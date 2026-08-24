@@ -473,6 +473,140 @@ export function ShareNodeIcon({ color = TEAL, size = 24 }: { color?: string; siz
   );
 }
 
+/**
+ * Film strip / photographic frame icon for "Use frame"
+ */
+export function UseFrameIcon({ color = '#214668', size = 36 }: { color?: string; size?: number }) {
+  const scale = size / 36;
+  const w = 24 * scale;
+  const h = 34 * scale;
+  const stroke = 2 * scale;
+
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+      {/* Outer film strip card */}
+      <View
+        style={{
+          width: w,
+          height: h,
+          borderRadius: 4 * scale,
+          borderWidth: stroke,
+          borderColor: color,
+          paddingVertical: 3 * scale,
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+        {/* Horizontal frame window 1 */}
+        <View
+          style={{
+            width: w - 2 * stroke - 4 * scale,
+            height: 6 * scale,
+            borderWidth: stroke * 0.8,
+            borderColor: color,
+            borderRadius: 1.5 * scale,
+          }}
+        />
+        {/* Horizontal frame window 2 */}
+        <View
+          style={{
+            width: w - 2 * stroke - 4 * scale,
+            height: 6 * scale,
+            borderWidth: stroke * 0.8,
+            borderColor: color,
+            borderRadius: 1.5 * scale,
+          }}
+        />
+        {/* Horizontal frame window 3 */}
+        <View
+          style={{
+            width: w - 2 * stroke - 4 * scale,
+            height: 6 * scale,
+            borderWidth: stroke * 0.8,
+            borderColor: color,
+            borderRadius: 1.5 * scale,
+          }}
+        />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Overlapping card with plus icon for "Print directly"
+ */
+export function PrintDirectlyIcon({ color = '#17A6B8', size = 36 }: { color?: string; size?: number }) {
+  const scale = size / 36;
+  const cardW = 20 * scale;
+  const cardH = 26 * scale;
+  const stroke = 2 * scale;
+
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+      {/* Back card offset/rotated */}
+      <View
+        style={{
+          position: 'absolute',
+          right: 4 * scale,
+          top: 3 * scale,
+          width: cardW,
+          height: cardH,
+          borderRadius: 4 * scale,
+          borderWidth: stroke,
+          borderColor: color,
+          transform: [{ rotate: '12deg' }],
+        }}
+      />
+      {/* Front card filled with plus */}
+      <View
+        style={{
+          position: 'absolute',
+          left: 4 * scale,
+          bottom: 3 * scale,
+          width: cardW,
+          height: cardH,
+          borderRadius: 4 * scale,
+          backgroundColor: color,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+        {/* Plus sign */}
+        <View style={{ width: 10 * scale, height: 10 * scale, alignItems: 'center', justifyContent: 'center' }}>
+          <View
+            style={{
+              position: 'absolute',
+              width: 10 * scale,
+              height: 2.5 * scale,
+              backgroundColor: '#FFFFFF',
+              borderRadius: 1,
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              width: 2.5 * scale,
+              height: 10 * scale,
+              backgroundColor: '#FFFFFF',
+              borderRadius: 1,
+            }}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   iconBox: {
     position: 'relative',

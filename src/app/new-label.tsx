@@ -44,14 +44,14 @@ export default function NewLabelModal() {
             <CreationOption
               label="Blank Label"
               color="#17A6B8"
-              onPress={() => router.back()}>
+              onPress={() => router.replace('/new-label-setup')}>
               <SymbolView name="plus.rectangle" tintColor="#FFFFFF" size={30} pointerEvents="none" />
             </CreationOption>
 
             <CreationOption
               label="Industry Template"
               color="#8BC34A"
-              onPress={() => router.back()}>
+              onPress={() => router.replace('/(tabs)/template')}>
               <View style={styles.templateMark}>
                 <View style={styles.templateBar} />
                 <View style={[styles.templateBar, styles.templateBarMid]} />
@@ -62,7 +62,7 @@ export default function NewLabelModal() {
             <CreationOption
               label="Scan Label"
               color="#F5A623"
-              onPress={() => router.back()}>
+              onPress={() => router.replace('/scan')}>
               <SymbolView name="qrcode.viewfinder" tintColor="#FFFFFF" size={30} pointerEvents="none" />
             </CreationOption>
           </View>

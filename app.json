@@ -32,6 +32,32 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Sez Print to access your camera to scan label barcodes and QR codes."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Sez Print to access your photos to select label images."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Sez Print to use the microphone for voice-to-text on labels.",
+          "speechRecognitionPermission": "Allow Sez Print to convert your speech into label text."
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "bluetoothAlwaysPermission": "Allow Sez Print to connect to your Bluetooth label printer."
+        }
       ]
     ],
     "experiments": {

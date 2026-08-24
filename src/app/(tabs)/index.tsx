@@ -1,6 +1,8 @@
 import { useRouter } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { useMemo, useState } from 'react';
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,8 +20,11 @@ import {
   ScanLabelIcon,
   ShareNodeIcon,
 } from '@/components/home-icons';
+import { LabelPreview } from '@/components/label-preview';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette, scaleFont } from '@/constants/ui';
+import { useLabelStore } from '@/stores/label-store';
+import { usePrinterStore } from '@/stores/printer-store';
 
 type IconName = SymbolViewProps['name'];
 
@@ -130,128 +135,71 @@ function Tile({
   );
 }
 
-/** Cute bunny face illustration matching the screenshot preview */
-function BunnyIllustration({
-  style,
-  scale = 1,
-  rotation = '0deg',
-}: {
-  style?: any;
-  scale?: number;
-  rotation?: string;
-}) {
-  return (
-    <View style={[{ transform: [{ rotate: rotation }] }, style]}>
-      {/* Ears */}
-      <View style={{ flexDirection: 'row', gap: 2.5 * scale, justifyContent: 'center', marginBottom: -3 * scale }}>
-        <View
-          style={{
-            width: 5.5 * scale,
-            height: 13 * scale,
-            backgroundColor: '#FFFFFF',
-            borderRadius: 3 * scale,
-            transform: [{ rotate: '-8deg' }],
-          }}
-        />
-        <View
-          style={{
-            width: 5.5 * scale,
-            height: 13 * scale,
-            backgroundColor: '#FFFFFF',
-            borderRadius: 3 * scale,
-            transform: [{ rotate: '8deg' }],
-          }}
-        />
-      </View>
-      {/* Head */}
-      <View
-        style={{
-          width: 25 * scale,
-          height: 20 * scale,
-          backgroundColor: '#FFFFFF',
-          borderRadius: 11 * scale,
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
-        }}>
-        {/* Eyes & Nose */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 * scale, marginTop: 1 * scale }}>
-          <View style={{ width: 1.8 * scale, height: 2.5 * scale, borderRadius: 1 * scale, backgroundColor: '#3D2F2D' }} />
-          <View style={{ width: 2 * scale, height: 1.4 * scale, borderRadius: 0.7 * scale, backgroundColor: '#3D2F2D' }} />
-          <View style={{ width: 1.8 * scale, height: 2.5 * scale, borderRadius: 1 * scale, backgroundColor: '#3D2F2D' }} />
-        </View>
-        {/* Blush dots */}
-        <View
-          style={{
-            position: 'absolute',
-            top: 9 * scale,
-            left: 2.5 * scale,
-            width: 2.8 * scale,
-            height: 1.6 * scale,
-            borderRadius: 1 * scale,
-            backgroundColor: '#FFAEC0',
-          }}
-        />
-        <View
-          style={{
-            position: 'absolute',
-            top: 9 * scale,
-            right: 2.5 * scale,
-            width: 2.8 * scale,
-            height: 1.6 * scale,
-            borderRadius: 1 * scale,
-            backgroundColor: '#FFAEC0',
-          }}
-        />
-      </View>
-    </View>
-  );
-}
-
-/** Small red bow decoration */
-function RibbonBow({ style, scale = 1 }: { style?: any; scale?: number }) {
-  return (
-    <View style={[{ flexDirection: 'row', alignItems: 'center' }, style]}>
-      <View
-        style={{
-          width: 4 * scale,
-          height: 4 * scale,
-          backgroundColor: '#E84149',
-          borderRadius: 1,
-          transform: [{ rotate: '45deg' }],
-        }}
-      />
-      <View style={{ width: 2 * scale, height: 2 * scale, backgroundColor: '#C82E36', borderRadius: 1 }} />
-      <View
-        style={{
-          width: 4 * scale,
-          height: 4 * scale,
-          backgroundColor: '#E84149',
-          borderRadius: 1,
-          transform: [{ rotate: '45deg' }],
-        }}
-      />
-    </View>
-  );
-}
-
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const router = useRouter();
+
+  const documents = useLabelStore((s) => s.documents);
+  const deleteDocument = useLabelStore((s) => s.deleteDocument);
+  const uploadToCloud = useLabelStore((s) => s.uploadToCloud);
+  const cloudProfile = useLabelStore((s) => s.cloudProfile);
+  const printerStatus = usePrinterStore((s) => s.status);
+  const printerName = usePrinterStore((s) => s.deviceName);
+
+  const recentLabel = useMemo(
+    () =>
+      documents.length > 0
+        ? [...documents].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+        : null,
+    [documents],
+  );
+
+  const [previewWidth, setPreviewWidth] = useState(0);
 
   const contentWidth = Math.min(width - SCREEN_PAD * 2, MaxContentWidth);
   const thirdTileWidth = (contentWidth - MENU_GAP * 2) / 3;
+
+  const handleDelete = () => {
+    if (!recentLabel) return;
+    Alert.alert('Delete Label', `Delete "${recentLabel.name}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => deleteDocument(recentLabel.id),
+      },
+    ]);
+  };
+
+  const handleUpload = () => {
+    if (!recentLabel) return;
+    if (!cloudProfile) {
+      Alert.alert('Not Signed In', 'Sign in from the Template screen Cloud tab to upload labels.');
+      return;
+    }
+    uploadToCloud(recentLabel);
+    Alert.alert('Uploaded', `"${recentLabel.name}" synced to cloud.`);
+  };
+
+  const connected = printerStatus === 'connected';
 
   return (
     <View style={styles.root}>
       {/* Navy Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.two }]}>
-        <View style={styles.connection}>
+        <Pressable
+          onPress={() => router.push('/printer-connect')}
+          style={({ pressed }) => [
+            styles.connection,
+            connected && styles.connectionConnected,
+            pressed && styles.pressed,
+          ]}>
           <Text numberOfLines={1} style={styles.connectionText}>
-            Unconnected
+            {connected ? printerName ?? 'Connected' : 'Unconnected'}
           </Text>
           <SymbolView name="link" tintColor="#FFFFFF" size={15} />
-        </View>
+        </Pressable>
       </View>
 
       <ScrollView
@@ -262,16 +210,15 @@ export default function HomeScreen() {
         ]}
         showsVerticalScrollIndicator={false}>
         <View style={styles.inner}>
-          {/* Main Card */}
+          {/* Main Card: most recent label */}
           <View style={styles.card}>
-            {/* Top Light Gray Inner Section */}
             <View style={styles.cardTopSection}>
               <View style={[styles.cardHead, width < 360 && styles.cardHeadStacked]}>
                 <Text
                   numberOfLines={1}
                   ellipsizeMode="tail"
                   style={[styles.cardTitle, { fontSize: scaleFont(width, 13.5, 0.85, 1.05) }]}>
-                  102-Cartoon-30x15
+                  {recentLabel ? recentLabel.name : 'No labels yet'}
                 </Text>
                 <Text
                   numberOfLines={1}
@@ -281,45 +228,69 @@ export default function HomeScreen() {
                     width < 360 && styles.cardSizeStacked,
                     { fontSize: scaleFont(width, 13, 0.85, 1.05) },
                   ]}>
-                  30 x 15 (Industry)
+                  {recentLabel
+                    ? `${recentLabel.widthMm.toFixed(0)} x ${recentLabel.heightMm.toFixed(0)} (${recentLabel.paperType})`
+                    : ''}
                 </Text>
               </View>
 
-              {/* Pink Label Preview with Bunny Illustrations */}
-              <View style={styles.preview}>
-                <BunnyIllustration scale={1.15} style={styles.bunnyTopLeft} rotation="-6deg" />
-                <BunnyIllustration scale={1.3} style={styles.bunnyCenter} />
-                <BunnyIllustration scale={1.1} style={styles.bunnyTopRight} rotation="8deg" />
-
-                <RibbonBow scale={1.3} style={styles.bowCenter} />
-                <RibbonBow scale={0.9} style={styles.bowRight} />
-
-                {/* Stars and sparkles */}
-                <Text style={styles.starOne}>✦</Text>
-                <Text style={styles.starTwo}>✦</Text>
-                <Text style={styles.starThree}>✦</Text>
-
-                {/* Bottom party confetti flags */}
-                <View style={styles.confettiWrap}>
-                  <View style={[styles.confettiTriangle, { borderBottomColor: '#6ED4B8' }]} />
-                  <View style={[styles.confettiTriangle, { borderBottomColor: '#FDD26E' }]} />
-                  <View style={[styles.confettiTriangle, { borderBottomColor: '#7BB3FC' }]} />
-                </View>
+              <View
+                style={styles.previewWrap}
+                onLayout={(e) => setPreviewWidth(e.nativeEvent.layout.width)}>
+                {recentLabel && previewWidth > 0 ? (
+                  <LabelPreview
+                    document={recentLabel}
+                    width={previewWidth}
+                    style={styles.previewBorder}
+                  />
+                ) : (
+                  <Pressable onPress={() => router.push('/new-label')} style={styles.emptyPreview}>
+                    <SymbolView name="plus.circle" tintColor={Palette.accent} size={28} />
+                    <Text style={styles.emptyPreviewText}>
+                      Create your first label to see it here
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             </View>
 
             {/* Bottom White Section: 5 Actions */}
             <View style={styles.actionRow}>
-              <ActionItem icon="square.and.pencil" label="Edit" href="/edit" />
-              <ActionItem icon="printer" label="Print" href="/print" />
-              <ActionItem icon="trash" label="Delete" disabled />
               <ActionItem
-                customIcon={<ShareNodeIcon color={Palette.accent} size={24} />}
-                label="Share"
-                href="/share"
-                highlight
+                icon="square.and.pencil"
+                label="Edit"
+                disabled={!recentLabel}
+                onPress={() =>
+                  recentLabel &&
+                  router.push({ pathname: '/edit', params: { labelId: recentLabel.id } })
+                }
               />
-              <ActionItem icon="icloud.and.arrow.up" label="Upload" disabled />
+              <ActionItem
+                icon="printer"
+                label="Print"
+                disabled={!recentLabel}
+                onPress={() =>
+                  recentLabel &&
+                  router.push({ pathname: '/print', params: { labelId: recentLabel.id } })
+                }
+              />
+              <ActionItem icon="trash" label="Delete" disabled={!recentLabel} onPress={handleDelete} />
+              <ActionItem
+                customIcon={<ShareNodeIcon color={recentLabel ? Palette.accent : Palette.disabled} size={24} />}
+                label="Share"
+                disabled={!recentLabel}
+                onPress={() =>
+                  recentLabel &&
+                  router.push({ pathname: '/share', params: { labelId: recentLabel.id } })
+                }
+                highlight={Boolean(recentLabel)}
+              />
+              <ActionItem
+                icon="icloud.and.arrow.up"
+                label="Upload"
+                disabled={!recentLabel}
+                onPress={handleUpload}
+              />
             </View>
           </View>
 
@@ -339,6 +310,7 @@ export default function HomeScreen() {
                 style={styles.menuHalf}
                 iconComponent={<ScanLabelIcon size={26} color={Palette.accent} />}
                 label="Scan Label"
+                href="/scan"
               />
             </View>
 
@@ -348,17 +320,19 @@ export default function HomeScreen() {
                 style={styles.menuThird}
                 iconComponent={<DocBadgeIcon badge="EXCEL" size={32} color="#7E8B98" />}
                 label="Print Excel"
-                href="/data-file"
+                href="/data-file?type=Excel"
               />
               <Tile
                 style={styles.menuThird}
                 iconComponent={<DocBadgeIcon badge="PDF" size={32} color="#7E8B98" />}
                 label="Print PDF"
+                href="/pdf"
               />
               <Tile
                 style={styles.menuThird}
                 iconComponent={<PrintPhotoIcon size={30} color={Palette.accent} />}
                 label="Print Photo"
+                href="/print-photo-modal"
               />
             </View>
 
@@ -368,6 +342,7 @@ export default function HomeScreen() {
                 style={{ width: thirdTileWidth }}
                 iconComponent={<LabelCloneIcon size={30} color={Palette.accent} />}
                 label="Label Clone"
+                href="/new-label-setup?isClone=true"
               />
             </View>
           </View>
@@ -393,9 +368,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     backgroundColor: Palette.danger,
+    minHeight: 40,
     paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
   },
   connectionText: {
     color: '#FFFFFF',
@@ -458,80 +434,31 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     alignSelf: 'stretch',
   },
-  preview: {
+  previewWrap: {
+    width: '100%',
+  },
+  previewBorder: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  emptyPreview: {
     width: '100%',
     aspectRatio: 2.05,
     borderRadius: 10,
-    backgroundColor: Palette.preview,
-    overflow: 'hidden',
-    position: 'relative',
+    backgroundColor: '#F4F6F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderStyle: 'dashed',
   },
-  bunnyTopLeft: {
-    position: 'absolute',
-    top: '12%',
-    left: '6%',
+  emptyPreviewText: {
+    color: Palette.muted,
+    fontSize: 12.5,
   },
-  bunnyCenter: {
-    position: 'absolute',
-    bottom: '8%',
-    left: '36%',
-  },
-  bunnyTopRight: {
-    position: 'absolute',
-    top: '10%',
-    right: '8%',
-  },
-  bowCenter: {
-    position: 'absolute',
-    top: '22%',
-    left: '52%',
-  },
-  bowRight: {
-    position: 'absolute',
-    bottom: '24%',
-    right: '4%',
-  },
-  starOne: {
-    position: 'absolute',
-    bottom: '20%',
-    left: '20%',
-    color: '#FFFFFF',
-    fontSize: 14,
-    opacity: 0.9,
-  },
-  starTwo: {
-    position: 'absolute',
-    top: '32%',
-    right: '34%',
-    color: '#FFFFFF',
-    fontSize: 12,
-    opacity: 0.9,
-  },
-  starThree: {
-    position: 'absolute',
-    bottom: '38%',
-    right: '20%',
-    color: '#FFFFFF',
-    fontSize: 10,
-    opacity: 0.8,
-  },
-  confettiWrap: {
-    position: 'absolute',
-    bottom: 0,
-    right: '32%',
-    flexDirection: 'row',
-    gap: 4,
-  },
-  confettiTriangle: {
-    width: 0,
-    height: 0,
-    backgroundColor: 'transparent',
-    borderStyle: 'solid',
-    borderLeftWidth: 5,
-    borderRightWidth: 5,
-    borderBottomWidth: 10,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
+  connectionConnected: {
+    backgroundColor: '#2E9E63',
   },
   actionRow: {
     flexDirection: 'row',

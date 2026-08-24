@@ -1,7 +1,10 @@
-import { router } from 'expo-router';
+import { Image } from 'expo-image';
+import { router, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,12 +13,178 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ViewShot, { captureRef } from 'react-native-view-shot';
 
+import {
+  DEFAULT_BARCODE_STATE,
+  DEFAULT_ELEMENT_STATE,
+  DEFAULT_QRCODE_STATE,
+} from '@/components/editor/types';
+import { LabelPreview } from '@/components/label-preview';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette, Type } from '@/constants/ui';
+import { dataPageCount, resolveDocumentData } from '@/lib/data-binding';
+import {
+  createLabelDocument,
+  generateId,
+  mmToPt,
+  type LabelDocument,
+  type LabelOrientation,
+  type PaperType,
+} from '@/lib/label-document';
+import {
+  encodeEscPosJob,
+  grayToBits,
+  pngBase64ToGray,
+  rotateGray,
+  shiftBits,
+} from '@/lib/printer/escpos';
+import { getPrinterManager } from '@/lib/printer/printer-manager';
+import { useDataStore, type ExcelSheet } from '@/stores/data-store';
+import { useLabelStore } from '@/stores/label-store';
+import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
+import { useSettingsStore } from '@/stores/settings-store';
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
 const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent'] as const;
+
+/** 203 dpi thermal printers print 8 dots per millimetre. */
+const DOTS_PER_MM = 8;
+
+function buildScanDocument(
+  scanType: string,
+  scanData: string,
+  widthMm: number,
+  heightMm: number,
+): LabelDocument {
+  const isQr = /qr|aztec|datamatrix|pdf417/i.test(scanType);
+  const elements: LabelDocument['elements'] = [];
+
+  if (isQr) {
+    const size = Math.min(widthMm, heightMm) * 0.62;
+    elements.push({
+      ...DEFAULT_QRCODE_STATE,
+      id: generateId(),
+      type: 'qrcode',
+      content: scanData,
+      left: (widthMm - size) / 2,
+      top: heightMm * 0.06,
+      width: size,
+      height: size,
+    });
+    elements.push({
+      ...DEFAULT_ELEMENT_STATE,
+      id: generateId(),
+      type: 'text',
+      text: scanData,
+      fontSize: mmToPt(heightMm * 0.1),
+      align: 'center',
+      left: widthMm * 0.05,
+      top: heightMm * 0.74,
+      width: widthMm * 0.9,
+    });
+  } else {
+    elements.push({
+      ...DEFAULT_BARCODE_STATE,
+      id: generateId(),
+      type: 'barcode',
+      content: scanData,
+      left: widthMm * 0.05,
+      top: heightMm * 0.2,
+      width: widthMm * 0.9,
+      height: heightMm * 0.55,
+    });
+  }
+
+  return createLabelDocument({
+    name: 'Scanned Code',
+    widthMm,
+    heightMm,
+    paperType: 'Label',
+    elements,
+  });
+}
+
+function buildPhotoDocument(
+  imageUri: string,
+  imageWidth: number,
+  imageHeight: number,
+  mode: string | undefined,
+  widthMm: number,
+  heightMm: number,
+): LabelDocument {
+  const framed = mode === 'frame';
+  const pad = framed ? Math.max(1.5, widthMm * 0.06) : 0;
+  const boxW = widthMm - pad * 2;
+  const boxH = heightMm - pad * 2;
+  const ratio = imageWidth > 0 && imageHeight > 0 ? imageHeight / imageWidth : 1;
+
+  // Contain-fit the photo inside the label box.
+  let w = boxW;
+  let h = boxW * ratio;
+  if (h > boxH) {
+    h = boxH;
+    w = boxH / ratio;
+  }
+
+  const elements: LabelDocument['elements'] = [
+    {
+      id: generateId(),
+      type: 'image',
+      uri: imageUri,
+      rotation: 0,
+      left: pad + (boxW - w) / 2,
+      top: pad + (boxH - h) / 2,
+      width: w,
+      height: h,
+      lockMovement: false,
+      needPrinting: true,
+      antiColor: false,
+    },
+  ];
+
+  return createLabelDocument({
+    name: framed ? 'Photo Frame' : 'Photo',
+    widthMm,
+    heightMm,
+    paperType: 'Label',
+    elements,
+  });
+}
+
+function buildExcelRowDocument(
+  sheet: ExcelSheet,
+  rowIndex: number,
+  name: string,
+  widthMm: number,
+  heightMm: number,
+): LabelDocument {
+  const row = sheet.rows[rowIndex] ?? [];
+  const count = Math.min(sheet.columns.length, 4);
+  const lineH = heightMm / (count + 0.5);
+  const elements: LabelDocument['elements'] = [];
+
+  for (let i = 0; i < count; i++) {
+    elements.push({
+      ...DEFAULT_ELEMENT_STATE,
+      id: generateId(),
+      type: 'text',
+      text: `${sheet.columns[i]}: ${row[i] ?? ''}`,
+      fontSize: mmToPt(lineH * 0.5),
+      left: widthMm * 0.05,
+      top: lineH * (i + 0.25),
+      width: widthMm * 0.9,
+    });
+  }
+
+  return createLabelDocument({
+    name,
+    widthMm,
+    heightMm,
+    paperType: 'Label',
+    elements,
+  });
+}
 
 function StepperRow({
   label,
@@ -24,6 +193,7 @@ function StepperRow({
   onMinus,
   onPlus,
   minusDisabled,
+  plusDisabled,
   bordered,
 }: {
   label: string;
@@ -32,6 +202,7 @@ function StepperRow({
   onMinus?: () => void;
   onPlus?: () => void;
   minusDisabled?: boolean;
+  plusDisabled?: boolean;
   bordered?: boolean;
 }) {
   return (
@@ -51,10 +222,15 @@ function StepperRow({
         </Pressable>
         <Text style={[styles.stepperValue, valueColor ? { color: valueColor } : null]}>{value}</Text>
         <Pressable
+          disabled={plusDisabled}
           onPress={onPlus}
           hitSlop={6}
-          style={({ pressed }) => [styles.stepperCircle, styles.stepperCircleActive, pressed && styles.pressed]}>
-          <Text style={[styles.stepperSymbol, styles.stepperSymbolActive]}>+</Text>
+          style={({ pressed }) => [
+            styles.stepperCircle,
+            plusDisabled && styles.stepperCircleDisabled,
+            pressed && !plusDisabled && styles.pressed,
+          ]}>
+          <Text style={[styles.stepperSymbol, plusDisabled && styles.stepperSymbolDisabled]}>+</Text>
         </Pressable>
       </View>
     </View>
@@ -93,28 +269,273 @@ function ChipGroup<T extends string>({
   );
 }
 
-function LabelPreview({ width }: { width: number }) {
-  const cardWidth = Math.min(width - 48, MaxContentWidth - 48);
-  const cardHeight = Math.round(cardWidth / 2);
-
-  return (
-    <View style={[styles.previewCard, { width: cardWidth, height: cardHeight }]}>
-      <View style={[styles.blob, styles.blobTopLeft]} />
-      <View style={[styles.blob, styles.blobTopRight]} />
-      <View style={[styles.blob, styles.blobCenter]} />
-      <Text style={styles.previewStar}>✦</Text>
-    </View>
-  );
-}
-
 export default function PrintScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const [copies, setCopies] = useState(1);
-  const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]>('0°');
-  const [paperType, setPaperType] = useState<(typeof PAPER_TYPES)[number]>('Label');
+  const params = useLocalSearchParams<{
+    labelId?: string;
+    imageUri?: string;
+    imageWidth?: string;
+    imageHeight?: string;
+    mode?: string;
+    docName?: string;
+    docUri?: string;
+    docType?: string;
+    excelFileId?: string;
+    scanType?: string;
+    scanData?: string;
+  }>();
 
+  const getDocument = useLabelStore((s) => s.getDocument);
+  const defaults = useSettingsStore((s) => s.defaults);
+  const printingSettings = useSettingsStore((s) => s.printing);
+  const status = usePrinterStore((s) => s.status);
+  const deviceName = usePrinterStore((s) => s.deviceName);
+  const addHistoryEntry = usePrinterStore((s) => s.addHistoryEntry);
+  const excelFiles = useDataStore((s) => s.excelFiles);
+  const activeExcelFileId = useDataStore((s) => s.activeExcelFileId);
+
+  const [copies, setCopies] = useState(1);
+  const [darkness, setDarkness] = useState<number | null>(null);
+  const [speed, setSpeed] = useState<number | null>(null);
+  const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]>('0°');
+  const [paperType, setPaperType] = useState<PaperType>(defaults.paperType);
+  const [gapLength, setGapLength] = useState(3);
+  const [hOffset, setHOffset] = useState(0);
+  const [vOffset, setVOffset] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [printing, setPrinting] = useState(false);
+
+  const shotRef = useRef<ViewShot>(null);
+
+  const excelSheet = useMemo<ExcelSheet | null>(() => {
+    const fileId = params.excelFileId ?? activeExcelFileId;
+    const file = excelFiles.find((f) => f.id === fileId) ?? null;
+    return file ? file.sheets[file.activeSheetIndex] ?? file.sheets[0] ?? null : null;
+  }, [params.excelFileId, activeExcelFileId, excelFiles]);
+
+  /** Base document (page-independent). Null for PDF documents, which show a card. */
+  const baseDocument = useMemo<LabelDocument | null>(() => {
+    if (params.labelId) return getDocument(params.labelId) ?? null;
+    if (params.scanData) {
+      return buildScanDocument(
+        params.scanType ?? '',
+        params.scanData,
+        defaults.labelWidth,
+        defaults.labelHeight,
+      );
+    }
+    if (params.imageUri) {
+      return buildPhotoDocument(
+        params.imageUri,
+        Number(params.imageWidth) || 0,
+        Number(params.imageHeight) || 0,
+        params.mode,
+        defaults.labelWidth,
+        defaults.labelHeight,
+      );
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    params.labelId,
+    params.scanData,
+    params.scanType,
+    params.imageUri,
+    params.imageWidth,
+    params.imageHeight,
+    params.mode,
+    getDocument,
+    defaults.labelWidth,
+    defaults.labelHeight,
+  ]);
+
+  const isExcelJob = params.docType === 'Excel' && excelSheet !== null;
+  const isPdfJob = params.docType === 'PDF';
+
+  const pageCount = useMemo(() => {
+    if (isExcelJob && excelSheet) return Math.max(1, excelSheet.rows.length);
+    if (baseDocument && excelSheet && printingSettings.autoPages) {
+      return dataPageCount(baseDocument, excelSheet);
+    }
+    return 1;
+  }, [isExcelJob, excelSheet, baseDocument, printingSettings.autoPages]);
+
+  const buildPageDocument = useCallback(
+    (page: number): LabelDocument | null => {
+      if (isExcelJob && excelSheet) {
+        return buildExcelRowDocument(
+          excelSheet,
+          page,
+          params.docName ?? 'Data Label',
+          defaults.labelWidth,
+          defaults.labelHeight,
+        );
+      }
+      if (baseDocument && excelSheet && pageCount > 1) {
+        return resolveDocumentData(baseDocument, excelSheet, page);
+      }
+      return baseDocument;
+    },
+    [isExcelJob, excelSheet, params.docName, defaults.labelWidth, defaults.labelHeight, baseDocument, pageCount],
+  );
+
+  const previewDocument = useMemo(
+    () => buildPageDocument(Math.min(pageIndex, pageCount - 1)),
+    [buildPageDocument, pageIndex, pageCount],
+  );
+
+  const connected = status === 'connected';
   const footerHeight = 72 + insets.bottom;
+
+  const baseCardWidth = Math.min(width - 48, MaxContentWidth - 48);
+  const cardWidth = Math.round(baseCardWidth * zoom);
+  const labelAspect = previewDocument
+    ? previewDocument.heightMm / previewDocument.widthMm
+    : 1 / 1.8;
+  const cardHeight = Math.round(cardWidth * labelAspect);
+
+  const historySource: PrintHistoryEntry['source'] = params.labelId
+    ? 'label'
+    : params.scanData
+    ? 'scan'
+    : params.imageUri
+    ? 'photo'
+    : isExcelJob
+    ? 'excel'
+    : isPdfJob
+    ? 'pdf'
+    : 'label';
+
+  const jobName =
+    previewDocument?.name ?? params.docName ?? (isPdfJob ? 'PDF Document' : 'Label');
+
+  const handlePrint = useCallback(async () => {
+    // PDFs can't be rasterized for a thermal printer here; hand them to the OS
+    // print dialog (AirPrint / Android print services) instead.
+    if (isPdfJob && params.docUri) {
+      try {
+        const Print = await import('expo-print');
+        await Print.printAsync({ uri: params.docUri });
+        if (printingSettings.recordHistory) {
+          addHistoryEntry({
+            labelName: jobName,
+            copies: 1,
+            documentId: undefined,
+            source: 'pdf',
+          });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        // User dismissing the dialog is not an error worth surfacing.
+        if (!/cancel|dismiss/i.test(message)) {
+          Alert.alert('Print Failed', message || 'Could not open the system print dialog.');
+        }
+      }
+      return;
+    }
+
+    const manager = getPrinterManager();
+    if (!manager.isConnected) {
+      Alert.alert(
+        'Printer Not Connected',
+        'Connect a Bluetooth ESC/POS printer before printing.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Connect', onPress: () => router.push('/printer-connect') },
+        ],
+      );
+      return;
+    }
+
+    setPrinting(true);
+    try {
+      const widthMm = previewDocument?.widthMm ?? defaults.labelWidth;
+      const heightMm = previewDocument?.heightMm ?? defaults.labelHeight;
+      const targetW = Math.round(widthMm * DOTS_PER_MM);
+      const targetH = Math.round(heightMm * DOTS_PER_MM);
+      const orientationDeg = parseInt(orientation.replace('°', ''), 10) as LabelOrientation;
+      const dither = defaults.colorMode === 'Halftone';
+      // Darkness biases the threshold: higher darkness prints more pixels.
+      const threshold = Math.min(
+        250,
+        Math.max(10, defaults.grayThreshold + (darkness != null ? (darkness - 8) * 10 : 0)),
+      );
+
+      for (let page = 0; page < pageCount; page++) {
+        if (pageCount > 1) {
+          setPageIndex(page);
+          // Give React a frame to render the new page before capturing.
+          await new Promise((resolve) => setTimeout(resolve, 80));
+        }
+        const base64 = await captureRef(shotRef, {
+          format: 'png',
+          quality: 1,
+          result: 'base64',
+          width: targetW,
+          height: targetH,
+        });
+
+        let gray = pngBase64ToGray(base64);
+        gray = rotateGray(gray, orientationDeg);
+        let bits = grayToBits(gray, { threshold, dither });
+        const offsetDots = Math.round(hOffset * DOTS_PER_MM);
+        if (offsetDots !== 0) bits = shiftBits(bits, offsetDots);
+
+        const bytes = encodeEscPosJob(bits, {
+          copies,
+          leadFeedLines: Math.max(0, Math.round(vOffset * DOTS_PER_MM)),
+          trailFeedLines: Math.max(0, Math.round(gapLength * DOTS_PER_MM)),
+          density: darkness,
+          speed,
+        });
+        await manager.print(bytes);
+      }
+
+      if (printingSettings.recordHistory) {
+        addHistoryEntry({
+          labelName: jobName,
+          copies: copies * pageCount,
+          documentId: params.labelId,
+          source: historySource,
+        });
+      }
+
+      Alert.alert('Print Sent', `${jobName} was sent to ${deviceName ?? 'the printer'}.`);
+      if (printingSettings.returnPrevious) router.back();
+    } catch (error) {
+      Alert.alert(
+        'Print Failed',
+        error instanceof Error ? error.message : 'Could not send data to the printer.',
+      );
+    } finally {
+      setPrinting(false);
+    }
+  }, [
+    isPdfJob,
+    params.docUri,
+    previewDocument,
+    defaults.labelWidth,
+    defaults.labelHeight,
+    defaults.colorMode,
+    defaults.grayThreshold,
+    orientation,
+    darkness,
+    speed,
+    pageCount,
+    hOffset,
+    vOffset,
+    gapLength,
+    copies,
+    printingSettings.recordHistory,
+    printingSettings.returnPrevious,
+    addHistoryEntry,
+    jobName,
+    params.labelId,
+    historySource,
+    deviceName,
+  ]);
 
   return (
     <View style={styles.root}>
@@ -126,12 +547,22 @@ export default function PrintScreen() {
           <SymbolView name="chevron.left" tintColor="#FFFFFF" size={22} />
         </Pressable>
 
-        <View style={styles.connection}>
+        <Pressable
+          onPress={() => router.push('/printer-connect')}
+          style={({ pressed }) => [
+            styles.connection,
+            connected && styles.connectionConnected,
+            pressed && styles.pressed,
+          ]}>
           <Text numberOfLines={1} style={styles.connectionText}>
-            Unconnected
+            {connected
+              ? deviceName ?? 'Connected'
+              : status === 'connecting'
+              ? 'Connecting…'
+              : 'Unconnected'}
           </Text>
           <SymbolView name="link" tintColor="#FFFFFF" size={14} />
-        </View>
+        </Pressable>
       </View>
 
       <ScrollView
@@ -139,13 +570,81 @@ export default function PrintScreen() {
         contentContainerStyle={{ paddingBottom: footerHeight + Spacing.three }}
         showsVerticalScrollIndicator={false}>
         <View style={styles.previewArea}>
-          <LabelPreview width={width} />
+          <ViewShot ref={shotRef} options={{ format: 'png', quality: 1 }}>
+            {previewDocument ? (
+              <LabelPreview
+                document={previewDocument}
+                width={cardWidth}
+                style={styles.previewShadow}
+              />
+            ) : params.imageUri ? (
+              <View style={[styles.previewCard, { width: cardWidth, height: cardHeight }]}>
+                <Image
+                  source={{ uri: params.imageUri }}
+                  style={StyleSheet.absoluteFillObject}
+                  contentFit="contain"
+                />
+              </View>
+            ) : (
+              <View
+                style={[styles.previewCard, styles.docPreviewCard, { width: cardWidth, height: cardHeight }]}>
+                <View style={styles.docBadgeLarge}>
+                  <Text style={styles.docBadgeLargeText}>{params.docType ?? 'PDF'}</Text>
+                </View>
+                <Text style={styles.docPreviewTitle} numberOfLines={2}>
+                  {params.docName ?? 'Document'}
+                </Text>
+                <Text style={styles.docPreviewSub}>
+                  {isPdfJob
+                    ? 'Prints via the system print dialog'
+                    : 'Document Ready for Print'}
+                </Text>
+              </View>
+            )}
+          </ViewShot>
+
+          {pageCount > 1 ? (
+            <View style={styles.pageNav}>
+              <Pressable
+                hitSlop={12}
+                disabled={pageIndex <= 0}
+                onPress={() => setPageIndex((p) => Math.max(0, p - 1))}
+                style={({ pressed }) => [styles.pageNavBtn, pressed && styles.pressed]}>
+                <SymbolView
+                  name="chevron.left"
+                  tintColor={pageIndex <= 0 ? '#7C848E' : '#FFFFFF'}
+                  size={16}
+                />
+              </Pressable>
+              <Text style={styles.pageNavText}>
+                Row {pageIndex + 1} / {pageCount}
+              </Text>
+              <Pressable
+                hitSlop={12}
+                disabled={pageIndex >= pageCount - 1}
+                onPress={() => setPageIndex((p) => Math.min(pageCount - 1, p + 1))}
+                style={({ pressed }) => [styles.pageNavBtn, pressed && styles.pressed]}>
+                <SymbolView
+                  name="chevron.right"
+                  tintColor={pageIndex >= pageCount - 1 ? '#7C848E' : '#FFFFFF'}
+                  size={16}
+                />
+              </Pressable>
+            </View>
+          ) : null}
+
           <View style={styles.zoomControls}>
-            <Pressable hitSlop={6} style={({ pressed }) => [styles.zoomBtn, pressed && styles.pressed]}>
+            <Pressable
+              hitSlop={6}
+              onPress={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.25) * 100) / 100))}
+              style={({ pressed }) => [styles.zoomBtn, pressed && styles.pressed]}>
               <Text style={styles.zoomText}>−</Text>
             </Pressable>
             <View style={styles.zoomDivider} />
-            <Pressable hitSlop={6} style={({ pressed }) => [styles.zoomBtn, pressed && styles.pressed]}>
+            <Pressable
+              hitSlop={6}
+              onPress={() => setZoom((z) => Math.min(2.5, Math.round((z + 0.25) * 100) / 100))}
+              style={({ pressed }) => [styles.zoomBtn, pressed && styles.pressed]}>
               <Text style={styles.zoomText}>+</Text>
             </Pressable>
           </View>
@@ -166,8 +665,23 @@ export default function PrintScreen() {
           </View>
 
           <View style={styles.settingsCard}>
-            <StepperRow label="Print Darkness" value="Auto" minusDisabled bordered />
-            <StepperRow label="Print Speed" value="Auto" minusDisabled />
+            <StepperRow
+              label="Print Darkness"
+              value={darkness == null ? 'Auto' : String(darkness)}
+              minusDisabled={darkness == null}
+              plusDisabled={darkness != null && darkness >= 15}
+              onMinus={() => setDarkness((d) => (d == null || d <= 1 ? null : d - 1))}
+              onPlus={() => setDarkness((d) => (d == null ? 8 : Math.min(15, d + 1)))}
+              bordered
+            />
+            <StepperRow
+              label="Print Speed"
+              value={speed == null ? 'Auto' : String(speed)}
+              minusDisabled={speed == null}
+              plusDisabled={speed != null && speed >= 5}
+              onMinus={() => setSpeed((s) => (s == null || s <= 1 ? null : s - 1))}
+              onPlus={() => setSpeed((s) => (s == null ? 3 : Math.min(5, s + 1)))}
+            />
           </View>
 
           <View style={styles.settingsCard}>
@@ -177,21 +691,48 @@ export default function PrintScreen() {
             <Text style={[styles.groupLabel, styles.groupLabelSpaced]}>Paper Type</Text>
             <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
 
-            <StepperRow label="Gap Length" value="3.00 mm" minusDisabled bordered />
-            <StepperRow label="Horizontal Offset" value="0.00 mm" minusDisabled bordered />
-            <StepperRow label="Vertical Offset" value="0.00 mm" minusDisabled />
+            <StepperRow
+              label="Gap Length"
+              value={`${gapLength.toFixed(2)} mm`}
+              minusDisabled={gapLength <= 0}
+              onMinus={() => setGapLength((v) => Math.max(0, Math.round((v - 0.5) * 100) / 100))}
+              onPlus={() => setGapLength((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
+              bordered
+            />
+            <StepperRow
+              label="Horizontal Offset"
+              value={`${hOffset.toFixed(2)} mm`}
+              minusDisabled={hOffset <= -10}
+              onMinus={() => setHOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
+              onPlus={() => setHOffset((v) => Math.min(10, Math.round((v + 0.5) * 100) / 100))}
+              bordered
+            />
+            <StepperRow
+              label="Vertical Offset"
+              value={`${vOffset.toFixed(2)} mm`}
+              minusDisabled={vOffset <= 0}
+              onMinus={() => setVOffset((v) => Math.max(0, Math.round((v - 0.5) * 100) / 100))}
+              onPlus={() => setVOffset((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
+            />
           </View>
         </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.two }]}>
-        <Pressable style={({ pressed }) => [styles.gearBtn, pressed && styles.pressed]}>
+        <Pressable
+          onPress={() => router.push('/printing-settings')}
+          style={({ pressed }) => [styles.gearBtn, pressed && styles.pressed]}>
           <SymbolView name="gearshape.fill" tintColor="#FFFFFF" size={24} />
         </Pressable>
         <Pressable
-          style={({ pressed }) => [styles.printBtn, pressed && styles.pressed]}
-          onPress={() => router.back()}>
-          <Text style={styles.printBtnText}>Print</Text>
+          disabled={printing}
+          style={({ pressed }) => [styles.printBtn, (pressed || printing) && styles.pressed]}
+          onPress={() => void handlePrint()}>
+          {printing ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.printBtnText}>Print</Text>
+          )}
         </Pressable>
       </View>
     </View>
@@ -225,6 +766,10 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     paddingHorizontal: 14,
     borderRadius: 8,
+    maxWidth: 220,
+  },
+  connectionConnected: {
+    backgroundColor: '#2E9E63',
   },
   connectionText: {
     color: '#FFFFFF',
@@ -241,41 +786,65 @@ const styles = StyleSheet.create({
     paddingVertical: 28,
     position: 'relative',
   },
+  previewShadow: {
+    borderRadius: 6,
+  },
   previewCard: {
     borderRadius: 10,
-    backgroundColor: Palette.preview,
+    backgroundColor: '#FFFFFF',
     overflow: 'hidden',
   },
-  blob: {
-    position: 'absolute',
+  docPreviewCard: {
     backgroundColor: '#FFFFFF',
-    opacity: 0.92,
-    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  blobTopLeft: {
-    width: 42,
-    height: 42,
-    top: '18%',
-    left: '8%',
+  docBadgeLarge: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginBottom: 8,
   },
-  blobTopRight: {
-    width: 36,
-    height: 36,
-    top: '16%',
-    right: '10%',
+  docBadgeLargeText: {
+    color: '#DC2626',
+    fontWeight: '700',
+    fontSize: 13,
   },
-  blobCenter: {
-    width: 44,
-    height: 44,
-    top: '48%',
-    left: '42%',
+  docPreviewTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 4,
   },
-  previewStar: {
-    position: 'absolute',
-    right: '26%',
-    top: '40%',
+  docPreviewSub: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  pageNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginTop: 14,
+    backgroundColor: '#525860',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  pageNavText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pageNavBtn: {
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   zoomControls: {
     position: 'absolute',
@@ -358,9 +927,6 @@ const styles = StyleSheet.create({
   stepperCircleDisabled: {
     borderColor: Palette.disabled,
   },
-  stepperCircleActive: {
-    backgroundColor: 'transparent',
-  },
   stepperSymbol: {
     fontSize: 18,
     fontWeight: '400',
@@ -369,9 +935,6 @@ const styles = StyleSheet.create({
   },
   stepperSymbolDisabled: {
     color: Palette.disabled,
-  },
-  stepperSymbolActive: {
-    color: Palette.accent,
   },
   stepperValue: {
     ...Type.bodyMedium,

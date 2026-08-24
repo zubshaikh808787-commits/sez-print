@@ -15,24 +15,26 @@ import { ThemedView } from './themed-view';
 
 import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
 import { Palette } from '@/constants/ui';
+import { useTranslation } from '@/lib/i18n';
 
 export default function AppTabs() {
+  const { t } = useTranslation();
   return (
     <Tabs>
       <TabSlot style={{ height: '100%' }} />
       <TabList asChild>
         <CustomTabList>
           <TabTrigger name="index" href="/(tabs)" asChild>
-            <TabButton icon="house.fill">Home</TabButton>
+            <TabButton icon="house.fill">{t('tab.home')}</TabButton>
           </TabTrigger>
           <TabTrigger name="template" href="/template" asChild>
-            <TabButton icon="square.grid.2x2.fill">Template</TabButton>
+            <TabButton icon="square.grid.2x2.fill">{t('tab.template')}</TabButton>
           </TabTrigger>
           <TabTrigger name="help" href="/help" asChild>
-            <TabButton icon="questionmark.circle.fill">Help</TabButton>
+            <TabButton icon="questionmark.circle.fill">{t('tab.help')}</TabButton>
           </TabTrigger>
           <TabTrigger name="setting" href="/setting" asChild>
-            <TabButton icon="gearshape.fill">Setting</TabButton>
+            <TabButton icon="gearshape.fill">{t('tab.setting')}</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>
