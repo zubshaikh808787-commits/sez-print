@@ -492,6 +492,7 @@ export default function PrintScreen() {
               gapMm: gapLength,
               copies,
               density: darkness,
+              speed: speed ?? 5,
             })
           : encodeEscPosJob(bits, {
               copies,

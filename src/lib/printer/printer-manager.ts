@@ -3,7 +3,6 @@ import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
 import {
   connectWifiPrinter,
-  fetchTestTscPayload,
   wifiPrintRaw,
   wifiPrintSample,
 } from '@/lib/printer/backend-api';
@@ -30,8 +29,10 @@ export type BluetoothCapabilities = {
   reason: string | null;
 };
 
-const SCAN_TIMEOUT_MS = 15000;
-const WRITE_CHUNK_SIZE = 180;
+const SCAN_TIMEOUT_MS = 8000;
+const BLE_SCAN_MS = 2500;
+const CONNECT_TIMEOUT_MS = 10000;
+const WRITE_CHUNK_SIZE = 512;
 const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -86,6 +87,7 @@ class PrinterManager {
   private connectedDevice: any = null;
   private writableTarget: WritableTarget | null = null;
   private scanTimer: ReturnType<typeof setTimeout> | null = null;
+  private scanAbort: (() => void) | null = null;
   private activeTransport: ActiveTransport = null;
   private td404ScanStop: (() => Promise<void>) | null = null;
   private backendPrinterId: string | null = null;
@@ -270,6 +272,7 @@ class PrinterManager {
     }
 
     await this.ensurePermissions('full');
+    this.stopScan();
     usePrinterStore.getState().setStatus('scanning');
 
     const td404 = this.getTd404();
@@ -316,14 +319,14 @@ class PrinterManager {
       }
     }
 
-    // 2) Parallel nearby scans.
+    // Nearby classic inquiry. Skip BLE when SPP is available — TD-404 is classic BT.
     await Promise.all([
       hasNative && td404
         ? this.startTd404Scan(td404, emit).catch((err) => {
             errors.push(err instanceof Error ? err.message : 'Classic BT scan failed.');
           })
         : Promise.resolve(),
-      ble
+      !hasNative && ble
         ? this.startBleScan(ble, emit).catch((err) => {
             errors.push(err instanceof Error ? err.message : 'BLE scan failed.');
           })
@@ -357,6 +360,7 @@ class PrinterManager {
           clearTimeout(this.scanTimer);
           this.scanTimer = null;
         }
+        this.scanAbort = null;
         if (error) reject(error);
         else resolve();
       };
@@ -374,6 +378,7 @@ class PrinterManager {
           });
         }, () => finish());
         this.td404ScanStop = handle.stop;
+        this.scanAbort = () => finish();
         this.scanTimer = setTimeout(() => finish(), SCAN_TIMEOUT_MS);
       } catch (error) {
         finish(error instanceof Error ? error : new Error('TD-404 scan failed to start.'));
@@ -424,11 +429,13 @@ class PrinterManager {
         return;
       }
 
-      setTimeout(() => finish(), SCAN_TIMEOUT_MS);
+      setTimeout(() => finish(), BLE_SCAN_MS);
     });
   }
 
   stopScan(): void {
+    this.scanAbort?.();
+    this.scanAbort = null;
     if (this.scanTimer) {
       clearTimeout(this.scanTimer);
       this.scanTimer = null;
@@ -458,7 +465,20 @@ class PrinterManager {
     if (preferSpp && td404?.isTd404NativeAvailable()) {
       try {
         await this.ensurePermissions('connect-only');
-        const result = await td404.connectTd404(deviceId, deviceName);
+        const result = await Promise.race([
+          td404.connectTd404(deviceId, deviceName),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    'Printer did not accept the connection in time. Keep it on and close other phone connections.',
+                  ),
+                ),
+              CONNECT_TIMEOUT_MS,
+            ),
+          ),
+        ]);
         this.activeTransport = 'td404-spp';
         this.connectedDevice = null;
         this.writableTarget = null;
@@ -628,13 +648,9 @@ class PrinterManager {
     }
 
     if (this.usesTd404CommandSet) {
-      let bytes: Uint8Array;
-      try {
-        bytes = await fetchTestTscPayload({ text, widthMm: 50, heightMm: 30 });
-      } catch {
-        bytes = encodeTscTextSample({ text, widthMm: 50, heightMm: 30 });
-      }
-      await this.print(bytes);
+      await this.print(
+        encodeTscTextSample({ text, widthMm: 50, heightMm: 30 }),
+      );
       return;
     }
 
@@ -676,7 +692,6 @@ class PrinterManager {
           characteristicUUID,
           payload,
         );
-        await new Promise((r) => setTimeout(r, 12));
       }
     }
   }

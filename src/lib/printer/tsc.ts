@@ -11,6 +11,8 @@ export type TscJobOptions = {
   gapMm?: number;
   copies?: number;
   density?: number | null;
+  /** TSPL SPEED 1–6. Higher is faster feed. */
+  speed?: number | null;
   /** Dot offset for BITMAP x,y */
   x?: number;
   y?: number;
@@ -43,6 +45,7 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
   const copies = Math.max(1, options.copies ?? 1);
   const density =
     options.density != null ? Math.min(15, Math.max(0, Math.round(options.density))) : 8;
+  const speed = options.speed != null ? Math.min(6, Math.max(1, Math.round(options.speed))) : 5;
   const x = options.x ?? 0;
   const y = options.y ?? 0;
 
@@ -50,6 +53,7 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
     '\r\n' +
     `SIZE ${options.widthMm} mm,${options.heightMm} mm\r\n` +
     `GAP ${gap} mm,0 mm\r\n` +
+    `SPEED ${speed}\r\n` +
     'DIRECTION 1,0\r\n' +
     'REFERENCE 0,0\r\n' +
     `DENSITY ${density}\r\n` +
@@ -78,6 +82,7 @@ export function encodeTscTextSample(options: {
     '\r\n' +
     `SIZE ${widthMm} mm,${heightMm} mm\r\n` +
     `GAP ${gapMm} mm,0 mm\r\n` +
+    'SPEED 5\r\n' +
     'DIRECTION 1,0\r\n' +
     'REFERENCE 0,0\r\n' +
     `DENSITY ${density}\r\n` +

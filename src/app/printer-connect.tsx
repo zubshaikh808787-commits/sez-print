@@ -301,15 +301,14 @@ export default function PrinterConnectScreen() {
           <View style={styles.heroCard}>
             <Text style={styles.heroTitle}>TD-404 Bluetooth</Text>
             <Text style={styles.heroBody}>
-              Scan lists paired system devices first, then nearby printers. Classic Bluetooth (SPP)
-              is required for most TD-404 units.
+              Scan lists paired printers first (fast), then nearby devices for a few seconds. Tap Connect as soon as your printer appears.
             </Text>
             <Pressable
               onPress={() => void startScan()}
-              disabled={scanning || connectingId !== null || !caps.canScan}
+              disabled={connectingId !== null || !caps.canScan}
               style={({ pressed }) => [
                 styles.connectBtn,
-                (scanning || connectingId !== null || !caps.canScan) && styles.connectBtnDisabled,
+                (connectingId !== null || !caps.canScan) && styles.connectBtnDisabled,
                 pressed && styles.pressed,
               ]}>
               {scanning ? (

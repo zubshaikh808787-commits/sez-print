@@ -18,7 +18,9 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * TD-404 / Ninestar classic Bluetooth (SPP) bridge.
@@ -27,7 +29,9 @@ import java.util.concurrent.Executors
  */
 class Td404PrinterModule : Module() {
   private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-  private val executor = Executors.newSingleThreadExecutor()
+  private val ioExecutor = Executors.newCachedThreadPool()
+  private val connectTimeoutMs = 8_000L
+  private val printChunk = 8 * 1024
   private var socket: BluetoothSocket? = null
   private var connectedMac: String? = null
   private var connectedName: String? = null
@@ -90,7 +94,7 @@ class Td404PrinterModule : Module() {
         promise.reject("NO_ADAPTER", "Bluetooth adapter not found.", null)
         return@AsyncFunction
       }
-      executor.execute {
+      ioExecutor.execute {
         try {
           @SuppressLint("MissingPermission")
           val bonded = adapter.bondedDevices ?: emptySet()
@@ -130,7 +134,7 @@ class Td404PrinterModule : Module() {
 
       ensureReceiver()
 
-      executor.execute {
+      ioExecutor.execute {
         try {
           @SuppressLint("MissingPermission")
           if (adapter.isDiscovering) adapter.cancelDiscovery()
@@ -162,7 +166,7 @@ class Td404PrinterModule : Module() {
     }
 
     AsyncFunction("stopScan") { promise: Promise ->
-      executor.execute {
+      ioExecutor.execute {
         try {
           getAdapter()?.let { adapter ->
             @SuppressLint("MissingPermission")
@@ -181,7 +185,7 @@ class Td404PrinterModule : Module() {
         promise.reject("NO_ADAPTER", "Bluetooth adapter not found.", null)
         return@AsyncFunction
       }
-      executor.execute {
+      ioExecutor.execute {
         try {
           @SuppressLint("MissingPermission")
           if (adapter.isDiscovering) adapter.cancelDiscovery()
@@ -220,7 +224,7 @@ class Td404PrinterModule : Module() {
     }
 
     AsyncFunction("disconnect") { promise: Promise ->
-      executor.execute {
+      ioExecutor.execute {
         closeSocket()
         sendEvent(
           "onConnectionChanged",
@@ -253,19 +257,17 @@ class Td404PrinterModule : Module() {
         promise.reject("NOT_CONNECTED", "No TD-404 printer connected.", null)
         return@AsyncFunction
       }
-      executor.execute {
+      ioExecutor.execute {
         try {
           val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
           val out = sock.outputStream
-          // Chunk large jobs so slow SPP links don't drop the stream.
           var offset = 0
-          val chunk = 1024
           while (offset < bytes.size) {
-            val end = minOf(offset + chunk, bytes.size)
+            val end = minOf(offset + printChunk, bytes.size)
             out.write(bytes, offset, end - offset)
-            out.flush()
             offset = end
           }
+          out.flush()
           promise.resolve(mapOf("bytesSent" to bytes.size))
         } catch (e: IOException) {
           promise.reject("PRINT_FAILED", e.message, e)
@@ -276,17 +278,54 @@ class Td404PrinterModule : Module() {
 
   @SuppressLint("MissingPermission")
   private fun openSppSocket(device: BluetoothDevice): BluetoothSocket {
-    try {
-      val sock = device.createRfcommSocketToServiceRecord(sppUuid)
-      sock.connect()
-      return sock
-    } catch (_: Exception) {
-      // Many label printers need channel-1 insecure RFCOMM (OEM quirk).
-      val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
-      val sock = method.invoke(device, 1) as BluetoothSocket
-      sock.connect()
-      return sock
+    val attempts = listOf(
+      { device.createInsecureRfcommSocketToServiceRecord(sppUuid) },
+      { device.createRfcommSocketToServiceRecord(sppUuid) },
+      {
+        val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+        method.invoke(device, 1) as BluetoothSocket
+      },
+    )
+    var lastError: Exception? = null
+    for (makeSocket in attempts) {
+      var sock: BluetoothSocket? = null
+      try {
+        sock = makeSocket()
+        connectWithTimeout(sock, connectTimeoutMs)
+        return sock
+      } catch (e: Exception) {
+        lastError = e
+        try {
+          sock?.close()
+        } catch (_: Exception) {
+        }
+      }
     }
+    throw lastError ?: IOException("Could not open Bluetooth SPP socket.")
+  }
+
+  private fun connectWithTimeout(sock: BluetoothSocket, timeoutMs: Long) {
+    val done = CountDownLatch(1)
+    var error: Exception? = null
+    val worker = Thread({
+      try {
+        sock.connect()
+      } catch (e: Exception) {
+        error = e
+      } finally {
+        done.countDown()
+      }
+    }, "td404-spp-connect")
+    worker.isDaemon = true
+    worker.start()
+    if (!done.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+      try {
+        sock.close()
+      } catch (_: Exception) {
+      }
+      throw IOException("Printer did not accept the connection in time. Keep it on and close other phone connections.")
+    }
+    error?.let { throw it }
   }
 
   private fun ensureReceiver() {
