@@ -74,5 +74,12 @@
     "build:android": "node ./scripts/eas-build.js android preview",
     "build:android:dev": "node ./scripts/eas-build.js android development"
   },
+  "expo": {
+    "autolinking": {
+      "android": {
+        "exclude": ["@expo/ui", "expo-glass-effect", "expo-speech-recognition"]
+      }
+    }
+  },
   "private": true
 }
