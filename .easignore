@@ -1,0 +1,34 @@
+# EAS upload ignores (based on .gitignore + build-only exclusions)
+
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.metro-health-check*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+.env*.local
+*.tsbuildinfo
+example
+/ios
+/android
+
+# Backend is not part of the mobile app build
+backend/node_modules/
+backend/.tmp-aar/
+backend/sdks/**/vendor/**/*.aar
+
+# Local native module build artifacts
+modules/**/android/build/
+modules/**/android/.gradle/
