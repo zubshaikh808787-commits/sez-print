@@ -1,10 +1,10 @@
 import { router } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { cardShadow, Palette } from '@/constants/ui';
 
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 type LabelSettingsMenuProps = {
   visible: boolean;
@@ -99,7 +99,7 @@ export function LabelSettingsMenu({
               pressed && styles.pressed,
             ]}>
             <View style={styles.menuIconWrap}>
-              <SymbolView name={item.icon} tintColor="#556473" size={20} />
+              <AppIcon name={item.icon} tintColor="#556473" size={20} />
             </View>
             <Text style={styles.menuLabel}>{item.label}</Text>
           </Pressable>

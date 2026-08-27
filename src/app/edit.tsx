@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -39,9 +39,7 @@ import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel
 import { ElementContentView } from '@/components/editor/element-renderer';
 import {
   artboardSurfaceStyle,
-  fitLabelPad,
-  LABEL_PAD_INSET,
-  LABEL_PAD_STAGE_COLOR,
+  fitLabelCanvas,
   LABEL_PAD_STAGE_MIN_HEIGHT,
 } from '@/components/label-preview';
 import { LabelSettingsMenu } from '@/components/editor/more-menu';
@@ -78,7 +76,7 @@ import {
 import { editorBridge, barcodeEncodeModeForScanType, isQrScanType } from '@/constants/editor-bridge';
 import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { cardShadow, Palette, Type } from '@/constants/ui';
+import { androidRipple, cardShadow, Palette, Type } from '@/constants/ui';
 import {
   createLabelDocument,
   elementSizeMm,
@@ -96,7 +94,7 @@ import { textBlockHeightMm } from '@/lib/element-sizing';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 const TOOLS: { icon: IconName; label: string }[] = [
   { icon: 'textformat', label: 'Text' },
@@ -134,8 +132,9 @@ function HeaderAction({
     <Pressable
       onPress={onPress}
       hitSlop={8}
+      android_ripple={androidRipple}
       style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}>
-      <SymbolView name={icon} tintColor="#FFFFFF" size={20} />
+      <AppIcon name={icon} tintColor="#FFFFFF" size={20} />
       <Text numberOfLines={1} style={styles.headerActionLabel}>
         {label}
       </Text>
@@ -163,12 +162,13 @@ function ToolbarItem({
     <Pressable
       disabled={disabled}
       onPress={onPress}
+      android_ripple={androidRipple}
       style={({ pressed }) => [
         styles.toolbarItem,
         withDivider && styles.toolbarDivider,
         pressed && !disabled && styles.pressed,
       ]}>
-      <SymbolView name={icon} tintColor={active ? Palette.accent : color} size={22} />
+      <AppIcon name={icon} tintColor={active ? Palette.accent : color} size={22} />
       <Text numberOfLines={1} style={[styles.toolbarLabel, { color: active ? Palette.accent : color }]}>
         {label}
       </Text>
@@ -188,8 +188,9 @@ function ToolItem({
   return (
     <Pressable
       onPress={onPress}
+      android_ripple={androidRipple}
       style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}>
-      <SymbolView name={icon} tintColor={Palette.accent} size={26} />
+      <AppIcon name={icon} tintColor={Palette.accent} size={26} />
       <Text numberOfLines={1} style={styles.toolLabel}>
         {label}
       </Text>
@@ -343,7 +344,7 @@ function CanvasElement({
           </View>
           {element.lockMovement ? (
             <View style={styles.lockBadge}>
-              <SymbolView name="lock.fill" tintColor="#FFFFFF" size={9} />
+              <AppIcon name="lock.fill" tintColor="#FFFFFF" size={9} />
             </View>
           ) : null}
         </>
@@ -477,7 +478,7 @@ export default function EditScreen() {
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
 
   const stageMaxHeight = Math.max(196, Math.min(windowHeight * 0.4, 348));
-  const fittedPad = fitLabelPad(doc.widthMm, doc.heightMm, stageWidth, stageMaxHeight);
+  const fittedPad = fitLabelCanvas(doc.widthMm, doc.heightMm, stageWidth, stageMaxHeight);
   const canvasHeightPx = fittedPad.heightPx;
   const canvasWidthPx = fittedPad.widthPx;
   const scale = fittedPad.scale;
@@ -1601,7 +1602,7 @@ export default function EditScreen() {
             }}
             hitSlop={12}
             style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
-            <SymbolView name="chevron.left" tintColor="#FFFFFF" size={22} />
+            <AppIcon name="chevron.left" tintColor="#FFFFFF" size={22} />
           </Pressable>
           <Text numberOfLines={1} ellipsizeMode="tail" style={styles.headerTitle}>
             {doc.name}
@@ -1637,7 +1638,7 @@ export default function EditScreen() {
                 onPress={closePanel}
                 hitSlop={10}
                 style={({ pressed }) => [styles.panelCloseBtn, pressed && styles.pressed]}>
-                <SymbolView name="xmark" tintColor={Palette.muted} size={16} />
+                <AppIcon name="xmark" tintColor={Palette.muted} size={16} />
               </Pressable>
             </View>
           ) : (
@@ -1778,7 +1779,7 @@ export default function EditScreen() {
                     key={saved.id}
                     onPress={() => openDocument(saved)}
                     style={({ pressed }) => [styles.openRow, pressed && styles.pressed]}>
-                    <SymbolView name="doc.text" tintColor={Palette.accent} size={18} />
+                    <AppIcon name="doc.text" tintColor={Palette.accent} size={18} />
                     <View style={styles.openRowInfo}>
                       <Text numberOfLines={1} style={styles.openRowName}>
                         {saved.name}
@@ -1890,11 +1891,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   stage: {
+    width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: LABEL_PAD_STAGE_COLOR,
-    paddingVertical: LABEL_PAD_INSET,
-    paddingHorizontal: LABEL_PAD_INSET,
+    backgroundColor: Palette.screen,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
     minHeight: LABEL_PAD_STAGE_MIN_HEIGHT,
   },
   emptyHintWrap: {

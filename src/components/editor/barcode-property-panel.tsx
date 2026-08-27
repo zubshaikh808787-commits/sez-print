@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { PositionControls } from '@/components/editor/position-controls';
@@ -19,7 +19,7 @@ import { BARCODE_MODES } from '@/lib/barcode-code128';
 
 const ACCENT = '#48C3C7';
 const TABS: BarcodePropertyTab[] = ['Regular', 'Position', 'Content', 'Encoding', 'Font'];
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 function pickEncodeMode(current: string, onSelect: (mode: string) => void) {
   Alert.alert(
@@ -137,7 +137,7 @@ function NavRow({ label, value, onPress }: { label: string; value: string; onPre
       <Text style={styles.rowLabel}>{label}</Text>
       <View style={styles.navRight}>
         <Text style={styles.navValue}>{value}</Text>
-        <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+        <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
       </View>
     </Pressable>
   );
@@ -201,7 +201,7 @@ function AlignButtons({
           key={value}
           onPress={() => patch({ align: value })}
           style={[styles.alignBtn, align === value && styles.alignBtnActive]}>
-          <SymbolView name={icon} tintColor={align === value ? '#FFFFFF' : '#556473'} size={16} />
+          <AppIcon name={icon} tintColor={align === value ? '#FFFFFF' : '#556473'} size={16} />
         </Pressable>
       ))}
     </View>
@@ -408,7 +408,7 @@ export function BarcodePropertyPanel({
                     {state.content}
                   </Text>
                 ) : null}
-                <SymbolView name="barcode.viewfinder" tintColor={ACCENT} size={22} />
+                <AppIcon name="barcode.viewfinder" tintColor={ACCENT} size={22} />
               </View>
             </View>
             <Divider />
@@ -547,7 +547,7 @@ export function BarcodePropertyPanel({
                     {state.content}
                   </Text>
                 ) : null}
-                <SymbolView name="barcode.viewfinder" tintColor={ACCENT} size={22} />
+                <AppIcon name="barcode.viewfinder" tintColor={ACCENT} size={22} />
               </View>
             </View>
           </>

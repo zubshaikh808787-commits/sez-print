@@ -1,4 +1,4 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import type { ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
@@ -19,7 +19,7 @@ import {
 
 const ACCENT = '#48C3C7';
 const TABS: QrcodePropertyTab[] = ['Regular', 'Position', 'Content', 'Encoding'];
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 const CODE_SHAPE_NOTE =
   "When set to 'Rectangle', the encoding takes precedence over the rectangular style. If the content does not support a rectangular style, it will appear as 'Square'.";
@@ -160,7 +160,7 @@ function NavRow({ label, value, onPress }: { label: string; value: string; onPre
         <Text style={styles.navValue} numberOfLines={1}>
           {value || ' '}
         </Text>
-        <SymbolView name="chevron.right" tintColor="#A0AEC0" size={14} />
+        <AppIcon name="chevron.right" tintColor="#A0AEC0" size={14} />
       </View>
     </Pressable>
   );
@@ -210,7 +210,7 @@ function ContentTypeSection({
                 {state.content}
               </Text>
             ) : null}
-            <SymbolView name="qrcode.viewfinder" tintColor={ACCENT} size={22} />
+            <AppIcon name="qrcode.viewfinder" tintColor={ACCENT} size={22} />
           </View>
         </View>
       )}

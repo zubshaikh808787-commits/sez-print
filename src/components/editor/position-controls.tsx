@@ -1,9 +1,9 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { TextAlign } from '@/components/editor/types';
 
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 const NUDGE_MM = 0.5;
 
@@ -84,13 +84,13 @@ export function PositionControls({
 
   const padBtn = (icon: IconName, onPress: () => void) => (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.padBtn, pressed && styles.pressed]}>
-      <SymbolView name={icon} tintColor="#556473" size={18} />
+      <AppIcon name={icon} tintColor="#556473" size={18} />
     </Pressable>
   );
 
   const gridBtn = (icon: IconName, onPress: () => void) => (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.gridBtn, pressed && styles.pressed]}>
-      <SymbolView name={icon} tintColor="#556473" size={17} />
+      <AppIcon name={icon} tintColor="#556473" size={17} />
     </Pressable>
   );
 
@@ -104,7 +104,7 @@ export function PositionControls({
             <Pressable
               onPress={() => alignTo('center')}
               style={({ pressed }) => [styles.padBtn, styles.padCenter, pressed && styles.pressed]}>
-              <SymbolView name="checkmark" tintColor="#556473" size={16} />
+              <AppIcon name="checkmark" tintColor="#556473" size={16} />
             </Pressable>
             {padBtn('arrowtriangle.right.fill', () => nudge(NUDGE_MM, 0))}
           </View>
@@ -139,7 +139,7 @@ export function PositionControls({
             key={icon}
             onPress={onPress}
             style={({ pressed }) => [styles.positionActionBtn, pressed && styles.pressed]}>
-            <SymbolView name={icon} tintColor="#556473" size={20} />
+            <AppIcon name={icon} tintColor="#556473" size={20} />
           </Pressable>
         ))}
       </View>

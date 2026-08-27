@@ -1,5 +1,4 @@
 import { useRouter } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import {
   Alert,
@@ -12,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import {
   DocBadgeIcon,
   LabelCloneIcon,
@@ -22,11 +22,11 @@ import {
 } from '@/components/home-icons';
 import { LabelPreview, LABEL_PAD_STAGE_MIN_HEIGHT } from '@/components/label-preview';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { cardShadow, Palette, scaleFont } from '@/constants/ui';
+import { androidRipple, cardShadow, Palette, scaleFont } from '@/constants/ui';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore } from '@/stores/printer-store';
 
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 function ActionItem({
   icon,
@@ -63,6 +63,7 @@ function ActionItem({
         disabled={disabled}
         onPress={handlePress}
         hitSlop={8}
+        android_ripple={androidRipple}
         style={({ pressed }) => [
           styles.actionPressable,
           pressed && !disabled && styles.pressed,
@@ -70,7 +71,7 @@ function ActionItem({
         {customIcon ? (
           customIcon
         ) : icon ? (
-          <SymbolView name={icon} tintColor={color} size={23} pointerEvents="none" />
+          <AppIcon name={icon} tintColor={color} size={23} pointerEvents="none" />
         ) : null}
         <Text
           numberOfLines={1}
@@ -120,6 +121,7 @@ function Tile({
     <View style={[styles.tileOuter, style]}>
       <Pressable
         onPress={handlePress}
+        android_ripple={androidRipple}
         style={({ pressed }) => [
           isWide ? styles.tileInnerWide : styles.tileInnerSquare,
           pressed && styles.pressed,
@@ -190,6 +192,7 @@ export default function HomeScreen() {
       <View style={[styles.header, { paddingTop: insets.top + Spacing.two }]}>
         <Pressable
           onPress={() => router.push('/printer-connect')}
+          android_ripple={androidRipple}
           style={({ pressed }) => [
             styles.connection,
             connected && styles.connectionConnected,
@@ -198,7 +201,7 @@ export default function HomeScreen() {
           <Text numberOfLines={1} style={styles.connectionText}>
             {connected ? printerName ?? 'Connected' : 'Unconnected'}
           </Text>
-          <SymbolView name="link" tintColor="#FFFFFF" size={15} />
+          <AppIcon name="link" tintColor="#FFFFFF" size={15} />
         </Pressable>
       </View>
 
@@ -247,7 +250,7 @@ export default function HomeScreen() {
                   />
                 ) : (
                   <Pressable onPress={() => router.push('/new-label')} style={styles.emptyPreview}>
-                    <SymbolView name="plus.circle" tintColor={Palette.accent} size={28} />
+                    <AppIcon name="plus.circle" tintColor={Palette.accent} size={28} />
                     <Text style={styles.emptyPreviewText}>
                       Create your first label to see it here
                     </Text>
@@ -535,6 +538,8 @@ const styles = StyleSheet.create({
   tileIconWrap: {
     alignItems: 'center',
     justifyContent: 'center',
+    minWidth: 28,
+    minHeight: 28,
   },
   tileLabel: {
     fontSize: 13,

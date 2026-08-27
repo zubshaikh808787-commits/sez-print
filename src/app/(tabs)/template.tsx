@@ -1,5 +1,5 @@
 ﻿import { useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Modal,
@@ -1623,13 +1623,13 @@ export default function TemplateScreen() {
               hitSlop={8}
               onPress={() => router.push('/scan')}
               style={({ pressed }) => [styles.iconBtn, pressed && styles.cardPressed]}>
-              <SymbolView name="qrcode.viewfinder" tintColor="#FFFFFF" size={21} />
+              <AppIcon name="qrcode.viewfinder" tintColor="#FFFFFF" size={21} />
             </Pressable>
             <Pressable
               hitSlop={8}
               onPress={() => setSortNewestFirst((v) => !v)}
               style={({ pressed }) => [styles.iconBtn, pressed && styles.cardPressed]}>
-              <SymbolView
+              <AppIcon
                 name={sortNewestFirst ? 'arrow.down' : 'arrow.up'}
                 tintColor="#FFFFFF"
                 size={19}
@@ -1703,7 +1703,7 @@ export default function TemplateScreen() {
 
             {visibleCloudTemplates.length === 0 ? (
               <View style={styles.cloudEmptyCard}>
-                <SymbolView name="icloud.and.arrow.up" tintColor="#9EAFC0" size={30} />
+                <AppIcon name="icloud.and.arrow.up" tintColor="#9EAFC0" size={30} />
                 <Text style={styles.cloudEmptyText}>
                   {searchQuery.trim()
                     ? 'No synced templates match your search.'
@@ -1730,10 +1730,10 @@ export default function TemplateScreen() {
                   />
                   <View style={styles.cardFooter}>
                     <Pressable hitSlop={10} onPress={() => handleEditCloudTemplate(tpl)}>
-                      <SymbolView name="square.and.pencil" tintColor={Palette.accent} size={19} />
+                      <AppIcon name="square.and.pencil" tintColor={Palette.accent} size={19} />
                     </Pressable>
                     <Pressable hitSlop={10} onPress={() => handleDeleteCloudTemplate(tpl)}>
-                      <SymbolView name="trash" tintColor="#DC2626" size={18} />
+                      <AppIcon name="trash" tintColor="#DC2626" size={18} />
                     </Pressable>
                   </View>
                 </View>
@@ -1780,7 +1780,7 @@ export default function TemplateScreen() {
                   style={({ pressed }) => [styles.localNewGroupBtn, pressed && styles.cardPressed]}
                   onPress={() => setNewGroupVisible(true)}>
                   <View style={styles.localNewGroupIconWrap}>
-                    <SymbolView name="square.stack.3d.up.fill" tintColor="#FFFFFF" size={22} />
+                    <AppIcon name="square.stack.3d.up.fill" tintColor="#FFFFFF" size={22} />
                   </View>
                   <Text style={styles.localNewGroupText}>New Group</Text>
                 </Pressable>
@@ -1916,12 +1916,12 @@ export default function TemplateScreen() {
                         onPress={() =>
                           router.push({ pathname: '/print', params: { labelId: docItem.id } })
                         }>
-                        <SymbolView name="printer" tintColor="#606F7B" size={18} />
+                        <AppIcon name="printer" tintColor="#606F7B" size={18} />
                       </Pressable>
                       <Pressable
                         hitSlop={8}
                         onPress={() => handleDeleteLocal(docItem.id, docItem.name)}>
-                        <SymbolView name="trash" tintColor="#DC2626" size={18} />
+                        <AppIcon name="trash" tintColor="#DC2626" size={18} />
                       </Pressable>
                     </View>
                   </Pressable>
@@ -1971,7 +1971,7 @@ export default function TemplateScreen() {
                 <View style={styles.cardFooter}>
                   {/* Circular clock history icon */}
                   <View style={styles.footerClock}>
-                    <SymbolView name="clock" tintColor="#606F7B" size={17} />
+                    <AppIcon name="clock" tintColor="#606F7B" size={17} />
                   </View>
 
                   {/* Share node icon */}

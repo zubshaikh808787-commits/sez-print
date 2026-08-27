@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -554,7 +554,7 @@ export default function PrintScreen() {
           onPress={() => router.back()}
           hitSlop={12}
           style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
-          <SymbolView name="chevron.left" tintColor="#FFFFFF" size={22} />
+          <AppIcon name="chevron.left" tintColor="#FFFFFF" size={22} />
         </Pressable>
 
         <Pressable
@@ -571,7 +571,7 @@ export default function PrintScreen() {
               ? 'Connecting…'
               : 'Unconnected'}
           </Text>
-          <SymbolView name="link" tintColor="#FFFFFF" size={14} />
+          <AppIcon name="link" tintColor="#FFFFFF" size={14} />
         </Pressable>
       </View>
 
@@ -621,7 +621,7 @@ export default function PrintScreen() {
                 disabled={pageIndex <= 0}
                 onPress={() => setPageIndex((p) => Math.max(0, p - 1))}
                 style={({ pressed }) => [styles.pageNavBtn, pressed && styles.pressed]}>
-                <SymbolView
+                <AppIcon
                   name="chevron.left"
                   tintColor={pageIndex <= 0 ? '#7C848E' : '#FFFFFF'}
                   size={16}
@@ -635,7 +635,7 @@ export default function PrintScreen() {
                 disabled={pageIndex >= pageCount - 1}
                 onPress={() => setPageIndex((p) => Math.min(pageCount - 1, p + 1))}
                 style={({ pressed }) => [styles.pageNavBtn, pressed && styles.pressed]}>
-                <SymbolView
+                <AppIcon
                   name="chevron.right"
                   tintColor={pageIndex >= pageCount - 1 ? '#7C848E' : '#FFFFFF'}
                   size={16}
@@ -733,7 +733,7 @@ export default function PrintScreen() {
         <Pressable
           onPress={() => router.push('/printing-settings')}
           style={({ pressed }) => [styles.gearBtn, pressed && styles.pressed]}>
-          <SymbolView name="gearshape.fill" tintColor="#FFFFFF" size={24} />
+          <AppIcon name="gearshape.fill" tintColor="#FFFFFF" size={24} />
         </Pressable>
         <Pressable
           disabled={printing}

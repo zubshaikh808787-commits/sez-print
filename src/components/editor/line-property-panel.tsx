@@ -1,4 +1,3 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import type { ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
@@ -14,7 +13,6 @@ import {
 
 const ACCENT = '#48C3C7';
 const TABS: LinePropertyTab[] = ['Regular', 'Position', 'Style'];
-type IconName = SymbolViewProps['name'];
 
 const LINE_STYLES: LineStyle[] = ['solid', 'dashed', 'slash', 'backslash'];
 

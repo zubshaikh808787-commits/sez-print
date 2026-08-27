@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useState } from 'react';
 import {
   Pressable,
@@ -47,7 +47,7 @@ export default function ColumnNameScreen() {
           onPress={() => router.back()}
           hitSlop={12}
           style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
-          <SymbolView name="chevron.left" tintColor="#FFFFFF" size={22} />
+          <AppIcon name="chevron.left" tintColor="#FFFFFF" size={22} />
         </Pressable>
         <Text style={styles.title}>Column Name</Text>
         <Pressable

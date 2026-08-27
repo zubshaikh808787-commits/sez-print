@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useMemo, useState } from 'react';
 import {
   Alert,
@@ -318,7 +318,7 @@ export default function DataFileScreen() {
           onPress={() => router.back()}
           hitSlop={12}
           style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
-          <SymbolView name="chevron.left" tintColor="#FFFFFF" size={22} />
+          <AppIcon name="chevron.left" tintColor="#FFFFFF" size={22} />
         </Pressable>
 
         <Text style={styles.headerTitle}>Data File</Text>
@@ -393,7 +393,7 @@ export default function DataFileScreen() {
                         },
                       ])
                     }>
-                    <SymbolView name="trash" tintColor="#DC2626" size={18} />
+                    <AppIcon name="trash" tintColor="#DC2626" size={18} />
                   </Pressable>
                 </View>
               )}
@@ -468,7 +468,7 @@ export default function DataFileScreen() {
                       },
                     ])
                   }>
-                  <SymbolView name="trash" tintColor="#DC2626" size={18} />
+                  <AppIcon name="trash" tintColor="#DC2626" size={18} />
                 </Pressable>
 
                 {item.excel ? <ExcelSpreadsheetPreview file={item.excel} /> : null}

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
@@ -21,7 +21,7 @@ import { Palette } from '@/constants/ui';
 
 const ACCENT = '#48C3C7';
 const TABS: PropertyTab[] = ['Regular', 'Position', 'Content', 'Paragraph', 'Font'];
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 function Divider({ inset = 16 }: { inset?: number }) {
   return <View style={[styles.divider, { marginLeft: inset }]} />;
@@ -125,7 +125,7 @@ function NavRow({ label, value, onPress }: { label: string; value: string; onPre
       <Text style={styles.rowLabel}>{label}</Text>
       <View style={styles.navRight}>
         <Text style={styles.navValue}>{value}</Text>
-        <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+        <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
       </View>
     </Pressable>
   );
@@ -181,7 +181,7 @@ function AlignButtons({
           key={align}
           onPress={() => patch({ align })}
           style={[styles.alignBtn, state.align === align && styles.alignBtnActive]}>
-          <SymbolView name={icon} tintColor={state.align === align ? '#FFFFFF' : '#556473'} size={16} />
+          <AppIcon name={icon} tintColor={state.align === align ? '#FFFFFF' : '#556473'} size={16} />
         </Pressable>
       ))}
     </View>
@@ -337,7 +337,7 @@ export function TextPropertyPanel({
             <Divider />
             <View style={styles.contentRow}>
               <Text style={styles.rowLabel}>Content</Text>
-              <SymbolView name="viewfinder" tintColor={ACCENT} size={22} />
+              <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
             </View>
             <SectionGap />
             <StepperRow
@@ -472,7 +472,7 @@ export function TextPropertyPanel({
                 onPress={() => router.push('/scan')}
                 hitSlop={8}
                 style={({ pressed }) => [pressed && styles.pressed]}>
-                <SymbolView name="viewfinder" tintColor={ACCENT} size={22} />
+                <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
               </Pressable>
             </View>
             <TextInput

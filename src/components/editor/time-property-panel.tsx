@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
@@ -20,7 +20,7 @@ import {
 
 const ACCENT = '#48C3C7';
 const TABS: TimePropertyTab[] = ['Regular', 'Position', 'Format', 'Font'];
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 function Divider() {
   return <View style={styles.divider} />;
@@ -145,7 +145,7 @@ function NavRow({ label, value, onPress }: { label: string; value: string; onPre
       <Text style={styles.rowLabel}>{label}</Text>
       <View style={styles.navRight}>
         <Text style={styles.navValue}>{value}</Text>
-        <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+        <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
       </View>
     </Pressable>
   );
@@ -213,7 +213,7 @@ function AlignButtons({
           key={align}
           onPress={() => patch({ align })}
           style={[styles.alignBtn, state.align === align && styles.alignBtnActive]}>
-          <SymbolView name={icon} tintColor={state.align === align ? '#FFFFFF' : '#556473'} size={16} />
+          <AppIcon name={icon} tintColor={state.align === align ? '#FFFFFF' : '#556473'} size={16} />
         </Pressable>
       ))}
     </View>

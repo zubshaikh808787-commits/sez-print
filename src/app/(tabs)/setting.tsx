@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { type ReactNode } from 'react';
 import {
   Alert,
@@ -16,10 +16,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { cardShadow, Palette } from '@/constants/ui';
+import { androidRipple, cardShadow, Palette } from '@/constants/ui';
 import { useTranslation } from '@/lib/i18n';
 
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 function FontSettingIcon() {
   return (
@@ -47,13 +47,14 @@ function SettingRow({
       <Pressable
         onPress={onPress}
         disabled={!onPress}
+        android_ripple={androidRipple}
         style={({ pressed }) => [styles.row, pressed && onPress && styles.rowPressed]}>
         <View style={styles.rowIcon}>
           {customIcon ??
-            (icon ? <SymbolView name={icon} tintColor="#5A6570" size={22} /> : null)}
+            (icon ? <AppIcon name={icon} tintColor="#5A6570" size={22} /> : null)}
         </View>
         <Text style={styles.rowLabel}>{label}</Text>
-        <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+        <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
       </Pressable>
       {showDivider ? <View style={styles.divider} /> : null}
     </>

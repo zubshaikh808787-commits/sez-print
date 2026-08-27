@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 
 import { PositionControls } from '@/components/editor/position-controls';
 import {
@@ -16,7 +16,7 @@ import {
 
 const ACCENT = '#48C3C7';
 const TABS: TablePropertyTab[] = ['Regular', 'Position', 'Table'];
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 function Divider() {
   return <View style={styles.divider} />;
@@ -119,7 +119,7 @@ function NavRow({ label, value, onPress }: { label: string; value: string; onPre
       <Text style={styles.rowLabel}>{label}</Text>
       <View style={styles.navRight}>
         <Text style={styles.navValue}>{value}</Text>
-        <SymbolView name="chevron.right" tintColor="#A0AEC0" size={14} />
+        <AppIcon name="chevron.right" tintColor="#A0AEC0" size={14} />
       </View>
     </Pressable>
   );

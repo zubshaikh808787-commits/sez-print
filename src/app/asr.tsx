@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -164,7 +164,7 @@ export default function AsrScreen() {
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.headerSide}>
-          <SymbolView name="chevron.left" tintColor="#FFFFFF" size={24} />
+          <AppIcon name="chevron.left" tintColor="#FFFFFF" size={24} />
         </Pressable>
         <Text style={styles.headerTitle}>ASR</Text>
         <Pressable onPress={handleConfirm} hitSlop={10} style={[styles.headerSide, styles.headerSideRight]}>

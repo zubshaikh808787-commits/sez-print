@@ -1,10 +1,10 @@
 import { router } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AppIcon } from '@/components/app-icon';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { Palette } from '@/constants/ui';
+import { androidRipple, Palette } from '@/constants/ui';
 
 export function SettingsStackHeader({ title }: { title: string }) {
   const insets = useSafeAreaInsets();
@@ -14,8 +14,9 @@ export function SettingsStackHeader({ title }: { title: string }) {
       <Pressable
         onPress={() => router.back()}
         hitSlop={12}
+        android_ripple={androidRipple}
         style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
-        <SymbolView name="chevron.left" tintColor="#FFFFFF" size={22} />
+        <AppIcon name="chevron.left" tintColor="#FFFFFF" size={22} />
       </Pressable>
       <Text style={styles.title}>{title}</Text>
       <View style={styles.spacer} />

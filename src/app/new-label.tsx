@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -45,7 +45,7 @@ export default function NewLabelModal() {
               label="Blank Label"
               color="#17A6B8"
               onPress={() => router.replace('/new-label-setup')}>
-              <SymbolView name="plus.rectangle" tintColor="#FFFFFF" size={30} pointerEvents="none" />
+              <AppIcon name="plus.rectangle" tintColor="#FFFFFF" size={30} pointerEvents="none" />
             </CreationOption>
 
             <CreationOption
@@ -63,7 +63,7 @@ export default function NewLabelModal() {
               label="Scan Label"
               color="#F5A623"
               onPress={() => router.replace('/scan')}>
-              <SymbolView name="qrcode.viewfinder" tintColor="#FFFFFF" size={30} pointerEvents="none" />
+              <AppIcon name="qrcode.viewfinder" tintColor="#FFFFFF" size={30} pointerEvents="none" />
             </CreationOption>
           </View>
         </View>

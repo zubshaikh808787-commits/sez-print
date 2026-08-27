@@ -1,4 +1,4 @@
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useMemo, useRef, useState } from 'react';
 import {
   PanResponder,
@@ -158,7 +158,7 @@ export function SignatureDrawingBoard({
               onPress={handleUndo}
               disabled={strokes.length === 0}
               style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}>
-              <SymbolView
+              <AppIcon
                 name="arrow.uturn.backward"
                 tintColor={strokes.length === 0 ? '#B8C0C8' : BLUE}
                 size={22}
@@ -171,7 +171,7 @@ export function SignatureDrawingBoard({
               onPress={handleRedo}
               disabled={redoStack.length === 0}
               style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}>
-              <SymbolView
+              <AppIcon
                 name="arrow.uturn.forward"
                 tintColor={redoStack.length === 0 ? '#B8C0C8' : BLUE}
                 size={22}

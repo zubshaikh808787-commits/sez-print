@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-
 import { PositionControls } from '@/components/editor/position-controls';
 import {
   DRAWING_COLORS,
@@ -14,7 +12,6 @@ import {
 
 const ACCENT = '#48C3C7';
 const TABS: ShapePropertyTab[] = ['Regular', 'Position', 'Style'];
-type IconName = SymbolViewProps['name'];
 
 const FIGURE_SHAPES: FigureShape[] = ['rectangle', 'roundedRectangle', 'oval', 'circle'];
 

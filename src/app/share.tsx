@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useMemo, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, Pressable, Text, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
@@ -30,7 +30,7 @@ function ShareOption({
       onPress={onPress}
       style={({ pressed }) => [styles.option, pressed && styles.pressed]}>
       <View style={[styles.optionIcon, { backgroundColor: color }]}>
-        <SymbolView name={icon} tintColor="#FFFFFF" size={30} pointerEvents="none" />
+        <AppIcon name={icon} tintColor="#FFFFFF" size={30} pointerEvents="none" />
       </View>
       <Text style={styles.optionLabel}>{label}</Text>
     </Pressable>

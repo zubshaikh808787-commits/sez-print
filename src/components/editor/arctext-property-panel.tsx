@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import type { ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
@@ -17,7 +17,7 @@ import {
 
 const ACCENT = '#48C3C7';
 const TABS: ArcTextPropertyTab[] = ['Regular', 'Position', 'Content', 'Style', 'Font'];
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 function Divider() {
   return <View style={styles.divider} />;
@@ -122,7 +122,7 @@ function NavRow({ label, value, onPress }: { label: string; value: string; onPre
         <Text style={styles.navValue} numberOfLines={1}>
           {value || ' '}
         </Text>
-        <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+        <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
       </View>
     </Pressable>
   );
@@ -263,7 +263,7 @@ function ContentSection({
       ) : (
         <View style={styles.contentRow}>
           <Text style={styles.rowLabel}>Content</Text>
-          <SymbolView name="viewfinder" tintColor={ACCENT} size={22} />
+          <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
         </View>
       )}
     </>

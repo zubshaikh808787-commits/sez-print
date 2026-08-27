@@ -1,4 +1,3 @@
-import { SymbolView } from 'expo-symbols';
 import { type ReactNode } from 'react';
 import {
   Platform,
@@ -12,9 +11,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AppIcon } from '@/components/app-icon';
 import { SettingsStackHeader } from '@/components/settings-stack-header';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { cardShadow, Palette } from '@/constants/ui';
+import { androidRipple, cardShadow, Palette } from '@/constants/ui';
 
 export function SettingsScreenShell({
   title,
@@ -60,9 +60,10 @@ export function SettingsNavRow({ label, onPress }: { label: string; onPress?: ()
     <Pressable
       onPress={onPress}
       disabled={!onPress}
+      android_ripple={androidRipple}
       style={({ pressed }) => [styles.navRow, pressed && onPress && styles.pressed]}>
       <Text style={styles.rowLabel}>{label}</Text>
-      <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+      <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
     </Pressable>
   );
 }
@@ -115,11 +116,12 @@ export function SettingsValueRow({
       <Pressable
         onPress={onPress}
         disabled={!onPress}
+        android_ripple={androidRipple}
         style={({ pressed }) => [styles.valueRow, pressed && onPress && styles.pressed]}>
         <Text style={styles.rowLabel}>{label}</Text>
         <View style={styles.valueRight}>
           <Text style={styles.valueText}>{value}</Text>
-          <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+          <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
         </View>
       </Pressable>
       {showDivider ? <SettingsDivider /> : null}
@@ -143,13 +145,14 @@ export function SettingsStatusRow({
       <Pressable
         onPress={onPress}
         disabled={!onPress}
+        android_ripple={androidRipple}
         style={({ pressed }) => [styles.valueRow, pressed && onPress && styles.pressed]}>
         <Text style={styles.rowLabel}>{label}</Text>
         <View style={styles.valueRight}>
           <Text style={[styles.statusText, enabled ? styles.statusEnabled : styles.statusDisabled]}>
             {enabled ? 'Enabled' : 'Not Enabled'}
           </Text>
-          <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+          <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
         </View>
       </Pressable>
       {showDivider ? <SettingsDivider /> : null}
@@ -178,7 +181,7 @@ export function SettingsRadioRow({
         </View>
         <Text style={styles.rowLabel}>{label}</Text>
         <Text style={styles.cacheValue}>{value}</Text>
-        <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+        <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
       </Pressable>
       {showDivider ? <SettingsDivider /> : null}
     </>

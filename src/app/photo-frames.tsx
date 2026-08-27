@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useMemo, useState } from 'react';
 import {
   FlatList,
@@ -43,7 +43,7 @@ export default function PhotoFramesScreen() {
           onPress={() => router.back()}
           hitSlop={12}
           style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
-          <SymbolView name="chevron.left" tintColor="#FFFFFF" size={22} />
+          <AppIcon name="chevron.left" tintColor="#FFFFFF" size={22} />
         </Pressable>
 
         <View style={styles.searchPill}>
@@ -55,7 +55,7 @@ export default function PhotoFramesScreen() {
             onChangeText={setQuery}
             returnKeyType="search"
           />
-          <SymbolView name="magnifyingglass" tintColor="#214668" size={16} />
+          <AppIcon name="magnifyingglass" tintColor="#214668" size={16} />
         </View>
       </View>
 

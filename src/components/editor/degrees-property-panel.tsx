@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { AppIcon, type AppIconName } from '@/components/app-icon';
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
@@ -21,7 +21,7 @@ import {
 
 const ACCENT = '#48C3C7';
 const TABS: PropertyTab[] = ['Regular', 'Position', 'Content', 'Paragraph', 'Font'];
-type IconName = SymbolViewProps['name'];
+type IconName = AppIconName;
 
 function Divider() {
   return <View style={styles.divider} />;
@@ -131,7 +131,7 @@ function NavRow({ label, value, onPress }: { label: string; value: string; onPre
         <Text style={styles.navValue} numberOfLines={1}>
           {value || ' '}
         </Text>
-        <SymbolView name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+        <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
       </View>
     </Pressable>
   );
@@ -143,7 +143,7 @@ function ContentValueRow({ value }: { value: string }) {
       <Text style={styles.rowLabel}>Content</Text>
       <View style={styles.contentRight}>
         <Text style={styles.contentValue}>{value}</Text>
-        <SymbolView name="viewfinder" tintColor={ACCENT} size={22} />
+        <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
       </View>
     </View>
   );
@@ -211,7 +211,7 @@ function AlignButtons({
           key={align}
           onPress={() => patch({ align })}
           style={[styles.alignBtn, state.align === align && styles.alignBtnActive]}>
-          <SymbolView name={icon} tintColor={state.align === align ? '#FFFFFF' : '#556473'} size={16} />
+          <AppIcon name={icon} tintColor={state.align === align ? '#FFFFFF' : '#556473'} size={16} />
         </Pressable>
       ))}
     </View>
@@ -316,7 +316,7 @@ function ContentSection({
           <View style={styles.contentRow}>
             <Text style={styles.rowLabel}>Content</Text>
             <Pressable onPress={() => router.push('/scan')} hitSlop={8}>
-              <SymbolView name="viewfinder" tintColor={ACCENT} size={22} />
+              <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
             </Pressable>
           </View>
           <TextInput

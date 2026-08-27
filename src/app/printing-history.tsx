@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -63,7 +63,7 @@ export default function PrintingHistoryScreen() {
         ]}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <SymbolView name="clock.arrow.circlepath" tintColor="#B8C0C8" size={44} />
+            <AppIcon name="clock.arrow.circlepath" tintColor="#B8C0C8" size={44} />
             <Text style={styles.emptyTitle}>No Printing History</Text>
             <Text style={styles.emptySub}>
               Records appear here after each print when history recording is enabled in Printing
@@ -76,7 +76,7 @@ export default function PrintingHistoryScreen() {
             <Pressable
               onPress={handleClear}
               style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}>
-              <SymbolView name="trash" tintColor="#DC2626" size={15} />
+              <AppIcon name="trash" tintColor="#DC2626" size={15} />
               <Text style={styles.clearText}>Clear All ({history.length})</Text>
             </Pressable>
           ) : null
@@ -95,7 +95,7 @@ export default function PrintingHistoryScreen() {
             <Pressable
               onPress={() => handleReprint(item)}
               style={({ pressed }) => [styles.reprintBtn, pressed && styles.pressed]}>
-              <SymbolView name="printer" tintColor="#FFFFFF" size={15} />
+              <AppIcon name="printer" tintColor="#FFFFFF" size={15} />
               <Text style={styles.reprintText}>Reprint</Text>
             </Pressable>
           </View>

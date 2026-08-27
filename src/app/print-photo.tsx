@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -330,7 +330,7 @@ export default function PrintPhotoScreen() {
           onPress={() => router.back()}
           hitSlop={12}
           style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
-          <SymbolView name="chevron.left" tintColor="#FFFFFF" size={22} />
+          <AppIcon name="chevron.left" tintColor="#FFFFFF" size={22} />
         </Pressable>
         <Pressable
           onPress={() => router.push('/printer-connect')}
@@ -346,7 +346,7 @@ export default function PrintPhotoScreen() {
                 ? 'Connecting…'
                 : 'Unconnected'}
           </Text>
-          <SymbolView name="link" tintColor="#FFFFFF" size={14} />
+          <AppIcon name="link" tintColor="#FFFFFF" size={14} />
         </Pressable>
       </View>
 
@@ -401,7 +401,7 @@ export default function PrintPhotoScreen() {
             <View style={styles.thumbEmpty} />
           )}
           <Text style={styles.addPhotoText}>Add photo</Text>
-          <SymbolView name="chevron.right" tintColor="#94A3B8" size={16} />
+          <AppIcon name="chevron.right" tintColor="#94A3B8" size={16} />
         </Pressable>
 
         {isFrame ? (
@@ -530,7 +530,7 @@ export default function PrintPhotoScreen() {
         <Pressable
           onPress={() => router.push('/printing-settings')}
           style={({ pressed }) => [styles.gearBtn, pressed && styles.pressed]}>
-          <SymbolView name="gearshape.fill" tintColor="#FFFFFF" size={22} />
+          <AppIcon name="gearshape.fill" tintColor="#FFFFFF" size={22} />
         </Pressable>
         <Pressable
           disabled={printing}

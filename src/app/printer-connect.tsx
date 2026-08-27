@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -234,7 +234,7 @@ export default function PrinterConnectScreen() {
           index < total - 1 && styles.deviceRowBorder,
           pressed && styles.pressed,
         ]}>
-        <SymbolView name="printer" tintColor={td404 ? Palette.accent : Palette.ink} size={20} />
+        <AppIcon name="printer" tintColor={td404 ? Palette.accent : Palette.ink} size={20} />
         <View style={styles.deviceInfo}>
           <View style={styles.nameRow}>
             <Text style={styles.deviceName}>{device.name ?? 'Unknown device'}</Text>
@@ -315,7 +315,7 @@ export default function PrinterConnectScreen() {
               {scanning ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <SymbolView name="antenna.radiowaves.left.and.right" tintColor="#FFFFFF" size={18} />
+                <AppIcon name="antenna.radiowaves.left.and.right" tintColor="#FFFFFF" size={18} />
               )}
               <Text style={styles.connectBtnText}>
                 {scanning ? 'Scanning…' : 'Scan Paired & Nearby'}
@@ -330,7 +330,7 @@ export default function PrinterConnectScreen() {
           {status === 'connected' ? (
             <View style={[styles.card, styles.connectedCard]}>
               <View style={styles.connectedRow}>
-                <SymbolView name="printer.fill" tintColor="#2E9E63" size={24} />
+                <AppIcon name="printer.fill" tintColor="#2E9E63" size={24} />
                 <View style={styles.connectedInfo}>
                   <Text style={styles.connectedName}>{deviceName ?? deviceId}</Text>
                   <Text style={styles.connectedStatus}>
@@ -395,7 +395,7 @@ export default function PrinterConnectScreen() {
               <Pressable
                 onPress={() => void startScan()}
                 style={({ pressed }) => [styles.rescanBtn, pressed && styles.pressed]}>
-                <SymbolView name="arrow.clockwise" tintColor={Palette.accent} size={15} />
+                <AppIcon name="arrow.clockwise" tintColor={Palette.accent} size={15} />
                 <Text style={styles.rescanText}>Rescan</Text>
               </Pressable>
             ) : null}

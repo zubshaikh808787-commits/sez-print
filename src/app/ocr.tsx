@@ -7,7 +7,7 @@ import {
   useCameraPermissions,
   type BarcodeType,
 } from 'expo-camera';
-import { SymbolView } from 'expo-symbols';
+import { AppIcon } from '@/components/app-icon';
 import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -237,7 +237,7 @@ export default function OcrScreen() {
       <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom + 20 }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.headerSide}>
-            <SymbolView name="chevron.left" tintColor="#FFFFFF" size={24} />
+            <AppIcon name="chevron.left" tintColor="#FFFFFF" size={24} />
           </Pressable>
           <Text style={styles.headerTitle}>OCR</Text>
           <View style={styles.headerSide} />
@@ -276,7 +276,7 @@ export default function OcrScreen() {
 
         <View style={[styles.header, styles.captureHeader, { paddingTop: insets.top + 8 }]}>
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.headerSide}>
-            <SymbolView name="chevron.left" tintColor="#FFFFFF" size={24} />
+            <AppIcon name="chevron.left" tintColor="#FFFFFF" size={24} />
           </Pressable>
           <Text style={styles.headerTitle}>OCR</Text>
           <View style={styles.headerSide} />
@@ -287,7 +287,7 @@ export default function OcrScreen() {
             onPress={() => setTorch((prev) => !prev)}
             style={({ pressed }) => [styles.captureSideBtn, pressed && styles.pressed]}
             hitSlop={10}>
-            <SymbolView
+            <AppIcon
               name={torch ? 'flashlight.on.fill' : 'flashlight.off.fill'}
               tintColor="#FFFFFF"
               size={28}
@@ -309,7 +309,7 @@ export default function OcrScreen() {
             onPress={handleGalleryPick}
             style={({ pressed }) => [styles.captureSideBtn, pressed && styles.pressed]}
             hitSlop={10}>
-            <SymbolView name="photo.on.rectangle" tintColor="#FFFFFF" size={28} />
+            <AppIcon name="photo.on.rectangle" tintColor="#FFFFFF" size={28} />
           </Pressable>
         </View>
       </View>
@@ -320,7 +320,7 @@ export default function OcrScreen() {
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={goBack} hitSlop={12} style={styles.headerSide}>
-          <SymbolView name="chevron.left" tintColor="#FFFFFF" size={24} />
+          <AppIcon name="chevron.left" tintColor="#FFFFFF" size={24} />
         </Pressable>
         <Text style={styles.headerTitle}>OCR</Text>
         <Pressable onPress={handleConfirm} hitSlop={10} style={[styles.headerSide, styles.headerSideRight]}>
