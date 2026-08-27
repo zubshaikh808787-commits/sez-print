@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "sezprint",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.sezprint.app",
       "icon": "./assets/expo.icon",
@@ -50,7 +50,6 @@
           "android": {
             "enableMinifyInReleaseBuilds": false,
             "enableShrinkResourcesInReleaseBuilds": false,
-            "newArchEnabled": false,
             "usesCleartextTraffic": true
           }
         }
