@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
@@ -31,12 +32,18 @@ import {
   fitTableDefaults,
   fitTextDefaults,
   fitTimeDefaults,
-  normalizeDocumentElements,
 } from '@/lib/element-sizing';
 import { DegreesPropertyPanel } from '@/components/editor/degrees-property-panel';
 import { ArcTextPropertyPanel } from '@/components/editor/arctext-property-panel';
 import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel';
 import { ElementContentView } from '@/components/editor/element-renderer';
+import {
+  artboardSurfaceStyle,
+  fitLabelPad,
+  LABEL_PAD_INSET,
+  LABEL_PAD_STAGE_COLOR,
+  LABEL_PAD_STAGE_MIN_HEIGHT,
+} from '@/components/label-preview';
 import { LabelSettingsMenu } from '@/components/editor/more-menu';
 import { LinePropertyPanel } from '@/components/editor/line-property-panel';
 import { QrcodePropertyPanel } from '@/components/editor/qrcode-property-panel';
@@ -69,7 +76,7 @@ import {
   type TimePropertyTab,
 } from '@/components/editor/types';
 import { editorBridge, barcodeEncodeModeForScanType, isQrScanType } from '@/constants/editor-bridge';
-import { buildTemplateElements } from '@/constants/template-documents';
+import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette, Type } from '@/constants/ui';
 import {
@@ -83,6 +90,8 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
+import { sortLayers } from '@/lib/template-schema';
+import { useTranslation } from '@/lib/i18n';
 import { textBlockHeightMm } from '@/lib/element-sizing';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
@@ -126,7 +135,7 @@ function HeaderAction({
       onPress={onPress}
       hitSlop={8}
       style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}>
-      <SymbolView name={icon} tintColor="#FFFFFF" size={22} />
+      <SymbolView name={icon} tintColor="#FFFFFF" size={20} />
       <Text numberOfLines={1} style={styles.headerActionLabel}>
         {label}
       </Text>
@@ -224,8 +233,8 @@ function CanvasElement({
   onResize,
 }: CanvasElementProps) {
   const size = elementSizeMm(element);
-  const widthPx = Math.max(4, size.width * scale);
-  const heightPx = Math.max(4, size.height * scale);
+  const widthPx = Math.max(1, size.width * scale);
+  const heightPx = Math.max(1, size.height * scale);
   // Expand touch area for thin elements (e.g. lines) so they can be grabbed.
   const touchSlopX = Math.max(0, (28 - widthPx) / 2);
   const touchSlopY = Math.max(0, (28 - heightPx) / 2);
@@ -315,6 +324,8 @@ function CanvasElement({
         top: element.top * scale,
         width: widthPx,
         height: heightPx,
+        opacity: element.opacity ?? 1,
+        zIndex: element.zIndex ?? 0,
         transform: [{ rotate: `${element.rotation}deg` }],
       }}>
       <ElementContentView element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />
@@ -351,6 +362,7 @@ export default function EditScreen() {
     orientation?: string;
     paperType?: string;
     templateCategory?: string;
+    templatePreviewType?: string;
     cloneFromId?: string;
   }>();
 
@@ -358,18 +370,36 @@ export default function EditScreen() {
   const editorSettings = useSettingsStore((s) => s.editor);
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
   const savedDocuments = useLabelStore((s) => s.documents);
+  const { t } = useTranslation();
 
   const [doc, setDoc] = useState<LabelDocument>(() => {
-    if (params.labelId) {
-      const existing = useLabelStore.getState().getDocument(params.labelId);
-      if (existing) {
-        const loaded = JSON.parse(JSON.stringify(existing)) as LabelDocument;
-        return { ...loaded, elements: normalizeDocumentElements(loaded) };
-      }
-    }
     const name = params.labelName ?? 'New Label_1';
     const widthMm = params.labelWidth ? parseFloat(params.labelWidth) : defaults.labelWidth;
     const heightMm = params.labelHeight ? parseFloat(params.labelHeight) : defaults.labelHeight;
+
+    if (params.labelId) {
+      const existing = useLabelStore.getState().getDocument(params.labelId);
+      if (existing) {
+        return JSON.parse(JSON.stringify(existing)) as LabelDocument;
+      }
+    }
+
+    // Industry templates: same JSON schema as the catalog card (no extra layers).
+    if (params.templatePreviewType) {
+      const created = createIndustryTemplateDocument({
+        name,
+        category: params.templateCategory ?? '',
+        widthMm,
+        heightMm,
+        previewType: params.templatePreviewType,
+      });
+      return {
+        ...created,
+        id: params.labelId ?? created.id,
+        orientation: parseOrientation(params.orientation),
+        paperType: parsePaperType(params.paperType),
+      };
+    }
 
     // Label Clone: copy elements from the source document with fresh ids.
     let elements: LabelElement[] = [];
@@ -382,7 +412,18 @@ export default function EditScreen() {
         }));
       }
     } else if (params.templateCategory) {
-      elements = buildTemplateElements(params.templateCategory, name, widthMm, heightMm);
+      const created = createIndustryTemplateDocument({
+        name,
+        category: params.templateCategory,
+        widthMm,
+        heightMm,
+        previewType: params.templatePreviewType ?? '',
+      });
+      return {
+        ...created,
+        orientation: parseOrientation(params.orientation),
+        paperType: parsePaperType(params.paperType),
+      };
     }
 
     const created = createLabelDocument({
@@ -393,7 +434,7 @@ export default function EditScreen() {
       paperType: parsePaperType(params.paperType),
       elements,
     });
-    return { ...created, elements: normalizeDocumentElements(created) };
+    return created;
   });
   const [savedToStore, setSavedToStore] = useState(() => Boolean(params.labelId));
   const [dirty, setDirty] = useState(false);
@@ -436,15 +477,10 @@ export default function EditScreen() {
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
 
   const stageMaxHeight = Math.max(196, Math.min(windowHeight * 0.4, 348));
-  const availStageWidth = Math.max(0, stageWidth > 0 ? stageWidth - 28 : 0);
-  const heightFromWidth = availStageWidth * (doc.heightMm / Math.max(doc.widthMm, 1));
-  const canvasHeightPx =
-    heightFromWidth > stageMaxHeight && availStageWidth > 0
-      ? stageMaxHeight
-      : heightFromWidth;
-  const canvasWidthPx =
-    canvasHeightPx > 0 ? canvasHeightPx * (doc.widthMm / Math.max(doc.heightMm, 1)) : 0;
-  const scale = canvasWidthPx > 0 ? canvasWidthPx / doc.widthMm : 0;
+  const fittedPad = fitLabelPad(doc.widthMm, doc.heightMm, stageWidth, stageMaxHeight);
+  const canvasHeightPx = fittedPad.heightPx;
+  const canvasWidthPx = fittedPad.widthPx;
+  const scale = fittedPad.scale;
   const selectionColor =
     ['#FCA5A5', '#EF4444', '#991B1B'][editorSettings.borderColorIndex] ?? Palette.accent;
 
@@ -1002,7 +1038,7 @@ export default function EditScreen() {
 
   const openDocument = useCallback((docToOpen: LabelDocument) => {
     const copy = JSON.parse(JSON.stringify(docToOpen)) as LabelDocument;
-    setDoc({ ...copy, elements: normalizeDocumentElements(copy) });
+    setDoc(copy);
     setSavedToStore(true);
     setDirty(false);
     setSelectedIds([]);
@@ -1137,11 +1173,11 @@ export default function EditScreen() {
   // Reload when navigated to an existing label while the screen is mounted.
   const lastLoadedId = useRef<string | undefined>(params.labelId);
   useEffect(() => {
-    if (params.labelId && params.labelId !== lastLoadedId.current) {
-      lastLoadedId.current = params.labelId;
-      const existing = useLabelStore.getState().getDocument(params.labelId);
-      if (existing) openDocument(existing);
-    }
+    if (!params.labelId) return;
+    if (params.labelId === lastLoadedId.current) return;
+    lastLoadedId.current = params.labelId;
+    const existing = useLabelStore.getState().getDocument(params.labelId);
+    if (existing) openDocument(existing);
   }, [params.labelId, openDocument]);
 
   const handleColumnNamePress = useCallback(() => {
@@ -1374,15 +1410,24 @@ export default function EditScreen() {
         <Pressable
           onPress={() => setSelectedIds([])}
           style={[
-            styles.canvas,
+            artboardSurfaceStyle(doc),
             {
               width: canvasWidthPx || 1,
               height: canvasHeightPx || 1,
             },
           ]}>
+          {doc.background?.type === 'image' ? (
+            <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+              <Image
+                source={{ uri: doc.background.uri }}
+                style={StyleSheet.absoluteFillObject}
+                contentFit="cover"
+              />
+            </View>
+          ) : null}
           {gridLines}
           {scale > 0
-            ? doc.elements.map((element) => (
+            ? sortLayers(doc.elements).map((element) => (
                 <CanvasElement
                   key={element.id}
                   element={element}
@@ -1423,7 +1468,6 @@ export default function EditScreen() {
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}
             contentFocusRequest={contentFocusRequest}
-            onColumnNamePress={handleColumnNamePress}
           />
         );
       case 'barcode':
@@ -1436,7 +1480,6 @@ export default function EditScreen() {
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}
-            onColumnNamePress={handleColumnNamePress}
           />
         );
       case 'qrcode':
@@ -1537,39 +1580,40 @@ export default function EditScreen() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.two }]}>
-        <Pressable
-          onPress={() => {
-            if (dirty) {
-              Alert.alert('Unsaved Changes', 'Save this label before leaving?', [
-                { text: 'Discard', style: 'destructive', onPress: () => router.back() },
-                {
-                  text: 'Save',
-                  onPress: () => {
-                    saveDocument(false);
-                    router.back();
+        <View style={styles.headerLeft}>
+          <Pressable
+            onPress={() => {
+              if (dirty) {
+                Alert.alert('Unsaved Changes', 'Save this label before leaving?', [
+                  { text: 'Discard', style: 'destructive', onPress: () => router.back() },
+                  {
+                    text: 'Save',
+                    onPress: () => {
+                      saveDocument(false);
+                      router.back();
+                    },
                   },
-                },
-                { text: 'Cancel', style: 'cancel' },
-              ]);
-            } else {
-              router.back();
-            }
-          }}
-          hitSlop={12}
-          style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
-          <SymbolView name="chevron.left" tintColor="#FFFFFF" size={24} />
-        </Pressable>
-
-        <Text numberOfLines={1} style={styles.headerTitle}>
-          {doc.name}
-          {dirty ? ' •' : ''}
-        </Text>
+                  { text: 'Cancel', style: 'cancel' },
+                ]);
+              } else {
+                router.back();
+              }
+            }}
+            hitSlop={12}
+            style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
+            <SymbolView name="chevron.left" tintColor="#FFFFFF" size={22} />
+          </Pressable>
+          <Text numberOfLines={1} ellipsizeMode="tail" style={styles.headerTitle}>
+            {doc.name}
+            {dirty ? ' •' : ''}
+          </Text>
+        </View>
 
         <View style={styles.headerActions}>
-          <HeaderAction icon="folder" label="Open" onPress={() => setShowOpenModal(true)} />
-          <HeaderAction icon="square.and.arrow.down.on.square" label="Save As" onPress={handleSaveAs} />
-          <HeaderAction icon="tray.and.arrow.down.fill" label="Save" onPress={() => saveDocument()} />
-          <HeaderAction icon="printer.fill" label="Print" onPress={handlePrint} />
+          <HeaderAction icon="folder" label={t('common.open')} onPress={() => setShowOpenModal(true)} />
+          <HeaderAction icon="square.and.arrow.down.on.square" label={t('common.saveAs')} onPress={handleSaveAs} />
+          <HeaderAction icon="tray.and.arrow.down.fill" label={t('common.save')} onPress={() => saveDocument()} />
+          <HeaderAction icon="printer.fill" label={t('print.print')} onPress={handlePrint} />
         </View>
       </View>
 
@@ -1774,39 +1818,51 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MaxContentWidth,
     backgroundColor: Palette.header,
-    paddingHorizontal: Spacing.three,
-    paddingBottom: Spacing.three,
+    paddingHorizontal: Spacing.two,
+    paddingBottom: Spacing.two + 2,
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    gap: Spacing.two,
     zIndex: 30,
   },
+  headerLeft: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingRight: Spacing.one,
+  },
   backBtn: {
-    paddingBottom: Spacing.one,
-    paddingRight: Spacing.two,
+    paddingVertical: 4,
+    paddingRight: 2,
   },
   headerTitle: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    flexShrink: 1,
-    paddingBottom: Spacing.one + 2,
-    maxWidth: 140,
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+    minWidth: 0,
   },
   headerActions: {
-    flex: 1,
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    alignItems: 'flex-end',
-    gap: Spacing.three,
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: 10,
   },
   headerAction: {
     alignItems: 'center',
-    gap: Spacing.half,
-    minWidth: 40,
+    justifyContent: 'center',
+    gap: 2,
+    minWidth: 44,
+    paddingHorizontal: 2,
   },
   headerActionLabel: {
     color: '#FFFFFF',
-    ...Type.caption,
+    fontSize: 10,
+    fontWeight: '500',
+    letterSpacing: 0.1,
   },
   scroll: {
     flex: 1,
@@ -1836,17 +1892,10 @@ const styles = StyleSheet.create({
   stage: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#C5CDD6',
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    minHeight: 176,
-  },
-  canvas: {
-    borderRadius: 4,
-    backgroundColor: '#FFFFFF',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#D7DEE7',
+    backgroundColor: LABEL_PAD_STAGE_COLOR,
+    paddingVertical: LABEL_PAD_INSET,
+    paddingHorizontal: LABEL_PAD_INSET,
+    minHeight: LABEL_PAD_STAGE_MIN_HEIGHT,
   },
   emptyHintWrap: {
     ...StyleSheet.absoluteFillObject,

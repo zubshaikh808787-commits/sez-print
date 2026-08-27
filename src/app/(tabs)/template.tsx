@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+﻿import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -15,10 +15,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ShareNodeIcon } from '@/components/home-icons';
-import { LabelPreview } from '@/components/label-preview';
+import { LabelPreview, LABEL_PAD_STAGE_MIN_HEIGHT } from '@/components/label-preview';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette } from '@/constants/ui';
+import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { useLabelStore } from '@/stores/label-store';
+import { useTranslation } from '@/lib/i18n';
 
 interface CategoryGroup {
   header: string;
@@ -27,7 +29,7 @@ interface CategoryGroup {
 
 const CATEGORY_GROUPS: CategoryGroup[] = [
   { header: 'Popular', items: ['Popular'] },
-  { header: 'General', items: ['General', 'Cable', 'Circle', 'Other'] },
+  { header: 'General', items: ['General', 'Multi-UP', 'Cable', 'Circle', 'Other'] },
   { header: 'Retail', items: ['Jewelry', 'Supermarket', 'Clothing', 'Food', 'Appliances'] },
   { header: 'Household', items: ['Storage'] },
   { header: 'Office', items: ['File', 'Asset', 'School'] },
@@ -64,6 +66,11 @@ interface TemplateItem {
     | 'dual-stacked-30x15'
     | 'dual-cols-30x30'
     | 'dual-cols-22.5x13'
+    | 'two-ups-30x20'
+    | 'two-ups-40x25'
+    | 'three-ups-25x15'
+    | 'three-ups-30x20'
+    | 'four-ups-20x15'
     // --- CABLE ---
     | 'cable-yellow-4col'
     | 'cable-12.5x74'
@@ -360,6 +367,51 @@ const TEMPLATES: TemplateItem[] = [
     width: 48,
     height: 13,
     previewType: 'dual-cols-22.5x13',
+  },
+  {
+    id: 'mup-1',
+    name: "2 UP's-30x20",
+    dimensions: '62 x 20',
+    category: 'Multi-UP',
+    width: 62,
+    height: 20,
+    previewType: 'two-ups-30x20',
+  },
+  {
+    id: 'mup-2',
+    name: "2 UP's-40x25",
+    dimensions: '82 x 25',
+    category: 'Multi-UP',
+    width: 82,
+    height: 25,
+    previewType: 'two-ups-40x25',
+  },
+  {
+    id: 'mup-3',
+    name: "3 UP's-25x15",
+    dimensions: '78 x 15',
+    category: 'Multi-UP',
+    width: 78,
+    height: 15,
+    previewType: 'three-ups-25x15',
+  },
+  {
+    id: 'mup-4',
+    name: "3 UP's-30x20",
+    dimensions: '94 x 20',
+    category: 'Multi-UP',
+    width: 94,
+    height: 20,
+    previewType: 'three-ups-30x20',
+  },
+  {
+    id: 'mup-5',
+    name: "4 UP's-20x15",
+    dimensions: '86 x 15',
+    category: 'Multi-UP',
+    width: 86,
+    height: 15,
+    previewType: 'four-ups-20x15',
   },
 
   // --- CABLE (15 items in exact order as screenshots) ---
@@ -771,7 +823,7 @@ const TEMPLATES: TemplateItem[] = [
   {
     id: 'cir-1',
     name: '401-Circle',
-    nameLine2: 'Label-34x34-φ30',
+    nameLine2: 'Label-34x34-Ï†30',
     dimensions: '34 x 34',
     category: 'Circle',
     width: 34,
@@ -781,7 +833,7 @@ const TEMPLATES: TemplateItem[] = [
   {
     id: 'cir-2',
     name: '402-Circle',
-    nameLine2: 'Label-45x45-φ40',
+    nameLine2: 'Label-45x45-Ï†40',
     dimensions: '45 x 45',
     category: 'Circle',
     width: 45,
@@ -791,7 +843,7 @@ const TEMPLATES: TemplateItem[] = [
   {
     id: 'cir-3',
     name: '403-Circle',
-    nameLine2: 'Label-52x52-φ50',
+    nameLine2: 'Label-52x52-Ï†50',
     dimensions: '52 x 52',
     category: 'Circle',
     width: 52,
@@ -936,7 +988,7 @@ const TEMPLATES: TemplateItem[] = [
     previewType: 'jew-rattail-143x635',
   },
 
-  // --- SUPERMARKET (14 items, all prices in Indian Rupees ₹) ---
+  // --- SUPERMARKET (14 items, all prices in Indian Rupees â‚¹) ---
   {
     id: 'smkt-1',
     name: 'Black Label-Yellow-60x40',
@@ -1374,2540 +1426,23 @@ const TEMPLATES: TemplateItem[] = [
   },
 ];
 
-/** Cute bunny face for cartoon template */
-function BunnyIllustration({
-  style,
-  scale = 1,
-  rotation = '0deg',
-}: {
-  style?: any;
-  scale?: number;
-  rotation?: string;
-}) {
-  return (
-    <View style={[{ transform: [{ rotate: rotation }] }, style]}>
-      <View style={{ flexDirection: 'row', gap: 2.5 * scale, justifyContent: 'center', marginBottom: -3 * scale }}>
-        <View
-          style={{
-            width: 5.5 * scale,
-            height: 13 * scale,
-            backgroundColor: '#FFFFFF',
-            borderRadius: 3 * scale,
-            transform: [{ rotate: '-8deg' }],
-          }}
-        />
-        <View
-          style={{
-            width: 5.5 * scale,
-            height: 13 * scale,
-            backgroundColor: '#FFFFFF',
-            borderRadius: 3 * scale,
-            transform: [{ rotate: '8deg' }],
-          }}
-        />
-      </View>
-      <View
-        style={{
-          width: 25 * scale,
-          height: 20 * scale,
-          backgroundColor: '#FFFFFF',
-          borderRadius: 11 * scale,
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
-        }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 * scale, marginTop: 1 * scale }}>
-          <View style={{ width: 1.8 * scale, height: 2.5 * scale, borderRadius: 1 * scale, backgroundColor: '#3D2F2D' }} />
-          <View style={{ width: 2 * scale, height: 1.4 * scale, borderRadius: 0.7 * scale, backgroundColor: '#3D2F2D' }} />
-          <View style={{ width: 1.8 * scale, height: 2.5 * scale, borderRadius: 1 * scale, backgroundColor: '#3D2F2D' }} />
-        </View>
-        <View
-          style={{
-            position: 'absolute',
-            top: 9 * scale,
-            left: 2.5 * scale,
-            width: 2.8 * scale,
-            height: 1.6 * scale,
-            borderRadius: 1 * scale,
-            backgroundColor: '#FFAEC0',
-          }}
-        />
-        <View
-          style={{
-            position: 'absolute',
-            top: 9 * scale,
-            right: 2.5 * scale,
-            width: 2.8 * scale,
-            height: 1.6 * scale,
-            borderRadius: 1 * scale,
-            backgroundColor: '#FFAEC0',
-          }}
-        />
-      </View>
-    </View>
+/** Same document and pad chrome as the editor editing pad. */
+function TemplatePreview({ item }: { item: TemplateItem }) {
+  const document = useMemo(
+    () =>
+      createIndustryTemplateDocument({
+        name: item.nameLine2 ? `${item.name} ${item.nameLine2}` : item.name,
+        category: item.category,
+        widthMm: item.width,
+        heightMm: item.height,
+        previewType: item.previewType,
+      }),
+    [item],
   );
-}
-
-/** Small red bow decoration */
-function RibbonBow({ style, scale = 1 }: { style?: any; scale?: number }) {
-  return (
-    <View style={[{ flexDirection: 'row', alignItems: 'center' }, style]}>
-      <View
-        style={{
-          width: 4 * scale,
-          height: 4 * scale,
-          backgroundColor: '#E84149',
-          borderRadius: 1,
-          transform: [{ rotate: '45deg' }],
-        }}
-      />
-      <View style={{ width: 2 * scale, height: 2 * scale, backgroundColor: '#C82E36', borderRadius: 1 }} />
-      <View
-        style={{
-          width: 4 * scale,
-          height: 4 * scale,
-          backgroundColor: '#E84149',
-          borderRadius: 1,
-          transform: [{ rotate: '45deg' }],
-        }}
-      />
-    </View>
-  );
-}
-
-/** Barcode lines illustration */
-function BarcodeIllustration({
-  scale = 1,
-  height = 20,
-  style,
-}: {
-  scale?: number;
-  height?: number;
-  style?: any;
-}) {
-  const bars = [
-    2, 1, 3, 1, 2, 2, 1, 3, 2, 1, 1, 3, 2, 2, 1, 2, 3, 1, 1, 2, 3, 2, 1, 3, 1, 2, 2, 1, 3, 2, 1, 2,
-  ];
-  return (
-    <View style={[{ flexDirection: 'row', alignItems: 'stretch', height, justifyContent: 'center' }, style]}>
-      {bars.map((w, i) => (
-        <View
-          key={i}
-          style={{
-            width: w * scale,
-            backgroundColor: i % 2 === 0 ? '#111827' : 'transparent',
-            marginRight: 0.5 * scale,
-          }}
-        />
-      ))}
-    </View>
-  );
-}
-
-/** Crisp vector QR Code graphic */
-function QrCodeIllustration({ size = 52, style }: { size?: number; style?: any }) {
-  const squareSize = size * 0.28;
-  const innerDot = size * 0.12;
 
   return (
-    <View
-      style={[
-        {
-          width: size,
-          height: size,
-          backgroundColor: '#FFFFFF',
-          borderWidth: 1,
-          borderColor: '#111827',
-          padding: 2,
-          position: 'relative',
-        },
-        style,
-      ]}>
-      {/* Top Left Finder */}
-      <View
-        style={{
-          position: 'absolute',
-          top: 3,
-          left: 3,
-          width: squareSize,
-          height: squareSize,
-          borderWidth: 2,
-          borderColor: '#111827',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-        <View style={{ width: innerDot, height: innerDot, backgroundColor: '#111827' }} />
-      </View>
-
-      {/* Top Right Finder */}
-      <View
-        style={{
-          position: 'absolute',
-          top: 3,
-          right: 3,
-          width: squareSize,
-          height: squareSize,
-          borderWidth: 2,
-          borderColor: '#111827',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-        <View style={{ width: innerDot, height: innerDot, backgroundColor: '#111827' }} />
-      </View>
-
-      {/* Bottom Left Finder */}
-      <View
-        style={{
-          position: 'absolute',
-          bottom: 3,
-          left: 3,
-          width: squareSize,
-          height: squareSize,
-          borderWidth: 2,
-          borderColor: '#111827',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-        <View style={{ width: innerDot, height: innerDot, backgroundColor: '#111827' }} />
-      </View>
-
-      {/* Center Data bits */}
-      <View
-        style={{
-          position: 'absolute',
-          top: size * 0.38,
-          left: size * 0.38,
-          width: size * 0.24,
-          height: size * 0.24,
-          backgroundColor: '#111827',
-        }}
-      />
-      <View
-        style={{
-          position: 'absolute',
-          bottom: 4,
-          right: 4,
-          width: size * 0.28,
-          height: size * 0.28,
-          borderWidth: 1.5,
-          borderColor: '#111827',
-        }}
-      />
-    </View>
+    <LabelPreview document={document} maxHeight={LABEL_PAD_STAGE_MIN_HEIGHT} showStage />
   );
-}
-
-/** Centered jewelry label placeholder text */
-function JewelryLabelText({ size = 9 }: { size?: number }) {
-  return (
-    <Text style={{ fontSize: size, fontWeight: '600', color: '#111827', textAlign: 'center' }}>
-      Jewelry label
-    </Text>
-  );
-}
-
-/** Decorative red meander pattern for jewelry tags */
-function MeanderSidePattern({ side }: { side: 'left' | 'right' }) {
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        [side]: 0,
-        top: 0,
-        bottom: 0,
-        width: 8,
-        backgroundColor: '#C62828',
-        opacity: 0.85,
-        borderTopLeftRadius: side === 'left' ? 4 : 0,
-        borderBottomLeftRadius: side === 'left' ? 4 : 0,
-        borderTopRightRadius: side === 'right' ? 4 : 0,
-        borderBottomRightRadius: side === 'right' ? 4 : 0,
-      }}
-    />
-  );
-}
-
-/** Strikethrough price text for supermarket labels */
-function SmktWasPrice({ amount }: { amount: string }) {
-  return (
-    <Text style={styles.smktWasText}>
-      Was <Text style={styles.smktStrike}>₹{amount}</Text>
-    </Text>
-  );
-}
-
-/** Ornate divider for kitchen cabinet storage labels */
-function StorageOrnamentDivider() {
-  return (
-    <View style={styles.storageOrnamentRow}>
-      <View style={styles.storageOrnamentLine} />
-      <Text style={styles.storageOrnamentHeart}>♥</Text>
-      <View style={styles.storageOrnamentLine} />
-    </View>
-  );
-}
-
-function FileDashedDivider() {
-  return <View style={styles.fileDashedDivider} />;
-}
-
-function FileCautionStripeRow() {
-  return (
-    <View style={styles.fileCautionRow}>
-      {Array.from({ length: 14 }).map((_, index) => (
-        <View key={index} style={styles.fileCautionDash} />
-      ))}
-    </View>
-  );
-}
-
-/** Octagonal frame used by File Label-40x25A/B previews */
-function FileOctagonFrame({
-  frameColor,
-  children,
-}: {
-  frameColor: string;
-  children: ReactNode;
-}) {
-  return (
-    <View style={styles.fileOctWrap}>
-      <View style={[styles.fileOctColorBlock, { backgroundColor: frameColor }]}>
-        <View style={styles.fileOctInnerCard}>{children}</View>
-      </View>
-      <View style={[styles.fileOctCorner, styles.fileOctCornerTL]} />
-      <View style={[styles.fileOctCorner, styles.fileOctCornerTR]} />
-      <View style={[styles.fileOctCorner, styles.fileOctCornerBL]} />
-      <View style={[styles.fileOctCorner, styles.fileOctCornerBR]} />
-    </View>
-  );
-}
-
-function AssetWaveLogo() {
-  return (
-    <View style={styles.assetWaveLogoWrap}>
-      <View style={styles.assetWaveLogoShape} />
-    </View>
-  );
-}
-
-function AssetHarkFieldRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.assetHarkRow}>
-      <Text style={styles.assetHarkLabel}>{label}</Text>
-      <View style={styles.assetHarkValueBox}>
-        <Text numberOfLines={1} style={styles.assetHarkValue}>
-          {value}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-function LabPathologyRow({ label, placeholder }: { label: string; placeholder: string }) {
-  return (
-    <View style={styles.labPathologyRow}>
-      <Text style={styles.labPathologyLabel}>{label}</Text>
-      <View style={styles.labPathologyField}>
-        <Text style={styles.labPathologyPlaceholder}>{placeholder}</Text>
-        <View style={styles.labPathologyUnderline} />
-      </View>
-    </View>
-  );
-}
-
-function RackArrowDown() {
-  return (
-    <View style={styles.rackArrowDownWrap}>
-      <View style={styles.rackArrowDownStem} />
-      <View style={styles.rackArrowDownHead} />
-    </View>
-  );
-}
-
-function RackArrowRight() {
-  return (
-    <View style={styles.rackArrowRightWrap}>
-      <View style={styles.rackArrowRightStem} />
-      <View style={styles.rackArrowRightHead} />
-    </View>
-  );
-}
-
-/** Specific visual preview canvas for each template */
-function TemplatePreview({ type }: { type: TemplateItem['previewType'] }) {
-  switch (type) {
-    // --- POPULAR ---
-    case 'macaroon':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.macaroonFill} />
-        </View>
-      );
-
-    case 'cartoon':
-      return (
-        <View style={[styles.previewBox, styles.cartoonBox]}>
-          <BunnyIllustration scale={0.9} style={styles.bunnyTopLeft} rotation="-6deg" />
-          <BunnyIllustration scale={1.05} style={styles.bunnyCenter} />
-          <BunnyIllustration scale={0.85} style={styles.bunnyTopRight} rotation="8deg" />
-          <RibbonBow scale={1.05} style={styles.bowCenter} />
-          <RibbonBow scale={0.8} style={styles.bowRight} />
-          <Text style={styles.starOne}>✦</Text>
-          <Text style={styles.starTwo}>✦</Text>
-          <View style={styles.confettiWrap}>
-            <View style={[styles.confettiTriangle, { borderBottomColor: '#6ED4B8' }]} />
-            <View style={[styles.confettiTriangle, { borderBottomColor: '#FDD26E' }]} />
-            <View style={[styles.confettiTriangle, { borderBottomColor: '#7BB3FC' }]} />
-          </View>
-        </View>
-      );
-
-    case 'watercolor':
-      return (
-        <View style={[styles.previewBox, styles.watercolorBox]}>
-          <View style={styles.watercolorPink} />
-          <View style={styles.watercolorYellow} />
-          <View style={styles.watercolorPurple} />
-          <View style={styles.watercolorPeach} />
-        </View>
-      );
-
-    case 'color-pill':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.pillBorderContainer}>
-            <View style={styles.pillGreenBlock} />
-            <View style={styles.pillWhiteBlock} />
-          </View>
-        </View>
-      );
-
-    // --- GENERAL ---
-    case 'rect-30x22':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.rectOutline, { height: 130, borderRadius: 6 }]} />
-        </View>
-      );
-
-    case 'rect-35x15':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.rectOutline, { height: 86, borderRadius: 2 }]} />
-        </View>
-      );
-
-    case 'rect-40x15':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.rectOutline, { height: 82, borderRadius: 6 }]} />
-        </View>
-      );
-
-    case 'rect-40x80':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={[styles.rectOutline, { width: 145, height: 275, borderRadius: 6 }]} />
-        </View>
-      );
-
-    case 'rect-50x20':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.rectOutline, { height: 95, borderRadius: 14 }]} />
-        </View>
-      );
-
-    case 'rect-50x25':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.rectOutline, { height: 110, borderRadius: 6 }]} />
-        </View>
-      );
-
-    case 'rect-50x70':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={[styles.rectOutline, { width: 190, height: 265, borderRadius: 6 }]} />
-        </View>
-      );
-
-    case 'rect-60x38':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.rectOutline, { height: 132, borderRadius: 4 }]} />
-        </View>
-      );
-
-    case 'rect-60x80':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={[styles.rectOutline, { width: 200, height: 275, borderRadius: 6 }]} />
-        </View>
-      );
-
-    case 'rect-65x35':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.rectOutline, { height: 120, borderRadius: 4 }]} />
-        </View>
-      );
-
-    case 'dual-stacked-20x10':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.dualStackedContainer}>
-            <View style={[styles.rectOutline, { height: 56, borderRadius: 10 }]} />
-            <View style={[styles.rectOutline, { height: 56, borderRadius: 10, marginTop: 2 }]} />
-          </View>
-        </View>
-      );
-
-    case 'dual-cols-20x10':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.dualColsContainer}>
-            <View style={[styles.rectOutline, styles.dualColBox, { height: 62, borderRadius: 6 }]} />
-            <View style={[styles.rectOutline, styles.dualColBox, { height: 62, borderRadius: 6 }]} />
-          </View>
-        </View>
-      );
-
-    case 'dual-stacked-30x15':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.dualStackedContainer}>
-            <View style={[styles.rectOutline, { height: 68, borderRadius: 10 }]} />
-            <View style={[styles.rectOutline, { height: 68, borderRadius: 10, marginTop: 2 }]} />
-          </View>
-        </View>
-      );
-
-    case 'dual-cols-30x30':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.dualColsContainer}>
-            <View style={[styles.rectOutline, styles.dualColBox, { height: 155, borderRadius: 8 }]} />
-            <View style={[styles.rectOutline, styles.dualColBox, { height: 155, borderRadius: 8 }]} />
-          </View>
-        </View>
-      );
-
-    case 'dual-cols-22.5x13':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.dualColsContainer}>
-            <View style={[styles.rectOutline, styles.dualColBox, { height: 68, borderRadius: 6 }]} />
-            <View style={[styles.rectOutline, styles.dualColBox, { height: 68, borderRadius: 6 }]} />
-          </View>
-        </View>
-      );
-
-    // --- CABLE TEMPLATES ---
-    case 'cable-yellow-4col':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cableYellowContainer}>
-            <View style={[styles.cableYellowCol, { borderRightWidth: 1.5 }]} />
-            <View style={[styles.cableYellowCol, { borderRightWidth: 1.5 }]} />
-            <View style={[styles.cableYellowCol, { borderRightWidth: 1.5 }]} />
-            <View style={styles.cableYellowCol} />
-          </View>
-        </View>
-      );
-
-    case 'cable-12.5x74':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cableThinP0Container}>
-            <View style={styles.cableThinP0Head}>
-              <View style={styles.cableThinP0DashedLine} />
-            </View>
-            <View style={styles.cableThinP0Tail} />
-          </View>
-        </View>
-      );
-
-    case 'cable-301-pstyle':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cable301Container}>
-            <View style={styles.cable301Head}>
-              <View style={styles.cable301TopHalf} />
-              <View style={styles.cable301DashedDivider} />
-              <View style={styles.cable301BottomHalf} />
-            </View>
-            <View style={styles.cable301Tail} />
-          </View>
-        </View>
-      );
-
-    case 'cable-428-inspected':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cable428Container}>
-            <View style={styles.cable428Head}>
-              <View style={styles.cable428Top}>
-                <Text style={styles.cable428TopTitle}>CABLE 428</Text>
-                <Text style={styles.cable428TopSub}>RESET CIRCUIT</Text>
-              </View>
-              <View style={styles.cableDashedLine} />
-              <View style={styles.cable428Bottom}>
-                <Text style={styles.cable428BottomText}>INSPECTED</Text>
-                <Text style={styles.cable428BottomText}>15/AUG/BG</Text>
-                <Text style={styles.cable428BottomText}>12:42PM</Text>
-              </View>
-            </View>
-            <View style={styles.cable428Tail} />
-          </View>
-        </View>
-      );
-
-    case 'cable-tall-dual-flag':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={styles.cableTallDualContainer}>
-            <View style={styles.cableTallSingleTag}>
-              <View style={styles.cableTallTagHead}>
-                <View style={styles.cableTallVerticalDash} />
-              </View>
-              <View style={styles.cableTallTagTail} />
-            </View>
-            <View style={styles.cableTallSingleTag}>
-              <View style={styles.cableTallTagHead}>
-                <View style={styles.cableTallVerticalDash} />
-              </View>
-              <View style={styles.cableTallTagTail} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'cable-d38-inverted':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cableD38Container}>
-            <View style={styles.cableD38TopRow}>
-              <View style={styles.cableD38TagHead}>
-                <View style={[styles.cableD38TextHalf, { transform: [{ rotate: '180deg' }] }]}>
-                  <Text style={styles.cableD38SmallText}>A-01</Text>
-                  <Text style={styles.cableD38SmallText}>China Telecom</Text>
-                </View>
-                <View style={styles.cableDashedLine} />
-                <View style={styles.cableD38TextHalf}>
-                  <Text style={styles.cableD38SmallText}>China Telecom</Text>
-                  <Text style={styles.cableD38SmallText}>A-01</Text>
-                </View>
-              </View>
-              <View style={styles.cableD38TopTail} />
-            </View>
-            <View style={styles.cableD38BottomRow}>
-              <View style={styles.cableD38BottomTail} />
-              <View style={styles.cableD38TagHead}>
-                <View style={[styles.cableD38TextHalf, { transform: [{ rotate: '180deg' }] }]}>
-                  <Text style={styles.cableD38SmallText}>A-01</Text>
-                  <Text style={styles.cableD38SmallText}>China Telecom</Text>
-                </View>
-                <View style={styles.cableDashedLine} />
-                <View style={styles.cableD38TextHalf}>
-                  <Text style={styles.cableD38SmallText}>China Telecom</Text>
-                  <Text style={styles.cableD38SmallText}>A-01</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'cable-gp60-hangtag':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cableGp60Container}>
-            <View style={styles.cableGp60Col}>
-              <View style={styles.cableGp60Hole} />
-              <Text style={styles.cableGp60Code}>GB45-60RD</Text>
-              <Text style={styles.cableGp60Title}>Indoor Hangtag</Text>
-              <View style={styles.cableGp60Details}>
-                <Text style={styles.cableGp60Sub}>Stick Method: Hangtag</Text>
-                <Text style={styles.cableGp60Sub}>Stick Equipment: Large</Text>
-                <Text style={styles.cableGp60Sub}>Diameter Cable</Text>
-              </View>
-              <Text style={styles.cableGp60Emp}>Employee No.: 027</Text>
-            </View>
-            <View style={styles.cableGp60Divider} />
-            <View style={styles.cableGp60Col}>
-              <View style={styles.cableGp60Hole} />
-              <Text style={styles.cableGp60Code}>GB45-60RD</Text>
-              <Text style={styles.cableGp60Title}>Indoor Hangtag</Text>
-              <View style={styles.cableGp60Details}>
-                <Text style={styles.cableGp60Sub}>Stick Method: Hangtag</Text>
-                <Text style={styles.cableGp60Sub}>Stick Equipment: Large</Text>
-                <Text style={styles.cableGp60Sub}>Diameter Cable</Text>
-              </View>
-              <Text style={styles.cableGp60Emp}>Employee No.: 027</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'cable-hb38-red':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cableHb38Container}>
-            <View style={styles.cableHb38Tail} />
-            <View style={styles.cableHb38Head}>
-              <View style={styles.cableHb38Half} />
-              <View style={styles.cableHb38WhiteDash} />
-              <View style={styles.cableHb38Half} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'cable-lf45-double':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cableLf45Container}>
-            <View style={styles.cableLf45Head}>
-              <View style={styles.cableLf45Box} />
-              <View style={styles.cableLf45Box} />
-            </View>
-            <View style={styles.cableLf45Tail} />
-          </View>
-        </View>
-      );
-
-    case 'cable-lf64-dash':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cableLf64Container}>
-            <View style={styles.cableLf64Head}>
-              <View style={styles.cableLf64Half} />
-              <View style={styles.cableDashedLine} />
-              <View style={styles.cableLf64Half} />
-            </View>
-            <View style={styles.cableLf64Tail} />
-          </View>
-        </View>
-      );
-
-    case 'cable-lt38-tstyle':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={styles.cableTStyleContainer}>
-            <View style={styles.cableTStyleTopBox} />
-            <View style={styles.cableTStyleMiddleBox} />
-            <View style={[styles.cableTStyleTail, { height: 110 }]} />
-          </View>
-        </View>
-      );
-
-    case 'cable-lt45-tstyle':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={styles.cableTStyleContainer}>
-            <View style={styles.cableTStyleTopBox} />
-            <View style={styles.cableTStyleMiddleBox} />
-            <View style={[styles.cableTStyleTail, { height: 145 }]} />
-          </View>
-        </View>
-      );
-
-    case 'cable-pstyle-barcode':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cablePStyleBarcodeContainer}>
-            <View style={styles.cablePStyleBarcodeHead}>
-              <View style={styles.cablePStyleBarcodeTop}>
-                <BarcodeIllustration scale={0.7} height={18} />
-                <Text style={styles.cableBarcodeNumber}>0 01234 56789 5</Text>
-              </View>
-              <View style={styles.cableDashedLine} />
-              <View style={styles.cablePStyleBarcodeBottom}>
-                <View>
-                  <Text style={styles.cableUsbText}>USB</Text>
-                  <Text style={styles.cableUsbText}>CABLE</Text>
-                </View>
-                <Text style={styles.cableLogoText}>FC</Text>
-                <Text style={styles.cableLogoText}>CE</Text>
-                <View style={styles.cableTrashWrap}>
-                  <SymbolView name="trash" tintColor="#111827" size={13} />
-                  <View style={styles.cableTrashUnderline} />
-                </View>
-              </View>
-            </View>
-            <View style={styles.cablePStyleBarcodeTail} />
-          </View>
-        </View>
-      );
-
-    case 'cable-pstyle-panel23':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.cablePanel23Container}>
-            <View style={styles.cablePanel23Head}>
-              <View style={styles.cablePanel23Top}>
-                <Text style={styles.cablePanel23Text}>PANEL 23 42:A</Text>
-                <Text style={styles.cablePanel23Text}>INSPECTED 02/29</Text>
-              </View>
-              <View style={styles.cableDashedLine} />
-              <View style={styles.cablePanel23Bottom} />
-            </View>
-            <View style={styles.cablePanel23Tail} />
-          </View>
-        </View>
-      );
-
-    case 'cable-tstyle-barcode':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={styles.cableTStyleBarcodeContainer}>
-            <View style={styles.cableTStyleTextHead}>
-              <Text style={styles.cableTStyleBigText}>BCX 13.1.03.ZX.IN3</Text>
-              <Text style={styles.cableTStyleBigText}>PPL 15.3.01.AT.OUT8</Text>
-            </View>
-            <View style={styles.cableTStyleDashedDivider} />
-            <View style={styles.cableTStyleBarcodeMiddle}>
-              <BarcodeIllustration scale={0.95} height={26} />
-              <Text style={styles.cableTStyleBarcodeNumber}>B 0 3 F 0 9 R 1 1</Text>
-            </View>
-            <View style={styles.cableTStyleBarcodeTail} />
-          </View>
-        </View>
-      );
-
-    // --- OTHER CATEGORY TEMPLATES ---
-    case 'other-8x60-5rows':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.other5RowsContainer}>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <View key={i} style={styles.other5RowsItem}>
-                {i < 5 && <View style={styles.otherRowDashed} />}
-              </View>
-            ))}
-          </View>
-        </View>
-      );
-
-    case 'other-15x25-rect':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={styles.other15x25Box}>
-            {/* Corner guide accents */}
-            <View style={[styles.cornerAccent, { top: 3, left: 3 }]} />
-            <View style={[styles.cornerAccent, { top: 3, right: 3 }]} />
-            <View style={[styles.cornerAccent, { bottom: 3, left: 3 }]} />
-            <View style={[styles.cornerAccent, { bottom: 3, right: 3 }]} />
-          </View>
-        </View>
-      );
-
-    case 'other-19x13-rect':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.rectOutline, { height: 110, borderRadius: 2 }]} />
-        </View>
-      );
-
-    case 'other-50x10-plus4':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.other50x14Container}>
-            <View style={[styles.rectOutline, { height: 50, borderRadius: 6 }]} />
-            <View style={[styles.rectOutline, { height: 22, borderRadius: 4, marginTop: 2 }]} />
-          </View>
-        </View>
-      );
-
-    case 'other-storage-bag-v1':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <View style={styles.otherFormRow}>
-              <Text style={styles.otherFormLabel}>Name:</Text>
-              <Text style={styles.otherFormLabel}>Bed No.:</Text>
-            </View>
-            <View style={[styles.otherFormRow, { marginTop: 8 }]}>
-              <Text style={styles.otherFormLabel}>Pumping Date</Text>
-              <Text style={styles.otherFormSubText}>Y    M    D</Text>
-            </View>
-            <View style={styles.otherSolidDivider} />
-            <View style={styles.otherFormRow}>
-              <Text style={styles.otherFormLabel}>Time</Text>
-              <Text style={styles.otherFormLabel}>Capacity      ml</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-storage-bag-v2':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherInnerRoundedCard}>
-            <View style={styles.otherUnderlineField}>
-              <View>
-                <Text style={styles.otherFieldZh}>Date</Text>
-                <Text style={styles.otherFieldEn}>Date</Text>
-              </View>
-              <View style={styles.otherFullUnderline} />
-            </View>
-            <View style={styles.otherUnderlineField}>
-              <View>
-                <Text style={styles.otherFieldZh}>Time</Text>
-                <Text style={styles.otherFieldEn}>Time</Text>
-              </View>
-              <View style={styles.otherFullUnderline} />
-            </View>
-            <View style={styles.otherUnderlineField}>
-              <View>
-                <Text style={styles.otherFieldZh}>Capacity</Text>
-                <Text style={styles.otherFieldEn}>ml</Text>
-              </View>
-              <View style={styles.otherFullUnderline} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-storage-bag-v3':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Bed No.:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Name:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Hospital No.:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Pumping Time:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-storage-bag-v4':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <View style={styles.otherSplitUnderlinesRow}>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>Name:</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>Bed No.:</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Hospital No.:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Pumping Time:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Received Time:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-storage-bag-v5':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherInnerRoundedCard}>
-            <View style={styles.otherFormRow}>
-              <View>
-                <Text style={styles.otherFieldHeading}>Date</Text>
-                <Text style={styles.otherSubLabel}>Date</Text>
-              </View>
-              <Text style={styles.otherSubLabel}>Year ___ Month ___ Day ___</Text>
-            </View>
-            <View style={styles.otherSolidDivider} />
-            <View style={styles.otherFormRow}>
-              <View>
-                <Text style={styles.otherFieldHeading}>Time AM</Text>
-                <Text style={styles.otherSubLabel}>Time PM</Text>
-              </View>
-              <View>
-                <Text style={styles.otherFieldHeading}>Capacity</Text>
-                <Text style={styles.otherSubLabel}>capacity</Text>
-              </View>
-              <Text style={styles.otherLargeUnit}>ml</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-storage-bag-v6':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherInnerRoundedCard}>
-            <View style={styles.otherSplitUnderlinesRow}>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>Bed No.</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>Name</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-            </View>
-            <View style={styles.otherSplitUnderlinesRow}>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>Hospital No.</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>Milk Vol.</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-            </View>
-            <View style={styles.otherSplitUnderlinesRow}>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>Date</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>Time</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-storage-bag-v7':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherGridCard}>
-            <View style={styles.otherGridRowThree}>
-              <Text style={styles.otherGridCellText}>Bed No.:</Text>
-              <View style={styles.otherGridVerticalLine} />
-              <Text style={styles.otherGridCellText}>Name:</Text>
-              <View style={styles.otherGridVerticalLine} />
-              <Text style={styles.otherGridCellText}>Hospital No.:</Text>
-            </View>
-            <View style={styles.otherGridHorizontalLine} />
-            <View style={styles.otherGridRowSingle}>
-              <Text style={styles.otherGridCellText}>Collected:    Y    M    D    H    M</Text>
-            </View>
-            <View style={styles.otherGridHorizontalLine} />
-            <View style={styles.otherGridRowSingle}>
-              <Text style={styles.otherGridCellText}>Expiry:        Y    M    D    H    M</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fishing-50x30-simple':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <View style={styles.otherLargeFieldRow}>
-              <Text style={styles.otherLargeFieldText}>Date:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherLargeFieldRow}>
-              <Text style={styles.otherLargeFieldText}>Start Time:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fishing-50x70-tall':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={styles.otherTallCard}>
-            <Text style={styles.otherCenterTitle}>XXX Fishing Ground</Text>
-            <View style={styles.otherSplitUnderlinesRow}>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>Date:</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-              <View style={styles.otherHalfUnderlineWrap}>
-                <Text style={styles.otherFieldHeading}>No.:</Text>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Time:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Fee:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>WeChat:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Cash:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-
-            {/* QR Code & Policy Box */}
-            <View style={styles.otherQrBottomWrap}>
-              <QrCodeIllustration size={64} />
-              <Text style={styles.otherQrRuleTitle}>1 Ticket 1 Rod</Text>
-              <Text style={styles.otherQrRuleText}>Valid Today Only</Text>
-              <Text style={styles.otherQrRuleText}>Please Retain For Inspection</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fishing-70x50-park':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <Text style={styles.otherCenterTitle}>XXX Fishing Park</Text>
-            <Text style={styles.otherCenterSubDate}>____ Year ____ Month ____ Day</Text>
-            <Text style={styles.otherCenterSubDate}>From: ___ : ___   To: ___ : ___</Text>
-            <View style={[styles.otherFieldRowUnderline, { marginTop: 6 }]}>
-              <Text style={styles.otherFieldHeading}>Phone:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Address:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fishing-70x50-hotline':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <Text style={styles.otherCenterTitle}>XXX Fishing Ground</Text>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>No.:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Date:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Time:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={[styles.otherFormRow, { marginTop: 8 }]}>
-              <Text style={styles.otherTinyText}>WeChat □  Cash □</Text>
-              <Text style={styles.otherTinyText}>Hotline: XXXXXXXXXX</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fishing-80x50-qr1':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <Text style={styles.otherCenterTitle}>XXX Fishing Ground</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={{ flex: 1 }}>
-                <View style={styles.otherFieldRowUnderline}>
-                  <Text style={styles.otherFieldHeading}>Date:</Text>
-                  <View style={styles.otherFlexUnderline} />
-                </View>
-                <View style={styles.otherFieldRowUnderline}>
-                  <Text style={styles.otherFieldHeading}>Time:</Text>
-                  <View style={styles.otherFlexUnderline} />
-                </View>
-                <View style={styles.otherFieldRowUnderline}>
-                  <Text style={styles.otherFieldHeading}>Ticket:</Text>
-                  <View style={styles.otherFlexUnderline} />
-                </View>
-              </View>
-              <View style={{ alignItems: 'center', marginLeft: 6 }}>
-                <Text style={{ fontSize: 7, fontWeight: '600' }}>Scan QR</Text>
-                <QrCodeIllustration size={44} />
-              </View>
-            </View>
-            <View style={[styles.otherFormRow, { marginTop: 6 }]}>
-              <View style={styles.otherBorderBadge}>
-                <Text style={{ fontSize: 8, fontWeight: '700' }}>Note: 1 Ticket 1 Rod</Text>
-              </View>
-              <Text style={styles.otherTinyText}>Hotline: XXXXXXXXXX</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fishing-80x50-qr2':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <Text style={styles.otherCenterTitle}>XXX Fishing Ground</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={{ flex: 1 }}>
-                <View style={styles.otherSplitUnderlinesRow}>
-                  <View style={styles.otherHalfUnderlineWrap}>
-                    <Text style={styles.otherFieldHeading}>Date:</Text>
-                    <View style={styles.otherFlexUnderline} />
-                  </View>
-                  <View style={styles.otherHalfUnderlineWrap}>
-                    <Text style={styles.otherFieldHeading}>No.:</Text>
-                    <View style={styles.otherFlexUnderline} />
-                  </View>
-                </View>
-                <View style={styles.otherFieldRowUnderline}>
-                  <Text style={styles.otherFieldHeading}>Time:</Text>
-                  <View style={styles.otherFlexUnderline} />
-                </View>
-                <Text style={[styles.otherTinyText, { marginTop: 2 }]}>WeChat □   Cash □</Text>
-              </View>
-              <View style={{ alignItems: 'center', marginLeft: 6 }}>
-                <Text style={{ fontSize: 7, fontWeight: '600' }}>Scan QR</Text>
-                <QrCodeIllustration size={44} />
-              </View>
-            </View>
-            <View style={[styles.otherFormRow, { marginTop: 6 }]}>
-              <View style={styles.otherBorderBadge}>
-                <Text style={{ fontSize: 8, fontWeight: '700' }}>Note: 1 Ticket 1 Rod</Text>
-              </View>
-              <Text style={styles.otherTinyText}>Hotline: XXXXXXXXXX</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fabric-50x70-remark':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={styles.otherTallCard}>
-            <View style={styles.otherInnerRoundedCard}>
-              <View style={styles.otherFieldRowUnderline}>
-                <View>
-                  <Text style={styles.otherFieldHeading}>Product:</Text>
-                  <Text style={styles.otherSubLabel}>REMARK</Text>
-                </View>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-              <View style={styles.otherFieldRowUnderline}>
-                <View>
-                  <Text style={styles.otherFieldHeading}>Lot No.:</Text>
-                  <Text style={styles.otherSubLabel}>ORDER NO</Text>
-                </View>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-              <View style={styles.otherFieldRowUnderline}>
-                <View>
-                  <Text style={styles.otherFieldHeading}>Color:</Text>
-                  <Text style={styles.otherSubLabel}>COLOR NO</Text>
-                </View>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-              <View style={styles.otherFieldRowUnderline}>
-                <View>
-                  <Text style={styles.otherFieldHeading}>Meters:</Text>
-                  <Text style={styles.otherSubLabel}>LENGTH</Text>
-                </View>
-                <View style={styles.otherFlexUnderline} />
-              </View>
-            </View>
-            <Text style={styles.otherDisclaimerText}>
-              * Not liable once fabric is cut or processed
-            </Text>
-          </View>
-        </View>
-      );
-
-    case 'other-fabric-50x70-table':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={styles.otherTallCard}>
-            <View style={styles.otherTableCard}>
-              {['Client', 'Product', 'Lot No.', 'Width', 'Color', 'Quantity'].map((label, idx) => (
-                <View key={label}>
-                  <View style={styles.otherTableRow}>
-                    <Text style={styles.otherTableHeadingCol}>{label}</Text>
-                    <View style={styles.otherTableValueCol} />
-                  </View>
-                  {idx < 5 && <View style={styles.otherGridHorizontalLine} />}
-                </View>
-              ))}
-            </View>
-            <Text style={styles.otherDisclaimerSmall}>
-              Notice: Report quality issues within 7 days. Company is not liable after cutting or processing.
-            </Text>
-          </View>
-        </View>
-      );
-
-    case 'other-fabric-70x50-simple':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Color No.:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Product:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Lot No.:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Length (m):</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fabric-70x50-spec':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherTableCard}>
-            <View style={styles.otherTableFullCell}>
-              <Text style={styles.otherFieldHeading}>Product:</Text>
-              <Text style={styles.otherSubLabel}>Description</Text>
-            </View>
-            <View style={styles.otherGridHorizontalLine} />
-            <View style={styles.otherTableFullCell}>
-              <Text style={styles.otherFieldHeading}>Article No:</Text>
-              <Text style={styles.otherSubLabel}>Article No</Text>
-            </View>
-            <View style={styles.otherGridHorizontalLine} />
-            <View style={styles.otherTableSplitRow}>
-              <View style={styles.otherTableHalfCell}>
-                <Text style={styles.otherFieldHeading}>Spec:</Text>
-                <Text style={styles.otherSubLabel}>spec</Text>
-              </View>
-              <View style={styles.otherGridVerticalLine} />
-              <View style={styles.otherTableHalfCell}>
-                <Text style={styles.otherFieldHeading}>Comp:</Text>
-                <Text style={styles.otherSubLabel}>Comp</Text>
-              </View>
-            </View>
-            <View style={styles.otherGridHorizontalLine} />
-            <View style={styles.otherTableSplitRow}>
-              <View style={styles.otherTableHalfCell}>
-                <Text style={styles.otherFieldHeading}>Weight:</Text>
-                <Text style={styles.otherSubLabel}>Weight</Text>
-              </View>
-              <View style={styles.otherGridVerticalLine} />
-              <View style={styles.otherTableHalfCell}>
-                <Text style={styles.otherFieldHeading}>Width:</Text>
-                <Text style={styles.otherSubLabel}>Width</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fabric-70x50-company':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <Text style={styles.otherCenterTitle}>XXXXX Textile Co., Ltd.</Text>
-            <View style={[styles.otherTableCard, { marginTop: 4 }]}>
-              <View style={styles.otherTableSplitRow}>
-                <View style={styles.otherTableHalfCell}>
-                  <Text style={styles.otherFieldHeading}>Product:</Text>
-                </View>
-                <View style={styles.otherGridVerticalLine} />
-                <View style={styles.otherTableHalfCell}>
-                  <Text style={styles.otherFieldHeading}>Width:</Text>
-                </View>
-              </View>
-              <View style={styles.otherGridHorizontalLine} />
-              <View style={styles.otherTableSplitRow}>
-                <View style={styles.otherTableHalfCell}>
-                  <Text style={styles.otherFieldHeading}>Comp:</Text>
-                </View>
-                <View style={styles.otherGridVerticalLine} />
-                <View style={styles.otherTableHalfCell}>
-                  <Text style={styles.otherFieldHeading}>Spec:</Text>
-                </View>
-              </View>
-              <View style={styles.otherGridHorizontalLine} />
-              <View style={styles.otherTableSplitRow}>
-                <View style={styles.otherTableHalfCell}>
-                  <Text style={styles.otherFieldHeading}>Weight:</Text>
-                </View>
-                <View style={styles.otherGridVerticalLine} />
-                <View style={styles.otherTableHalfCell}>
-                  <Text style={styles.otherFieldHeading}>Remark:</Text>
-                </View>
-              </View>
-              <View style={styles.otherGridHorizontalLine} />
-              <View style={styles.otherTableFullCell}>
-                <Text style={styles.otherFieldHeading}>Phone:</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-fabric-70x50-rows':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherTableCard}>
-            <View style={styles.otherTableFullCell}>
-              <Text style={styles.otherFieldHeading}>Product:</Text>
-            </View>
-            <View style={styles.otherGridHorizontalLine} />
-            <View style={styles.otherTableFullCell}>
-              <Text style={styles.otherFieldHeading}>Comp:</Text>
-            </View>
-            <View style={styles.otherGridHorizontalLine} />
-            <View style={styles.otherTableSplitRow}>
-              <View style={styles.otherTableHalfCell}>
-                <Text style={styles.otherFieldHeading}>Weight:</Text>
-              </View>
-              <View style={styles.otherGridVerticalLine} />
-              <View style={styles.otherTableHalfCell}>
-                <Text style={styles.otherFieldHeading}>Width:</Text>
-              </View>
-            </View>
-            <View style={styles.otherGridHorizontalLine} />
-            <View style={styles.otherTableSplitRow}>
-              <View style={styles.otherTableHalfCell}>
-                <Text style={styles.otherFieldHeading}>Spec:</Text>
-              </View>
-              <View style={styles.otherGridVerticalLine} />
-              <View style={styles.otherTableHalfCell}>
-                <Text style={styles.otherFieldHeading}>Remark:</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'other-barcode-library':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.otherFormCard, { alignItems: 'center', justifyContent: 'center' }]}>
-            <Text style={styles.otherCenterTitle}>Academy Library</Text>
-            <BarcodeIllustration scale={1.05} height={32} style={{ marginVertical: 4 }} />
-            <Text style={styles.otherBarcodeText}>1234567890</Text>
-          </View>
-        </View>
-      );
-
-    case 'other-barcode-apparel':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.otherFormCard, { alignItems: 'center', justifyContent: 'center' }]}>
-            <Text style={styles.otherCenterTitle}>Apparel Store</Text>
-            <BarcodeIllustration scale={1.1} height={38} style={{ marginVertical: 4 }} />
-            <Text style={styles.otherBarcodeText}>2025 1010 10009</Text>
-            <Text style={styles.otherPriceText}>Retail Price: $599</Text>
-          </View>
-        </View>
-      );
-
-    case 'other-barcode-elementary':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.otherFormCard, { alignItems: 'center', justifyContent: 'center' }]}>
-            <Text style={styles.otherCenterTitle}>Elementary School Academy</Text>
-            <BarcodeIllustration scale={1.3} height={48} style={{ marginVertical: 6 }} />
-            <Text style={[styles.otherBarcodeText, { fontSize: 13 }]}>20251010009</Text>
-          </View>
-        </View>
-      );
-
-    case 'other-service-card-warranty':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherInnerRoundedCard}>
-            <Text style={styles.otherCenterTitle}>After-Sales Service Card</Text>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Purchase Date:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Replacement:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Expiry Date:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherSolidDivider} />
-            <Text style={styles.otherDisclaimerSmall}>
-              Note: Battery warranty __ months, replacement in first __ months. Damaged/swollen batteries not covered.
-            </Text>
-          </View>
-        </View>
-      );
-
-    case 'other-service-water-filter':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <Text style={styles.otherCenterTitle}>Water Filter Replacement Log</Text>
-            <Text style={[styles.otherFieldHeading, { marginTop: 4 }]}>
-              Replacement Date: ___ Y ___ M ___ D
-            </Text>
-            <Text style={[styles.otherFieldHeading, { marginTop: 3 }]}>
-              Replaced: PP Cotton□  Carbon□  RO Membrane□
-            </Text>
-            <Text style={[styles.otherFieldHeading, { marginTop: 2 }]}>
-              Post Carbon□  T33□
-            </Text>
-            <Text style={[styles.otherSubLabel, { marginTop: 6 }]}>
-              • PP Cotton / Carbon / T33: Replace every 3-8 months
-            </Text>
-            <Text style={styles.otherSubLabel}>
-              • RO Membrane: Replace every 12-36 months
-            </Text>
-            <Text style={[styles.otherTinyText, { marginTop: 4 }]}>
-              * Replacement timing depends on TDS test
-            </Text>
-          </View>
-        </View>
-      );
-
-    case 'other-service-equipment':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.otherFormCard}>
-            <Text style={styles.otherCenterTitle}>After-Sales Service Card</Text>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Device Name:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Device Model:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Serial No.:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Technician:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-            <View style={styles.otherFieldRowUnderline}>
-              <Text style={styles.otherFieldHeading}>Inspector:</Text>
-              <View style={styles.otherFlexUnderline} />
-            </View>
-          </View>
-        </View>
-      );
-
-    // --- STORAGE ---
-    case 'storage-home-50x20':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.storageHomeBox}>
-            <Text style={styles.storageHomeText}>Counting Cards</Text>
-          </View>
-        </View>
-      );
-
-    case 'storage-kitchen-cabinet-101x51':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.storageCabinetBox}>
-            <StorageOrnamentDivider />
-            <Text style={styles.storageCabinetText}>Forks</Text>
-            <StorageOrnamentDivider />
-          </View>
-        </View>
-      );
-
-    case 'storage-kitchen-vanilla-44x32':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.storageVanillaFrame}>
-            <View style={styles.storageVanillaInner}>
-              <Text style={styles.storageVanillaLine}>French</Text>
-              <Text style={styles.storageVanillaLine}>Vanilla</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'transparent-30x20':
-    case 'transparent-40x20':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.transparentInnerBox} />
-        </View>
-      );
-
-    // --- CIRCLE ---
-    case 'circle-30':
-      return (
-        <View style={[styles.previewBox, styles.circleBoxContainer]}>
-          <View style={[styles.circleOutline, { width: 150, height: 150, borderRadius: 75 }]} />
-        </View>
-      );
-
-    case 'circle-40':
-      return (
-        <View style={[styles.previewBox, styles.circleBoxContainer]}>
-          <View style={[styles.circleOutline, { width: 165, height: 165, borderRadius: 82.5 }]} />
-        </View>
-      );
-
-    case 'circle-50':
-      return (
-        <View style={[styles.previewBox, styles.circleBoxContainer]}>
-          <View style={[styles.circleOutline, { width: 178, height: 178, borderRadius: 89 }]} />
-        </View>
-      );
-
-    // --- JEWELRY ---
-    case 'jew-dumbell-13x85':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewDumbellRow}>
-            <View style={[styles.jewDumbellCapsule, { width: 95, height: 58 }]}>
-              <JewelryLabelText size={10} />
-            </View>
-            <View style={styles.jewDumbellBridge} />
-            <View style={[styles.jewDumbellCapsule, { width: 95, height: 58 }]}>
-              <JewelryLabelText size={10} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'jew-dumbell-15x85':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewDumbellRow}>
-            <View style={[styles.jewDumbellCapsule, { width: 72, height: 62, paddingHorizontal: 4 }]}>
-              <BarcodeIllustration scale={0.55} height={28} />
-              <Text style={styles.jewTinyBarcodeNum}>1234567890</Text>
-            </View>
-            <View style={styles.jewDumbellBridge} />
-            <View style={[styles.jewDumbellCapsule, { width: 118, height: 62, justifyContent: 'center' }]}>
-              <Text style={styles.jewProductLine}>Amber Necklace</Text>
-              <Text style={styles.jewProductLine}>Sterling Silver Chain</Text>
-              <Text style={styles.jewProductLine}>€29.9/£24.99</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'jew-hangtag-159x413':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewHangtagWrap}>
-            <View style={styles.jewHangtagNotch} />
-            <View style={styles.jewHangtagBody}>
-              <Text style={styles.jewHangtagTitle}>woodlawn bracelet</Text>
-              <BarcodeIllustration scale={0.85} height={34} style={{ marginVertical: 4 }} />
-              <Text style={styles.jewTinyBarcodeNum}>1234567890</Text>
-            </View>
-            <View style={styles.jewHangtagSerration} />
-          </View>
-        </View>
-      );
-
-    case 'jew-label-20x20-right':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewFlagRow}>
-            <View style={styles.jewStackedLeft}>
-              <View style={styles.jewStackBox}>
-                <JewelryLabelText />
-              </View>
-              <View style={styles.jewStackDash} />
-              <View style={styles.jewStackBox}>
-                <JewelryLabelText />
-              </View>
-            </View>
-            <View style={styles.jewTailRight} />
-          </View>
-        </View>
-      );
-
-    case 'jew-label-20x20-left':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewFlagRow}>
-            <View style={styles.jewTailLeft} />
-            <View style={styles.jewStackedRight}>
-              <View style={styles.jewStackBox}>
-                <JewelryLabelText />
-              </View>
-              <View style={styles.jewStackDash} />
-              <View style={styles.jewStackBox}>
-                <JewelryLabelText />
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'jew-label-50x13-horizontal':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewFlagRow}>
-            <View style={styles.jewHorizontalPair}>
-              <View style={[styles.jewStackBox, { flex: 1, height: 52 }]}>
-                <JewelryLabelText />
-              </View>
-              <View style={styles.jewStackDashVertical} />
-              <View style={[styles.jewStackBox, { flex: 1, height: 52 }]}>
-                <JewelryLabelText />
-              </View>
-            </View>
-            <View style={[styles.jewTailRight, { height: 14, marginTop: 20 }]} />
-          </View>
-        </View>
-      );
-
-    case 'jew-label-50x13-yellow':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewFlagRow}>
-            <View style={[styles.jewHorizontalPair, { backgroundColor: '#F7E329' }]}>
-              <View style={[styles.jewYellowBox, { flex: 1 }]} />
-              <View style={styles.jewYellowDash} />
-              <View style={[styles.jewYellowBox, { flex: 1 }]} />
-            </View>
-            <View style={[styles.jewTailRight, { height: 14, marginTop: 20, borderColor: '#262626' }]} />
-          </View>
-        </View>
-      );
-
-    case 'jew-sample-25x30-flower':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewFlagRow}>
-            <View style={styles.jewStackedLeft}>
-              <View style={[styles.jewStackBox, styles.jewPatternBox, { height: 38 }]}>
-                <MeanderSidePattern side="left" />
-                <MeanderSidePattern side="right" />
-              </View>
-              <View style={[styles.jewStackBox, styles.jewPatternBox, { height: 38, marginTop: 2 }]}>
-                <MeanderSidePattern side="left" />
-                <MeanderSidePattern side="right" />
-              </View>
-            </View>
-            <View style={styles.jewSampleTailWrap}>
-              <View style={styles.jewSampleTailFlap} />
-              <View style={styles.jewTailRight} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'jew-sample-30x25-stacked':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewFlagRow}>
-            <View style={styles.jewStackedLeft}>
-              <View style={[styles.jewStackBox, { height: 34 }]} />
-              <View style={[styles.jewStackBox, { height: 34, marginTop: 2 }]} />
-            </View>
-            <View style={styles.jewSampleTailWrap}>
-              <View style={[styles.jewSampleTailFlap, { width: 48 }]} />
-              <View style={[styles.jewTailRight, { height: 12 }]} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'jew-sample-30x25-pattern':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewFlagRow}>
-            <View style={styles.jewStackedLeft}>
-              <View style={[styles.jewStackBox, styles.jewPatternBox, { height: 42 }]}>
-                <MeanderSidePattern side="left" />
-                <MeanderSidePattern side="right" />
-              </View>
-              <View style={[styles.jewStackBox, styles.jewPatternBox, { height: 42, marginTop: 2 }]}>
-                <MeanderSidePattern side="left" />
-                <MeanderSidePattern side="right" />
-              </View>
-            </View>
-            <View style={[styles.jewTailRight, { height: 12, marginTop: 36 }]} />
-          </View>
-        </View>
-      );
-
-    case 'jew-sample-50x15-holes':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewHolesRow}>
-            <View style={[styles.jewHoleBox, { borderTopLeftRadius: 8 }]}>
-              <View style={[styles.jewPunchHole, { top: 4, left: 6 }]} />
-            </View>
-            <View style={[styles.jewHoleBox, { borderTopRightRadius: 8 }]}>
-              <View style={[styles.jewPunchHole, { top: 4, right: 6 }]} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'jew-sample-50x19-tabs':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewTabsRow}>
-            <View style={styles.jewTabUnit}>
-              <View style={styles.jewTabFlap}>
-                <View style={styles.jewPunchHoleSmall} />
-              </View>
-              <View style={styles.jewTabBody} />
-            </View>
-            <View style={styles.jewTabUnit}>
-              <View style={styles.jewTabFlap}>
-                <View style={styles.jewPunchHoleSmall} />
-              </View>
-              <View style={styles.jewTabBody} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'jew-sample-53x14-bar':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewBarDumbellRow}>
-            <View style={styles.jewBarCapsule} />
-            <View style={styles.jewBarConnector} />
-            <View style={styles.jewBarCapsule} />
-          </View>
-        </View>
-      );
-
-    case 'jew-rattail-143x635':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.jewRatTailRow}>
-            <View style={styles.jewRatTailHead}>
-              <View style={styles.jewRatTailBarcodeCol}>
-                <BarcodeIllustration scale={0.5} height={22} />
-                <Text style={styles.jewRatTailBarcodeNum}>1234567890</Text>
-              </View>
-              <View style={styles.jewRatTailTextCol}>
-                <Text style={styles.jewRatTailLine}>Men&apos;s Comfort Band</Text>
-                <Text style={styles.jewRatTailLine}>14K Gold, 10.5 Size, 22</Text>
-                <Text style={styles.jewRatTailLine}>grams</Text>
-              </View>
-            </View>
-            <View style={styles.jewRatTailStrip} />
-          </View>
-        </View>
-      );
-
-    // --- SUPERMARKET ---
-    case 'smkt-black-yellow-60x40':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktRowSplit}>
-              <View style={styles.smktLeftCol}>
-                <Text style={styles.smktTitleBold}>Thermal Label{'\n'}Sticker Paper</Text>
-                <Text style={styles.smktMetaText}>Type: black mark</Text>
-                <Text style={styles.smktMetaText}>Item #: 60x40</Text>
-                <BarcodeIllustration scale={0.65} height={22} style={{ marginTop: 4 }} />
-                <Text style={styles.smktBarcodeNum}>1234567890</Text>
-              </View>
-              <View style={styles.smktClearanceBox}>
-                <Text style={styles.smktClearanceTitle}>Clearance</Text>
-                <Text style={styles.smktPriceHuge}>₹241</Text>
-                <SmktWasPrice amount="330" />
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-orange-50x30':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <BarcodeIllustration scale={0.9} height={38} />
-            <Text style={styles.smktBarcodeNum}>4 934321 111571</Text>
-            <View style={styles.smktOrangeBand}>
-              <Text style={styles.smktOrangeProduct}>Wheat Tortillas 2.5kg</Text>
-              <View style={styles.smktOrangePriceRow}>
-                <View>
-                  <Text style={styles.smktOrangeUnitLabel}>Price per kg</Text>
-                  <Text style={styles.smktOrangeUnitPrice}>₹ 280</Text>
-                </View>
-                <Text style={styles.smktOrangeMainPrice}>₹699</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-yellow-40x30':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktYellowBandRow}>
-              <Text style={styles.smktWhoopsText}>WHOOPS!</Text>
-              <Text style={styles.smktWasInline}>WAS: ₹140</Text>
-            </View>
-            <BarcodeIllustration scale={0.75} height={32} style={{ marginVertical: 6 }} />
-            <Text style={styles.smktBarcodeNum}>4 9 0 1 1 1 1 7 7 6 8 0 7</Text>
-            <View style={styles.smktYellowBandRow}>
-              <Text style={styles.smktWhoopsText}>NOW:</Text>
-              <Text style={styles.smktNowPrice}>₹107</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-shelf-50x30-1':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktMeatTopRow}>
-              <Text style={styles.smktMeatTitle}>PREMIUM{'\n'}GROUND{'\n'}CHUCK</Text>
-              <Text style={styles.smktMeatUnit}>1 LB</Text>
-            </View>
-            <View style={styles.smktMeatMidRow}>
-              <Text style={styles.smktMetaText}>₹115 LB</Text>
-              <View style={styles.smktYellowPricePill}>
-                <Text style={styles.smktYellowPriceText}>₹ 115</Text>
-              </View>
-            </View>
-            <View style={styles.smktMeatBottomRow}>
-              <Text style={styles.smktTinyMeta}>MEAT   MC</Text>
-              <BarcodeIllustration scale={0.7} height={20} style={{ flex: 1 }} />
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-shelf-50x30-2':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktYellowTopBar} />
-            <View style={styles.smktRetailPriceRow}>
-              <Text style={styles.smktRetailLabel}>RETAIL{'\n'}PRICE</Text>
-              <View style={styles.smktSupPriceWrap}>
-                <Text style={styles.smktSupPriceMain}>5</Text>
-                <Text style={styles.smktSupPriceCents}>99</Text>
-              </View>
-              <Text style={styles.smktRetailLabel}>UNIT PRICE{'\n'}EACH</Text>
-            </View>
-            <Text style={styles.smktDescLine}>(H)NERD COSTUME SET PPR AST</Text>
-            <Text style={styles.smktDescSub}>902-600 2 04902284053</Text>
-            <View style={styles.smktMeatBottomRow}>
-              <BarcodeIllustration scale={0.65} height={18} />
-              <Text style={styles.smktTinyMeta}>L10-B2-P2-P5</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-twocolor-50x30':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktTwoColorTop}>
-              <Text style={styles.smktMangoTitle}>MANGO</Text>
-              <View>
-                <Text style={styles.smktMetaText}>Orchard&apos;s</Text>
-                <Text style={styles.smktMetaText}>100g=₹249</Text>
-              </View>
-            </View>
-            <View style={styles.smktTwoColorBottom}>
-              <Text style={styles.smktSaleLabel}>SALE</Text>
-              <Text style={styles.smktSalePrice}>₹ 253</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-black-yellow-40x30':
-      return (
-        <View style={styles.previewBox}>
-          <View style={[styles.smktLabelCard, styles.smktFullYellowCard]}>
-            {[0, 1].map((i) => (
-              <View key={i} style={[styles.smktMilkSegment, i === 1 && styles.smktMilkSegmentBottom]}>
-                <Text style={styles.smktMilkBrand}>DETONGER</Text>
-                <Text style={styles.smktMilkDesc}>FULL CREAM MILK POWDER TIM</Text>
-                <View style={styles.smktMilkPriceRow}>
-                  <Text style={styles.smktMetaText}>400g</Text>
-                  <Text style={styles.smktMilkPrice}>₹2499</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        </View>
-      );
-
-    case 'smkt-red-40x30':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktRedOuter}>
-            <Text style={styles.smktReducedTitle}>REDUCED</Text>
-            <View style={styles.smktRedInner}>
-              <BarcodeIllustration scale={0.7} height={28} />
-              <Text style={styles.smktBarcodeNum}>4 9 4 7 9 7 5 4 1 5 7 5 9</Text>
-              <View style={styles.smktRedPriceRow}>
-                <SmktWasPrice amount="490" />
-                <Text style={styles.smktNowRed}>
-                  <Text style={styles.smktNowRedLabel}>NOW </Text>
-                  <Text style={styles.smktNowRedPrice}>₹429</Text>
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-black-75x38':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktBbqGrid}>
-              <View style={styles.smktBbqLeft}>
-                <View style={styles.smktBlueProductBlock}>
-                  <Text style={styles.smktBbqTitle}>BULL&apos;S-EYE ORIGINAL BBQ SAUCE</Text>
-                  <Text style={styles.smktBbqSub}>10AL   HBA   MEAT</Text>
-                </View>
-                <View style={styles.smktBbqBarcodeRow}>
-                  <View>
-                    <Text style={styles.smktMetaText}>344470</Text>
-                    <BarcodeIllustration scale={0.55} height={18} />
-                  </View>
-                  <Text style={styles.smktUnitOz}>9p{'\n'}Per OZ</Text>
-                </View>
-              </View>
-              <View style={styles.smktBbqPriceCol}>
-                <Text style={styles.smktRupeeSmall}>₹</Text>
-                <Text style={styles.smktBbqBigPrice}>1130</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-black-green-60x40':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktGreenHeader}>
-              <Text style={styles.smktGreenTitle}>Baby Wipes</Text>
-            </View>
-            <View style={styles.smktWipesBody}>
-              <View style={styles.smktWipesLeft}>
-                <Text style={styles.smktBullet}>*1 flip-top pack of 56 wipes</Text>
-                <Text style={styles.smktBullet}>*Alcohol free</Text>
-                <Text style={styles.smktBullet}>*Paraben free</Text>
-                <BarcodeIllustration scale={0.6} height={20} style={{ marginTop: 4 }} />
-                <Text style={styles.smktBarcodeNum}>1234567890</Text>
-              </View>
-              <View style={styles.smktWipesPriceCol}>
-                <Text style={styles.smktRupeeSmall}>₹</Text>
-                <Text style={styles.smktWipesPrice}>223</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-sale-talker-635x984':
-      return (
-        <View style={[styles.previewBox, styles.tallPreviewBox]}>
-          <View style={styles.smktTalkerCard}>
-            <View style={styles.smktTalkerWhite}>
-              <Text style={styles.smktTalkerProduct}>KRAFT RANCH DRESSING</Text>
-              <View style={styles.smktTalkerWhiteRow}>
-                <View>
-                  <Text style={styles.smktMetaText}>9p</Text>
-                  <Text style={styles.smktMetaText}>Per OZ</Text>
-                  <Text style={styles.smktMetaText}>562100</Text>
-                </View>
-                <Text style={styles.smktTalkerPrice}>₹165</Text>
-              </View>
-            </View>
-            <View style={styles.smktTalkerYellow}>
-              <Text style={styles.smktTalkerPromo}>2/₹249</Text>
-              <Text style={styles.smktTalkerSave}>YOU SAVE ₹81</Text>
-              <View style={styles.smktTalkerSplit}>
-                <View style={styles.smktTalkerSplitCol}>
-                  <Text style={styles.smktTinyMeta}>Unit Price</Text>
-                  <Text style={styles.smktTinyMeta}>9p Per OZ</Text>
-                </View>
-                <View style={styles.smktTalkerSplitDivider} />
-                <View style={styles.smktTalkerSplitCol}>
-                  <Text style={styles.smktTinyMeta}>16 OZ KRAFT</Text>
-                  <Text style={styles.smktTinyMeta}>RANCH DRESSING</Text>
-                </View>
-              </View>
-            </View>
-            <View style={styles.smktTalkerRed}>
-              <Text style={styles.smktTalkerSale}>sale</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-shelf-84x30-cvs':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktWideShelfRow}>
-              <View style={styles.smktWideLeft}>
-                <Text style={styles.smktWideProduct}>CVS C 500MG EZSWLO</Text>
-                <Text style={styles.smktTinyMeta}>12161   145470</Text>
-                <Text style={styles.smktTinyMeta}>F02</Text>
-                <Text style={styles.smktTinyMeta}>05/09/16</Text>
-              </View>
-              <View style={styles.smktWideRight}>
-                <BarcodeIllustration scale={0.65} height={22} />
-                <View style={styles.smktYouPayBar}>
-                  <Text style={styles.smktYouPayText}>YOU PAY</Text>
-                </View>
-                <Text style={styles.smktWidePrice}>₹439</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-shelf-84x30-bbq':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktWideBbqRow}>
-              <View style={styles.smktWideBbqLeft}>
-                <View style={styles.smktBlueProductBlock}>
-                  <Text style={styles.smktBbqTitleSmall}>BULL&apos;S-EYE ORIGINAL BBQ SAUCE</Text>
-                  <Text style={styles.smktBbqSub}>10AL   HBA   MEAT</Text>
-                </View>
-                <View style={styles.smktBbqBarcodeRow}>
-                  <Text style={styles.smktMetaText}>344470</Text>
-                  <BarcodeIllustration scale={0.55} height={16} />
-                </View>
-              </View>
-              <Text style={styles.smktUnitOzWide}>9p Per OZ</Text>
-              <View style={styles.smktBbqPriceColWide}>
-                <Text style={styles.smktRupeeSmall}>₹</Text>
-                <Text style={styles.smktBbqBigPrice}>1130</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'smkt-shelf-84x30-2':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.smktLabelCard}>
-            <View style={styles.smktEverydayRow}>
-              <View style={styles.smktEverydayLeft}>
-                <Text style={styles.smktEverydayTitle}>EVERYDAY{'\n'}PRICE</Text>
-                <BarcodeIllustration scale={0.6} height={20} style={{ marginTop: 4 }} />
-                <Text style={styles.smktTinyMeta}>100</Text>
-                <Text style={styles.smktTinyMeta}>03700085522</Text>
-              </View>
-              <View style={styles.smktEverydayRight}>
-                <View style={styles.smktYouPayBox}>
-                  <Text style={styles.smktYouPaySmall}>YOU PAY</Text>
-                  <Text style={styles.smktEverydayPrice}>539</Text>
-                </View>
-                <Text style={styles.smktEverydayDesc}>GAIN FIREWORKS ORIG 9.7Z</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    // --- FOOD ---
-    case 'food-baked-30x15':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.foodBakedBox}>
-            <Text style={styles.foodBakedText}>Baking bread</Text>
-          </View>
-        </View>
-      );
-
-    case 'food-price-496x296':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.foodPriceOuter}>
-            <View style={styles.foodPriceInner}>
-              <View style={styles.foodPriceBarcodeCol}>
-                <BarcodeIllustration scale={0.75} height={36} />
-                <Text style={styles.foodBarcodeNum}>6 901234 567892</Text>
-              </View>
-              <View style={styles.foodPriceTextCol}>
-                <View style={styles.foodRotatedWrap}>
-                  <Text style={styles.foodRotatedLine}>Coffee and Walnut</Text>
-                  <Text style={styles.foodRotatedLine}>Filigree Biscuits</Text>
-                  <Text style={styles.foodRotatedPrice}>₹580 for 25</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'food-imported-60x50':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.foodImportedCard}>
-            <Text style={styles.foodImportedTitle}>WAGYU RIBEYE</Text>
-            <Text style={styles.foodImportedLine}>CARCASS NO.:4660</Text>
-            <Text style={styles.foodImportedLine}>WEIGHT:1.02LB</Text>
-            <Text style={styles.foodImportedLine}>CATTLE ID NO.:</Text>
-            <Text style={styles.foodImportedLine}>0863354944</Text>
-          </View>
-        </View>
-      );
-
-    case 'food-ingredients-50x40':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.foodIngredientsCard}>
-            <Text style={styles.foodIngredientsHeading}>Ingredients:</Text>
-            <Text style={styles.foodIngredientsItem}>-Salmon</Text>
-            <Text style={styles.foodIngredientsItem}>-Yams</Text>
-            <Text style={styles.foodIngredientsItem}>-Corn Flour</Text>
-            <Text style={styles.foodIngredientsItem}>-Wheat Flour</Text>
-          </View>
-        </View>
-      );
-
-    // --- APPLIANCES ---
-    case 'appl-electrical-40x20':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.applElectricalCard}>
-            <Text style={styles.applCompanyName}>ACS Electrical</Text>
-            <Text style={styles.applPhoneLine}>Tel:.0120 314 5666</Text>
-            <BarcodeIllustration scale={0.85} height={34} style={{ marginTop: 8 }} />
-            <Text style={styles.applBarcodeNum}>6 901234 567892</Text>
-          </View>
-        </View>
-      );
-
-    // --- FILE ---
-    case 'file-address-667x254':
-      return (
-        <View style={[styles.previewBox, styles.filePreviewBox]}>
-          <View style={styles.fileAddressBadge}>
-            <FileCautionStripeRow />
-            <Text style={styles.fileAddressText}>OPEN IMMEDIATELY</Text>
-            <FileCautionStripeRow />
-          </View>
-        </View>
-      );
-
-    case 'file-cabinet-52x169':
-      return (
-        <View style={[styles.previewBox, styles.filePreviewBox]}>
-          <View style={styles.fileCabinetLabel}>
-            <Text style={styles.fileCabinetText}>bank</Text>
-          </View>
-        </View>
-      );
-
-    case 'file-folder-192x61':
-      return (
-        <View style={[styles.previewBox, styles.filePreviewBox]}>
-          <View style={styles.fileFolderLabel}>
-            <Text style={styles.fileFolderText}>Marketing</Text>
-          </View>
-        </View>
-      );
-
-    case 'file-label-40x25a':
-      return (
-        <View style={[styles.previewBox, styles.filePreviewBox, styles.fileOctPreviewBox]}>
-          <FileOctagonFrame frameColor="#D8B4E8">
-            <Text style={styles.fileOctLinePrimary}>Important Meeting</Text>
-            <FileDashedDivider />
-            <Text style={styles.fileOctLineSecondary}>Note-taking</Text>
-          </FileOctagonFrame>
-        </View>
-      );
-
-    case 'file-label-40x25b':
-      return (
-        <View style={[styles.previewBox, styles.filePreviewBox, styles.fileOctPreviewBox]}>
-          <FileOctagonFrame frameColor="#93C5FD">
-            <Text style={styles.fileOctLinePrimary}>Staff Handbook</Text>
-            <FileDashedDivider />
-            <Text style={styles.fileOctLineSecondary}>Personnel</Text>
-            <FileDashedDivider />
-            <Text style={styles.fileOctLineSecondary}>2018 Year</Text>
-          </FileOctagonFrame>
-        </View>
-      );
-
-    case 'file-visitor-968x54':
-      return (
-        <View style={[styles.previewBox, styles.filePreviewBox]}>
-          <View style={styles.fileVisitorBadge}>
-            <Text style={styles.fileVisitorHeading}>VISITOR</Text>
-            <Text style={styles.fileVisitorName}>JOHN TAY</Text>
-            <Text style={styles.fileVisitorCompany}>ABC Corp</Text>
-            <View style={styles.fileVisitorFooter}>
-              <Text style={styles.fileVisitorMeta}>08/22</Text>
-              <Text style={styles.fileVisitorMeta}>15:35</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    // --- ASSET ---
-    case 'asset-tag-508x19':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.assetTagCard}>
-            <Text style={styles.assetTagPropertyLine}>PROPERTY OF OSSIA /</Text>
-            <Text style={styles.assetTagPropertyLine}>SOUNDWORKS</Text>
-            <Text style={styles.assetTagHeading}>ASSET NO.</Text>
-            <Text style={styles.assetTagNumber}>HQBOAFT01000586481</Text>
-          </View>
-        </View>
-      );
-
-    case 'asset-tag-6985x3175':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.assetTagWideCard}>
-            <AssetWaveLogo />
-            <View style={styles.assetTagWideContent}>
-              <Text style={styles.assetCompanyName}>Company Name</Text>
-              <Text style={styles.assetCompanyLine}>Company address</Text>
-              <Text style={styles.assetCompanyLine}>Company Office Number</Text>
-              <BarcodeIllustration scale={0.75} height={28} style={{ marginTop: 6, alignSelf: 'flex-end' }} />
-              <Text style={styles.assetBarcodeNum}>1234567890</Text>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'asset-tag-9525x508-1':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.assetHarkCard}>
-            <View style={styles.assetHarkBanner}>
-              <Text style={styles.assetHarkBannerText}>PROPERTY OF HARK</Text>
-              <Text style={styles.assetHarkBannerText}>INDUSTRIES</Text>
-            </View>
-            <BarcodeIllustration scale={1.05} height={42} style={{ marginTop: 10 }} />
-            <Text style={styles.assetHarkBarcodeNum}>12345678912345678</Text>
-          </View>
-        </View>
-      );
-
-    case 'asset-tag-9525x508-2':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.assetHarkFormCard}>
-            <Text style={styles.assetHarkFormTitle}>PROPERTY OF HARK INDUSTRIES</Text>
-            <AssetHarkFieldRow label="ASSET NO." value="NSN 1450-01-425-2548" />
-            <AssetHarkFieldRow label="SERIAL NO." value="1" />
-            <AssetHarkFieldRow label="PART NO." value="10162862" />
-            <AssetHarkFieldRow label="CONTR NO." value="SP0700-03-MQ053" />
-            <Text numberOfLines={1} style={styles.assetHarkSummary}>
-              NSN 1450-01-425-2548 1 10162862 SP0700-03-MQ053
-            </Text>
-          </View>
-        </View>
-      );
-
-    // --- SCHOOL ---
-    case 'school-name-sticker-40x25a':
-      return (
-        <View style={[styles.previewBox, styles.filePreviewBox, styles.fileOctPreviewBox]}>
-          <FileOctagonFrame frameColor="#D8B4E8">
-            <Text style={styles.schoolNamePrimary}>WangLele</Text>
-            <FileDashedDivider />
-            <Text style={styles.schoolNameSecondary}>No.24</Text>
-          </FileOctagonFrame>
-        </View>
-      );
-
-    case 'school-name-sticker-40x25b':
-      return (
-        <View style={[styles.previewBox, styles.filePreviewBox, styles.fileOctPreviewBox]}>
-          <FileOctagonFrame frameColor="#93C5FD">
-            <Text style={styles.schoolClassLine}>Class 403</Text>
-            <FileDashedDivider />
-            <Text style={styles.schoolNamePrimary}>WangLele</Text>
-            <FileDashedDivider />
-            <Text style={styles.schoolNameSecondary}>No.24</Text>
-          </FileOctagonFrame>
-        </View>
-      );
-
-    // --- MATERIAL ---
-    case 'material-label-445x14':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.materialSmallCard}>
-            <Text style={styles.materialNutText}>1/4 -20  HE'S NUT</Text>
-            <BarcodeIllustration scale={0.9} height={32} style={{ marginTop: 8 }} />
-            <Text style={styles.materialBarcodeNum}>6 90123 4 5 6 7 8 7</Text>
-          </View>
-        </View>
-      );
-
-    case 'material-label-61x508':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.materialLockNutCard}>
-            <View style={styles.materialLockNutHeader}>
-              <Text style={styles.materialLockNutTitle}>Lock Nut</Text>
-            </View>
-            <View style={styles.materialLockNutBody}>
-              <View style={styles.materialLockNutCol}>
-                <Text style={styles.materialLockNutLine}>1/2 diameter</Text>
-                <Text style={styles.materialLockNutLine}>Insert Lock NF</Text>
-                <Text style={styles.materialLockNutLine}>Nylon Insert</Text>
-              </View>
-              <View style={styles.materialLockNutCol}>
-                <Text style={styles.materialLockNutLine}>20TPI</Text>
-                <Text style={styles.materialLockNutLine}>Zinc Plated</Text>
-                <Text style={styles.materialLockNutLine}>Grade 2 Steel</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    case 'material-label-70x222':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.materialSmallCard}>
-            <Text style={styles.materialScrewTitle}>Machine Screws</Text>
-            <BarcodeIllustration scale={1} height={36} style={{ marginTop: 10 }} />
-          </View>
-        </View>
-      );
-
-    case 'material-label-80x40':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.materialSpecCard}>
-            <Text style={styles.materialSpecTitle}>SCREW TRUSS HEAD TYPE</Text>
-            <View style={styles.materialSpecRow}>
-              <Text style={styles.materialSpecText}>B.SS #4</Text>
-              <View style={styles.materialSpecUnderline} />
-            </View>
-            <View style={styles.materialSpecRow}>
-              <Text style={styles.materialSpecText}>TYPE-B #4 SS</Text>
-              <View style={styles.materialSpecUnderline} />
-            </View>
-            <View style={styles.materialSpecRow}>
-              <Text style={styles.materialSpecText}>1/3", 1/2"</Text>
-              <View style={styles.materialSpecUnderline} />
-            </View>
-          </View>
-        </View>
-      );
-
-    // --- RACKING ---
-    case 'rack-label-80x40':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.rackLabelCard}>
-            <View style={styles.rackLabelContent}>
-              <Text style={styles.rackLabelTitle}>KRC DISTRIBUTORS</Text>
-              <BarcodeIllustration scale={1} height={38} style={{ marginVertical: 8 }} />
-              <Text style={styles.rackLabelCode}>A-25-B-588</Text>
-            </View>
-            <RackArrowDown />
-          </View>
-        </View>
-      );
-
-    case 'rack-label-100x40':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.rackLabelWideCard}>
-            <View style={styles.rackLabelWideContent}>
-              <BarcodeIllustration scale={1.1} height={44} />
-              <Text style={styles.rackLabelIsleText}>Isle D - Row 41</Text>
-            </View>
-            <RackArrowRight />
-          </View>
-        </View>
-      );
-
-    // --- LABORATORY ---
-    case 'lab-label-508x37':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.labCameoCard}>
-            <Text style={styles.labCameoTitle}>Brenmoor Cameo Label</Text>
-            <QrCodeIllustration size={58} style={{ marginVertical: 8 }} />
-            <Text style={styles.labCameoLine}>Plowman</Text>
-            <Text style={styles.labCameoLine}>Sally</Text>
-            <Text style={styles.labCameoLine}>11.1.2005</Text>
-          </View>
-        </View>
-      );
-
-    case 'lab-microscope-22x22':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.labMicroscopeCard}>
-            <BarcodeIllustration scale={0.95} height={34} />
-            <Text style={styles.labMicroscopeCode}>SRS0003</Text>
-            <Text style={styles.labMicroscopeMeta}>Patient ID:GREY.ANN</Text>
-            <Text style={styles.labMicroscopeMeta}>date:06/05/16 12:07</Text>
-            <Text style={styles.labMicroscopeMeta}>Study:8100SRS</Text>
-          </View>
-        </View>
-      );
-
-    case 'lab-pathology-508x19':
-      return (
-        <View style={styles.previewBox}>
-          <View style={styles.labPathologyCard}>
-            <LabPathologyRow label="NAME" placeholder="NAME" />
-            <LabPathologyRow label="DOB" placeholder="DOB" />
-            <LabPathologyRow label="Specimen" placeholder="Specimen" />
-            <View style={styles.labPathologySplitRow}>
-              <View style={styles.labPathologySplitItem}>
-                <Text style={styles.labPathologyLabel}>Rm.No.</Text>
-                <View style={styles.labPathologyField}>
-                  <Text style={styles.labPathologyPlaceholder}>No.</Text>
-                  <View style={styles.labPathologyUnderline} />
-                </View>
-              </View>
-              <View style={styles.labPathologySplitItem}>
-                <Text style={styles.labPathologyLabel}>Date</Text>
-                <View style={styles.labPathologyField}>
-                  <Text style={styles.labPathologyPlaceholder}>Date</Text>
-                  <View style={styles.labPathologyUnderline} />
-                </View>
-              </View>
-            </View>
-          </View>
-        </View>
-      );
-
-    default:
-      return <View style={styles.previewBox} />;
-  }
 }
 
 function TemplateLocalEmptyIllustration() {
@@ -3965,6 +1500,7 @@ export default function TemplateScreen() {
   const deleteCloudTemplate = useLabelStore((s) => s.deleteCloudTemplate);
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
   const getDocument = useLabelStore((s) => s.getDocument);
+  const { t } = useTranslation();
 
   const localDocuments = useMemo(() => {
     const sorted = [...documents].sort((a, b) =>
@@ -4022,14 +1558,18 @@ export default function TemplateScreen() {
   }, [searchQuery, selectedCategory]);
 
   const handleSelectTemplate = (template: TemplateItem) => {
+    const name = template.nameLine2 ? `${template.name} ${template.nameLine2}` : template.name;
+    const doc = createIndustryTemplateDocument({
+      name,
+      category: template.category,
+      widthMm: template.width,
+      heightMm: template.height,
+      previewType: template.previewType,
+    });
+    upsertDocument(doc);
     router.push({
       pathname: '/edit',
-      params: {
-        labelName: template.nameLine2 ? `${template.name} ${template.nameLine2}` : template.name,
-        labelWidth: String(template.width),
-        labelHeight: String(template.height),
-        templateCategory: template.category,
-      },
+      params: { labelId: doc.id },
     });
   };
 
@@ -4104,7 +1644,7 @@ export default function TemplateScreen() {
             onPress={() => setActiveTab('local')}
             style={[styles.tabItem, activeTab === 'local' && styles.tabItemActive]}>
             <Text style={[styles.tabText, activeTab === 'local' && styles.tabTextActive]}>
-              Local ({documents.length})
+              {t('template.local')} ({documents.length})
             </Text>
             {activeTab === 'local' && <View style={styles.tabIndicator} />}
           </Pressable>
@@ -4113,7 +1653,7 @@ export default function TemplateScreen() {
             onPress={() => setActiveTab('industry')}
             style={[styles.tabItem, activeTab === 'industry' && styles.tabItemActive]}>
             <Text style={[styles.tabText, activeTab === 'industry' && styles.tabTextActive]}>
-              Industry ({INDUSTRY_CATEGORY_COUNT})
+              {t('template.industry')} ({INDUSTRY_CATEGORY_COUNT})
             </Text>
             {activeTab === 'industry' && <View style={styles.tabIndicator} />}
           </Pressable>
@@ -4122,7 +1662,7 @@ export default function TemplateScreen() {
             onPress={() => setActiveTab('cloud')}
             style={[styles.tabItem, activeTab === 'cloud' && styles.tabItemActive]}>
             <Text style={[styles.tabText, activeTab === 'cloud' && styles.tabTextActive]}>
-              Cloud
+              {t('template.cloud')}
             </Text>
             {activeTab === 'cloud' && <View style={styles.tabIndicator} />}
           </Pressable>
@@ -4183,9 +1723,11 @@ export default function TemplateScreen() {
                       {tpl.widthMm.toFixed(0)} x {tpl.heightMm.toFixed(0)}
                     </Text>
                   </View>
-                  <View style={styles.localPreviewWrap}>
-                    <LabelPreview document={tpl} width={Math.min(templateCardMaxWidth, 400) - 24} />
-                  </View>
+                  <LabelPreview
+                    document={tpl}
+                    maxHeight={LABEL_PAD_STAGE_MIN_HEIGHT}
+                    showStage
+                  />
                   <View style={styles.cardFooter}>
                     <Pressable hitSlop={10} onPress={() => handleEditCloudTemplate(tpl)}>
                       <SymbolView name="square.and.pencil" tintColor={Palette.accent} size={19} />
@@ -4363,12 +1905,11 @@ export default function TemplateScreen() {
                         {docItem.widthMm.toFixed(0)} x {docItem.heightMm.toFixed(0)}
                       </Text>
                     </View>
-                    <View style={styles.localPreviewWrap}>
-                      <LabelPreview
-                        document={docItem}
-                        width={Math.min(templateCardMaxWidth, 400) - 24}
-                      />
-                    </View>
+                    <LabelPreview
+                      document={docItem}
+                      maxHeight={LABEL_PAD_STAGE_MIN_HEIGHT}
+                      showStage
+                    />
                     <View style={styles.cardFooter}>
                       <Pressable
                         hitSlop={8}
@@ -4424,7 +1965,7 @@ export default function TemplateScreen() {
                 </View>
 
                 {/* Visual Label Canvas Preview */}
-                <TemplatePreview type={item.previewType} />
+                <TemplatePreview item={item} />
 
                 {/* Bottom Action Footer: Clock + Share */}
                 <View style={styles.cardFooter}>
@@ -4587,11 +2128,11 @@ const styles = StyleSheet.create({
   tabText: {
     color: '#9EAFC0',
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   tabTextActive: {
     color: '#FFFFFF',
-    fontWeight: '700',
+    fontWeight: '500',
   },
   tabIndicator: {
     position: 'absolute',
@@ -4629,7 +2170,7 @@ const styles = StyleSheet.create({
   },
   groupHeaderText: {
     fontSize: 13.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#214668',
     textAlign: 'center',
     includeFontPadding: false,
@@ -4692,7 +2233,7 @@ const styles = StyleSheet.create({
   bannerTitle: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   bannerSubtitle: {
     color: '#FFFFFF',
@@ -4703,7 +2244,7 @@ const styles = StyleSheet.create({
   bannerDimensions: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '500',
     flexShrink: 0,
   },
   // Preview Canvas
@@ -4932,7 +2473,7 @@ const styles = StyleSheet.create({
   },
   jewTinyBarcodeNum: {
     fontSize: 7,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginTop: 2,
   },
@@ -5187,7 +2728,7 @@ const styles = StyleSheet.create({
   },
   jewRatTailBarcodeNum: {
     fontSize: 6.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginTop: 1,
   },
@@ -5230,7 +2771,7 @@ const styles = StyleSheet.create({
   },
   smktTitleBold: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     lineHeight: 14,
     marginBottom: 4,
@@ -5243,7 +2784,7 @@ const styles = StyleSheet.create({
   },
   smktBarcodeNum: {
     fontSize: 7,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     marginTop: 2,
@@ -5258,7 +2799,7 @@ const styles = StyleSheet.create({
   },
   smktClearanceTitle: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginBottom: 2,
   },
@@ -5286,7 +2827,7 @@ const styles = StyleSheet.create({
   },
   smktOrangeProduct: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     marginBottom: 4,
   },
@@ -5302,7 +2843,7 @@ const styles = StyleSheet.create({
   },
   smktOrangeUnitPrice: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
   },
   smktOrangeMainPrice: {
@@ -5326,7 +2867,7 @@ const styles = StyleSheet.create({
   },
   smktWasInline: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
   },
   smktNowPrice: {
@@ -5347,7 +2888,7 @@ const styles = StyleSheet.create({
   },
   smktMeatUnit: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
   },
   smktMeatMidRow: {
@@ -5393,7 +2934,7 @@ const styles = StyleSheet.create({
   },
   smktRetailLabel: {
     fontSize: 7,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     lineHeight: 9,
@@ -5416,7 +2957,7 @@ const styles = StyleSheet.create({
   },
   smktDescLine: {
     fontSize: 7.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginBottom: 1,
   },
@@ -5451,7 +2992,7 @@ const styles = StyleSheet.create({
   },
   smktSaleLabel: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
   },
   smktSalePrice: {
@@ -5544,13 +3085,13 @@ const styles = StyleSheet.create({
   },
   smktBbqTitle: {
     fontSize: 8,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     lineHeight: 10,
   },
   smktBbqTitleSmall: {
     fontSize: 7,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     lineHeight: 9,
   },
@@ -5571,7 +3112,7 @@ const styles = StyleSheet.create({
   },
   smktUnitOz: {
     fontSize: 7,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     lineHeight: 9,
@@ -5585,7 +3126,7 @@ const styles = StyleSheet.create({
   },
   smktRupeeSmall: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
   },
   smktBbqBigPrice: {
@@ -5603,7 +3144,7 @@ const styles = StyleSheet.create({
   },
   smktGreenTitle: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
   },
   smktWipesBody: {
@@ -5670,7 +3211,7 @@ const styles = StyleSheet.create({
   },
   smktTalkerSave: {
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     marginVertical: 4,
@@ -5709,7 +3250,7 @@ const styles = StyleSheet.create({
   },
   smktWideProduct: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     marginBottom: 4,
   },
@@ -5726,7 +3267,7 @@ const styles = StyleSheet.create({
   },
   smktYouPayText: {
     fontSize: 7,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#FFFFFF',
   },
   smktWidePrice: {
@@ -5744,7 +3285,7 @@ const styles = StyleSheet.create({
   },
   smktUnitOzWide: {
     fontSize: 7,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     alignSelf: 'center',
     marginHorizontal: 4,
@@ -5779,7 +3320,7 @@ const styles = StyleSheet.create({
   },
   smktYouPaySmall: {
     fontSize: 7,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
   },
   smktEverydayPrice: {
@@ -5789,7 +3330,7 @@ const styles = StyleSheet.create({
   },
   smktEverydayDesc: {
     fontSize: 6.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginTop: 4,
     textAlign: 'center',
@@ -5836,7 +3377,7 @@ const styles = StyleSheet.create({
   },
   foodBarcodeNum: {
     fontSize: 7.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginTop: 4,
     textAlign: 'center',
@@ -5855,13 +3396,13 @@ const styles = StyleSheet.create({
   },
   foodRotatedLine: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     lineHeight: 12,
   },
   foodRotatedPrice: {
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     marginTop: 4,
   },
@@ -5877,7 +3418,7 @@ const styles = StyleSheet.create({
   },
   foodImportedTitle: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     marginBottom: 8,
     letterSpacing: 0.3,
@@ -5903,7 +3444,7 @@ const styles = StyleSheet.create({
   },
   foodIngredientsHeading: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginBottom: 8,
   },
@@ -5929,7 +3470,7 @@ const styles = StyleSheet.create({
   },
   applCompanyName: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     marginBottom: 4,
@@ -5943,7 +3484,7 @@ const styles = StyleSheet.create({
   },
   applBarcodeNum: {
     fontSize: 8,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginTop: 4,
     letterSpacing: 0.5,
@@ -6026,7 +3567,7 @@ const styles = StyleSheet.create({
   },
   storageVanillaLine: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     lineHeight: 22,
@@ -6066,7 +3607,7 @@ const styles = StyleSheet.create({
   },
   fileAddressText: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     letterSpacing: 0.2,
     marginVertical: 4,
@@ -6099,7 +3640,7 @@ const styles = StyleSheet.create({
   },
   fileFolderText: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
   },
   fileOctWrap: {
@@ -6153,7 +3694,7 @@ const styles = StyleSheet.create({
   },
   fileOctLinePrimary: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
   },
@@ -6183,7 +3724,7 @@ const styles = StyleSheet.create({
   },
   fileVisitorHeading: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     letterSpacing: 0.4,
@@ -6229,7 +3770,7 @@ const styles = StyleSheet.create({
   },
   assetTagPropertyLine: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     lineHeight: 13,
@@ -6243,7 +3784,7 @@ const styles = StyleSheet.create({
   },
   assetTagNumber: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     marginTop: 2,
@@ -6285,7 +3826,7 @@ const styles = StyleSheet.create({
   },
   assetCompanyName: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'right',
   },
@@ -6298,7 +3839,7 @@ const styles = StyleSheet.create({
   },
   assetBarcodeNum: {
     fontSize: 8,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'right',
     marginTop: 3,
@@ -6324,14 +3865,14 @@ const styles = StyleSheet.create({
   },
   assetHarkBannerText: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     lineHeight: 13,
   },
   assetHarkBarcodeNum: {
     fontSize: 8,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginTop: 6,
     textAlign: 'center',
@@ -6348,7 +3889,7 @@ const styles = StyleSheet.create({
   },
   assetHarkFormTitle: {
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     marginBottom: 8,
@@ -6363,7 +3904,7 @@ const styles = StyleSheet.create({
   assetHarkLabel: {
     width: 62,
     fontSize: 7.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
   },
   assetHarkValueBox: {
@@ -6391,7 +3932,7 @@ const styles = StyleSheet.create({
   // --- SCHOOL STYLES ---
   schoolNamePrimary: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
   },
@@ -6422,13 +3963,13 @@ const styles = StyleSheet.create({
   },
   materialNutText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
   },
   materialBarcodeNum: {
     fontSize: 8,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginTop: 5,
     textAlign: 'center',
@@ -6450,7 +3991,7 @@ const styles = StyleSheet.create({
   },
   materialLockNutTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#FFFFFF',
     textAlign: 'center',
   },
@@ -6473,7 +4014,7 @@ const styles = StyleSheet.create({
   },
   materialScrewTitle: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
   },
@@ -6489,7 +4030,7 @@ const styles = StyleSheet.create({
   },
   materialSpecTitle: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     marginBottom: 8,
   },
@@ -6529,13 +4070,13 @@ const styles = StyleSheet.create({
   },
   rackLabelTitle: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
   },
   rackLabelCode: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
     letterSpacing: 0.5,
@@ -6559,7 +4100,7 @@ const styles = StyleSheet.create({
   },
   rackLabelIsleText: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     marginTop: 8,
   },
@@ -6629,7 +4170,7 @@ const styles = StyleSheet.create({
   },
   labCameoTitle: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     textAlign: 'center',
   },
@@ -6653,7 +4194,7 @@ const styles = StyleSheet.create({
   },
   labMicroscopeCode: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
     letterSpacing: 1.2,
     marginTop: 4,
@@ -6696,7 +4237,7 @@ const styles = StyleSheet.create({
   },
   labPathologyLabel: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#111827',
   },
   labPathologyField: {
@@ -6825,12 +4366,12 @@ const styles = StyleSheet.create({
   },
   cable428TopTitle: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
   },
   cable428TopSub: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
   },
   cable428Bottom: {
@@ -6956,7 +4497,7 @@ const styles = StyleSheet.create({
   },
   cableD38SmallText: {
     fontSize: 7.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     lineHeight: 9.5,
   },
@@ -6986,12 +4527,12 @@ const styles = StyleSheet.create({
   },
   cableGp60Code: {
     fontSize: 10.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
   },
   cableGp60Title: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     marginTop: 2,
     marginBottom: 4,
@@ -7007,7 +4548,7 @@ const styles = StyleSheet.create({
   },
   cableGp60Emp: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     marginTop: 6,
   },
@@ -7161,7 +4702,7 @@ const styles = StyleSheet.create({
   },
   cableBarcodeNumber: {
     fontSize: 7.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     marginTop: 1,
   },
@@ -7174,7 +4715,7 @@ const styles = StyleSheet.create({
   },
   cableUsbText: {
     fontSize: 6.5,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#000000',
     lineHeight: 7.5,
   },
@@ -7225,7 +4766,7 @@ const styles = StyleSheet.create({
   },
   cablePanel23Text: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     lineHeight: 13,
   },
@@ -7260,7 +4801,7 @@ const styles = StyleSheet.create({
   },
   cableTStyleBigText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     lineHeight: 14,
   },
@@ -7285,7 +4826,7 @@ const styles = StyleSheet.create({
   },
   cableTStyleBarcodeNumber: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     letterSpacing: 1.2,
     marginTop: 2,
@@ -7364,7 +4905,7 @@ const styles = StyleSheet.create({
   },
   otherFormLabel: {
     fontSize: 12.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
   },
   otherFormSubText: {
@@ -7384,7 +4925,7 @@ const styles = StyleSheet.create({
   },
   otherFieldZh: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
   },
   otherFieldEn: {
@@ -7406,7 +4947,7 @@ const styles = StyleSheet.create({
   },
   otherFieldHeading: {
     fontSize: 11.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
   },
   otherFlexUnderline: {
@@ -7433,7 +4974,7 @@ const styles = StyleSheet.create({
   },
   otherLargeUnit: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#000000',
   },
   otherGridCard: {
@@ -7451,7 +4992,7 @@ const styles = StyleSheet.create({
   otherGridCellText: {
     flex: 1,
     fontSize: 9.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     textAlign: 'center',
   },
@@ -7475,12 +5016,12 @@ const styles = StyleSheet.create({
   },
   otherLargeFieldText: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
   },
   otherCenterTitle: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#000000',
     textAlign: 'center',
     marginBottom: 6,
@@ -7499,7 +5040,7 @@ const styles = StyleSheet.create({
   },
   otherQrRuleTitle: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#000000',
     marginTop: 6,
   },
@@ -7517,12 +5058,12 @@ const styles = StyleSheet.create({
   },
   otherTinyText: {
     fontSize: 8,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
   },
   otherDisclaimerText: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     textAlign: 'center',
     marginTop: 8,
@@ -7540,7 +5081,7 @@ const styles = StyleSheet.create({
   otherTableHeadingCol: {
     width: 65,
     fontSize: 10.5,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     textAlign: 'center',
     borderRightWidth: 1.2,
@@ -7569,13 +5110,13 @@ const styles = StyleSheet.create({
   },
   otherBarcodeText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#000000',
     letterSpacing: 1,
   },
   otherPriceText: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '500',
     color: '#000000',
     marginTop: 2,
   },
@@ -7817,7 +5358,7 @@ const styles = StyleSheet.create({
   cloudAvatarText: {
     color: '#FFFFFF',
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   cloudProfileInfo: {
     flex: 1,
@@ -7845,7 +5386,7 @@ const styles = StyleSheet.create({
   },
   cloudSectionTitle: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#8A97A4',
     textTransform: 'uppercase',
     letterSpacing: 0.4,

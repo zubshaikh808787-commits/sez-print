@@ -26,6 +26,7 @@ export type EditorElementState = {
   left: number;
   top: number;
   width: number;
+  height?: number;
   lockMovement: boolean;
   needPrinting: boolean;
   antiColor: boolean;
@@ -202,6 +203,8 @@ export type FigureShape = 'rectangle' | 'roundedRectangle' | 'oval' | 'circle';
 export type ShapeElementState = {
   figureShape: FigureShape;
   fill: boolean;
+  /** Explicit fill hex. When omitted, `drawingColorIndex` palette color is used. */
+  fillColor?: string;
   lineWidth: number;
   roundRadius: number;
   rotation: Rotation;
@@ -306,6 +309,7 @@ export type TimeElementState = {
   left: number;
   top: number;
   width: number;
+  height?: number;
   lockMovement: boolean;
   needPrinting: boolean;
   antiColor: boolean;
@@ -431,6 +435,7 @@ export type DegreesElementState = {
   left: number;
   top: number;
   width: number;
+  height?: number;
   lockMovement: boolean;
   needPrinting: boolean;
   antiColor: boolean;

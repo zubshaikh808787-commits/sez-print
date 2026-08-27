@@ -13,6 +13,11 @@ import type {
 import type { SignatureStroke } from '@/components/editor/signature-drawing-board';
 import type { BorderStyleId } from '@/constants/border-library';
 
+export type TemplateBackground =
+  | { type: 'none' }
+  | { type: 'color'; color: string }
+  | { type: 'image'; uri: string };
+
 export type LabelOrientation = 0 | 90 | 180 | 270;
 export type PaperType = 'Receipt' | 'Label' | 'Cardstock' | 'Transparent';
 
@@ -82,7 +87,12 @@ export type ElementType =
   | 'border'
   | 'signature';
 
-export type LabelElement =
+type LayerMeta = {
+  opacity?: number;
+  zIndex?: number;
+};
+
+export type LabelElement = (
   | ({ id: string; type: 'text' } & EditorElementState)
   | ({ id: string; type: 'barcode' } & BarcodeElementState)
   | ({ id: string; type: 'qrcode' } & QrcodeElementState)
@@ -95,7 +105,8 @@ export type LabelElement =
   | ({ id: string; type: 'image' } & ImageElementState)
   | ({ id: string; type: 'clipart' } & ClipartElementState)
   | ({ id: string; type: 'border' } & BorderElementState)
-  | ({ id: string; type: 'signature' } & SignatureElementState);
+  | ({ id: string; type: 'signature' } & SignatureElementState)
+) & LayerMeta;
 
 export type LabelElementOfType<T extends ElementType> = Extract<LabelElement, { type: T }>;
 
@@ -110,6 +121,11 @@ export type LabelDocument = {
   groupId: string | null;
   createdAt: number;
   updatedAt: number;
+  /** Bottom-most artboard fill. Absent / `none` means a transparent canvas. */
+  background?: TemplateBackground;
+  /** Industry template id used to create this label (for re-open consistency). */
+  templatePreviewType?: string;
+  templateCategory?: string;
 };
 
 let idCounter = 0;
@@ -150,6 +166,7 @@ export function createLabelDocument(params: {
     orientation: params.orientation ?? 0,
     paperType: params.paperType ?? 'Cardstock',
     elements: params.elements ?? [],
+    background: { type: 'none' },
     groupId: params.groupId ?? null,
     createdAt: now,
     updatedAt: now,
@@ -160,11 +177,14 @@ export function cloneDocument(doc: LabelDocument): LabelDocument {
   return JSON.parse(JSON.stringify(doc)) as LabelDocument;
 }
 
-/** Bounding box of an element in mm. Text-like elements have height derived from font size. */
+/** Bounding box of an element in mm. Prefer the JSON height when the template stored one. */
 export function elementSizeMm(element: LabelElement): { width: number; height: number } {
   switch (element.type) {
     case 'text':
     case 'degrees': {
+      if (typeof element.height === 'number' && element.height > 0) {
+        return { width: element.width, height: element.height };
+      }
       const lines = ('text' in element ? element.text : element.content).split('\n').length;
       return {
         width: element.width,
@@ -172,6 +192,9 @@ export function elementSizeMm(element: LabelElement): { width: number; height: n
       };
     }
     case 'time':
+      if (typeof element.height === 'number' && element.height > 0) {
+        return { width: element.width, height: element.height };
+      }
       return {
         width: element.width,
         height: Math.max(3, ptToMm(element.fontSize) * 1.25),

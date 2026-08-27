@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
   },
   bannerTitle: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '500',
     color: Palette.ink,
   },
   bannerSub: {
@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
   },
   native: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '500',
     color: Palette.ink,
   },
   nativeActive: {
@@ -134,7 +134,7 @@ const styles = StyleSheet.create({
   },
   check: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '500',
     color: Palette.accent,
     marginLeft: Spacing.two,
   },

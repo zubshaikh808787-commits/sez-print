@@ -107,6 +107,14 @@ export default function SettingScreen() {
         <View style={[styles.inner, { width: contentWidth, maxWidth: MaxContentWidth }]}>
           <SettingGroup>
             <SettingRow
+              label={t('setting.connectBluetoothPrinter')}
+              icon="printer"
+              onPress={() => router.push('/printer-connect')}
+            />
+          </SettingGroup>
+
+          <SettingGroup>
+            <SettingRow
               label={t('setting.languageSwitch')}
               icon="globe"
               onPress={() => router.push('/language-switch')}
@@ -196,7 +204,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: '#FFFFFF',
     fontSize: 17,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   scroll: {
     flex: 1,
@@ -250,7 +258,7 @@ const styles = StyleSheet.create({
   },
   fontIconText: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '500',
     color: '#5A6570',
     lineHeight: 20,
   },

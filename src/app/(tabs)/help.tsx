@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '500',
     color: Palette.ink,
     marginBottom: 6,
   },

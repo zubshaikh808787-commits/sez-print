@@ -225,16 +225,6 @@ export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocume
     patch.height = height;
   }
 
-  if (element.type === 'text' || element.type === 'degrees' || element.type === 'time') {
-    const lines =
-      element.type === 'time'
-        ? 1
-        : ('text' in element ? element.text : element.content).split('\n').length;
-    const maxFont = mmToPt(Math.max(2.4, maxH - top) / (1.25 * Math.max(1, lines)));
-    const fitted = Math.max(6, Math.min(element.fontSize, Math.round(maxFont * 2) / 2, 36));
-    if (fitted !== element.fontSize) patch.fontSize = fitted;
-  }
-
   return { ...element, ...patch } as LabelElement;
 }
 

@@ -2,78 +2,98 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import { Component, type ErrorInfo, type ReactNode, useEffect } from 'react';
+import { ScrollView, Text, View, useColorScheme } from 'react-native';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { APP_FONT_MAP } from '@/lib/app-fonts';
 
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Sez Print failed to start', error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#FFFFFF', padding: 24, justifyContent: 'center' }}>
+          <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 8, color: '#111827' }}>
+            Sez Print failed to start
+          </Text>
+          <ScrollView>
+            <Text selectable style={{ color: '#374151', fontSize: 14 }}>
+              {this.state.error.message}
+            </Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const [fontsLoaded, fontError] = useFonts(APP_FONT_MAP);
-  const [ready, setReady] = useState(false);
+  useFonts(APP_FONT_MAP);
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      setReady(true);
-    }
-    const timeout = setTimeout(() => setReady(true), 3000);
-    return () => clearTimeout(timeout);
-  }, [fontsLoaded, fontError]);
-
-  useEffect(() => {
-    if (!ready) return;
     SplashScreen.hideAsync().catch(() => {});
-  }, [ready]);
-
-  if (!ready) {
-    return null;
-  }
+    const timeout = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, []);
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="edit" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="print" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen
-          name="share"
-          options={{ presentation: 'transparentModal', animation: 'fade' }}
-        />
-        <Stack.Screen
-          name="new-label"
-          options={{ presentation: 'transparentModal', animation: 'fade' }}
-        />
-        <Stack.Screen
-          name="print-photo-modal"
-          options={{ presentation: 'transparentModal', animation: 'fade' }}
-        />
-        <Stack.Screen name="photo-frames" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="print-photo" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="scan" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="ocr" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="asr" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="pdf" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="data-file" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="language-switch" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="font-library" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="column-name" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="clipart" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="border-library" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="advanced-settings" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="printing-settings" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="editing-settings" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="editor-settings" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="default-property-settings" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="cache-settings" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="app-permissions" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="printing-history" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="printer-connect" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="new-label-setup" options={{ animation: 'slide_from_right' }} />
-      </Stack>
-    </ThemeProvider>
+    <RootErrorBoundary>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="edit" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="print" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen
+            name="share"
+            options={{ presentation: 'transparentModal', animation: 'fade' }}
+          />
+          <Stack.Screen
+            name="new-label"
+            options={{ presentation: 'transparentModal', animation: 'fade' }}
+          />
+          <Stack.Screen
+            name="print-photo-modal"
+            options={{ presentation: 'transparentModal', animation: 'fade' }}
+          />
+          <Stack.Screen name="photo-frames" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="print-photo" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="scan" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="ocr" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="asr" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="pdf" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="data-file" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="language-switch" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="font-library" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="column-name" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="clipart" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="border-library" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="advanced-settings" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="printing-settings" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="editing-settings" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="editor-settings" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="default-property-settings" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="cache-settings" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="app-permissions" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="printing-history" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="printer-connect" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="new-label-setup" options={{ animation: 'slide_from_right' }} />
+        </Stack>
+      </ThemeProvider>
+    </RootErrorBoundary>
   );
 }

@@ -1,4 +1,5 @@
-import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Tabs } from 'expo-router';
 import { useColorScheme } from 'react-native';
 
 import { Palette } from '@/constants/ui';
@@ -10,32 +11,48 @@ export default function AppTabs() {
   const { t } = useTranslation();
 
   return (
-    <NativeTabs
-      backgroundColor={isDark ? '#1A1D20' : '#FFFFFF'}
-      indicatorColor={Palette.accent}
-      labelStyle={{
-        default: { color: isDark ? '#8E8E93' : '#8A95A0' },
-        selected: { color: Palette.accent },
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: Palette.accent,
+        tabBarInactiveTintColor: isDark ? '#8E8E93' : '#8A95A0',
+        tabBarStyle: {
+          backgroundColor: isDark ? '#1A1D20' : '#FFFFFF',
+          borderTopColor: isDark ? '#2A2E32' : '#E6EBF0',
+        },
       }}>
-      <NativeTabs.Trigger name="index">
-        <Label>{t('tab.home')}</Label>
-        <Icon sf={{ default: 'house', selected: 'house.fill' }} />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="template">
-        <Label>{t('tab.template')}</Label>
-        <Icon sf={{ default: 'square.grid.2x2', selected: 'square.grid.2x2.fill' }} />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="help">
-        <Label>{t('tab.help')}</Label>
-        <Icon sf={{ default: 'questionmark.circle', selected: 'questionmark.circle.fill' }} />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="setting">
-        <Label>{t('tab.setting')}</Label>
-        <Icon sf={{ default: 'gearshape', selected: 'gearshape.fill' }} />
-      </NativeTabs.Trigger>
-    </NativeTabs>
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: t('tab.home'),
+          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="template"
+        options={{
+          title: t('tab.template'),
+          tabBarIcon: ({ color, size }) => <Ionicons name="grid" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="help"
+        options={{
+          title: t('tab.help'),
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="help-circle-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="setting"
+        options={{
+          title: t('tab.setting'),
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="settings-outline" size={size} color={color} />
+          ),
+        }}
+      />
+    </Tabs>
   );
 }

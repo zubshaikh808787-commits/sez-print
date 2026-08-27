@@ -20,7 +20,7 @@ import {
   ScanLabelIcon,
   ShareNodeIcon,
 } from '@/components/home-icons';
-import { LabelPreview } from '@/components/label-preview';
+import { LabelPreview, LABEL_PAD_STAGE_MIN_HEIGHT } from '@/components/label-preview';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette, scaleFont } from '@/constants/ui';
 import { useLabelStore } from '@/stores/label-store';
@@ -241,6 +241,8 @@ export default function HomeScreen() {
                   <LabelPreview
                     document={recentLabel}
                     width={previewWidth}
+                    maxHeight={LABEL_PAD_STAGE_MIN_HEIGHT}
+                    showStage
                     style={styles.previewBorder}
                   />
                 ) : (

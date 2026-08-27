@@ -7,8 +7,41 @@ import {
   DEFAULT_TIME_STATE,
   createTableState,
 } from '@/components/editor/types';
-import { templateFontSizes } from '@/lib/element-sizing';
-import { generateId, type LabelElement } from '@/lib/label-document';
+import { buildIndustryPreviewElements } from '@/constants/industry-template-elements';
+import { buildJewelryTemplateElements } from '@/constants/jewelry-template-elements';
+import { templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
+import { generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
+import {
+  colorBackground,
+  emptyBackground,
+  freezeTemplateLayers,
+  instantiateTemplate,
+  templateUsesDieCutBackground,
+  type TemplateDefinition,
+} from '@/lib/template-schema';
+
+/** Map previewType prefix to the layout builder category. */
+function categoryForPreview(previewType: string, fallback: string): string {
+  if (previewType.startsWith('jew-')) return 'jewelry';
+  if (previewType.startsWith('smkt-')) return 'supermarket';
+  if (previewType.startsWith('food-')) return 'food';
+  if (previewType.startsWith('cable-')) return 'cable';
+  if (previewType.startsWith('circle-')) return 'circle';
+  if (previewType.startsWith('appl-')) return 'appliances';
+  if (previewType.startsWith('storage-')) return 'storage';
+  if (previewType.startsWith('other-')) return 'other';
+  if (
+    previewType.startsWith('rect-') ||
+    previewType.startsWith('dual-') ||
+    previewType.startsWith('two-') ||
+    previewType.startsWith('three-') ||
+    previewType.startsWith('four-')
+  ) {
+    return 'general';
+  }
+  if (['macaroon', 'cartoon', 'watercolor', 'color-pill'].includes(previewType)) return 'popular';
+  return fallback;
+}
 
 type Frame = { left: number; top: number; width: number; height?: number };
 
@@ -27,6 +60,7 @@ function text(
     left: frame.left,
     top: frame.top,
     width: frame.width,
+    height: textBlockHeightMm(fontSize, content.split('\n').length),
     ...extra,
   };
 }
@@ -95,6 +129,8 @@ function circleShape(widthMm: number, heightMm: number): LabelElement {
     width: d,
     height: d,
     lineWidth: 0.4,
+    fill: true,
+    fillColor: '#FFFFFF',
   };
 }
 
@@ -107,6 +143,7 @@ function timeElement(frame: Frame, fontSize: number): LabelElement {
     left: frame.left,
     top: frame.top,
     width: frame.width,
+    height: textBlockHeightMm(fontSize, 1),
     align: 'left',
   };
 }
@@ -135,12 +172,23 @@ export function buildTemplateElements(
   name: string,
   w: number,
   h: number,
+  previewType?: string,
 ): LabelElement[] {
+  if (previewType?.startsWith('jew-')) {
+    return buildJewelryTemplateElements(previewType, w, h);
+  }
+
+  if (previewType) {
+    const specific = buildIndustryPreviewElements(previewType, name, w, h);
+    if (specific) return specific;
+  }
+
+  const effectiveCategory = previewType ? categoryForPreview(previewType, category) : category;
   const { titlePt, bodyPt, smallPt } = templateFontSizes(w, h);
   const pad = Math.max(1, w * 0.04);
   const innerW = w - pad * 2;
 
-  switch (category.toLowerCase()) {
+  switch (effectiveCategory.toLowerCase()) {
     case 'popular':
       return [
         frameShape(w, h),
@@ -299,4 +347,44 @@ export function buildTemplateElements(
         text({ left: pad, top: h * 0.55, width: innerW }, `${w} × ${h} mm`, smallPt),
       ];
   }
+}
+
+export function getTemplateDefinition(params: {
+  name: string;
+  category: string;
+  widthMm: number;
+  heightMm: number;
+  previewType: string;
+}): TemplateDefinition {
+  const layers = freezeTemplateLayers(
+    params.previewType,
+    buildTemplateElements(
+      params.category,
+      params.name,
+      params.widthMm,
+      params.heightMm,
+      params.previewType,
+    ),
+  );
+  return {
+    id: params.previewType,
+    name: params.name,
+    category: params.category,
+    designWidth: params.widthMm,
+    designHeight: params.heightMm,
+    background: templateUsesDieCutBackground(params.previewType)
+      ? emptyBackground()
+      : colorBackground('#FFFFFF'),
+    layers,
+  };
+}
+
+export function createIndustryTemplateDocument(params: {
+  name: string;
+  category: string;
+  widthMm: number;
+  heightMm: number;
+  previewType: string;
+}): LabelDocument {
+  return instantiateTemplate(getTemplateDefinition(params));
 }

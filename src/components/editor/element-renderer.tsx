@@ -42,6 +42,16 @@ export function inkColor(drawingColorIndex: number) {
   return drawingColorIndex === 0 || color === '#FFFFFF' ? '#111827' : color;
 }
 
+function paletteColor(drawingColorIndex: number) {
+  return DRAWING_COLORS[drawingColorIndex] ?? '#111827';
+}
+
+function shapeFillColor(element: ShapeElementState) {
+  if (!element.fill) return 'transparent';
+  if (element.fillColor) return element.fillColor;
+  return paletteColor(element.drawingColorIndex);
+}
+
 export function resolveFontFamily(name: string): string | undefined {
   if (!name || name === 'Default' || name === 'Barcode') return undefined;
   const byName = FONT_LIBRARY.find((f) => f.name === name || f.id === name);
@@ -49,7 +59,7 @@ export function resolveFontFamily(name: string): string | undefined {
 }
 
 function fontSizePx(fontSizePt: number, scale: number) {
-  return Math.max(4, ptToMm(fontSizePt) * scale);
+  return Math.max(1, ptToMm(fontSizePt) * scale);
 }
 
 function useClock(enabled: boolean) {
@@ -81,8 +91,7 @@ function textStyleFor(
     | 'align'
     | 'drawingColorIndex'
     | 'antiColor'
-    | 'lineSpacing'
-  >,
+  > & { lineSpacing?: EditorElementState['lineSpacing'] },
   scale: number,
 ) {
   const size = fontSizePx(state.fontSize, scale);
@@ -177,8 +186,6 @@ function BarcodeContent({
   const content =
     element.contentType === 'Data Source' && element.columnNameContent
       ? `{${element.columnNameContent}}`
-      : element.contentType === 'Degrees'
-      ? applySerialOffset(element.content || '0123456789', element.degreesOffset, 1)
       : element.content || '0123456789';
   const bars = useMemo(
     () => barcodeBarsForMode(element.encodeMode, content),
@@ -187,8 +194,8 @@ function BarcodeContent({
   const color = element.antiColor ? '#FFFFFF' : inkColor(element.drawingColorIndex);
   const bgColor = element.antiColor ? inkColor(element.drawingColorIndex) : 'transparent';
   const labelSize = fontSizePx(element.fontSize, scale);
-  const showLabel = element.textFlag !== 'Hide' && heightPx > labelSize * 1.6;
-  const barsHeight = showLabel ? heightPx - labelSize * 1.3 : heightPx;
+  const showLabel = element.textFlag !== 'Hide';
+  const barsHeight = showLabel ? Math.max(2, heightPx - labelSize * 1.3) : heightPx;
   const label = showLabel ? (
     <Text
       numberOfLines={1}
@@ -271,7 +278,7 @@ function QrcodeContent({
       <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
         <QRCode
           value={content}
-          size={Math.max(16, size)}
+          size={Math.max(1, size)}
           color={color}
           backgroundColor="transparent"
           ecl={element.errorLevel}
@@ -375,7 +382,7 @@ function ShapeContent({
   const color = inkColor(element.drawingColorIndex);
   const strokeWidth = Math.max(1, element.lineWidth * scale);
   const inset = strokeWidth / 2;
-  const fill = element.fill ? color : 'transparent';
+  const fill = shapeFillColor(element);
 
   if (element.figureShape === 'oval' || element.figureShape === 'circle') {
     const rx =
