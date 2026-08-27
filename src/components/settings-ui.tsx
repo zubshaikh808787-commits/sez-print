@@ -381,7 +381,6 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: Palette.card,
     borderRadius: 10,
-    overflow: 'hidden',
     ...cardShadow,
   },
   navRow: {
@@ -391,6 +390,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    overflow: 'hidden',
   },
   toggleRow: {
     minHeight: 56,
@@ -428,6 +428,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    overflow: 'hidden',
   },
   radioRow: {
     minHeight: 56,

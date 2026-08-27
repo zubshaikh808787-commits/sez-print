@@ -26,11 +26,10 @@ export const cardShadow = Platform.select({
   default: {},
 });
 
-/** Android-only ripple; omit on iOS so Pressable keeps opacity feedback. */
+/** Android-only ripple; omit on iOS so Pressable keeps opacity feedback.
+ * Do not set `foreground: true` — it crashes inside overflow-hidden cards on Android. */
 export const androidRipple =
-  Platform.OS === 'android'
-    ? { color: 'rgba(23, 166, 184, 0.18)' as const, foreground: true }
-    : undefined;
+  Platform.OS === 'android' ? { color: 'rgba(23, 166, 184, 0.18)' as const } : undefined;
 
 /**
  * Clamp a base size against the device width so layouts stay readable on

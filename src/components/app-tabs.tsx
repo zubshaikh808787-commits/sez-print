@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
-import { useColorScheme } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 
 import { Palette } from '@/constants/ui';
 import { useTranslation } from '@/lib/i18n';
@@ -19,6 +19,9 @@ export default function AppTabs() {
         tabBarStyle: {
           backgroundColor: isDark ? '#1A1D20' : '#FFFFFF',
           borderTopColor: isDark ? '#2A2E32' : '#E6EBF0',
+          ...(Platform.OS === 'android'
+            ? { height: 56, paddingBottom: 6, paddingTop: 4, elevation: 8 }
+            : null),
         },
       }}>
       <Tabs.Screen

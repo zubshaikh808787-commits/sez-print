@@ -14,8 +14,8 @@ export const LABEL_PAD_STAGE_MIN_HEIGHT = 176;
 /** Artboard bounds only. Fill comes from template JSON (`background`). */
 export const LABEL_PAD_CANVAS_STYLE = {
   overflow: 'hidden' as const,
-  borderWidth: StyleSheet.hairlineWidth,
-  borderColor: 'rgba(15, 23, 42, 0.16)',
+  borderWidth: 1,
+  borderColor: 'rgba(15, 23, 42, 0.35)',
 };
 
 export function artboardSurfaceStyle(document: LabelDocument): ViewStyle {

@@ -206,6 +206,18 @@ export function textBlockHeightMm(fontSizePt: number, lines: number) {
 
 /** Clamp element position/size so it stays inside the label. */
 export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocument, 'widthMm' | 'heightMm'>) {
+  if (element.type === 'border') {
+    return {
+      ...element,
+      left: 0,
+      top: 0,
+      width: doc.widthMm,
+      height: doc.heightMm,
+      rotation: 0,
+      lockMovement: true,
+    };
+  }
+
   const size = bboxOf(element);
   const maxW = doc.widthMm;
   const maxH = doc.heightMm;
@@ -214,8 +226,6 @@ export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocume
   let left = element.left;
   let top = element.top;
 
-  if (width > maxW - 0.4) width = Math.max(3, maxW - 0.8);
-  if (height > maxH - 0.4) height = Math.max(2, maxH - 0.8);
   left = Math.min(Math.max(0, left), Math.max(0, maxW - width));
   top = Math.min(Math.max(0, top), Math.max(0, maxH - height));
 

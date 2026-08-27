@@ -223,7 +223,6 @@ const styles = StyleSheet.create({
   group: {
     backgroundColor: Palette.card,
     borderRadius: 10,
-    overflow: 'hidden',
     ...cardShadow,
   },
   row: {
@@ -231,6 +230,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 52,
     paddingRight: Spacing.three,
+    overflow: 'hidden',
   },
   rowPressed: {
     backgroundColor: '#F5F7FA',

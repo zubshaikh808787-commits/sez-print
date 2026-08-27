@@ -32,6 +32,7 @@ import {
   fitTableDefaults,
   fitTextDefaults,
   fitTimeDefaults,
+  normalizeDocumentElements,
 } from '@/lib/element-sizing';
 import { DegreesPropertyPanel } from '@/components/editor/degrees-property-panel';
 import { ArcTextPropertyPanel } from '@/components/editor/arctext-property-panel';
@@ -315,6 +316,23 @@ function CanvasElement({
     }),
   ).current;
 
+  if (element.type === 'border') {
+    return (
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: element.left * scale,
+          top: element.top * scale,
+          width: widthPx,
+          height: heightPx,
+          zIndex: 0,
+        }}>
+        <ElementContentView element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />
+      </View>
+    );
+  }
+
   return (
     <View
       {...panResponder.panHandlers}
@@ -381,7 +399,8 @@ export default function EditScreen() {
     if (params.labelId) {
       const existing = useLabelStore.getState().getDocument(params.labelId);
       if (existing) {
-        return JSON.parse(JSON.stringify(existing)) as LabelDocument;
+        const copy = JSON.parse(JSON.stringify(existing)) as LabelDocument;
+        return { ...copy, elements: normalizeDocumentElements(copy) };
       }
     }
 
@@ -435,7 +454,7 @@ export default function EditScreen() {
       paperType: parsePaperType(params.paperType),
       elements,
     });
-    return created;
+    return { ...created, elements: normalizeDocumentElements(created) };
   });
   const [savedToStore, setSavedToStore] = useState(() => Boolean(params.labelId));
   const [dirty, setDirty] = useState(false);
@@ -745,11 +764,11 @@ export default function EditScreen() {
             borderStyle: 'solid-medium',
             lineWidth: 0.75,
             rotation: 0,
-            left: 0.5,
-            top: 0.5,
-            width: maxW - 1,
-            height: maxH - 1,
-            lockMovement: false,
+            left: 0,
+            top: 0,
+            width: maxW,
+            height: maxH,
+            lockMovement: true,
             needPrinting: true,
             drawingColorIndex: 0,
             ...overrides,
@@ -1152,7 +1171,6 @@ export default function EditScreen() {
         const existingBorder = docRef.current.elements.find((el) => el.type === 'border');
         if (existingBorder) {
           patchElement(existingBorder.id, { borderStyle });
-          setSelectedIds([existingBorder.id]);
         } else {
           addElement('border', { borderStyle });
         }

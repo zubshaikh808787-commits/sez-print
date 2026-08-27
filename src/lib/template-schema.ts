@@ -5,6 +5,7 @@ import {
   type LabelElement,
   type TemplateBackground,
 } from '@/lib/label-document';
+import { normalizeDocumentElements } from '@/lib/element-sizing';
 
 export type { TemplateBackground } from '@/lib/label-document';
 
@@ -64,7 +65,11 @@ export function templateScaleFactor(
 }
 
 export function sortLayers(layers: LabelElement[]): LabelElement[] {
-  return [...layers].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+  return [...layers].sort((a, b) => {
+    if (a.type === 'border' && b.type !== 'border') return -1;
+    if (b.type === 'border' && a.type !== 'border') return 1;
+    return (a.zIndex ?? 0) - (b.zIndex ?? 0);
+  });
 }
 
 /** Stamp stable ids / zIndex so preview and editor share one schema instance. */
@@ -85,11 +90,15 @@ export function instantiateTemplate(definition: TemplateDefinition): LabelDocume
     heightMm: definition.designHeight,
     elements: layers,
   });
-  return {
+  const document: LabelDocument = {
     ...created,
     background: definition.background,
     templatePreviewType: definition.id,
     templateCategory: definition.category,
+  };
+  return {
+    ...document,
+    elements: normalizeDocumentElements(document),
   };
 }
 

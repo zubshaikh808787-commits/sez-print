@@ -1,7 +1,7 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import type { ComponentProps } from 'react';
-import { Platform, type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, View, type StyleProp, type ViewStyle } from 'react-native';
 
 export type AppIconName = string;
 
@@ -15,7 +15,7 @@ const ION: Record<string, IoniconsName> = {
   'antenna.radiowaves.left.and.right': 'wifi-outline',
   'arrow.clockwise': 'refresh-outline',
   'arrow.down': 'arrow-down-outline',
-  'arrow.down.right.and.arrow.up.left': 'contract-outline',
+  'arrow.down.right.and.arrow.up.left': 'scan-outline',
   'arrow.left.and.right': 'swap-horizontal-outline',
   'arrow.left.to.line': 'arrow-back-outline',
   'arrow.right.to.line': 'arrow-forward-outline',
@@ -25,10 +25,10 @@ const ION: Record<string, IoniconsName> = {
   'arrow.up.right.square': 'open-outline',
   'arrow.uturn.backward': 'arrow-undo-outline',
   'arrow.uturn.forward': 'arrow-redo-outline',
-  'arrowtriangle.down.fill': 'caret-down',
-  'arrowtriangle.left.fill': 'caret-back',
-  'arrowtriangle.right.fill': 'caret-forward',
-  'arrowtriangle.up.fill': 'caret-up',
+  'arrowtriangle.down.fill': 'chevron-down',
+  'arrowtriangle.left.fill': 'chevron-back',
+  'arrowtriangle.right.fill': 'chevron-forward',
+  'arrowtriangle.up.fill': 'chevron-up',
   barcode: 'barcode-outline',
   'barcode.viewfinder': 'barcode-outline',
   character: 'text-outline',
@@ -41,12 +41,12 @@ const ION: Record<string, IoniconsName> = {
   'doc.text': 'document-text-outline',
   eye: 'eye-outline',
   folder: 'folder-outline',
-  'flashlight.off.fill': 'flashlight-outline',
-  'flashlight.on.fill': 'flashlight',
+  'flashlight.off.fill': 'flash-outline',
+  'flashlight.on.fill': 'flash',
   gearshape: 'settings-outline',
   'gearshape.fill': 'settings',
   globe: 'globe-outline',
-  hexagon: 'hexagon-outline',
+  hexagon: 'stop-outline',
   'house.fill': 'home',
   'icloud.and.arrow.up': 'cloud-upload-outline',
   'info.circle': 'information-circle-outline',
@@ -80,7 +80,7 @@ const ION: Record<string, IoniconsName> = {
   'square.grid.2x2.fill': 'grid',
   'square.on.circle': 'shapes-outline',
   'square.on.square': 'copy-outline',
-  'square.stack.3d.up.fill': 'layers',
+  'square.stack.3d.up.fill': 'albums',
   tablecells: 'grid-outline',
   'tablecells.badge.ellipsis': 'grid-outline',
   'text.aligncenter': 'text',
@@ -88,8 +88,8 @@ const ION: Record<string, IoniconsName> = {
   'text.alignright': 'text',
   'text.justify': 'text',
   textformat: 'text-outline',
-  'tray.and.arrow.down': 'save-outline',
-  'tray.and.arrow.down.fill': 'save',
+  'tray.and.arrow.down': 'download-outline',
+  'tray.and.arrow.down.fill': 'download',
   trash: 'trash-outline',
   viewfinder: 'scan-outline',
   xmark: 'close-outline',
@@ -125,12 +125,10 @@ export function AppIcon({
 
   const glyph = ION[name] ?? 'ellipse-outline';
   return (
-    <Ionicons
-      name={glyph}
-      size={size}
-      color={tintColor}
-      pointerEvents={pointerEvents}
-      style={style}
-    />
+    <View
+      pointerEvents={pointerEvents ?? 'auto'}
+      style={[{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }, style]}>
+      <Ionicons name={glyph} size={size} color={tintColor} />
+    </View>
   );
 }
