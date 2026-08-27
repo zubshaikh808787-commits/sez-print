@@ -10,6 +10,8 @@ export type PrinterConnectionStatus =
   | 'connecting'
   | 'connected';
 
+export type PrinterTransport = 'bluetooth-spp' | 'bluetooth-ble' | 'wifi';
+
 export type PrintHistoryEntry = {
   id: string;
   labelName: string;
@@ -23,11 +25,23 @@ type PrinterStoreState = {
   status: PrinterConnectionStatus;
   deviceId: string | null;
   deviceName: string | null;
+  transport: PrinterTransport | null;
+  sdkId: 'td404' | 'generic' | null;
+  /** Backend Wi‑Fi session id when transport === 'wifi' */
+  backendPrinterId: string | null;
   lastDeviceId: string | null;
   lastDeviceName: string | null;
   history: PrintHistoryEntry[];
   setStatus: (status: PrinterConnectionStatus) => void;
-  setConnectedDevice: (deviceId: string, deviceName: string) => void;
+  setConnectedDevice: (
+    deviceId: string,
+    deviceName: string,
+    meta?: {
+      transport?: PrinterTransport;
+      sdkId?: 'td404' | 'generic';
+      backendPrinterId?: string | null;
+    },
+  ) => void;
   clearConnection: () => void;
   addHistoryEntry: (entry: Omit<PrintHistoryEntry, 'id' | 'printedAt'>) => void;
   clearHistory: () => void;
@@ -39,22 +53,36 @@ export const usePrinterStore = create<PrinterStoreState>()(
       status: 'disconnected',
       deviceId: null,
       deviceName: null,
+      transport: null,
+      sdkId: null,
+      backendPrinterId: null,
       lastDeviceId: null,
       lastDeviceName: null,
       history: [],
 
       setStatus: (status) => set({ status }),
 
-      setConnectedDevice: (deviceId, deviceName) =>
+      setConnectedDevice: (deviceId, deviceName, meta) =>
         set({
           status: 'connected',
           deviceId,
           deviceName,
+          transport: meta?.transport ?? null,
+          sdkId: meta?.sdkId ?? null,
+          backendPrinterId: meta?.backendPrinterId ?? null,
           lastDeviceId: deviceId,
           lastDeviceName: deviceName,
         }),
 
-      clearConnection: () => set({ status: 'disconnected', deviceId: null, deviceName: null }),
+      clearConnection: () =>
+        set({
+          status: 'disconnected',
+          deviceId: null,
+          deviceName: null,
+          transport: null,
+          sdkId: null,
+          backendPrinterId: null,
+        }),
 
       addHistoryEntry: (entry) =>
         set((state) => ({

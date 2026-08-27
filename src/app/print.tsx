@@ -40,6 +40,7 @@ import {
   shiftBits,
 } from '@/lib/printer/escpos';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
+import { encodeTscBitmapJob } from '@/lib/printer/tsc';
 import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
@@ -440,7 +441,7 @@ export default function PrintScreen() {
     if (!manager.isConnected) {
       Alert.alert(
         'Printer Not Connected',
-        'Connect a Bluetooth ESC/POS printer before printing.',
+        'Connect your TD-404 (Bluetooth or Wi‑Fi) before printing.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Connect', onPress: () => router.push('/printer-connect') },
@@ -462,6 +463,7 @@ export default function PrintScreen() {
         250,
         Math.max(10, defaults.grayThreshold + (darkness != null ? (darkness - 8) * 10 : 0)),
       );
+      const useTsc = manager.usesTd404CommandSet;
 
       for (let page = 0; page < pageCount; page++) {
         if (pageCount > 1) {
@@ -483,13 +485,21 @@ export default function PrintScreen() {
         const offsetDots = Math.round(hOffset * DOTS_PER_MM);
         if (offsetDots !== 0) bits = shiftBits(bits, offsetDots);
 
-        const bytes = encodeEscPosJob(bits, {
-          copies,
-          leadFeedLines: Math.max(0, Math.round(vOffset * DOTS_PER_MM)),
-          trailFeedLines: Math.max(0, Math.round(gapLength * DOTS_PER_MM)),
-          density: darkness,
-          speed,
-        });
+        const bytes = useTsc
+          ? encodeTscBitmapJob(bits, {
+              widthMm,
+              heightMm,
+              gapMm: gapLength,
+              copies,
+              density: darkness,
+            })
+          : encodeEscPosJob(bits, {
+              copies,
+              leadFeedLines: Math.max(0, Math.round(vOffset * DOTS_PER_MM)),
+              trailFeedLines: Math.max(0, Math.round(gapLength * DOTS_PER_MM)),
+              density: darkness,
+              speed,
+            });
         await manager.print(bytes);
       }
 
@@ -575,6 +585,7 @@ export default function PrintScreen() {
               <LabelPreview
                 document={previewDocument}
                 width={cardWidth}
+                maxHeight={Math.min(320, cardWidth * 1.4)}
                 style={styles.previewShadow}
               />
             ) : params.imageUri ? (

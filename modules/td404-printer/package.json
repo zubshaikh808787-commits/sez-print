@@ -1,0 +1,18 @@
+{
+  "name": "td404-printer",
+  "version": "1.0.0",
+  "description": "TD-404 / Ninestar classic Bluetooth (SPP) printer module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {},
+  "keywords": ["expo", "td404", "printer"],
+  "license": "UNLICENSED",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

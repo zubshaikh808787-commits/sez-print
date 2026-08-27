@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.td404printer'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.td404printer"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  implementation 'androidx.core:core-ktx:1.13.1'
+}
+
+// Classic Bluetooth SPP matches Ninestar TD-404 SppBluetoothPort transport.

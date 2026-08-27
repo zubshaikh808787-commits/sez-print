@@ -9,7 +9,11 @@ import { Palette, Type } from '@/constants/ui';
 export default function PrintPhotoModal() {
   const insets = useSafeAreaInsets();
 
-  const handleSelectMode = async (mode: 'frame' | 'direct') => {
+  const handleUseFrame = () => {
+    router.replace('/photo-frames');
+  };
+
+  const handlePrintDirectly = async () => {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
@@ -20,12 +24,10 @@ export default function PrintPhotoModal() {
       if (!res.canceled && res.assets && res.assets.length > 0) {
         const asset = res.assets[0];
         router.replace({
-          pathname: '/print',
+          pathname: '/print-photo',
           params: {
-            mode,
+            mode: 'direct',
             imageUri: asset.uri,
-            imageWidth: asset.width,
-            imageHeight: asset.height,
           },
         });
       }
@@ -39,15 +41,13 @@ export default function PrintPhotoModal() {
       <Pressable style={styles.backdrop} onPress={() => router.back()} />
 
       <View style={[styles.bottom, { paddingBottom: insets.bottom + 10 }]}>
-        {/* Top Sheet Card */}
         <View style={styles.sheet}>
           <Text style={styles.title}>Please select print mode</Text>
           <View style={styles.divider} />
 
           <View style={styles.options}>
-            {/* Option 1: Use frame */}
             <Pressable
-              onPress={() => handleSelectMode('frame')}
+              onPress={handleUseFrame}
               style={({ pressed }) => [styles.option, pressed && styles.pressed]}>
               <View style={styles.iconContainer}>
                 <UseFrameIcon color="#214668" size={38} />
@@ -55,9 +55,8 @@ export default function PrintPhotoModal() {
               <Text style={styles.optionLabel}>Use frame</Text>
             </Pressable>
 
-            {/* Option 2: Print directly */}
             <Pressable
-              onPress={() => handleSelectMode('direct')}
+              onPress={() => void handlePrintDirectly()}
               style={({ pressed }) => [styles.option, pressed && styles.pressed]}>
               <View style={styles.iconContainer}>
                 <PrintDirectlyIcon color="#17A6B8" size={38} />
@@ -67,7 +66,6 @@ export default function PrintPhotoModal() {
           </View>
         </View>
 
-        {/* Bottom Cancel Button */}
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
