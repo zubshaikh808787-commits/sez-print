@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -15,21 +15,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LabelSizeEditor } from '@/components/label-size-editor';
 import { Spacing } from '@/constants/theme';
 import { Palette } from '@/constants/ui';
 import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { useTranslation } from '@/lib/i18n';
+import { clampLabelMm, validateLabelSize } from '@/lib/label-geometry';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
-
-const STANDARD_SIZES = [
-  { w: 40, h: 30, label: '40×30mm' },
-  { w: 50, h: 30, label: '50×30mm' },
-  { w: 57, h: 30, label: '57×30mm' },
-  { w: 30, h: 20, label: '30×20mm' },
-  { w: 25, h: 15, label: '25×15mm' },
-  { w: 20, h: 15, label: '20×15mm' },
-];
 
 function previewTypeForColumns(columns: number): string {
   if (columns >= 4) return 'four-ups-20x15';
@@ -47,6 +40,7 @@ export default function NewLabelSetupScreen() {
     cloneName?: string;
     cloneWidth?: string;
     cloneHeight?: string;
+    focusSize?: string;
   }>();
   const isClone = params.isClone === 'true';
   const defaults = useSettingsStore((s) => s.defaults);
@@ -66,22 +60,28 @@ export default function NewLabelSetupScreen() {
   const [batchEdit, setBatchEdit] = useState(false);
 
   const [nameModalVisible, setNameModalVisible] = useState(false);
-  const [sizeModalVisible, setSizeModalVisible] = useState(false);
+  const [sizeModalVisible, setSizeModalVisible] = useState(params.focusSize === '1');
   const [tempName, setTempName] = useState('');
 
-  const canvasWidth = useMemo(
-    () => labelWidth * columns + columnSpacing * Math.max(0, columns - 1),
-    [labelWidth, columns, columnSpacing],
-  );
+  useEffect(() => {
+    if (params.focusSize === '1') setSizeModalVisible(true);
+  }, [params.focusSize]);
 
   const handleCreateLabel = () => {
+    const size = clampLabelMm(labelWidth, labelHeight);
+    const error = validateLabelSize(size.widthMm, size.heightMm);
+    if (error) {
+      Alert.alert('Invalid size', error);
+      return;
+    }
+
     if (columns > 1) {
       const previewType = previewTypeForColumns(columns);
       const doc = createIndustryTemplateDocument({
         name: labelName,
         category: 'Multi-UP',
-        widthMm: canvasWidth,
-        heightMm: labelHeight,
+        widthMm: size.widthMm * columns + columnSpacing * Math.max(0, columns - 1),
+        heightMm: size.heightMm,
         previewType,
       });
       upsertDocument(doc);
@@ -93,8 +93,8 @@ export default function NewLabelSetupScreen() {
       pathname: '/edit',
       params: {
         labelName,
-        labelWidth: String(labelWidth),
-        labelHeight: String(labelHeight),
+        labelWidth: String(size.widthMm),
+        labelHeight: String(size.heightMm),
         orientation: `${defaults.orientation}°`,
         paperType: defaults.paperType,
         ...(isClone && params.cloneFromId ? { cloneFromId: params.cloneFromId } : {}),
@@ -154,10 +154,10 @@ export default function NewLabelSetupScreen() {
         <Pressable
           onPress={() => setSizeModalVisible(true)}
           style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
-          <Text style={styles.fieldLabel}>Set label size (unit: mm)</Text>
+          <Text style={styles.fieldLabel}>Set label size</Text>
           <View style={styles.fieldValueWrap}>
             <Text style={styles.fieldValueText}>
-              {labelWidth}×{labelHeight}mm
+              {labelWidth}×{labelHeight} mm
             </Text>
             <Text style={styles.chevronRight}>›</Text>
           </View>
@@ -270,24 +270,26 @@ export default function NewLabelSetupScreen() {
         animationType="fade"
         onRequestClose={() => setSizeModalVisible(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalHeading}>Label size</Text>
-            {STANDARD_SIZES.map((size) => (
-              <Pressable
-                key={size.label}
-                onPress={() => {
-                  setLabelWidth(size.w);
-                  setLabelHeight(size.h);
-                  setSizeModalVisible(false);
-                }}
-                style={({ pressed }) => [styles.sizeRow, pressed && styles.pressed]}>
-                <Text style={styles.sizeRowText}>{size.label}</Text>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.sizeModalWrap}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalHeading}>Customize label size</Text>
+              {sizeModalVisible ? (
+                <LabelSizeEditor
+                  widthMm={labelWidth}
+                  heightMm={labelHeight}
+                  onChange={(w, h) => {
+                    setLabelWidth(w);
+                    setLabelHeight(h);
+                  }}
+                />
+              ) : null}
+              <Pressable style={styles.modalBtn} onPress={() => setSizeModalVisible(false)}>
+                <Text style={styles.modalOk}>Done</Text>
               </Pressable>
-            ))}
-            <Pressable style={styles.modalBtn} onPress={() => setSizeModalVisible(false)}>
-              <Text style={styles.modalCancel}>{t('common.cancel')}</Text>
-            </Pressable>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>
@@ -415,7 +417,6 @@ const styles = StyleSheet.create({
   modalBtn: { paddingVertical: 6 },
   modalCancel: { color: '#64748B', fontSize: 16, fontWeight: '500' },
   modalOk: { color: Palette.accent, fontSize: 16, fontWeight: '500' },
-  sizeRow: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E2E8F0' },
-  sizeRowText: { fontSize: 15, fontWeight: '400', color: Palette.ink },
+  sizeModalWrap: { width: '100%' },
   pressed: { opacity: 0.75 },
 });

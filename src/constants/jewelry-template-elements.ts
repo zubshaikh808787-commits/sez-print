@@ -4,7 +4,7 @@ import {
   DEFAULT_LINE_STATE,
   DEFAULT_SHAPE_STATE,
 } from '@/components/editor/types';
-import { templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
+import { clampElementToLabel, templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
 import { generateId, type LabelElement } from '@/lib/label-document';
 
 type Frame = { left: number; top: number; width: number; height?: number };
@@ -140,19 +140,20 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
   const { smallPt, bodyPt } = templateFontSizes(w, h);
   const pad = Math.max(0.8, w * 0.02);
 
+  const els: LabelElement[] = (() => {
   switch (previewType) {
     case 'jew-dumbell-13x85': {
-      const capW = (w - 4) / 2;
-      const bridgeW = 2.2;
+      const bridgeW = Math.min(3.2, w * 0.08);
+      const capW = (w - bridgeW) / 2;
       return [
-        boxEl(pad, pad * 0.5, capW, h - pad, { radius: 2.4 }),
-        boxEl(pad + capW - 0.2, h * 0.36, bridgeW, h * 0.28, { rounded: false }),
-        boxEl(pad + capW + bridgeW - 0.4, pad * 0.5, capW, h - pad, { radius: 2.4 }),
-        textEl({ left: pad + 1, top: h * 0.28, width: capW - 2 }, 'Jewelry label', smallPt, {
+        boxEl(0, 0, capW, h, { radius: 2.4 }),
+        boxEl(capW, h * 0.32, bridgeW, h * 0.36, { rounded: false }),
+        boxEl(capW + bridgeW, 0, capW, h, { radius: 2.4 }),
+        textEl({ left: 1, top: h * 0.28, width: capW - 2 }, 'Jewelry label', smallPt, {
           align: 'center',
         }),
         textEl(
-          { left: pad + capW + bridgeW + 0.6, top: h * 0.28, width: capW - 2 },
+          { left: capW + bridgeW + 1, top: h * 0.28, width: capW - 2 },
           'Jewelry label',
           smallPt,
           { align: 'center' },
@@ -161,16 +162,16 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
     }
 
     case 'jew-dumbell-15x85': {
-      const leftW = w * 0.38;
-      const bridgeW = 2.4;
-      const rightLeft = pad + leftW + bridgeW - 0.6;
-      const rightW = w - rightLeft - pad;
+      const bridgeW = Math.min(3.4, w * 0.08);
+      const leftW = (w - bridgeW) * 0.46;
+      const rightW = w - leftW - bridgeW;
+      const rightLeft = leftW + bridgeW;
       return [
-        boxEl(pad, pad * 0.35, leftW, h - pad * 0.7, { radius: 2.6 }),
-        boxEl(pad + leftW - 0.3, h * 0.34, bridgeW, h * 0.32, { rounded: false }),
-        boxEl(rightLeft, pad * 0.35, rightW, h - pad * 0.7, { radius: 2.6 }),
+        boxEl(0, 0, leftW, h, { radius: 2.6 }),
+        boxEl(leftW, h * 0.34, bridgeW, h * 0.32, { rounded: false }),
+        boxEl(rightLeft, 0, rightW, h, { radius: 2.6 }),
         barcodeEl(
-          { left: pad + 1.1, top: h * 0.1, width: leftW - 2.2, height: h * 0.78 },
+          { left: 1.1, top: h * 0.1, width: Math.max(4, leftW - 2.2), height: h * 0.78 },
           '5060185190113',
           { encodeMode: 'EAN-13', textFlag: 'Bottom', fontSize: Math.max(4.5, smallPt * 0.7) },
         ),
@@ -311,4 +312,7 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
         }),
       ];
   }
+  })();
+
+  return els.map((el) => clampElementToLabel(el, { widthMm: w, heightMm: h }));
 }

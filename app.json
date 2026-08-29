@@ -5,7 +5,10 @@
     "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "sezprint",
+    "scheme": [
+      "sezprint",
+      "sez-print"
+    ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -45,6 +48,13 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-dev-client",
+        {
+          "addGeneratedScheme": true,
+          "launchMode": "most-recent"
+        }
+      ],
       [
         "expo-build-properties",
         {

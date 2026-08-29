@@ -25,10 +25,14 @@ export const editorBridge = {
   fontResult: null as string | null,
 };
 
-const QR_SCAN_TYPES = new Set(['qr', 'aztec', 'datamatrix', 'pdf417']);
-
 export function isQrScanType(type: string) {
-  return QR_SCAN_TYPES.has(type.toLowerCase());
+  const normalized = type.toLowerCase().replace(/[_-\s]/g, '');
+  return (
+    normalized.includes('qr') ||
+    normalized.includes('aztec') ||
+    normalized.includes('datamatrix') ||
+    normalized.includes('pdf417')
+  );
 }
 
 export function barcodeEncodeModeForScanType(type: string) {

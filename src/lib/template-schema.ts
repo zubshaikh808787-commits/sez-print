@@ -42,7 +42,8 @@ export function canvasFillFromTemplate(background: TemplateBackground | undefine
   return 'transparent';
 }
 
-export function canvasFillFromDocument(doc: Pick<LabelDocument, 'background' | 'paperType'>): string {
+export function canvasFillFromDocument(doc: Pick<LabelDocument, 'background' | 'paperType' | 'templatePreviewType'>): string {
+  if (templateUsesDieCutBackground(doc.templatePreviewType ?? '')) return 'transparent';
   if (doc.background) return canvasFillFromTemplate(doc.background);
   return doc.paperType === 'Transparent' ? 'transparent' : '#FFFFFF';
 }

@@ -205,7 +205,7 @@ export function textBlockHeightMm(fontSizePt: number, lines: number) {
 }
 
 /** Clamp element position/size so it stays inside the label. */
-export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocument, 'widthMm' | 'heightMm'>) {
+export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocument, 'widthMm' | 'heightMm'>): LabelElement {
   if (element.type === 'border') {
     return {
       ...element,
@@ -213,7 +213,7 @@ export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocume
       top: 0,
       width: doc.widthMm,
       height: doc.heightMm,
-      rotation: 0,
+      rotation: 0 as const,
       lockMovement: true,
     };
   }
@@ -240,6 +240,47 @@ export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocume
 
 export function normalizeDocumentElements(doc: LabelDocument): LabelElement[] {
   return doc.elements.map((el) => clampElementToLabel(el, doc));
+}
+
+/** Scale and reposition layers when the label size changes (no silent crop). */
+export function scaleDocumentToSize(
+  doc: LabelDocument,
+  widthMm: number,
+  heightMm: number,
+): LabelDocument {
+  const sx = widthMm / Math.max(doc.widthMm, 0.01);
+  const sy = heightMm / Math.max(doc.heightMm, 0.01);
+  const fontScale = Math.min(sx, sy);
+  const nextDoc = { ...doc, widthMm, heightMm };
+  const elements = doc.elements.map((el) => {
+    if (el.type === 'border') {
+      return clampElementToLabel(
+        { ...el, left: 0, top: 0, width: widthMm, height: heightMm, rotation: 0 as const },
+        nextDoc,
+      );
+    }
+    const scaled: LabelElement = {
+      ...el,
+      left: el.left * sx,
+      top: el.top * sy,
+      width: el.width * sx,
+    };
+    if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
+      (scaled as { height: number }).height *= sy;
+    }
+    if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
+      (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * fontScale);
+    }
+    if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
+      (scaled as { lineWidth: number }).lineWidth *= fontScale;
+    }
+    if (scaled.type === 'table') {
+      scaled.columnWidths = scaled.columnWidths.map((n) => n * sx);
+      scaled.rowHeights = scaled.rowHeights.map((n) => n * sy);
+    }
+    return clampElementToLabel(scaled, nextDoc);
+  });
+  return { ...nextDoc, elements };
 }
 
 /** Template title/body font sizes derived from label mm (not raw mm as pt). */

@@ -49,6 +49,13 @@ export default function NewLabelModal() {
             </CreationOption>
 
             <CreationOption
+              label="Customize Size"
+              color="#3B82F6"
+              onPress={() => router.replace({ pathname: '/new-label-setup', params: { focusSize: '1' } })}>
+              <AppIcon name="rectangle.dashed" tintColor="#FFFFFF" size={28} pointerEvents="none" />
+            </CreationOption>
+
+            <CreationOption
               label="Industry Template"
               color="#8BC34A"
               onPress={() => router.replace('/(tabs)/template')}>
@@ -111,13 +118,15 @@ const styles = StyleSheet.create({
   },
   options: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-evenly',
-    paddingTop: 22,
-    paddingBottom: 24,
-    paddingHorizontal: 12,
+    paddingTop: 18,
+    paddingBottom: 20,
+    paddingHorizontal: 8,
+    rowGap: 18,
   },
   option: {
-    flex: 1,
+    width: '46%',
     alignItems: 'center',
     gap: 10,
     minWidth: 0,

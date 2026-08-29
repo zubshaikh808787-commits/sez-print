@@ -25,6 +25,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { editorBridge } from '@/constants/editor-bridge';
+import { isScanEmptyError, payloadFromBarcodeResult, SCAN_CODE_TYPES } from '@/lib/scan-codes';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SCAN_FRAME_SIZE = Math.min(Math.round(SCREEN_WIDTH * 0.72), 280);
@@ -107,31 +108,41 @@ export default function ScanScreen() {
 
   const handleBarcodeScanned = (result: BarcodeScanningResult) => {
     if (scanCooldown || scannedResult) return;
+    const payload = payloadFromBarcodeResult(result);
+    if (!payload) return;
     setScanCooldown(true);
-    setScannedResult({ type: result.type, data: result.data });
+    setScannedResult(payload);
   };
 
   const handlePhotoPick = async () => {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        quality: 0.9,
+        allowsEditing: false,
+        quality: 1,
       });
 
-      if (!res.canceled && res.assets && res.assets.length > 0) {
-        const results = await scanFromURLAsync(res.assets[0].uri);
-        if (results[0]?.data) {
-          setScannedResult({ type: results[0].type, data: results[0].data });
-        } else {
-          Alert.alert(
-            'Nothing Detected',
-            'No barcode or QR code was found in this photo. Try a clearer photo, or enter the code manually.',
-          );
-        }
+      if (res.canceled || !res.assets?.[0]?.uri) return;
+
+      const results = await scanFromURLAsync(res.assets[0].uri, SCAN_CODE_TYPES);
+      const payload = results.map(payloadFromBarcodeResult).find(Boolean);
+      if (payload) {
+        setScannedResult(payload);
+        return;
       }
-    } catch {
-      Alert.alert('Error', 'Unable to open photo library');
+      Alert.alert(
+        'Nothing Detected',
+        'No barcode or QR code was found in this photo. Try a closer, sharper photo of just the code, or enter it manually.',
+      );
+    } catch (error) {
+      if (isScanEmptyError(error)) {
+        Alert.alert(
+          'Nothing Detected',
+          'No barcode or QR code was found in this photo. Try a closer, sharper photo of just the code, or enter it manually.',
+        );
+        return;
+      }
+      Alert.alert('Error', 'Unable to read this photo. Try another image, or enter the code manually.');
     }
   };
 
@@ -273,20 +284,7 @@ export default function ScanScreen() {
         facing="back"
         enableTorch={torch}
         barcodeScannerSettings={{
-          barcodeTypes: [
-            'qr',
-            'ean13',
-            'ean8',
-            'code128',
-            'code39',
-            'upc_a',
-            'upc_e',
-            'itf14',
-            'codabar',
-            'pdf417',
-            'aztec',
-            'datamatrix',
-          ],
+          barcodeTypes: SCAN_CODE_TYPES,
         }}
         onBarcodeScanned={scannedResult ? undefined : handleBarcodeScanned}
       />

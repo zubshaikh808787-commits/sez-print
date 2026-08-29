@@ -30,13 +30,13 @@ import {
 } from '@/lib/printer/escpos';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
 import { encodeTscBitmapJob } from '@/lib/printer/tsc';
+import { PRINT_DOTS_PER_MM } from '@/lib/label-geometry';
 import { usePrinterStore } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
 const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent'] as const;
 const COLOR_MODES = ['Original', 'B & W', 'Halftone'] as const;
-const DOTS_PER_MM = 8;
 
 type ColorMode = (typeof COLOR_MODES)[number];
 
@@ -224,8 +224,8 @@ export default function PrintPhotoScreen() {
     try {
       const widthMm = frame?.widthMm ?? defaults.labelWidth;
       const heightMm = frame?.heightMm ?? defaults.labelHeight;
-      const targetW = Math.round(widthMm * DOTS_PER_MM);
-      const targetH = Math.round(heightMm * DOTS_PER_MM);
+      const targetW = Math.round(widthMm * PRINT_DOTS_PER_MM);
+      const targetH = Math.round(heightMm * PRINT_DOTS_PER_MM);
       const orientationDeg = parseInt(orientation.replace('°', ''), 10) as 0 | 90 | 180 | 270;
       const dither = colorMode === 'Halftone';
       const threshold =
@@ -260,7 +260,7 @@ export default function PrintPhotoScreen() {
 
       gray = rotateGray(gray, orientationDeg);
       let bits = grayToBits(gray, { threshold, dither: dither || colorMode === 'B & W' });
-      const offsetDots = Math.round(hOffset * DOTS_PER_MM);
+      const offsetDots = Math.round(hOffset * PRINT_DOTS_PER_MM);
       if (offsetDots !== 0) bits = shiftBits(bits, offsetDots);
 
       const bytes = manager.usesTd404CommandSet
@@ -273,8 +273,8 @@ export default function PrintPhotoScreen() {
           })
         : encodeEscPosJob(bits, {
             copies,
-            leadFeedLines: Math.max(0, Math.round(vOffset * DOTS_PER_MM)),
-            trailFeedLines: Math.max(0, Math.round(gapLength * DOTS_PER_MM)),
+            leadFeedLines: Math.max(0, Math.round(vOffset * PRINT_DOTS_PER_MM)),
+            trailFeedLines: Math.max(0, Math.round(gapLength * PRINT_DOTS_PER_MM)),
             density: darkness,
             speed,
           });

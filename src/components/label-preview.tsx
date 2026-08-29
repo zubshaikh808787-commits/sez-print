@@ -1,26 +1,26 @@
 import { Image } from 'expo-image';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelDocument } from '@/lib/label-document';
-import { canvasFillFromDocument, sortLayers, templateScaleFactor } from '@/lib/template-schema';
+import { fitLabelSize } from '@/lib/label-geometry';
+import { canvasFillFromDocument, sortLayers, templateUsesDieCutBackground } from '@/lib/template-schema';
 
 /** Workspace chrome around the artboard — not part of template content. */
 export const LABEL_PAD_STAGE_COLOR = '#C5CDD6';
 export const LABEL_PAD_INSET = 14;
 export const LABEL_PAD_STAGE_MIN_HEIGHT = 176;
+export const ARTBOARD_BORDER_WIDTH = 1;
+export const ARTBOARD_BORDER_COLOR = 'rgba(15, 23, 42, 0.45)';
 
-/** Artboard bounds only. Fill comes from template JSON (`background`). */
 export const LABEL_PAD_CANVAS_STYLE = {
   overflow: 'hidden' as const,
-  borderWidth: 1,
-  borderColor: 'rgba(15, 23, 42, 0.35)',
 };
 
 export function artboardSurfaceStyle(document: LabelDocument): ViewStyle {
   return {
-    ...LABEL_PAD_CANVAS_STYLE,
+    overflow: 'hidden',
     backgroundColor: canvasFillFromDocument(document),
   };
 }
@@ -30,16 +30,10 @@ export function fitLabelCanvas(
   heightMm: number,
   maxWidthPx: number,
   maxHeightPx: number,
-): { widthPx: number; heightPx: number; scale: number } {
-  const scale = templateScaleFactor(widthMm, heightMm, maxWidthPx, maxHeightPx);
-  return {
-    widthPx: widthMm * scale,
-    heightPx: heightMm * scale,
-    scale,
-  };
+) {
+  return fitLabelSize(widthMm, heightMm, maxWidthPx, maxHeightPx);
 }
 
-/** Fit the artboard inside the gray workspace the same way the editor does. */
 export function fitLabelPad(
   widthMm: number,
   heightMm: number,
@@ -54,13 +48,60 @@ export function fitLabelPad(
   );
 }
 
+/**
+ * One box drives clip + overlay border. Border is painted on top and does not
+ * change the layout size (avoids Yoga content-box vs border-width mismatch).
+ */
+export function ArtboardFrame({
+  document,
+  widthPx,
+  heightPx,
+  children,
+  style,
+}: {
+  document: LabelDocument;
+  widthPx: number;
+  heightPx: number;
+  children?: ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const w = Math.max(1, widthPx);
+  const h = Math.max(1, heightPx);
+  const dieCut = templateUsesDieCutBackground(document.templatePreviewType ?? '');
+
+  return (
+    <View
+      collapsable={false}
+      style={[
+        {
+          width: w,
+          height: h,
+          overflow: 'hidden',
+          backgroundColor: canvasFillFromDocument(document),
+        },
+        style,
+      ]}>
+      <View style={{ width: w, height: h, overflow: 'hidden' }}>{children}</View>
+      {dieCut ? null : (
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              borderWidth: ARTBOARD_BORDER_WIDTH,
+              borderColor: ARTBOARD_BORDER_COLOR,
+            },
+          ]}
+        />
+      )}
+    </View>
+  );
+}
+
 type LabelPreviewProps = {
   document: LabelDocument;
-  /** Maximum width in px. With `showStage`, the stage fills the parent and this is only a fallback before layout. */
   width?: number;
-  /** Maximum canvas height in px. Defaults to the true aspect-ratio height for `width`. */
   maxHeight?: number;
-  /** Gray workspace around the artboard — not template content. */
   showStage?: boolean;
   style?: StyleProp<ViewStyle>;
 };
@@ -125,20 +166,17 @@ function LabelCanvas({
   style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View
-      style={[
-        artboardSurfaceStyle(document),
-        { width: fitted.widthPx || 1, height: fitted.heightPx || 1 },
-        style,
-      ]}
-      pointerEvents="none">
+    <ArtboardFrame
+      document={document}
+      widthPx={fitted.widthPx || 1}
+      heightPx={fitted.heightPx || 1}
+      style={style}>
       <TemplateBackgroundImage document={document} />
       {fitted.scale > 0 ? <LabelElements document={document} scale={fitted.scale} /> : null}
-    </View>
+    </ArtboardFrame>
   );
 }
 
-/** Non-interactive scaled rendering of template JSON layers (same artboard as the editor). */
 export function LabelPreview({
   document,
   width = 0,
@@ -183,5 +221,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: LABEL_PAD_INSET,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
 });

@@ -24,6 +24,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { editorBridge, type OcrResultType } from '@/constants/editor-bridge';
+import { isScanEmptyError, payloadFromBarcodeResult } from '@/lib/scan-codes';
 import { Palette } from '@/constants/ui';
 import { recognizeTextFromImage } from '@/lib/text-recognition';
 
@@ -158,21 +159,41 @@ export default function OcrScreen() {
     setIdentifying(true);
     try {
       if (recognitionType === 'QRCode') {
-        const results = await scanFromURLAsync(imageUri, QR_TYPES);
-        if (results[0]?.data) {
-          setPreviewText(results[0].data);
-        } else {
-          Alert.alert('Not Found', 'No QR code was detected in this photo.');
+        try {
+          const results = await scanFromURLAsync(imageUri, QR_TYPES);
+          const payload = results.map(payloadFromBarcodeResult).find(Boolean);
+          if (payload) {
+            setPreviewText(payload.data);
+          } else {
+            Alert.alert('Not Found', 'No QR code was detected in this photo.');
+          }
+        } catch (error) {
+          Alert.alert(
+            'Not Found',
+            isScanEmptyError(error)
+              ? 'No QR code was detected in this photo.'
+              : 'Unable to analyze this image. Please try another photo.',
+          );
         }
         return;
       }
 
       if (recognitionType === 'Barcode') {
-        const results = await scanFromURLAsync(imageUri, BARCODE_TYPES);
-        if (results[0]?.data) {
-          setPreviewText(results[0].data);
-        } else {
-          Alert.alert('Not Found', 'No barcode was detected in this photo.');
+        try {
+          const results = await scanFromURLAsync(imageUri, BARCODE_TYPES);
+          const payload = results.map(payloadFromBarcodeResult).find(Boolean);
+          if (payload) {
+            setPreviewText(payload.data);
+          } else {
+            Alert.alert('Not Found', 'No barcode was detected in this photo.');
+          }
+        } catch (error) {
+          Alert.alert(
+            'Not Found',
+            isScanEmptyError(error)
+              ? 'No barcode was detected in this photo.'
+              : 'Unable to analyze this image. Please try another photo.',
+          );
         }
         return;
       }

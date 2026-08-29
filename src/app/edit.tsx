@@ -33,16 +33,18 @@ import {
   fitTextDefaults,
   fitTimeDefaults,
   normalizeDocumentElements,
+  scaleDocumentToSize,
 } from '@/lib/element-sizing';
 import { DegreesPropertyPanel } from '@/components/editor/degrees-property-panel';
 import { ArcTextPropertyPanel } from '@/components/editor/arctext-property-panel';
 import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import {
-  artboardSurfaceStyle,
+  ArtboardFrame,
   fitLabelCanvas,
   LABEL_PAD_STAGE_MIN_HEIGHT,
 } from '@/components/label-preview';
+import { LabelSizeEditor } from '@/components/label-size-editor';
 import { LabelSettingsMenu } from '@/components/editor/more-menu';
 import { LinePropertyPanel } from '@/components/editor/line-property-panel';
 import { QrcodePropertyPanel } from '@/components/editor/qrcode-property-panel';
@@ -89,6 +91,7 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
+import { clampLabelMm } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { textBlockHeightMm } from '@/lib/element-sizing';
@@ -393,8 +396,12 @@ export default function EditScreen() {
 
   const [doc, setDoc] = useState<LabelDocument>(() => {
     const name = params.labelName ?? 'New Label_1';
-    const widthMm = params.labelWidth ? parseFloat(params.labelWidth) : defaults.labelWidth;
-    const heightMm = params.labelHeight ? parseFloat(params.labelHeight) : defaults.labelHeight;
+    const parsed = clampLabelMm(
+      params.labelWidth ? parseFloat(params.labelWidth) : defaults.labelWidth,
+      params.labelHeight ? parseFloat(params.labelHeight) : defaults.labelHeight,
+    );
+    const widthMm = parsed.widthMm;
+    const heightMm = parsed.heightMm;
 
     if (params.labelId) {
       const existing = useLabelStore.getState().getDocument(params.labelId);
@@ -477,8 +484,9 @@ export default function EditScreen() {
   const [saveAsName, setSaveAsName] = useState('');
   const [pickerRows, setPickerRows] = useState(2);
   const [pickerColumns, setPickerColumns] = useState(3);
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [stageWidth, setStageWidth] = useState(0);
+  const [sizeModalVisible, setSizeModalVisible] = useState(false);
 
   const [textTab, setTextTab] = useState<PropertyTab>('Regular');
   const [barcodeTab, setBarcodeTab] = useState<BarcodePropertyTab>('Regular');
@@ -497,7 +505,8 @@ export default function EditScreen() {
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
 
   const stageMaxHeight = Math.max(196, Math.min(windowHeight * 0.4, 348));
-  const fittedPad = fitLabelCanvas(doc.widthMm, doc.heightMm, stageWidth, stageMaxHeight);
+  const layoutWidth = stageWidth > 0 ? stageWidth : windowWidth;
+  const fittedPad = fitLabelCanvas(doc.widthMm, doc.heightMm, layoutWidth, stageMaxHeight);
   const canvasHeightPx = fittedPad.heightPx;
   const canvasWidthPx = fittedPad.widthPx;
   const scale = fittedPad.scale;
@@ -1073,6 +1082,16 @@ export default function EditScreen() {
     router.push({ pathname: '/print', params: { labelId: docRef.current.id } });
   }, [saveDocument]);
 
+  const applyLabelSize = useCallback((widthMm: number, heightMm: number) => {
+    setDoc((prev) => {
+      if (Math.abs(prev.widthMm - widthMm) < 0.001 && Math.abs(prev.heightMm - heightMm) < 0.001) {
+        return prev;
+      }
+      return scaleDocumentToSize(prev, widthMm, heightMm);
+    });
+    setDirty(true);
+  }, []);
+
   const handlePickImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
@@ -1426,49 +1445,49 @@ export default function EditScreen() {
         if (Math.abs(next - stageWidth) > 1) setStageWidth(next);
       }}>
       <ViewShot ref={canvasShotRef} options={{ format: 'png', quality: 1 }}>
-        <Pressable
-          onPress={() => setSelectedIds([])}
-          style={[
-            artboardSurfaceStyle(doc),
-            {
+        <ArtboardFrame document={doc} widthPx={canvasWidthPx || 1} heightPx={canvasHeightPx || 1}>
+          <Pressable
+            onPress={() => setSelectedIds([])}
+            style={{
               width: canvasWidthPx || 1,
               height: canvasHeightPx || 1,
-            },
-          ]}>
-          {doc.background?.type === 'image' ? (
-            <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-              <Image
-                source={{ uri: doc.background.uri }}
-                style={StyleSheet.absoluteFillObject}
-                contentFit="cover"
-              />
-            </View>
-          ) : null}
-          {gridLines}
-          {scale > 0
-            ? sortLayers(doc.elements).map((element) => (
-                <CanvasElement
-                  key={element.id}
-                  element={element}
-                  scale={scale}
-                  selected={selectedIds.includes(element.id)}
-                  selectionColor={selectionColor}
-                  onSelect={handleSelect}
-                  onOpenPanel={openPanelFor}
-                  onEditText={beginTextEdit}
-                  onDrag={handleDrag}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                  onResize={handleResize}
+              overflow: 'hidden',
+            }}>
+            {doc.background?.type === 'image' ? (
+              <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+                <Image
+                  source={{ uri: doc.background.uri }}
+                  style={StyleSheet.absoluteFillObject}
+                  contentFit="cover"
                 />
-              ))
-            : null}
-          {doc.elements.length === 0 ? (
-            <View pointerEvents="none" style={styles.emptyHintWrap}>
-              <Text style={styles.emptyHint}>Tap a tool below to add elements</Text>
-            </View>
-          ) : null}
-        </Pressable>
+              </View>
+            ) : null}
+            {gridLines}
+            {scale > 0
+              ? sortLayers(doc.elements).map((element) => (
+                  <CanvasElement
+                    key={element.id}
+                    element={element}
+                    scale={scale}
+                    selected={selectedIds.includes(element.id)}
+                    selectionColor={selectionColor}
+                    onSelect={handleSelect}
+                    onOpenPanel={openPanelFor}
+                    onEditText={beginTextEdit}
+                    onDrag={handleDrag}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onResize={handleResize}
+                  />
+                ))
+              : null}
+            {doc.elements.length === 0 ? (
+              <View pointerEvents="none" style={styles.emptyHintWrap}>
+                <Text style={styles.emptyHint}>Tap a tool below to add elements</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </ArtboardFrame>
       </ViewShot>
     </View>
   );
@@ -1639,12 +1658,15 @@ export default function EditScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.body, { maxWidth: MaxContentWidth }]}>
-        <View style={styles.subToolbar}>
+        <Pressable
+          onPress={() => setSizeModalVisible(true)}
+          style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
           <Text style={styles.dimText}>
-            {doc.widthMm.toFixed(0)} × {doc.heightMm.toFixed(0)} mm · {doc.paperType}
+            {doc.widthMm.toFixed(1)} × {doc.heightMm.toFixed(1)} mm · {doc.paperType}
             {doc.orientation ? ` · ${doc.orientation}°` : ''}
           </Text>
-        </View>
+          <Text style={styles.sizeHint}>Tap to customize size</Text>
+        </Pressable>
 
         {renderCanvas()}
 
@@ -1819,6 +1841,28 @@ export default function EditScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={sizeModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSizeModalVisible(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}>
+          <View style={[styles.modalCard, styles.sizeModalCard]}>
+            <Text style={styles.modalHeading}>Label size</Text>
+            {sizeModalVisible ? (
+              <LabelSizeEditor widthMm={doc.widthMm} heightMm={doc.heightMm} onChange={applyLabelSize} />
+            ) : null}
+            <Pressable
+              style={[styles.modalBtn, styles.modalSaveBtn, styles.openCloseBtn]}
+              onPress={() => setSizeModalVisible(false)}>
+              <Text style={styles.modalSaveText}>Done</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -1897,16 +1941,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   subToolbar: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
+    gap: 2,
   },
   dimText: {
     color: Palette.muted,
     ...Type.caption,
     fontSize: 13,
+  },
+  sizeHint: {
+    color: Palette.accent,
+    fontSize: 11,
+    fontWeight: '500',
   },
   stage: {
     width: '100%',
@@ -1916,6 +1965,7 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     paddingHorizontal: 0,
     minHeight: LABEL_PAD_STAGE_MIN_HEIGHT,
+    overflow: 'hidden',
   },
   emptyHintWrap: {
     ...StyleSheet.absoluteFillObject,
@@ -2078,6 +2128,10 @@ const styles = StyleSheet.create({
   },
   openModalCard: {
     maxHeight: 480,
+  },
+  sizeModalCard: {
+    maxWidth: 400,
+    maxHeight: '90%',
   },
   modalHeading: {
     fontSize: 17,
