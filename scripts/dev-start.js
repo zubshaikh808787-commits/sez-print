@@ -1,7 +1,7 @@
 /**
  * Start Metro for the Expo development build.
  *
- * The terminal QR uses exp+sez-print:// — the stock Camera app cannot open it.
+ * The terminal QR uses exp+gesu:// — the stock Camera app cannot open it.
  * Connect from inside the sez-print development app instead.
  */
 const { spawn, spawnSync } = require('child_process');
@@ -59,7 +59,7 @@ function printConnectHelp(port) {
   console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
 ║  DO NOT scan the terminal QR with the Camera app.                ║
-║  Camera cannot open exp+sez-print:// (shows "No usable data").   ║
+║  Camera cannot open exp+gesu:// (shows "No usable data").        ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Connect for live reload (scan QR *inside* the sez-print app):     ║
 ║  1. Install APK from: npm run build:android:dev  (NOT preview)   ║

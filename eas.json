@@ -2,7 +2,7 @@
   "cli": {
     "version": ">= 16.0.0",
     "appVersionSource": "remote",
-    "requireCommit": false
+    "requireCommit": true
   },
   "build": {
     "development": {
@@ -13,7 +13,8 @@
       },
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
+        "gradleCommand": ":app:assembleDebug",
+        "withoutCredentials": true
       },
       "ios": {
         "simulator": false,
