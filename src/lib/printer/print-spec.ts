@@ -35,7 +35,7 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
     printheadWidthMm: 108,
     printheadWidthDots: 1296, // 108mm * 12 dots/mm = 1296 dots (162 bytes/row)
     maxHeightMm: 1000,
-    alignment: 'center',
+    alignment: 'left',
     commandLanguage: 'tspl',
   },
   'generic-304-4in': {
@@ -45,7 +45,7 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
     printheadWidthMm: 104,
     printheadWidthDots: 1248, // 104mm * 12 dots/mm = 1248 dots (156 bytes/row)
     maxHeightMm: 1000,
-    alignment: 'center',
+    alignment: 'left',
     commandLanguage: 'tspl',
   },
   'td404-203': {
@@ -55,7 +55,7 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
     printheadWidthMm: 108,
     printheadWidthDots: 864, // 108 * 8 = 864 (multiple of 8)
     maxHeightMm: 1000,
-    alignment: 'center',
+    alignment: 'left',
     commandLanguage: 'tspl',
   },
   'generic-203-4in': {
@@ -179,6 +179,8 @@ export function computePrintheadCenteringOffset(
   profile: PrinterProfile,
 ): number {
   if (profile.alignment !== 'center') return 0;
+  // Full-width labels (e.g. 4x6 / 100mm / 108mm) align to the left guide — do not shift off-edge
+  if (labelWidthDots >= profile.printheadWidthDots * 0.85) return 0;
   const gap = profile.printheadWidthDots - labelWidthDots;
   return gap > 0 ? Math.round(gap / 2) : 0;
 }

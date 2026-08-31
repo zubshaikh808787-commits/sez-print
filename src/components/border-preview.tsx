@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderColor: '#111827',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'transparent',
     borderRadius: 2,
   },
   dashed: {

@@ -585,12 +585,14 @@ export function ElementContentView({ element, widthPx, heightPx, scale }: Conten
         </View>
       );
     }
-    case 'border':
+    case 'border': {
+      const inset = Math.max(1.5, Math.round(scale * 1.0));
       return (
-        <View style={styles.fill}>
+        <View style={[styles.fill, { padding: inset }]}>
           <BorderPreview styleId={element.borderStyle} />
         </View>
       );
+    }
     case 'signature':
       return (
         <View style={styles.fill}>

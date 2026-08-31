@@ -215,7 +215,7 @@ function FieldRenderer({
   return (
     <G onPress={onSelect}>
       {/* Field Content */}
-      {renderFieldContent(field, orderData, xPx, yPx, widthPx, heightPx)}
+      {renderFieldContent(field, orderData, xPx, yPx, widthPx, heightPx, canvasWidthPx, canvasHeightPx)}
 
       {/* Selected Field Drag & Selection Highlight */}
       {isSelected && (
@@ -248,15 +248,21 @@ function renderFieldContent(
   y: number,
   width: number,
   height: number,
+  canvasWidthPx: number,
+  canvasHeightPx: number,
 ) {
+  // Scale factor: normalizes 100mm canvas so 1 unit ≈ 1mm in printer dots or preview pixels
+  const pxPerMm = Math.max(1, canvasWidthPx / 100);
+
   if (field.type === 'box') {
-    const strokeWidth = field.lineWidth || 1.5;
+    const strokeWidth = Math.max(1.5, (field.lineWidth || 1.5) * pxPerMm * 0.45);
+    const halfStroke = strokeWidth / 2;
     return (
       <Rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
+        x={x + halfStroke}
+        y={y + halfStroke}
+        width={Math.max(1, width - strokeWidth)}
+        height={Math.max(1, height - strokeWidth)}
         fill="none"
         stroke="#000000"
         strokeWidth={strokeWidth}
@@ -266,7 +272,7 @@ function renderFieldContent(
 
   if (field.type === 'line') {
     const isVert = field.orientation === 'vertical';
-    const strokeWidth = field.lineWidth || 1;
+    const strokeWidth = Math.max(1, (field.lineWidth || 1) * pxPerMm * 0.45);
     return (
       <Line
         x1={x}
@@ -289,49 +295,53 @@ function renderFieldContent(
     const lines = rawContent.split('\n');
     const hasLabelBadge = Boolean(field.label);
 
-    // Auto-scaling font size to ensure text NEVER overflows or clips (fixes the 3-Dec bug)
-    const availableH = hasLabelBadge ? height * 0.72 : height;
+    // Auto-scaling font size with resolution responsiveness (no microscopic DP caps)
+    const availableH = hasLabelBadge ? height * 0.78 : height;
     const lineCount = Math.max(1, lines.length);
     const maxLineLength = Math.max(...lines.map((l) => l.length), 1);
 
-    // Optimal font size calculation
-    const fromHeight = availableH / (lineCount * 1.3);
-    const fromWidth = (width * 1.8) / maxLineLength;
-    const computedFontSize = Math.max(7, Math.min(14, Math.min(fromHeight, fromWidth)));
+    const fromHeight = availableH / (lineCount * 1.32);
+    const fromWidth = (width * 1.7) / maxLineLength;
+    const maxIdealFont = Math.min(canvasHeightPx * 0.055, canvasWidthPx * 0.065);
+    const minIdealFont = Math.max(8, pxPerMm * 1.8);
+    const computedFontSize = Math.max(
+      minIdealFont,
+      Math.min(maxIdealFont, Math.min(fromHeight, fromWidth)),
+    );
 
-    const labelBadgeSize = Math.max(6.5, Math.min(9, computedFontSize * 0.8));
+    const labelBadgeSize = Math.max(minIdealFont * 0.9, computedFontSize * 0.75);
     const isBold = field.bold !== false;
 
     let textAnchor: 'start' | 'middle' | 'end' = 'start';
-    let textX = x + 3;
+    let textX = x + pxPerMm * 0.5;
     if (field.align === 'center') {
       textAnchor = 'middle';
       textX = x + width / 2;
     } else if (field.align === 'right') {
       textAnchor = 'end';
-      textX = x + width - 3;
+      textX = x + width - pxPerMm * 0.5;
     }
 
     return (
       <G>
-        {/* Optional field badge label e.g. "FROM" or "SHIP TO" */}
+        {/* Field badge label e.g. "FROM" or "SHIP TO" in solid black */}
         {hasLabelBadge && (
           <SvgText
-            x={x + 3}
-            y={y + labelBadgeSize + 1}
+            x={x + pxPerMm * 0.5}
+            y={y + labelBadgeSize + pxPerMm * 0.3}
             fontSize={labelBadgeSize}
             fontWeight="700"
-            fill="#475569"
+            fill="#000000"
             letterSpacing={0.5}>
             {field.label}
           </SvgText>
         )}
 
-        {/* Text lines */}
+        {/* Text lines in solid black */}
         {lines.map((line, idx) => {
           const lineY =
             y +
-            (hasLabelBadge ? labelBadgeSize + 4 : 2) +
+            (hasLabelBadge ? labelBadgeSize + pxPerMm * 0.8 : pxPerMm * 0.4) +
             (idx + 1) * (computedFontSize * 1.25);
 
           return (
@@ -355,6 +365,9 @@ function renderFieldContent(
     let colLeft = x;
     const colWidths = field.columns.map((col) => (col.widthPct / 100) * width);
 
+    const labelFontSize = Math.max(8, Math.min(height * 0.30, pxPerMm * 2.5));
+    const valFontSize = Math.max(10, Math.min(height * 0.48, pxPerMm * 3.8));
+
     return (
       <G>
         {field.columns.map((col, idx) => {
@@ -367,9 +380,6 @@ function renderFieldContent(
             (col.dataKey ? (orderData as Record<string, string>)[col.dataKey] : '') ||
             '';
 
-          const labelFontSize = Math.max(6.5, Math.min(9, height * 0.28));
-          const valFontSize = Math.max(8, Math.min(12, height * 0.42));
-
           return (
             <G key={col.id}>
               {/* Divider between columns */}
@@ -380,17 +390,17 @@ function renderFieldContent(
                   x2={currentLeft}
                   y2={y + height}
                   stroke="#000000"
-                  strokeWidth={0.8}
+                  strokeWidth={Math.max(1, pxPerMm * 0.35)}
                 />
               )}
 
               {/* Column Label */}
               <SvgText
                 x={currentLeft + colW / 2}
-                y={y + labelFontSize + 2}
+                y={y + labelFontSize + pxPerMm * 0.4}
                 fontSize={labelFontSize}
                 fontWeight="700"
-                fill="#475569"
+                fill="#000000"
                 textAnchor="middle">
                 {col.label}
               </SvgText>
@@ -398,7 +408,7 @@ function renderFieldContent(
               {/* Column Value */}
               <SvgText
                 x={currentLeft + colW / 2}
-                y={y + height - 3}
+                y={y + height - pxPerMm * 0.5}
                 fontSize={valFontSize}
                 fontWeight="700"
                 fill="#000000"
@@ -427,8 +437,8 @@ function renderFieldContent(
     );
 
     const showText = field.showValueBelow !== false;
-    const textHeight = showText ? Math.min(12, Math.max(8, height * 0.22)) : 0;
-    const barHeight = Math.max(4, height - textHeight - 2);
+    const textHeight = showText ? Math.max(10, Math.min(height * 0.22, pxPerMm * 3.5)) : 0;
+    const barHeight = Math.max(6, height - textHeight - pxPerMm * 0.5);
 
     return (
       <G>
@@ -448,9 +458,9 @@ function renderFieldContent(
         {showText && (
           <SvgText
             x={x + width / 2}
-            y={y + height - 1}
+            y={y + height - pxPerMm * 0.2}
             fontSize={textHeight}
-            fontWeight="600"
+            fontWeight="700"
             fontFamily="monospace"
             fill="#000000"
             textAnchor="middle">

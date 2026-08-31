@@ -79,7 +79,7 @@ export const DEFAULT_PRINTING_SETTINGS: PrintingSettings = {
   autoPages: true,
   returnPrevious: false,
   printerDpi: 304,
-  printerAlignment: 'center',
+  printerAlignment: 'left',
   printheadWidthMm: 108,
   customPaperWidthMm: 210,
   customPaperHeightMm: 297,

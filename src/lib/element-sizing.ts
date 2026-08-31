@@ -345,8 +345,12 @@ export function fitDocumentCenteredOnPage(
 
 /** Template title/body font sizes derived from label mm (not raw mm as pt). */
 export function templateFontSizes(widthMm: number, heightMm: number) {
-  const titlePt = Math.min(28, Math.max(fitFontSizePt(widthMm, heightMm, 1) * 1.15, 8));
-  const bodyPt = Math.max(6, Math.min(titlePt * 0.7, fitFontSizePt(widthMm, heightMm, 2)));
-  const smallPt = Math.max(6, bodyPt * 0.85);
+  const isLargeLabel = widthMm >= 75 && heightMm >= 95;
+  const baseTitle = isLargeLabel ? 18 : fitFontSizePt(widthMm, heightMm, 1) * 1.15;
+  const titlePt = Math.min(28, Math.max(baseTitle, 8));
+  const bodyPt = isLargeLabel
+    ? 12
+    : Math.max(6, Math.min(titlePt * 0.7, fitFontSizePt(widthMm, heightMm, 2)));
+  const smallPt = isLargeLabel ? 9 : Math.max(6, bodyPt * 0.85);
   return { titlePt, bodyPt, smallPt };
 }
