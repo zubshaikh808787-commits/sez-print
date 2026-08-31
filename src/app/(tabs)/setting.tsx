@@ -15,8 +15,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { androidRipple, cardShadow, Palette } from '@/constants/ui';
+import { useTabBarPadding } from '@/hooks/use-tab-bar-padding';
 import { useTranslation } from '@/lib/i18n';
 
 type IconName = AppIconName;
@@ -67,6 +68,7 @@ function SettingGroup({ children }: { children: ReactNode }) {
 
 export default function SettingScreen() {
   const insets = useSafeAreaInsets();
+  const tabPad = useTabBarPadding(Spacing.four);
   const router = useRouter();
   const { width } = useWindowDimensions();
   const { t } = useTranslation();
@@ -102,7 +104,7 @@ export default function SettingScreen() {
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: BottomTabInset + Spacing.four },
+          { paddingBottom: tabPad },
         ]}
         showsVerticalScrollIndicator={false}>
         <View style={[styles.inner, { width: contentWidth, maxWidth: MaxContentWidth }]}>

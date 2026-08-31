@@ -165,9 +165,11 @@ const styles = StyleSheet.create({
   },
   captureHost: {
     position: 'absolute',
-    left: -CAPTURE_WIDTH * 2,
+    left: 0,
     top: 0,
-    opacity: 0,
+    zIndex: -999,
+    opacity: 1,
+    pointerEvents: 'none',
   },
   bottom: {
     paddingHorizontal: 10,

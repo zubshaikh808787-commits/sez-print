@@ -15,6 +15,20 @@ export type CloudProfile = {
   signedInAt: number;
 };
 
+/** Local + uploaded templates, one entry per id, newest first. */
+export function mergeSavedTemplates(
+  documents: LabelDocument[],
+  cloudTemplates: LabelDocument[],
+): LabelDocument[] {
+  const byId = new Map<string, LabelDocument>();
+  for (const doc of cloudTemplates) byId.set(doc.id, doc);
+  for (const doc of documents) {
+    const prev = byId.get(doc.id);
+    if (!prev || doc.updatedAt >= prev.updatedAt) byId.set(doc.id, doc);
+  }
+  return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 type LabelStoreState = {
   documents: LabelDocument[];
   groups: LabelGroup[];
@@ -24,6 +38,8 @@ type LabelStoreState = {
   deleteDocument: (id: string) => void;
   duplicateDocument: (id: string, newName: string) => LabelDocument | null;
   getDocument: (id: string) => LabelDocument | undefined;
+  /** Copy a cloud-only template into `documents` so editor/print can load it by id. */
+  ensureLocalDocument: (id: string) => LabelDocument | null;
   addGroup: (name: string) => void;
   renameGroup: (id: string, name: string) => void;
   deleteGroup: (id: string) => void;
@@ -68,7 +84,20 @@ export const useLabelStore = create<LabelStoreState>()(
         return copy;
       },
 
-      getDocument: (id) => get().documents.find((d) => d.id === id),
+      getDocument: (id) =>
+        get().documents.find((d) => d.id === id) ??
+        get().cloudTemplates.find((d) => d.id === id),
+
+      ensureLocalDocument: (id) => {
+        const local = get().documents.find((d) => d.id === id);
+        if (local) return local;
+        const cloud = get().cloudTemplates.find((d) => d.id === id);
+        if (!cloud) return null;
+        const copy = cloneDocument(cloud);
+        copy.updatedAt = Date.now();
+        set((state) => ({ documents: [copy, ...state.documents] }));
+        return copy;
+      },
 
       addGroup: (name) =>
         set((state) => ({ groups: [...state.groups, { id: generateId('group'), name }] })),
@@ -99,9 +128,14 @@ export const useLabelStore = create<LabelStoreState>()(
       uploadToCloud: (doc) =>
         set((state) => {
           const copy = cloneDocument(doc);
-          const exists = state.cloudTemplates.some((t) => t.id === copy.id);
+          copy.updatedAt = Date.now();
+          const existsLocal = state.documents.some((d) => d.id === copy.id);
+          const existsCloud = state.cloudTemplates.some((t) => t.id === copy.id);
           return {
-            cloudTemplates: exists
+            documents: existsLocal
+              ? state.documents.map((d) => (d.id === copy.id ? { ...d, ...copy } : d))
+              : [copy, ...state.documents],
+            cloudTemplates: existsCloud
               ? state.cloudTemplates.map((t) => (t.id === copy.id ? copy : t))
               : [copy, ...state.cloudTemplates],
           };

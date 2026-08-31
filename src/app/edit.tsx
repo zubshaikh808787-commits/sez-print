@@ -42,8 +42,10 @@ import { ElementContentView } from '@/components/editor/element-renderer';
 import {
   ArtboardFrame,
   fitLabelCanvas,
+  LABEL_PAD_STAGE_COLOR,
   LABEL_PAD_STAGE_MIN_HEIGHT,
 } from '@/components/label-preview';
+import { HorizontalRuler, RULER_SIZE, VerticalRuler } from '@/components/canvas-rulers';
 import { LabelSizeEditor } from '@/components/label-size-editor';
 import { LabelSettingsMenu } from '@/components/editor/more-menu';
 import { LinePropertyPanel } from '@/components/editor/line-property-panel';
@@ -505,8 +507,15 @@ export default function EditScreen() {
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
 
   const stageMaxHeight = Math.max(196, Math.min(windowHeight * 0.4, 348));
+  // Stage width is measured once from the viewport; canvas size is contain-fit into
+  // (stage − rulers) and does not change when elements are added/selected.
   const layoutWidth = stageWidth > 0 ? stageWidth : windowWidth;
-  const fittedPad = fitLabelCanvas(doc.widthMm, doc.heightMm, layoutWidth, stageMaxHeight);
+  const fittedPad = fitLabelCanvas(
+    doc.widthMm,
+    doc.heightMm,
+    Math.max(40, layoutWidth - RULER_SIZE - 16),
+    Math.max(40, stageMaxHeight - RULER_SIZE - 16),
+  );
   const canvasHeightPx = fittedPad.heightPx;
   const canvasWidthPx = fittedPad.widthPx;
   const scale = fittedPad.scale;
@@ -932,8 +941,7 @@ export default function EditScreen() {
   const handleDrag = useCallback(
     (id: string, totalDxMm: number, totalDyMm: number) => {
       const moveIds = selectedIds.includes(id) ? selectedIds : [id];
-      const grid = useSettingsStore.getState().editor.editorGrid;
-      const step = grid ? 1 : 0.1;
+      const step = 0.1;
       const snap = (value: number) => Math.round(value / step) * step;
       setDoc((prev) => ({
         ...prev,
@@ -956,29 +964,40 @@ export default function EditScreen() {
 
   const handleDragEnd = useCallback(
     (id: string) => {
-      if (!useSettingsStore.getState().editor.pictureAdsorption) return;
+      const snap1 = (value: number) => Math.round(value);
       const doc = docRef.current;
-      const el = doc.elements.find((e) => e.id === id);
-      if (!el || (el.type !== 'image' && el.type !== 'clipart')) return;
-      const size = elementSizeMm(el);
-      const threshold = 1;
-      let left = el.left;
-      let top = el.top;
-      if (left < threshold) left = 0;
-      if (top < threshold) top = 0;
-      if (doc.widthMm - (left + size.width) < threshold) left = Math.max(0, doc.widthMm - size.width);
-      if (doc.heightMm - (top + size.height) < threshold) top = Math.max(0, doc.heightMm - size.height);
-      if (left !== el.left || top !== el.top) {
-        patchElement(id, { left, top });
+      const moveIds = selectedIds.includes(id) ? selectedIds : [id];
+      const snapped = doc.elements.map((el) => {
+        if (!moveIds.includes(el.id) || el.lockMovement) return el;
+        return { ...el, left: snap1(el.left), top: snap1(el.top) };
+      });
+      const el = snapped.find((e) => e.id === id);
+      let nextElements = snapped;
+      if (el && useSettingsStore.getState().editor.pictureAdsorption && (el.type === 'image' || el.type === 'clipart')) {
+        const size = elementSizeMm(el);
+        const threshold = 1;
+        let left = el.left;
+        let top = el.top;
+        if (left < threshold) left = 0;
+        if (top < threshold) top = 0;
+        if (doc.widthMm - (left + size.width) < threshold) left = Math.max(0, doc.widthMm - size.width);
+        if (doc.heightMm - (top + size.height) < threshold) top = Math.max(0, doc.heightMm - size.height);
+        if (left !== el.left || top !== el.top) {
+          nextElements = snapped.map((e) => (e.id === id ? { ...e, left, top } : e));
+        }
+      }
+      const changed = nextElements.some((e, i) => e !== doc.elements[i]);
+      if (changed) {
+        setDoc((d) => ({ ...d, elements: nextElements }));
+        setDirty(true);
       }
     },
-    [patchElement],
+    [selectedIds],
   );
 
   const handleResize = useCallback(
     (id: string, totalDwMm: number, totalDhMm: number) => {
-      const grid = useSettingsStore.getState().editor.editorGrid;
-      const step = grid ? 1 : 0.1;
+      const step = 0.1;
       const snap = (value: number) => Math.round(value / step) * step;
       setDoc((prev) => ({
         ...prev,
@@ -1439,56 +1458,81 @@ export default function EditScreen() {
 
   const renderCanvas = () => (
     <View
-      style={styles.stage}
+      style={[styles.stage, { height: stageMaxHeight }]}
       onLayout={(event) => {
         const next = event.nativeEvent.layout.width;
         if (Math.abs(next - stageWidth) > 1) setStageWidth(next);
       }}>
-      <ViewShot ref={canvasShotRef} options={{ format: 'png', quality: 1 }}>
-        <ArtboardFrame document={doc} widthPx={canvasWidthPx || 1} heightPx={canvasHeightPx || 1}>
-          <Pressable
-            onPress={() => setSelectedIds([])}
+      <View
+        style={[
+          styles.rulerBoard,
+          {
+            width: RULER_SIZE + (canvasWidthPx || 1),
+            height: RULER_SIZE + (canvasHeightPx || 1),
+          },
+        ]}>
+        <View style={styles.rulerTopRow}>
+          <View style={styles.rulerCorner} />
+          <HorizontalRuler widthPx={canvasWidthPx || 1} lengthMm={doc.widthMm} pxPerMm={scale} />
+        </View>
+        <View style={styles.rulerBodyRow}>
+          <VerticalRuler heightPx={canvasHeightPx || 1} lengthMm={doc.heightMm} pxPerMm={scale} />
+          {/* Clip layer: absolute children + transforms cannot paint past the label border. */}
+          <View
+            collapsable={false}
             style={{
               width: canvasWidthPx || 1,
               height: canvasHeightPx || 1,
               overflow: 'hidden',
             }}>
-            {doc.background?.type === 'image' ? (
-              <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-                <Image
-                  source={{ uri: doc.background.uri }}
-                  style={StyleSheet.absoluteFillObject}
-                  contentFit="cover"
-                />
-              </View>
-            ) : null}
-            {gridLines}
-            {scale > 0
-              ? sortLayers(doc.elements).map((element) => (
-                  <CanvasElement
-                    key={element.id}
-                    element={element}
-                    scale={scale}
-                    selected={selectedIds.includes(element.id)}
-                    selectionColor={selectionColor}
-                    onSelect={handleSelect}
-                    onOpenPanel={openPanelFor}
-                    onEditText={beginTextEdit}
-                    onDrag={handleDrag}
-                    onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
-                    onResize={handleResize}
-                  />
-                ))
-              : null}
-            {doc.elements.length === 0 ? (
-              <View pointerEvents="none" style={styles.emptyHintWrap}>
-                <Text style={styles.emptyHint}>Tap a tool below to add elements</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        </ArtboardFrame>
-      </ViewShot>
+            <ViewShot ref={canvasShotRef} options={{ format: 'png', quality: 1 }} style={{ width: canvasWidthPx || 1, height: canvasHeightPx || 1 }}>
+              <ArtboardFrame document={doc} widthPx={canvasWidthPx || 1} heightPx={canvasHeightPx || 1}>
+                <Pressable
+                  onPress={() => setSelectedIds([])}
+                  style={{
+                    width: canvasWidthPx || 1,
+                    height: canvasHeightPx || 1,
+                    overflow: 'hidden',
+                  }}>
+                  {doc.background?.type === 'image' ? (
+                    <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+                      <Image
+                        source={{ uri: doc.background.uri }}
+                        style={StyleSheet.absoluteFillObject}
+                        contentFit="cover"
+                      />
+                    </View>
+                  ) : null}
+                  {gridLines}
+                  {scale > 0
+                    ? sortLayers(doc.elements).map((element) => (
+                        <CanvasElement
+                          key={element.id}
+                          element={element}
+                          scale={scale}
+                          selected={selectedIds.includes(element.id)}
+                          selectionColor={selectionColor}
+                          onSelect={handleSelect}
+                          onOpenPanel={openPanelFor}
+                          onEditText={beginTextEdit}
+                          onDrag={handleDrag}
+                          onDragStart={handleDragStart}
+                          onDragEnd={handleDragEnd}
+                          onResize={handleResize}
+                        />
+                      ))
+                    : null}
+                  {doc.elements.length === 0 ? (
+                    <View pointerEvents="none" style={styles.emptyHintWrap}>
+                      <Text style={styles.emptyHint}>Tap a tool below to add elements</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              </ArtboardFrame>
+            </ViewShot>
+          </View>
+        </View>
+      </View>
     </View>
   );
 
@@ -1736,16 +1780,12 @@ export default function EditScreen() {
           router.push({ pathname: '/share', params: { labelId: docRef.current.id } });
         }}
         onUpload={() => {
-          if (!useLabelStore.getState().cloudProfile) {
-            Alert.alert(
-              'Not Signed In',
-              'Sign in from the Template screen Cloud tab to upload labels.',
-            );
-            return;
-          }
           saveDocument(false);
           useLabelStore.getState().uploadToCloud(docRef.current);
-          Alert.alert('Saved', `"${docRef.current.name}" saved to cloud backup on this device.`);
+          Alert.alert(
+            'Template saved',
+            `"${docRef.current.name}" is in Select Existing Template and Template → Cloud.`,
+          );
         }}
       />
 
@@ -1848,19 +1888,30 @@ export default function EditScreen() {
         animationType="fade"
         onRequestClose={() => setSizeModalVisible(false)}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}>
-          <View style={[styles.modalCard, styles.sizeModalCard]}>
-            <Text style={styles.modalHeading}>Label size</Text>
-            {sizeModalVisible ? (
-              <LabelSizeEditor widthMm={doc.widthMm} heightMm={doc.heightMm} onChange={applyLabelSize} />
-            ) : null}
-            <Pressable
-              style={[styles.modalBtn, styles.modalSaveBtn, styles.openCloseBtn]}
-              onPress={() => setSizeModalVisible(false)}>
-              <Text style={styles.modalSaveText}>Done</Text>
-            </Pressable>
-          </View>
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.sizeModalScroll}
+            bounces={false}
+            showsVerticalScrollIndicator={false}>
+            <View style={[styles.modalCard, styles.sizeModalCard]}>
+              <Text style={styles.modalHeading}>Label size</Text>
+              {sizeModalVisible ? (
+                <LabelSizeEditor
+                  widthMm={doc.widthMm}
+                  heightMm={doc.heightMm}
+                  onChange={applyLabelSize}
+                />
+              ) : null}
+              <Pressable
+                style={[styles.modalBtn, styles.modalSaveBtn, styles.openCloseBtn]}
+                onPress={() => setSizeModalVisible(false)}>
+                <Text style={styles.modalSaveText}>Done</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
     </View>
@@ -1961,11 +2012,27 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Palette.screen,
-    paddingVertical: 0,
-    paddingHorizontal: 0,
+    backgroundColor: LABEL_PAD_STAGE_COLOR,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
     minHeight: LABEL_PAD_STAGE_MIN_HEIGHT,
     overflow: 'hidden',
+  },
+  rulerBoard: {
+    flexDirection: 'column',
+    overflow: 'hidden',
+    backgroundColor: LABEL_PAD_STAGE_COLOR,
+  },
+  rulerTopRow: {
+    flexDirection: 'row',
+  },
+  rulerBodyRow: {
+    flexDirection: 'row',
+  },
+  rulerCorner: {
+    width: RULER_SIZE,
+    height: RULER_SIZE,
+    backgroundColor: '#DDE4EC',
   },
   emptyHintWrap: {
     ...StyleSheet.absoluteFillObject,
@@ -2115,13 +2182,18 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sizeModalScroll: {
+    flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
+    paddingVertical: 24,
   },
   modalCard: {
     width: '100%',
     maxWidth: 340,
+    alignSelf: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 22,
@@ -2131,7 +2203,6 @@ const styles = StyleSheet.create({
   },
   sizeModalCard: {
     maxWidth: 400,
-    maxHeight: '90%',
   },
   modalHeading: {
     fontSize: 17,

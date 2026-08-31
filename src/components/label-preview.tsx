@@ -58,12 +58,15 @@ export function ArtboardFrame({
   heightPx,
   children,
   style,
+  showBorder = true,
 }: {
   document: LabelDocument;
   widthPx: number;
   heightPx: number;
   children?: ReactNode;
   style?: StyleProp<ViewStyle>;
+  /** Editor chrome — omit when capturing a print raster. */
+  showBorder?: boolean;
 }) {
   const w = Math.max(1, widthPx);
   const h = Math.max(1, heightPx);
@@ -81,8 +84,11 @@ export function ArtboardFrame({
         },
         style,
       ]}>
-      <View style={{ width: w, height: h, overflow: 'hidden' }}>{children}</View>
-      {dieCut ? null : (
+      {/* Nested clip — absolute + rotated children must stay inside the label border. */}
+      <View collapsable={false} style={{ width: w, height: h, overflow: 'hidden' }}>
+        {children}
+      </View>
+      {dieCut || !showBorder ? null : (
         <View
           pointerEvents="none"
           style={[
@@ -102,8 +108,12 @@ type LabelPreviewProps = {
   document: LabelDocument;
   width?: number;
   maxHeight?: number;
+  /** Force exact pixel dimensions (print capture). Uniform scale, centered in the box. */
+  exactWidthPx?: number;
+  exactHeightPx?: number;
   showStage?: boolean;
   style?: StyleProp<ViewStyle>;
+  showArtboardBorder?: boolean;
 };
 
 function LabelElements({
@@ -160,17 +170,20 @@ function LabelCanvas({
   document,
   fitted,
   style,
+  showBorder = true,
 }: {
   document: LabelDocument;
   fitted: { widthPx: number; heightPx: number; scale: number };
   style?: StyleProp<ViewStyle>;
+  showBorder?: boolean;
 }) {
   return (
     <ArtboardFrame
       document={document}
       widthPx={fitted.widthPx || 1}
       heightPx={fitted.heightPx || 1}
-      style={style}>
+      style={style}
+      showBorder={showBorder}>
       <TemplateBackgroundImage document={document} />
       {fitted.scale > 0 ? <LabelElements document={document} scale={fitted.scale} /> : null}
     </ArtboardFrame>
@@ -181,10 +194,45 @@ export function LabelPreview({
   document,
   width = 0,
   maxHeight,
+  exactWidthPx,
+  exactHeightPx,
   showStage = false,
   style,
+  showArtboardBorder = true,
 }: LabelPreviewProps) {
   const [stageWidth, setStageWidth] = useState(0);
+
+  if (exactWidthPx != null && exactHeightPx != null) {
+    const w = Math.max(1, Math.round(exactWidthPx));
+    const h = Math.max(1, Math.round(exactHeightPx));
+    const scale = Math.min(
+      w / Math.max(document.widthMm, 0.01),
+      h / Math.max(document.heightMm, 0.01),
+    );
+    const contentW = Math.max(1, Math.round(document.widthMm * scale));
+    const contentH = Math.max(1, Math.round(document.heightMm * scale));
+    return (
+      <View
+        collapsable={false}
+        style={[
+          {
+            width: w,
+            height: h,
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            backgroundColor: canvasFillFromDocument(document),
+          },
+          style,
+        ]}>
+        <LabelCanvas
+          document={document}
+          fitted={{ widthPx: contentW, heightPx: contentH, scale }}
+          showBorder={showArtboardBorder}
+        />
+      </View>
+    );
+  }
 
   if (!showStage) {
     const naturalHeight = width * (document.heightMm / Math.max(document.widthMm, 0.01));
@@ -194,7 +242,14 @@ export function LabelPreview({
       width,
       maxHeight ?? naturalHeight,
     );
-    return <LabelCanvas document={document} fitted={fitted} style={style} />;
+    return (
+      <LabelCanvas
+        document={document}
+        fitted={fitted}
+        style={style}
+        showBorder={showArtboardBorder}
+      />
+    );
   }
 
   const outerWidth = stageWidth > 0 ? stageWidth : width;
@@ -209,7 +264,7 @@ export function LabelPreview({
         const next = event.nativeEvent.layout.width;
         if (Math.abs(next - stageWidth) > 1) setStageWidth(next);
       }}>
-      <LabelCanvas document={document} fitted={fitted} />
+      <LabelCanvas document={document} fitted={fitted} showBorder={showArtboardBorder} />
     </View>
   );
 }

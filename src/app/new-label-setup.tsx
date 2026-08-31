@@ -269,10 +269,15 @@ export default function NewLabelSetupScreen() {
         transparent
         animationType="fade"
         onRequestClose={() => setSizeModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.sizeModalWrap}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.sizeModalScroll}
+            bounces={false}
+            showsVerticalScrollIndicator={false}>
             <View style={styles.modalCard}>
               <Text style={styles.modalHeading}>Customize label size</Text>
               {sizeModalVisible ? (
@@ -289,8 +294,8 @@ export default function NewLabelSetupScreen() {
                 <Text style={styles.modalOk}>Done</Text>
               </Pressable>
             </View>
-          </KeyboardAvoidingView>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -395,6 +400,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
+  },
+  sizeModalScroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
     padding: 24,
   },
   modalCard: {
@@ -417,6 +426,5 @@ const styles = StyleSheet.create({
   modalBtn: { paddingVertical: 6 },
   modalCancel: { color: '#64748B', fontSize: 16, fontWeight: '500' },
   modalOk: { color: Palette.accent, fontSize: 16, fontWeight: '500' },
-  sizeModalWrap: { width: '100%' },
   pressed: { opacity: 0.75 },
 });

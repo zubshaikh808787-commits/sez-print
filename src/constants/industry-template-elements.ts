@@ -7,6 +7,7 @@ import {
   createTableState,
   type BarcodeElementState,
 } from '@/components/editor/types';
+import { buildShippingTemplateElements } from '@/constants/shipping-template-elements';
 import { templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
 import { generateId, type LabelElement } from '@/lib/label-document';
 
@@ -209,12 +210,25 @@ function dualStacked(w: number, h: number, radius = 1.5) {
 
 function pStyle(w: number, h: number, extra: LabelElement[] = []) {
   const pad = 0.7;
-  const headW = w * 0.68;
+  const headW = Math.min(w * 0.68, w - pad * 2 - 2.5);
   const tailW = Math.max(2.5, w - headW - pad * 2);
+  const headLeft = pad;
+  const tailLeft = Math.min(pad + headW, w - pad - tailW);
   return [
-    box(pad, pad, headW, h - pad * 2, { radius: 0.6 }),
-    box(pad + headW, h * 0.34, tailW, h * 0.32, { rounded: false }),
-    ...extra,
+    box(headLeft, pad, headW, h - pad * 2, { radius: 0.6 }),
+    box(tailLeft, h * 0.34, tailW, h * 0.32, { rounded: false }),
+    ...extra.map((el) => {
+      // Keep injected extras (e.g. dual-stack panels) inside the head region.
+      const maxW = headW;
+      const width = Math.min(el.width, maxW);
+      const left = Math.min(Math.max(pad, el.left), pad + maxW - width);
+      const height =
+        'height' in el && typeof el.height === 'number'
+          ? Math.min(el.height, h - pad * 2)
+          : el.height;
+      const top = Math.min(Math.max(pad, el.top), h - pad - (height ?? 0));
+      return { ...el, left, top, width, ...(height != null ? { height } : {}) } as LabelElement;
+    }),
   ];
 }
 
@@ -239,6 +253,9 @@ export function buildIndustryPreviewElements(
   w: number,
   h: number,
 ): LabelElement[] | null {
+  const shipping = buildShippingTemplateElements(previewType, w, h);
+  if (shipping) return shipping;
+
   const { titlePt, bodyPt, smallPt } = templateFontSizes(w, h);
   const pad = Math.max(0.8, Math.min(w, h) * 0.04);
   const innerW = w - pad * 2;

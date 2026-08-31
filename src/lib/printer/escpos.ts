@@ -225,6 +225,82 @@ export function grayToBits(
   return { bytesPerRow, height, data };
 }
 
+/**
+ * Map a gray raster onto destW×destH.
+ * `stretch` fills the label (same mm→dot mapping as the editor).
+ * `contain` is only for 90°/270° when the rotated bitmap has a swapped aspect.
+ */
+export function fitGrayToSize(
+  src: GrayRaster,
+  destW: number,
+  destH: number,
+  mode: 'contain' | 'stretch' = 'stretch',
+): GrayRaster {
+  const width = Math.max(1, Math.round(destW));
+  const height = Math.max(1, Math.round(destH));
+  if (src.width === width && src.height === height) return src;
+  const out = new Uint8Array(width * height);
+  out.fill(255);
+  if (mode === 'stretch') {
+    for (let y = 0; y < height; y++) {
+      const sy = Math.min(src.height - 1, Math.floor(((y + 0.5) * src.height) / height));
+      for (let x = 0; x < width; x++) {
+        const sx = Math.min(src.width - 1, Math.floor(((x + 0.5) * src.width) / width));
+        out[y * width + x] = src.gray[sy * src.width + sx];
+      }
+    }
+    return { width, height, gray: out };
+  }
+  const scale = Math.min(width / Math.max(src.width, 1), height / Math.max(src.height, 1));
+  const dw = Math.max(1, Math.round(src.width * scale));
+  const dh = Math.max(1, Math.round(src.height * scale));
+  const ox = Math.floor((width - dw) / 2);
+  const oy = Math.floor((height - dh) / 2);
+  for (let y = 0; y < dh; y++) {
+    const sy = Math.min(src.height - 1, Math.floor(((y + 0.5) * src.height) / dh));
+    for (let x = 0; x < dw; x++) {
+      const sx = Math.min(src.width - 1, Math.floor(((x + 0.5) * src.width) / dw));
+      out[(y + oy) * width + (x + ox)] = src.gray[sy * src.width + sx];
+    }
+  }
+  return { width, height, gray: out };
+}
+
+/**
+ * Place a bit raster centered on a dest canvas (white fill).
+ * destWidth is forced to a multiple of 8 for TSPL BITMAP packing.
+ * Used so 8-dot alignment padding is equal left/right, not all on the right.
+ */
+export function padBitsCentered(
+  raster: BitRaster,
+  destWidth: number,
+  destHeight: number,
+): BitRaster {
+  const destW = Math.max(8, Math.ceil(Math.max(1, destWidth) / 8) * 8);
+  const destH = Math.max(1, Math.round(destHeight));
+  const srcW = raster.bytesPerRow * 8;
+  const srcH = raster.height;
+  if (srcW === destW && srcH === destH) return raster;
+
+  const bytesPerRow = destW >> 3;
+  const out = new Uint8Array(bytesPerRow * destH);
+  const ox = Math.floor((destW - srcW) / 2);
+  const oy = Math.floor((destH - srcH) / 2);
+
+  for (let y = 0; y < srcH; y++) {
+    const dy = y + oy;
+    if (dy < 0 || dy >= destH) continue;
+    for (let x = 0; x < srcW; x++) {
+      const dx = x + ox;
+      if (dx < 0 || dx >= destW) continue;
+      if (raster.data[y * raster.bytesPerRow + (x >> 3)] & (0x80 >> (x & 7))) {
+        out[dy * bytesPerRow + (dx >> 3)] |= 0x80 >> (dx & 7);
+      }
+    }
+  }
+  return { bytesPerRow, height: destH, data: out };
+}
+
 /** Shift a bit raster horizontally by whole dots (positive = right). */
 export function shiftBits(raster: BitRaster, offsetDots: number): BitRaster {
   if (offsetDots === 0) return raster;

@@ -1,8 +1,9 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette } from '@/constants/ui';
+import { useTabBarPadding } from '@/hooks/use-tab-bar-padding';
 
 const SECTIONS = [
   {
@@ -33,6 +34,7 @@ const SECTIONS = [
 
 export default function HelpScreen() {
   const insets = useSafeAreaInsets();
+  const tabPad = useTabBarPadding(Spacing.four);
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
@@ -41,7 +43,7 @@ export default function HelpScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingBottom: insets.bottom + BottomTabInset + Spacing.four },
+          { paddingBottom: tabPad },
         ]}
         showsVerticalScrollIndicator={false}>
         <Text style={styles.intro}>

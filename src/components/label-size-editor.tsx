@@ -1,5 +1,13 @@
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type TextInput as TextInputType,
+} from 'react-native';
 
 import { Palette } from '@/constants/ui';
 import {
@@ -34,6 +42,9 @@ export function LabelSizeEditor({ widthMm, heightMm, onChange }: LabelSizeEditor
   const [widthText, setWidthText] = useState(() => formatField(widthMm, 'mm'));
   const [heightText, setHeightText] = useState(() => formatField(heightMm, 'mm'));
   const presetId = matchingPresetId(widthMm, heightMm);
+  const scrollRef = useRef<ScrollView>(null);
+  const widthRef = useRef<TextInputType>(null);
+  const heightRef = useRef<TextInputType>(null);
 
   const error = useMemo(() => {
     const w = parseSizeInput(widthText);
@@ -64,10 +75,26 @@ export function LabelSizeEditor({ widthMm, heightMm, onChange }: LabelSizeEditor
     setHeightText(formatField(heightMm, next));
   };
 
+  const scrollInputsIntoView = () => {
+    // Keep width/height fields above the keyboard inside modal/sheet parents.
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
+  };
+
   return (
-    <View style={styles.root}>
+    <ScrollView
+      ref={scrollRef}
+      style={styles.scroll}
+      contentContainerStyle={styles.root}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      bounces={false}>
       <Text style={styles.hint}>
-        Screen preview fits millimetres into the editor. Print uses 8 dots/mm (203 DPI).
+        Screen preview fits millimetres into the editor. Print uses the printer DPI
+        (TD-404 = 203 DPI): dots = mm × 203 ÷ 25.4. Inch sizes such as 2×1 in are
+        stored as millimetres (50.8×25.4) and sent to the printer in inches so the
+        media size is exact.
       </Text>
       <View style={styles.unitRow}>
         {UNITS.map((item) => (
@@ -80,13 +107,19 @@ export function LabelSizeEditor({ widthMm, heightMm, onChange }: LabelSizeEditor
         ))}
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.presetRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.presetRow}
+        keyboardShouldPersistTaps="handled">
         {LABEL_SIZE_PRESETS.map((preset) => (
           <Pressable
             key={preset.id}
             onPress={() => applyMm(preset.widthMm, preset.heightMm)}
             style={[styles.presetChip, presetId === preset.id && styles.presetChipOn]}>
-            <Text style={[styles.presetText, presetId === preset.id && styles.presetTextOn]}>{preset.label}</Text>
+            <Text style={[styles.presetText, presetId === preset.id && styles.presetTextOn]}>
+              {preset.label}
+            </Text>
           </Pressable>
         ))}
         <Pressable
@@ -103,9 +136,11 @@ export function LabelSizeEditor({ widthMm, heightMm, onChange }: LabelSizeEditor
         <View style={styles.inputCol}>
           <Text style={styles.inputLabel}>Width ({unit})</Text>
           <TextInput
+            ref={widthRef}
             style={[styles.input, error ? styles.inputError : null]}
             keyboardType="decimal-pad"
             value={widthText}
+            onFocus={scrollInputsIntoView}
             onChangeText={(text) => {
               setWidthText(text);
               applyFromInputs(text, heightText, unit);
@@ -116,9 +151,11 @@ export function LabelSizeEditor({ widthMm, heightMm, onChange }: LabelSizeEditor
         <View style={styles.inputCol}>
           <Text style={styles.inputLabel}>Height ({unit})</Text>
           <TextInput
+            ref={heightRef}
             style={[styles.input, error ? styles.inputError : null]}
             keyboardType="decimal-pad"
             value={heightText}
+            onFocus={scrollInputsIntoView}
             onChangeText={(text) => {
               setHeightText(text);
               applyFromInputs(widthText, text, unit);
@@ -126,17 +163,20 @@ export function LabelSizeEditor({ widthMm, heightMm, onChange }: LabelSizeEditor
           />
         </View>
       </View>
-      {error ? <Text style={styles.error}>{error}</Text> : (
+      {error ? (
+        <Text style={styles.error}>{error}</Text>
+      ) : (
         <Text style={styles.bounds}>
           Allowed range: {MIN_LABEL_MM}–{MAX_LABEL_MM} mm
         </Text>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { gap: 12 },
+  scroll: { flexGrow: 0 },
+  root: { gap: 12, paddingBottom: 8 },
   hint: { fontSize: 12, color: '#64748B', lineHeight: 16 },
   unitRow: { flexDirection: 'row', gap: 8 },
   unitChip: {

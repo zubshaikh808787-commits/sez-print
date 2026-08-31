@@ -41,7 +41,10 @@ example
 # generated native folders
 /ios
 /android
+.gradle/
+**/.gradle/
 modules/**/android/build/
+modules/**/android/.gradle/
 
 # local EAS log dumps
 eas-build-log*

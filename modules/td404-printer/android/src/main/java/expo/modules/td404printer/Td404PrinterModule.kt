@@ -31,7 +31,7 @@ class Td404PrinterModule : Module() {
   private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
   private val ioExecutor = Executors.newCachedThreadPool()
   private val connectTimeoutMs = 8_000L
-  private val printChunk = 8 * 1024
+  private val printChunk = 32 * 1024
   private var socket: BluetoothSocket? = null
   private var connectedMac: String? = null
   private var connectedName: String? = null
@@ -261,15 +261,26 @@ class Td404PrinterModule : Module() {
         try {
           val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
           val out = sock.outputStream
+          val startMs = System.currentTimeMillis()
           var offset = 0
           while (offset < bytes.size) {
             val end = minOf(offset + printChunk, bytes.size)
             out.write(bytes, offset, end - offset)
             offset = end
           }
+          val writeMs = System.currentTimeMillis() - startMs
           out.flush()
+          val totalMs = System.currentTimeMillis() - startMs
+          android.util.Log.i("Td404Printer", "SPP wrote ${bytes.size} bytes in ${writeMs}ms (flush: ${totalMs - writeMs}ms)")
           promise.resolve(mapOf("bytesSent" to bytes.size))
         } catch (e: IOException) {
+          android.util.Log.e("Td404Printer", "SPP write failed, closing dead socket: ${e.message}")
+          // Auto-close the dead socket so the JS layer detects disconnection immediately.
+          closeSocket()
+          sendEvent(
+            "onConnectionChanged",
+            mapOf("connected" to false, "sdkId" to "td404"),
+          )
           promise.reject("PRINT_FAILED", e.message, e)
         }
       }

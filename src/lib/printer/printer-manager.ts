@@ -1,13 +1,20 @@
 import Constants from 'expo-constants';
 import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
+import { PRINT_DPI } from '@/lib/label-geometry';
 import {
   connectWifiPrinter,
   wifiPrintRaw,
   wifiPrintSample,
 } from '@/lib/printer/backend-api';
+import {
+  DEFAULT_PRINTER_PROFILE,
+  PRINTER_PROFILES,
+  type PrinterProfile,
+} from '@/lib/printer/print-spec';
 import { encodeTscTextSample } from '@/lib/printer/tsc';
 import { usePrinterStore } from '@/stores/printer-store';
+import { useSettingsStore } from '@/stores/settings-store';
 
 export type DiscoveredPrinter = {
   id: string;
@@ -31,20 +38,39 @@ export type BluetoothCapabilities = {
 
 const SCAN_TIMEOUT_MS = 8000;
 const BLE_SCAN_MS = 2500;
-const CONNECT_TIMEOUT_MS = 10000;
-const WRITE_CHUNK_SIZE = 512;
-const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+/** Default BLE payload chunk (128 bytes allows fast bursts on standard BLE peripherals). */
+const BLE_DEFAULT_CHUNK = 128;
+/** Inter-chunk delay in ms. Packet bursting is used so writes complete in < 500ms. */
+const BLE_INTER_CHUNK_MS = 1;
+const BLE_BURST_INTERVAL = 4;
+/** MTU we request from the peripheral. */
+const BLE_REQUESTED_MTU = 512;
+
+const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function bytesToBase64(bytes: Uint8Array): string {
   let result = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i];
-    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
-    result += BASE64_CHARS[b0 >> 2];
-    result += BASE64_CHARS[((b0 & 3) << 4) | (b1 >> 4)];
-    result += i + 1 < bytes.length ? BASE64_CHARS[((b1 & 15) << 2) | (b2 >> 6)] : '=';
-    result += i + 2 < bytes.length ? BASE64_CHARS[b2 & 63] : '=';
+  const len = bytes.length;
+  const mainLen = len - (len % 3);
+  for (let i = 0; i < mainLen; i += 3) {
+    const chunk = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    result +=
+      B64_CHARS[(chunk >> 18) & 63] +
+      B64_CHARS[(chunk >> 12) & 63] +
+      B64_CHARS[(chunk >> 6) & 63] +
+      B64_CHARS[chunk & 63];
+  }
+  const remaining = len - mainLen;
+  if (remaining === 1) {
+    const chunk = bytes[mainLen];
+    result += B64_CHARS[chunk >> 2] + B64_CHARS[(chunk & 3) << 4] + '==';
+  } else if (remaining === 2) {
+    const chunk = (bytes[mainLen] << 8) | bytes[mainLen + 1];
+    result +=
+      B64_CHARS[chunk >> 10] +
+      B64_CHARS[(chunk >> 4) & 63] +
+      B64_CHARS[(chunk & 15) << 2] +
+      '=';
   }
   return result;
 }
@@ -63,8 +89,43 @@ export function isLikelyTd404Name(name: string | null | undefined): boolean {
     n.includes('tpl') ||
     n.startsWith('btprinter') ||
     n.includes('gp-') ||
-    n.includes('printer')
+    n.includes('printer') ||
+    // Common BLE / desktop thermal label printers (TSPL), e.g. "Thermal-3536-BLE".
+    n.includes('thermal') ||
+    n.includes('label') ||
+    n.includes('sticker') ||
+    n.includes('barcode') ||
+    n.includes('niimbot') ||
+    n.includes('phomemo') ||
+    n.includes('marklife') ||
+    n.includes('zebra') ||
+    n.includes('godex') ||
+    n.includes('tsc')
   );
+}
+
+/** True when this connection should get TSPL label jobs (SIZE/GAP/BITMAP), not ESC/POS receipts. */
+export function shouldUseTsplCommandSet(opts: {
+  activeTransport: string | null;
+  storeTransport: string | null;
+  sdkId: string | null;
+  deviceName: string | null;
+}): boolean {
+  if (
+    opts.activeTransport === 'td404-spp' ||
+    opts.activeTransport === 'wifi' ||
+    opts.sdkId === 'td404' ||
+    opts.storeTransport === 'bluetooth-spp' ||
+    opts.storeTransport === 'wifi'
+  ) {
+    return true;
+  }
+  // BLE label printers were incorrectly classified as ESC/POS → continuous overlapping
+  // dumps and left clipping. Prefer TSPL whenever the name looks like a label printer.
+  if (opts.activeTransport === 'bluetooth-ble' || opts.storeTransport === 'bluetooth-ble') {
+    return isLikelyTd404Name(opts.deviceName);
+  }
+  return false;
 }
 
 function isExpoGoRuntime(): boolean {
@@ -92,6 +153,10 @@ class PrinterManager {
   private td404ScanStop: (() => Promise<void>) | null = null;
   private backendPrinterId: string | null = null;
   private lastScanError: string | null = null;
+  /** Negotiated BLE ATT MTU. Payload = mtu - 3. */
+  private bleNegotiatedMtu: number = 0;
+  /** Serializes print() so batch copies never overlap on the wire. */
+  private printChain: Promise<void> = Promise.resolve();
 
   private getBle(): any {
     if (!this.bleLoadTried) {
@@ -168,13 +233,67 @@ class PrinterManager {
 
   get usesTd404CommandSet(): boolean {
     const store = usePrinterStore.getState();
-    return (
-      this.activeTransport === 'td404-spp' ||
-      this.activeTransport === 'wifi' ||
-      store.sdkId === 'td404' ||
-      store.transport === 'bluetooth-spp' ||
-      store.transport === 'wifi'
-    );
+    return shouldUseTsplCommandSet({
+      activeTransport: this.activeTransport,
+      storeTransport: store.transport,
+      sdkId: store.sdkId,
+      deviceName: store.deviceName ?? store.lastDeviceName,
+    });
+  }
+
+  /**
+   * Resolve the PrinterProfile for the currently connected (or last connected) printer.
+   * Uses device name heuristics and sdkId to pick the best match from PRINTER_PROFILES.
+   */
+  getActivePrinterProfile(): PrinterProfile {
+    const store = usePrinterStore.getState();
+    const settings = useSettingsStore.getState().printing;
+    const name = (store.deviceName ?? store.lastDeviceName ?? '').toLowerCase();
+
+    // Receipt printers (ESC/POS, left-aligned)
+    if (!this.usesTd404CommandSet) {
+      if (/80mm|80pos|pos80|tsp|tm-t|tm-m/i.test(name)) {
+        return PRINTER_PROFILES['receipt-80mm'];
+      }
+      return PRINTER_PROFILES['receipt-58mm'];
+    }
+
+    // TSPL label printers — resolve from user settings (default 304 DPI / 12 dots/mm)
+    const dpi = settings.printerDpi ?? 304;
+    const alignment = settings.printerAlignment ?? 'center';
+    const headWidthMm = settings.printheadWidthMm ?? 108;
+    const headWidthDots = Math.round((headWidthMm * dpi) / 25.4);
+
+    if (dpi === 304) {
+      const base = headWidthMm >= 106 ? PRINTER_PROFILES['td404-304'] : PRINTER_PROFILES['generic-304-4in'];
+      return { ...base, alignment };
+    }
+
+    if (dpi === 300) {
+      const base = PRINTER_PROFILES['generic-300-4in'];
+      return { ...base, alignment, printheadWidthMm: headWidthMm, printheadWidthDots: headWidthDots };
+    }
+
+    if (dpi === 203) {
+      const base = headWidthMm >= 106 ? PRINTER_PROFILES['td404-203'] : PRINTER_PROFILES['generic-203-4in'];
+      return { ...base, alignment };
+    }
+
+    return {
+      id: `custom-${dpi}`,
+      name: `Custom Thermal Label Printer (${dpi} DPI)`,
+      dpi,
+      printheadWidthMm: headWidthMm,
+      printheadWidthDots: headWidthDots,
+      maxHeightMm: 1000,
+      alignment,
+      commandLanguage: 'tspl',
+    };
+  }
+
+  /** Returns the DPI of the active printer profile. */
+  getPrintDpi(): number {
+    return this.getActivePrinterProfile().dpi;
   }
 
   getLastScanError(): string | null {
@@ -456,6 +575,7 @@ class PrinterManager {
   ): Promise<void> {
     this.stopScan();
     usePrinterStore.getState().setStatus('connecting');
+    const connectStart = Date.now();
 
     const preferSpp =
       transport === 'bluetooth-spp' ||
@@ -465,24 +585,16 @@ class PrinterManager {
     if (preferSpp && td404?.isTd404NativeAvailable()) {
       try {
         await this.ensurePermissions('connect-only');
-        const result = await Promise.race([
-          td404.connectTd404(deviceId, deviceName),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () =>
-                reject(
-                  new Error(
-                    'Printer did not accept the connection in time. Keep it on and close other phone connections.',
-                  ),
-                ),
-              CONNECT_TIMEOUT_MS,
-            ),
-          ),
-        ]);
+        console.info('[printer] SPP connect →', deviceId, deviceName);
+        // Native Kotlin module handles its own 8s timeout with proper socket cleanup.
+        // A JS-side Promise.race would leave a zombie socket if it fires first.
+        const result = await td404.connectTd404(deviceId, deviceName);
         this.activeTransport = 'td404-spp';
         this.connectedDevice = null;
         this.writableTarget = null;
         this.backendPrinterId = null;
+        this.bleNegotiatedMtu = 0;
+        console.info('[printer] SPP connected in', Date.now() - connectStart, 'ms →', result.id);
         usePrinterStore.getState().setConnectedDevice(result.id, result.name ?? deviceId, {
           transport: 'bluetooth-spp',
           sdkId: 'td404',
@@ -490,6 +602,7 @@ class PrinterManager {
         });
         return;
       } catch (error) {
+        console.warn('[printer] SPP connect failed after', Date.now() - connectStart, 'ms:', error);
         if (transport === 'bluetooth-spp' || !this.getBle()) {
           usePrinterStore.getState().clearConnection();
           throw error instanceof Error ? error : new Error('Failed to connect to TD-404 printer.');
@@ -542,10 +655,23 @@ class PrinterManager {
   private async connectBle(deviceId: string, deviceName: string | null): Promise<void> {
     const ble = this.getBle();
     if (!ble) throw new Error('Bluetooth LE module is not available.');
+    const connectStart = Date.now();
+    console.info('[printer] BLE connect →', deviceId, deviceName);
 
     try {
       await this.waitForBlePoweredOn(ble);
       const device = await ble.connectToDevice(deviceId, { timeout: 12000 });
+
+      // Negotiate a larger MTU before service discovery for maximum throughput.
+      try {
+        const mtuResult = await device.requestMTU(BLE_REQUESTED_MTU);
+        this.bleNegotiatedMtu = mtuResult?.mtu ?? 0;
+        console.info('[printer] BLE MTU negotiated:', this.bleNegotiatedMtu);
+      } catch (mtuErr) {
+        this.bleNegotiatedMtu = 0;
+        console.warn('[printer] BLE MTU negotiation failed, using default chunk size:', mtuErr);
+      }
+
       await device.discoverAllServicesAndCharacteristics();
       this.writableTarget = await this.findWritableTarget(device);
       if (!this.writableTarget) {
@@ -555,11 +681,18 @@ class PrinterManager {
       this.connectedDevice = device;
       this.activeTransport = 'ble';
       this.backendPrinterId = null;
+      console.info(
+        '[printer] BLE connected in', Date.now() - connectStart, 'ms →',
+        deviceId, '| MTU:', this.bleNegotiatedMtu,
+        '| writeWithResponse:', this.writableTarget.withResponse,
+      );
 
       device.onDisconnected(() => {
+        console.info('[printer] BLE disconnected (peripheral-initiated)');
         this.connectedDevice = null;
         this.writableTarget = null;
         this.activeTransport = null;
+        this.bleNegotiatedMtu = 0;
         usePrinterStore.getState().clearConnection();
       });
 
@@ -570,7 +703,9 @@ class PrinterManager {
         backendPrinterId: null,
       });
     } catch (error) {
+      console.warn('[printer] BLE connect failed after', Date.now() - connectStart, 'ms:', error);
       this.activeTransport = null;
+      this.bleNegotiatedMtu = 0;
       usePrinterStore.getState().clearConnection();
       throw error instanceof Error ? error : new Error('Failed to connect to printer.');
     }
@@ -606,6 +741,7 @@ class PrinterManager {
   }
 
   async disconnect(): Promise<void> {
+    console.info('[printer] disconnect requested, transport:', this.activeTransport);
     if (this.activeTransport === 'td404-spp') {
       await this.getTd404()?.disconnectTd404();
     }
@@ -626,6 +762,7 @@ class PrinterManager {
     }
     this.activeTransport = null;
     this.backendPrinterId = null;
+    this.bleNegotiatedMtu = 0;
     usePrinterStore.getState().clearConnection();
   }
 
@@ -637,6 +774,38 @@ class PrinterManager {
       return Boolean(this.backendPrinterId);
     }
     return this.connectedDevice !== null && this.writableTarget !== null;
+  }
+
+  /** Effective BLE write chunk (bytes per characteristic write). */
+  private get bleChunkSize(): number {
+    if (this.bleNegotiatedMtu > 3) return this.bleNegotiatedMtu - 3;
+    return BLE_DEFAULT_CHUNK;
+  }
+
+  /**
+   * Attempt to reconnect to the last known device.
+   * Useful when navigating back to the print screen.
+   * No-op if already connected or no last device is stored.
+   */
+  async reconnectLastDevice(): Promise<boolean> {
+    if (this.isConnected) return true;
+    const store = usePrinterStore.getState();
+    if (!store.lastDeviceId) return false;
+    try {
+      console.info('[printer] auto-reconnect →', store.lastDeviceId, store.lastDeviceName);
+      const transport = store.transport ?? undefined;
+      // For Wi-Fi, skip — requires explicit IP entry.
+      if (transport === 'wifi') return false;
+      await this.connect(
+        store.lastDeviceId,
+        store.lastDeviceName,
+        transport as DiscoveredPrinter['transport'],
+      );
+      return true;
+    } catch (error) {
+      console.warn('[printer] auto-reconnect failed:', error);
+      return false;
+    }
   }
 
   async printTestLabel(text = 'Sez Print OK'): Promise<void> {
@@ -661,24 +830,53 @@ class PrinterManager {
   }
 
   async print(bytes: Uint8Array): Promise<void> {
+    // Serialize all transports so a second job cannot start while SPP/BLE is
+    // still writing — overlapping writes were a source of intermittent garbage
+    // / polarity flips on subsequent labels in a batch.
+    const run = this.printChain.then(() => this.printUnlocked(bytes));
+    this.printChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async printUnlocked(bytes: Uint8Array): Promise<void> {
+    const writeStart = Date.now();
+
     if (this.activeTransport === 'wifi' && this.backendPrinterId) {
+      console.info('[printer] Wi-Fi write:', bytes.length, 'bytes');
       await wifiPrintRaw(this.backendPrinterId, bytes);
+      console.info('[printer] Wi-Fi write done in', Date.now() - writeStart, 'ms');
       return;
     }
 
     if (this.activeTransport === 'td404-spp') {
       const td404 = this.getTd404();
       if (!td404?.isTd404Connected()) throw new Error('No printer connected.');
+      console.info('[printer] SPP write:', bytes.length, 'bytes');
       await td404.printTd404Base64(bytesToBase64(bytes));
+      console.info('[printer] SPP write done in', Date.now() - writeStart, 'ms');
       return;
     }
 
     if (!this.connectedDevice || !this.writableTarget) {
       throw new Error('No printer connected.');
     }
+
+    // BLE: use negotiated MTU chunk size with inter-chunk pacing.
+    const chunkSize = this.bleChunkSize;
     const { serviceUUID, characteristicUUID, withResponse } = this.writableTarget;
-    for (let offset = 0; offset < bytes.length; offset += WRITE_CHUNK_SIZE) {
-      const chunk = bytes.slice(offset, offset + WRITE_CHUNK_SIZE);
+    const totalChunks = Math.ceil(bytes.length / chunkSize);
+    console.info(
+      '[printer] BLE write:', bytes.length, 'bytes |',
+      totalChunks, 'chunks @', chunkSize, 'B/chunk |',
+      withResponse ? 'withResponse' : 'withoutResponse',
+    );
+
+    let chunkIndex = 0;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
       const payload = bytesToBase64(chunk);
       if (withResponse) {
         await this.connectedDevice.writeCharacteristicWithResponseForService(
@@ -692,8 +890,14 @@ class PrinterManager {
           characteristicUUID,
           payload,
         );
+        chunkIndex++;
+        // Micro-pause only on burst intervals to prevent buffer backpressure while keeping speed high
+        if (chunkIndex % BLE_BURST_INTERVAL === 0 && offset + chunkSize < bytes.length) {
+          await new Promise<void>((r) => setTimeout(r, BLE_INTER_CHUNK_MS));
+        }
       }
     }
+    console.info('[printer] BLE write done in', Date.now() - writeStart, 'ms');
   }
 }
 

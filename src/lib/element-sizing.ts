@@ -218,16 +218,19 @@ export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocume
     };
   }
 
-  const size = bboxOf(element);
   const maxW = doc.widthMm;
   const maxH = doc.heightMm;
-  let width = Math.min(Math.max(3, size.width), maxW);
-  let height = Math.min(Math.max(2, size.height), maxH);
-  let left = element.left;
-  let top = element.top;
+  const minW = element.type === 'line' ? 0.1 : 0.5;
+  const minH = element.type === 'line' ? 0.1 : 0.5;
 
-  left = Math.min(Math.max(0, left), Math.max(0, maxW - width));
-  top = Math.min(Math.max(0, top), Math.max(0, maxH - height));
+  const width = Math.min(Math.max(minW, element.width), maxW);
+  const height =
+    'height' in element && typeof element.height === 'number'
+      ? Math.min(Math.max(minH, element.height), maxH)
+      : 0;
+
+  const left = Math.min(Math.max(0, element.left), Math.max(0, maxW - width));
+  const top = Math.min(Math.max(0, element.top), Math.max(0, maxH - (height || minH)));
 
   const patch: Record<string, unknown> = { left, top, width };
 
@@ -277,6 +280,63 @@ export function scaleDocumentToSize(
     if (scaled.type === 'table') {
       scaled.columnWidths = scaled.columnWidths.map((n) => n * sx);
       scaled.rowHeights = scaled.rowHeights.map((n) => n * sy);
+    }
+    return clampElementToLabel(scaled, nextDoc);
+  });
+  return { ...nextDoc, elements };
+}
+
+/**
+ * Uniform contain-fit onto a print page, centered L/R and T/B.
+ * Small templates keep their aspect and sit in the middle of larger stock
+ * (matches “print looks like the preview, centered on the label”).
+ */
+export function fitDocumentCenteredOnPage(
+  doc: LabelDocument,
+  widthMm: number,
+  heightMm: number,
+): LabelDocument {
+  const scale = Math.min(
+    widthMm / Math.max(doc.widthMm, 0.01),
+    heightMm / Math.max(doc.heightMm, 0.01),
+  );
+  const contentW = doc.widthMm * scale;
+  const contentH = doc.heightMm * scale;
+  const ox = (widthMm - contentW) / 2;
+  const oy = (heightMm - contentH) / 2;
+  const nextDoc = { ...doc, widthMm, heightMm };
+  const elements = doc.elements.map((el) => {
+    if (el.type === 'border') {
+      return clampElementToLabel(
+        {
+          ...el,
+          left: ox,
+          top: oy,
+          width: contentW,
+          height: contentH,
+          rotation: 0 as const,
+        },
+        nextDoc,
+      );
+    }
+    const scaled: LabelElement = {
+      ...el,
+      left: ox + el.left * scale,
+      top: oy + el.top * scale,
+      width: el.width * scale,
+    };
+    if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
+      (scaled as { height: number }).height *= scale;
+    }
+    if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
+      (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * scale);
+    }
+    if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
+      (scaled as { lineWidth: number }).lineWidth *= scale;
+    }
+    if (scaled.type === 'table') {
+      scaled.columnWidths = scaled.columnWidths.map((n) => n * scale);
+      scaled.rowHeights = scaled.rowHeights.map((n) => n * scale);
     }
     return clampElementToLabel(scaled, nextDoc);
   });

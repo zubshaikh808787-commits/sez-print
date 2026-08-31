@@ -16,8 +16,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ShareNodeIcon } from '@/components/home-icons';
 import { LabelPreview, LABEL_PAD_STAGE_MIN_HEIGHT } from '@/components/label-preview';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette } from '@/constants/ui';
+import { useTabBarPadding } from '@/hooks/use-tab-bar-padding';
 import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { useLabelStore } from '@/stores/label-store';
 import { useTranslation } from '@/lib/i18n';
@@ -1472,6 +1473,7 @@ const INDUSTRY_CATEGORY_COUNT = CATEGORY_GROUPS.reduce(
 
 export default function TemplateScreen() {
   const insets = useSafeAreaInsets();
+  const tabPad = useTabBarPadding(Spacing.six);
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
 
@@ -1499,7 +1501,7 @@ export default function TemplateScreen() {
   const signOut = useLabelStore((s) => s.signOut);
   const deleteCloudTemplate = useLabelStore((s) => s.deleteCloudTemplate);
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
-  const getDocument = useLabelStore((s) => s.getDocument);
+  const ensureLocalDocument = useLabelStore((s) => s.ensureLocalDocument);
   const { t } = useTranslation();
 
   const localDocuments = useMemo(() => {
@@ -1521,11 +1523,9 @@ export default function TemplateScreen() {
   }, [cloudTemplates, searchQuery]);
 
   const handleEditCloudTemplate = (tpl: (typeof cloudTemplates)[number]) => {
-    // The editor loads from local documents; make sure a local copy exists.
-    if (!getDocument(tpl.id)) {
-      upsertDocument(JSON.parse(JSON.stringify(tpl)));
-    }
-    router.push({ pathname: '/edit', params: { labelId: tpl.id } });
+    const local = ensureLocalDocument(tpl.id);
+    if (!local) return;
+    router.push({ pathname: '/edit', params: { labelId: local.id } });
   };
 
   const handleDeleteCloudTemplate = (tpl: (typeof cloudTemplates)[number]) => {
@@ -1673,7 +1673,7 @@ export default function TemplateScreen() {
         cloudProfile ? (
           <ScrollView
             style={styles.cloudSignedInScroll}
-            contentContainerStyle={[styles.cloudSignedInContent, { paddingBottom: BottomTabInset + Spacing.six }]}
+            contentContainerStyle={[styles.cloudSignedInContent, { paddingBottom: tabPad }]}
             showsVerticalScrollIndicator={false}>
             <View style={styles.cloudProfileCard}>
               <View style={styles.cloudAvatar}>
@@ -1698,7 +1698,7 @@ export default function TemplateScreen() {
             </View>
 
             <Text style={styles.cloudSectionTitle}>
-              Synced Templates ({cloudTemplates.length})
+              Saved on this device ({cloudTemplates.length})
             </Text>
 
             {visibleCloudTemplates.length === 0 ? (
@@ -1772,7 +1772,7 @@ export default function TemplateScreen() {
         <View style={styles.sidebar}>
           <ScrollView
             style={styles.sidebarScroll}
-            contentContainerStyle={[styles.sidebarContent, { paddingBottom: BottomTabInset + 20 }]}
+            contentContainerStyle={[styles.sidebarContent, { paddingBottom: tabPad }]}
             showsVerticalScrollIndicator={false}>
             {activeTab === 'local' ? (
               <>
@@ -1881,7 +1881,7 @@ export default function TemplateScreen() {
                 style={styles.templatesScroll}
                 contentContainerStyle={[
                   styles.templatesContent,
-                  { paddingBottom: BottomTabInset + Spacing.six, alignItems: 'center' },
+                  { paddingBottom: tabPad, alignItems: 'center' },
                 ]}
                 showsVerticalScrollIndicator={false}>
                 {localDocuments.map((docItem) => (
@@ -1935,7 +1935,7 @@ export default function TemplateScreen() {
             contentContainerStyle={[
               styles.templatesContent,
               {
-                paddingBottom: BottomTabInset + Spacing.six,
+                paddingBottom: tabPad,
                 alignItems: 'center',
               },
             ]}
@@ -2030,6 +2030,9 @@ export default function TemplateScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalHeading}>Cloud Login</Text>
+            <Text style={{ fontSize: 12, color: '#64748B', textAlign: 'center', marginBottom: 12 }}>
+              Saved on this phone only — there is no remote cloud account yet.
+            </Text>
             <TextInput
               style={styles.modalInput}
               value={loginEmail}

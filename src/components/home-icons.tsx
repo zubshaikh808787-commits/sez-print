@@ -607,6 +607,86 @@ export function PrintDirectlyIcon({ color = '#17A6B8', size = 36 }: { color?: st
   );
 }
 
+export function ShippingLabelIcon({ color = TEAL, size = 30 }: { color?: string; size?: number }) {
+  const scale = size / 30;
+  const stroke = 2 * scale;
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <View
+        style={{
+          width: 20 * scale,
+          height: 24 * scale,
+          borderRadius: 3 * scale,
+          borderWidth: stroke,
+          borderColor: color,
+          backgroundColor: '#FFFFFF',
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          top: 8 * scale,
+          width: 12 * scale,
+          height: stroke,
+          backgroundColor: color,
+          borderRadius: 1,
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          top: 13 * scale,
+          width: 12 * scale,
+          height: stroke,
+          backgroundColor: color,
+          borderRadius: 1,
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          top: 18 * scale,
+          width: 8 * scale,
+          height: stroke,
+          backgroundColor: color,
+          borderRadius: 1,
+        }}
+      />
+    </View>
+  );
+}
+
+export function CustomizeIcon({ color = TEAL, size = 30 }: { color?: string; size?: number }) {
+  const scale = size / 30;
+  const stroke = 2 * scale;
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <View
+        style={{
+          width: 22 * scale,
+          height: 16 * scale,
+          borderRadius: 3 * scale,
+          borderWidth: stroke,
+          borderColor: color,
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          width: 8 * scale,
+          height: 8 * scale,
+          borderRadius: 2 * scale,
+          borderWidth: stroke,
+          borderColor: color,
+          backgroundColor: '#FFFFFF',
+          bottom: 4 * scale,
+          right: 4 * scale,
+        }}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   iconBox: {
     position: 'relative',

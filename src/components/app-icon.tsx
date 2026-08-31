@@ -63,7 +63,7 @@ const ION: Record<string, IoniconsName> = {
   'photo.on.rectangle': 'images-outline',
   'plus.circle': 'add-circle-outline',
   'plus.rectangle': 'add-outline',
-  'plus.square': 'add-square-outline',
+  'plus.square': 'add-circle-outline',
   printer: 'print-outline',
   'printer.fill': 'print',
   qrcode: 'qr-code-outline',

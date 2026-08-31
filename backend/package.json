@@ -1,0 +1,21 @@
+{
+  "name": "sez-print-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sez Print API — multi-SDK label printer orchestration (TD-404 and future SDKs)",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "free-port": "node scripts/free-port.js",
+    "start": "node scripts/free-port.js && node src/index.js",
+    "dev": "node scripts/free-port.js && node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "uuid": "^11.1.0"
+  }
+}

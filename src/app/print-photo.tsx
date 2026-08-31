@@ -2,7 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,27 +18,37 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ViewShot, { captureRef } from 'react-native-view-shot';
 
 import { PhotoFramePreview } from '@/components/photo-frame-preview';
+import { PrintSizeSelector } from '@/components/print-size-selector';
 import { getPhotoFrame } from '@/constants/photo-frames';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { Palette, cardShadow } from '@/constants/ui';
+import { type LabelSizeMm } from '@/lib/label-geometry';
+import { pngBase64ToGray, rotateGray } from '@/lib/printer/escpos';
 import {
-  encodeEscPosJob,
-  grayToBits,
-  pngBase64ToGray,
-  rotateGray,
-  shiftBits,
-} from '@/lib/printer/escpos';
+  PRINT_CAPTURE_OPTIONS,
+  encodeConnectedPrinterJob,
+  finalizeGrayForPrint,
+  formatPrintFailure,
+  orientedPrintSize,
+  printCaptureLayout,
+  printJobSizeError,
+  sendIsolatedPrintCopies,
+  waitForNextPaint,
+} from '@/lib/printer/print-job';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
-import { encodeTscBitmapJob } from '@/lib/printer/tsc';
-import { PRINT_DOTS_PER_MM } from '@/lib/label-geometry';
 import { usePrinterStore } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
-const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent'] as const;
+const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent', 'Black mark'] as const;
 const COLOR_MODES = ['Original', 'B & W', 'Halftone'] as const;
 
 type ColorMode = (typeof COLOR_MODES)[number];
+
+function containWidth(boxW: number, boxH: number, contentW: number, contentH: number) {
+  const scale = Math.min(boxW / Math.max(contentW, 0.01), boxH / Math.max(contentH, 0.01));
+  return Math.max(1, Math.round(contentW * scale));
+}
 
 function StepperRow({
   label,
@@ -165,6 +175,9 @@ export default function PrintPhotoScreen() {
   const [antiColor, setAntiColor] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [footerHeight, setFooterHeight] = useState(72);
+  const [sizeSheetOpen, setSizeSheetOpen] = useState(false);
+  const [printSize, setPrintSize] = useState<LabelSizeMm | null>(null);
+  const pendingPrintRef = useRef(false);
 
   const shotRef = useRef<ViewShot>(null);
   const contentWidth = Math.min(width, MaxContentWidth);
@@ -220,26 +233,29 @@ export default function PrintPhotoScreen() {
       return;
     }
 
+    const widthMm = printSize?.widthMm ?? frame?.widthMm ?? defaults.labelWidth;
+    const heightMm = printSize?.heightMm ?? frame?.heightMm ?? defaults.labelHeight;
+    const orientationDeg = parseInt(orientation.replace('°', ''), 10) as 0 | 90 | 180 | 270;
+    const paper = orientedPrintSize(widthMm, heightMm, orientationDeg);
+    const sizeError = printJobSizeError(paper.widthMm, paper.heightMm);
+    if (sizeError) {
+      Alert.alert('Unsupported Size', sizeError);
+      return;
+    }
+
     setPrinting(true);
     try {
-      const widthMm = frame?.widthMm ?? defaults.labelWidth;
-      const heightMm = frame?.heightMm ?? defaults.labelHeight;
-      const targetW = Math.round(widthMm * PRINT_DOTS_PER_MM);
-      const targetH = Math.round(heightMm * PRINT_DOTS_PER_MM);
-      const orientationDeg = parseInt(orientation.replace('°', ''), 10) as 0 | 90 | 180 | 270;
+      await waitForNextPaint();
       const dither = colorMode === 'Halftone';
       const threshold =
         colorMode === 'Original'
           ? 200
           : Math.min(250, Math.max(10, grayThreshold + (darkness != null ? (darkness - 8) * 10 : 0)));
 
-      const base64 = await captureRef(shotRef, {
-        format: 'png',
-        quality: 1,
-        result: 'base64',
-        width: targetW,
-        height: targetH,
-      });
+      const base64 = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
+      if (!base64) {
+        throw new Error('Could not capture the photo for printing.');
+      }
 
       let gray = pngBase64ToGray(base64);
       if (flipH) {
@@ -259,26 +275,31 @@ export default function PrintPhotoScreen() {
       }
 
       gray = rotateGray(gray, orientationDeg);
-      let bits = grayToBits(gray, { threshold, dither: dither || colorMode === 'B & W' });
-      const offsetDots = Math.round(hOffset * PRINT_DOTS_PER_MM);
-      if (offsetDots !== 0) bits = shiftBits(bits, offsetDots);
+      const bits = finalizeGrayForPrint(gray, {
+        widthMm: paper.widthMm,
+        heightMm: paper.heightMm,
+        threshold,
+        dither: dither || colorMode === 'B & W',
+        hOffsetMm: hOffset,
+      });
 
-      const bytes = manager.usesTd404CommandSet
-        ? encodeTscBitmapJob(bits, {
-            widthMm,
-            heightMm,
-            gapMm: gapLength,
-            copies,
-            density: darkness,
-          })
-        : encodeEscPosJob(bits, {
-            copies,
-            leadFeedLines: Math.max(0, Math.round(vOffset * PRINT_DOTS_PER_MM)),
-            trailFeedLines: Math.max(0, Math.round(gapLength * PRINT_DOTS_PER_MM)),
-            density: darkness,
-            speed,
-          });
-      await manager.print(bytes);
+      const bytes = encodeConnectedPrinterJob(bits, {
+        widthMm: paper.widthMm,
+        heightMm: paper.heightMm,
+        gapMm: gapLength,
+        copies: 1,
+        density: darkness,
+        speed,
+        vOffsetMm: vOffset,
+        hOffsetMm: hOffset,
+        media:
+          paperType === 'Receipt'
+            ? 'continuous'
+            : paperType === 'Black mark'
+              ? 'bline'
+              : 'gap',
+      });
+      await sendIsolatedPrintCopies(bytes, copies);
 
       if (printingSettings.recordHistory) {
         addHistoryEntry({
@@ -290,10 +311,8 @@ export default function PrintPhotoScreen() {
       Alert.alert('Print Sent', `Job sent to ${deviceName ?? 'the printer'}.`);
       if (printingSettings.returnPrevious) router.back();
     } catch (error) {
-      Alert.alert(
-        'Print Failed',
-        error instanceof Error ? error.message : 'Could not send data to the printer.',
-      );
+      const message = formatPrintFailure(error);
+      if (message) Alert.alert('Print Failed', message);
     } finally {
       setPrinting(false);
     }
@@ -315,12 +334,41 @@ export default function PrintPhotoScreen() {
     vOffset,
     gapLength,
     copies,
+    paperType,
     printingSettings.recordHistory,
     printingSettings.returnPrevious,
     addHistoryEntry,
     deviceName,
+    printSize,
   ]);
 
+  useEffect(() => {
+    if (!pendingPrintRef.current || !printSize) return;
+    pendingPrintRef.current = false;
+    let cancelled = false;
+    void waitForNextPaint().then(() => {
+      if (!cancelled) void handlePrint();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [printSize, handlePrint]);
+
+  const jobWidthMm = printSize?.widthMm ?? frame?.widthMm ?? defaults.labelWidth;
+  const jobHeightMm = printSize?.heightMm ?? frame?.heightMm ?? defaults.labelHeight;
+  const printCaptureSize = useMemo(
+    () => printCaptureLayout(jobWidthMm, jobHeightMm).content,
+    [jobWidthMm, jobHeightMm],
+  );
+  const frameCaptureWidth =
+    isFrame && frame
+      ? containWidth(
+          printCaptureSize.widthPx,
+          printCaptureSize.heightPx,
+          frame.widthMm,
+          frame.heightMm,
+        )
+      : printCaptureSize.widthPx;
   const thresholdPct = useMemo(() => grayThreshold / 255, [grayThreshold]);
 
   return (
@@ -358,7 +406,7 @@ export default function PrintPhotoScreen() {
         }}
         showsVerticalScrollIndicator={false}>
         <View style={styles.previewArea}>
-          <ViewShot ref={shotRef} options={{ format: 'png', quality: 1 }}>
+          <View style={styles.previewShadow}>
             {isFrame && frame ? (
               <PhotoFramePreview frame={frame} photos={photos} width={previewWidth} />
             ) : primaryPhoto ? (
@@ -367,7 +415,7 @@ export default function PrintPhotoScreen() {
                   styles.directPreview,
                   {
                     width: previewWidth,
-                    height: previewWidth * ((defaults.labelHeight || 40) / (defaults.labelWidth || 50)),
+                    height: previewWidth * (jobHeightMm / Math.max(jobWidthMm, 1)),
                   },
                 ]}>
                 <Image
@@ -381,6 +429,40 @@ export default function PrintPhotoScreen() {
                 <Text style={styles.placeholderHint}>Add a photo to preview</Text>
               </View>
             )}
+          </View>
+
+          <ViewShot
+            ref={shotRef}
+            options={PRINT_CAPTURE_OPTIONS}
+            style={[
+              styles.printCaptureNative,
+              { width: printCaptureSize.widthPx, height: printCaptureSize.heightPx },
+            ]}>
+            {isFrame && frame ? (
+              <View
+                style={{
+                  width: printCaptureSize.widthPx,
+                  height: printCaptureSize.heightPx,
+                  backgroundColor: '#FFFFFF',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                <PhotoFramePreview frame={frame} photos={photos} width={frameCaptureWidth} />
+              </View>
+            ) : primaryPhoto ? (
+              <View
+                style={{
+                  width: printCaptureSize.widthPx,
+                  height: printCaptureSize.heightPx,
+                  backgroundColor: '#FFFFFF',
+                }}>
+                <Image
+                  source={{ uri: primaryPhoto }}
+                  style={StyleSheet.absoluteFillObject}
+                  contentFit="contain"
+                />
+              </View>
+            ) : null}
           </ViewShot>
         </View>
 
@@ -534,7 +616,7 @@ export default function PrintPhotoScreen() {
         </Pressable>
         <Pressable
           disabled={printing}
-          onPress={() => void handlePrint()}
+          onPress={() => setSizeSheetOpen(true)}
           style={({ pressed }) => [styles.printBtn, (pressed || printing) && styles.pressed]}>
           {printing ? (
             <ActivityIndicator color="#FFFFFF" />
@@ -543,6 +625,18 @@ export default function PrintPhotoScreen() {
           )}
         </Pressable>
       </View>
+
+      <PrintSizeSelector
+        visible={sizeSheetOpen}
+        initialWidthMm={jobWidthMm}
+        initialHeightMm={jobHeightMm}
+        onCancel={() => setSizeSheetOpen(false)}
+        onSelect={(size) => {
+          pendingPrintRef.current = true;
+          setPrintSize(size);
+          setSizeSheetOpen(false);
+        }}
+      />
     </View>
   );
 }
@@ -576,6 +670,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 18,
     backgroundColor: '#D5DCE4',
+  },
+  previewShadow: {
+    borderRadius: 6,
+  },
+  printCaptureNative: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    zIndex: -999,
+    opacity: 1,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    pointerEvents: 'none',
+  },
+  printCapture: {
+    backgroundColor: '#FFFFFF',
   },
   directPreview: {
     backgroundColor: '#FFFFFF',

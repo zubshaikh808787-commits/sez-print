@@ -37,6 +37,15 @@ export type PrintingSettings = {
   recordHistory: boolean;
   autoPages: boolean;
   returnPrevious: boolean;
+  /** Printer resolution: 304 (12 dots/mm), 300, or 203 (8 dots/mm). Default is 304 DPI. */
+  printerDpi: number;
+  /** Printhead alignment: 'center' (standard thermal desktop) or 'left'. */
+  printerAlignment: 'center' | 'left';
+  /** Printhead physical width in mm (108mm for 4-inch printers). */
+  printheadWidthMm: number;
+  /** Last custom paper/page size entered in the print size selector (mm). */
+  customPaperWidthMm: number;
+  customPaperHeightMm: number;
 };
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
@@ -69,6 +78,11 @@ export const DEFAULT_PRINTING_SETTINGS: PrintingSettings = {
   recordHistory: true,
   autoPages: true,
   returnPrevious: false,
+  printerDpi: 304,
+  printerAlignment: 'center',
+  printheadWidthMm: 108,
+  customPaperWidthMm: 210,
+  customPaperHeightMm: 297,
 };
 
 type SettingsStoreState = {

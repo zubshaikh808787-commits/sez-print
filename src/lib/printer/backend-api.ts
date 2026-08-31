@@ -28,17 +28,27 @@ export function getBackendBaseUrl(): string {
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${getBackendBaseUrl()}${path}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...(init?.headers || {}),
+      },
+    });
+  } catch {
+    throw new Error('Could not reach the print service. Check Wi‑Fi and that the printer is on.');
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(body.error || `Backend ${res.status}`);
+    const err = new Error(
+      body.error ||
+        (res.status === 0 || res.status >= 500
+          ? 'Print service is unavailable. Check Wi‑Fi and try again.'
+          : `Backend ${res.status}`),
+    );
     (err as Error & { code?: string }).code = body.code;
     throw err;
   }

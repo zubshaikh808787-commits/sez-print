@@ -14,7 +14,7 @@ import { parseOrientation, type LabelOrientation } from '@/lib/label-document';
 import { useSettingsStore } from '@/stores/settings-store';
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
-const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent'] as const;
+const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent', 'Black mark'] as const;
 const WRAP_MODES = ['Close', 'Char', 'Word'] as const;
 const QR_LEVELS = ['L', 'M', 'Q', 'H'] as const;
 const QR_ZONES = ['0', '2', '4'] as const;

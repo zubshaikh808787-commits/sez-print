@@ -1,3 +1,4 @@
+import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -25,6 +26,37 @@ import {
   type DiscoveredPrinter,
 } from '@/lib/printer/printer-manager';
 import { usePrinterStore } from '@/stores/printer-store';
+
+const ANDROID_BLUETOOTH_SETTINGS = 'android.settings.BLUETOOTH_SETTINGS';
+
+async function openPhoneBluetoothSettings() {
+  try {
+    if (Platform.OS === 'android') {
+      await Linking.sendIntent(ANDROID_BLUETOOTH_SETTINGS);
+      return;
+    }
+    if (Platform.OS === 'ios') {
+      // Apple does not allow a third-party app to open the Bluetooth pane.
+      await Linking.openURL('app-settings:');
+      return;
+    }
+    Alert.alert(
+      'Unavailable',
+      'Bluetooth settings can only be opened from the Android or iOS app.',
+    );
+  } catch (error) {
+    try {
+      await Linking.openSettings();
+    } catch {
+      Alert.alert(
+        'Could Not Open Settings',
+        error instanceof Error
+          ? error.message
+          : 'Open Bluetooth from the phone Settings app, then return here to scan.',
+      );
+    }
+  }
+}
 
 export default function PrinterConnectScreen() {
   const insets = useSafeAreaInsets();
@@ -200,6 +232,14 @@ export default function PrinterConnectScreen() {
     }
   };
 
+  const showBluetoothSettings =
+    Platform.OS !== 'web' &&
+    status !== 'connected' &&
+    (paired.length === 0 || scanErrors.length > 0 || Boolean(nativeHint) || !caps.canScan);
+
+  const bluetoothSettingsLabel =
+    Platform.OS === 'ios' ? 'Open Settings' : 'Open Bluetooth Settings';
+
   const handleWifiConnect = async () => {
     const ip = wifiIp.trim();
     if (!ip) {
@@ -295,6 +335,14 @@ export default function PrinterConnectScreen() {
                 {' · '}SPP {caps.classicSppAvailable ? 'yes' : 'no'}
                 {' · '}BLE {caps.bleAvailable ? 'yes' : 'no'}
               </Text>
+              {showBluetoothSettings ? (
+                <Pressable
+                  onPress={() => void openPhoneBluetoothSettings()}
+                  style={({ pressed }) => [styles.settingsBtn, pressed && styles.pressed]}>
+                  <AppIcon name="link" tintColor={Palette.accent} size={16} />
+                  <Text style={styles.settingsBtnText}>{bluetoothSettingsLabel}</Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
 
@@ -320,6 +368,27 @@ export default function PrinterConnectScreen() {
                 {scanning ? 'Scanning…' : 'Scan Paired & Nearby'}
               </Text>
             </Pressable>
+            {showBluetoothSettings && caps.canScan ? (
+              <>
+                <Pressable
+                  onPress={() => void openPhoneBluetoothSettings()}
+                  style={({ pressed }) => [styles.settingsBtn, pressed && styles.pressed]}>
+                  <AppIcon name="link" tintColor={Palette.accent} size={16} />
+                  <Text style={styles.settingsBtnText}>{bluetoothSettingsLabel}</Text>
+                </Pressable>
+                {Platform.OS === 'ios' ? (
+                  <Text style={styles.settingsHint}>
+                    Opens this app’s Settings. From there, go to Bluetooth to turn it on or pair
+                    the printer.
+                  </Text>
+                ) : (
+                  <Text style={styles.settingsHint}>
+                    Opens the phone’s Bluetooth settings so you can turn Bluetooth on or pair the
+                    printer, then come back and scan.
+                  </Text>
+                )}
+              </>
+            ) : null}
             {nativeHint ? <Text style={styles.warnText}>{nativeHint}</Text> : null}
             {scanErrors.length > 0 ? (
               <Text style={styles.warnText}>{scanErrors.join(' · ')}</Text>
@@ -610,5 +679,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   wifiBtnText: { color: Palette.accent, fontSize: 14, fontWeight: '600' },
+  settingsBtn: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: Palette.accent,
+    borderRadius: 10,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
+  },
+  settingsBtnText: { color: Palette.accent, fontSize: 14, fontWeight: '600' },
+  settingsHint: { color: Palette.muted, fontSize: 12.5, lineHeight: 18 },
   pressed: { opacity: 0.65 },
 });

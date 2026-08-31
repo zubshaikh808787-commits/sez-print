@@ -92,7 +92,16 @@ function AppRoot() {
         <Stack.Screen name="app-permissions" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="printing-history" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="printer-connect" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="calibration-print" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="new-label-setup" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen
+          name="shipping-label"
+          options={{ presentation: 'transparentModal', animation: 'fade' }}
+        />
+        <Stack.Screen
+          name="customize-template"
+          options={{ presentation: 'transparentModal', animation: 'fade' }}
+        />
       </Stack>
     </ThemeProvider>
   );

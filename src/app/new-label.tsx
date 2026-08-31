@@ -51,7 +51,7 @@ export default function NewLabelModal() {
             <CreationOption
               label="Customize Size"
               color="#3B82F6"
-              onPress={() => router.replace({ pathname: '/new-label-setup', params: { focusSize: '1' } })}>
+              onPress={() => router.replace('/customize-template')}>
               <AppIcon name="rectangle.dashed" tintColor="#FFFFFF" size={28} pointerEvents="none" />
             </CreationOption>
 

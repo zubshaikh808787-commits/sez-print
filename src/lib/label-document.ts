@@ -19,7 +19,7 @@ export type TemplateBackground =
   | { type: 'image'; uri: string };
 
 export type LabelOrientation = 0 | 90 | 180 | 270;
-export type PaperType = 'Receipt' | 'Label' | 'Cardstock' | 'Transparent';
+export type PaperType = 'Receipt' | 'Label' | 'Cardstock' | 'Transparent' | 'Black mark';
 
 export type ImageElementState = {
   uri: string;
@@ -144,7 +144,14 @@ export function parseOrientation(value: string | undefined): LabelOrientation {
 }
 
 export function parsePaperType(value: string | undefined): PaperType {
-  if (value === 'Receipt' || value === 'Label' || value === 'Transparent') return value;
+  if (
+    value === 'Receipt' ||
+    value === 'Label' ||
+    value === 'Transparent' ||
+    value === 'Black mark'
+  ) {
+    return value;
+  }
   return 'Cardstock';
 }
 

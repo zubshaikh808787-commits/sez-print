@@ -23,6 +23,7 @@ import {
 /** Map previewType prefix to the layout builder category. */
 function categoryForPreview(previewType: string, fallback: string): string {
   if (previewType.startsWith('jew-')) return 'jewelry';
+  if (previewType.startsWith('ship-')) return 'shipping';
   if (previewType.startsWith('smkt-')) return 'supermarket';
   if (previewType.startsWith('food-')) return 'food';
   if (previewType.startsWith('cable-')) return 'cable';

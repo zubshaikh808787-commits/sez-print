@@ -3,12 +3,15 @@
  *
  * Design / editor coordinates are millimetres.
  * Screen preview: contain-fit mm into available pixels (not CSS 96dpi).
- * Print raster: 8 dots/mm ≈ 203 DPI (typical TD-404 / thermal).
+ * Print raster: dots = round(mm × DPI / 25.4). TD-404 is 203 DPI.
  */
 
-export const PRINT_DOTS_PER_MM = 8;
-export const PRINT_DPI = 203;
-export const MM_PER_INCH = 25.4;
+import { dotsToMm, MM_PER_INCH, mmToDots } from '@/lib/printer/print-spec';
+
+export { dotsToMm, MM_PER_INCH, mmToDots };
+export const PRINT_DPI = 304;
+/** @deprecated Prefer mmToDots(mm, dpi). 203 DPI ≈ 7.992 dots/mm, not exactly 8. */
+export const PRINT_DOTS_PER_MM = PRINT_DPI / MM_PER_INCH;
 export const MIN_LABEL_MM = 8;
 export const MAX_LABEL_MM = 310;
 
@@ -27,19 +30,27 @@ export type LabelSizePreset = {
 };
 
 export const LABEL_SIZE_PRESETS: LabelSizePreset[] = [
-  { id: '30x20', label: '30×20 mm', widthMm: 30, heightMm: 20 },
-  { id: '40x30', label: '40×30 mm', widthMm: 40, heightMm: 30 },
-  { id: '50x30', label: '50×30 mm', widthMm: 50, heightMm: 30 },
-  { id: '57x30', label: '57×30 mm', widthMm: 57, heightMm: 30 },
-  { id: '25x15', label: '25×15 mm', widthMm: 25, heightMm: 15 },
-  { id: '20x15', label: '20×15 mm', widthMm: 20, heightMm: 15 },
-  { id: '50x13', label: '50×13 mm jewelry', widthMm: 50, heightMm: 13 },
-  { id: '85x13', label: '85×13 mm barbell', widthMm: 85, heightMm: 13 },
-  { id: '85x15', label: '85×15 mm barbell', widthMm: 85, heightMm: 15 },
-  { id: '2x1in', label: '2×1 in', widthMm: 50.8, heightMm: 25.4 },
-  { id: '4x6in', label: '4×6 in', widthMm: 101.6, heightMm: 152.4 },
-  { id: 'a6', label: 'A6', widthMm: 105, heightMm: 148 },
-  { id: 'a4', label: 'A4', widthMm: 210, heightMm: 297 },
+  { id: '100x155', label: '100×155 mm Waybill', widthMm: 100, heightMm: 155 },
+  { id: '100x150', label: '100×150 mm (4×6 in)', widthMm: 100, heightMm: 150 },
+  { id: '4x6in', label: '4×6 in (101.6×152.4 mm)', widthMm: 101.6, heightMm: 152.4 },
+  { id: '100x100', label: '100×100 mm (4×4 in)', widthMm: 100, heightMm: 100 },
+  { id: '76x130', label: '76×130 mm Courier', widthMm: 76, heightMm: 130 },
+  { id: '75x100', label: '75×100 mm (3×4 in)', widthMm: 75, heightMm: 100 },
+  { id: '80x50', label: '80×50 mm', widthMm: 80, heightMm: 50 },
+  { id: '60x40', label: '60×40 mm Barcode', widthMm: 60, heightMm: 40 },
+  { id: '50x30', label: '50×30 mm Retail', widthMm: 50, heightMm: 30 },
+  { id: '57x30', label: '57×30 mm Receipt', widthMm: 57, heightMm: 30 },
+  { id: '40x30', label: '40×30 mm Price Tag', widthMm: 40, heightMm: 30 },
+  { id: '30x20', label: '30×20 mm Mini', widthMm: 30, heightMm: 20 },
+  { id: '25x15', label: '25×15 mm Small', widthMm: 25, heightMm: 15 },
+  { id: '20x15', label: '20×15 mm Tiny', widthMm: 20, heightMm: 15 },
+  { id: '50x15', label: '50×15 mm Jewelry', widthMm: 50, heightMm: 15 },
+  { id: '85x13', label: '85×13 mm Barbell', widthMm: 85, heightMm: 13 },
+  { id: '85x15', label: '85×15 mm Barbell', widthMm: 85, heightMm: 15 },
+  { id: '2x1in', label: '2×1 in (50.8×25.4 mm)', widthMm: 50.8, heightMm: 25.4 },
+  { id: '3x2in', label: '3×2 in (76.2×50.8 mm)', widthMm: 76.2, heightMm: 50.8 },
+  { id: 'a6', label: 'A6 (105×148 mm)', widthMm: 105, heightMm: 148 },
+  { id: 'a4', label: 'A4 (210×297 mm)', widthMm: 210, heightMm: 297 },
 ];
 
 export function toMm(value: number, unit: LabelUnit): number {
@@ -87,7 +98,11 @@ export function matchingPresetId(widthMm: number, heightMm: number): string {
   return found?.id ?? 'custom';
 }
 
-/** Uniform contain-fit from mm into a pixel box. Pixel sizes are integers to avoid subpixel leak. */
+/** Uniform contain-fit from mm into a pixel box.
+ * `scale` (px per mm) is the single source of truth for canvas + element layout.
+ * Both axes share one scale so width/height aspect always matches widthMm/heightMm
+ * (required for ViewShot → printer-dot scaling without stretching past borders).
+ */
 export function fitLabelSize(
   widthMm: number,
   heightMm: number,
@@ -99,15 +114,64 @@ export function fitLabelSize(
   if (maxWidthPx <= 0 || maxHeightPx <= 0) {
     return { widthPx: 1, heightPx: 1, scale: 0 };
   }
-  const scale = Math.min(maxWidthPx / w, maxHeightPx / h);
-  const widthPx = Math.max(1, Math.round(w * scale));
-  const heightPx = Math.max(1, Math.round(h * scale));
+  const rawScale = Math.min(maxWidthPx / w, maxHeightPx / h);
+  let widthPx = Math.max(1, Math.floor(w * rawScale));
+  let heightPx = Math.max(1, Math.round(h * (widthPx / w)));
+  if (heightPx > maxHeightPx) {
+    heightPx = Math.max(1, Math.floor(maxHeightPx));
+    widthPx = Math.max(1, Math.round(w * (heightPx / h)));
+  }
+  if (widthPx > maxWidthPx) {
+    widthPx = Math.max(1, Math.floor(maxWidthPx));
+    heightPx = Math.max(1, Math.round(h * (widthPx / w)));
+  }
   return { widthPx, heightPx, scale: widthPx / w };
 }
 
-export function printRasterSize(widthMm: number, heightMm: number) {
+
+/**
+ * Exact label size in printer dots (1:1 with preview mm layout).
+ * Use this for ViewShot capture so aspect matches the preview.
+ */
+export function printContentSize(widthMm: number, heightMm: number, dpi = PRINT_DPI) {
+  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : PRINT_DPI;
   return {
-    widthPx: Math.max(1, Math.round(widthMm * PRINT_DOTS_PER_MM)),
-    heightPx: Math.max(1, Math.round(heightMm * PRINT_DOTS_PER_MM)),
+    widthPx: Math.max(1, mmToDots(widthMm, d)),
+    heightPx: Math.max(1, mmToDots(heightMm, d)),
   };
+}
+
+/**
+ * BITMAP canvas size: width rounded UP to a multiple of 8 (TSPL bytes×8).
+ * Content is centered into this canvas so padding is even L/R (not left-biased).
+ */
+export function printRasterSize(widthMm: number, heightMm: number, dpi = PRINT_DPI) {
+  const content = printContentSize(widthMm, heightMm, dpi);
+  return {
+    widthPx: Math.max(8, Math.ceil(content.widthPx / 8) * 8),
+    heightPx: content.heightPx,
+  };
+}
+
+/**
+ * ViewShot uses `content` (true mm→dots). TSPL BITMAP uses `canvas` (8-dot pad).
+ * `scale` is uniform px/mm so capture aspect matches the preview.
+ */
+export function printCaptureLayout(widthMm: number, heightMm: number, dpi = PRINT_DPI) {
+  const content = printContentSize(widthMm, heightMm, dpi);
+  const canvas = printRasterSize(widthMm, heightMm, dpi);
+  const wMm = Math.max(widthMm, 0.01);
+  const hMm = Math.max(heightMm, 0.01);
+  const scale = Math.min(content.widthPx / wMm, content.heightPx / hMm);
+  return { content, canvas, scale };
+}
+
+/**
+ * TSPL SIZE command. Always emits explicit integer `N mm,N mm` format
+ * which is universally supported by all TSPL firmware versions.
+ */
+export function formatTsplSizeCommand(widthMm: number, heightMm: number): string {
+  const w = Math.max(1, Math.round(widthMm));
+  const h = Math.max(1, Math.round(heightMm));
+  return `SIZE ${w} mm,${h} mm`;
 }

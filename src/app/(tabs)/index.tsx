@@ -13,16 +13,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon, type AppIconName } from '@/components/app-icon';
 import {
+  CustomizeIcon,
   DocBadgeIcon,
   LabelCloneIcon,
   NewLabelIcon,
   PrintPhotoIcon,
   ScanLabelIcon,
   ShareNodeIcon,
+  ShippingLabelIcon,
 } from '@/components/home-icons';
 import { LabelPreview, LABEL_PAD_STAGE_MIN_HEIGHT } from '@/components/label-preview';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { androidRipple, cardShadow, Palette, scaleFont } from '@/constants/ui';
+import { useTabBarPadding } from '@/hooks/use-tab-bar-padding';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore } from '@/stores/printer-store';
 
@@ -139,13 +142,13 @@ function Tile({
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const tabPad = useTabBarPadding(Spacing.five);
   const { width } = useWindowDimensions();
   const router = useRouter();
 
   const documents = useLabelStore((s) => s.documents);
   const deleteDocument = useLabelStore((s) => s.deleteDocument);
   const uploadToCloud = useLabelStore((s) => s.uploadToCloud);
-  const cloudProfile = useLabelStore((s) => s.cloudProfile);
   const printerStatus = usePrinterStore((s) => s.status);
   const printerName = usePrinterStore((s) => s.deviceName);
 
@@ -158,9 +161,6 @@ export default function HomeScreen() {
   );
 
   const [previewWidth, setPreviewWidth] = useState(0);
-
-  const contentWidth = Math.min(width - SCREEN_PAD * 2, MaxContentWidth);
-  const thirdTileWidth = (contentWidth - MENU_GAP * 2) / 3;
 
   const handleDelete = () => {
     if (!recentLabel) return;
@@ -176,12 +176,11 @@ export default function HomeScreen() {
 
   const handleUpload = () => {
     if (!recentLabel) return;
-    if (!cloudProfile) {
-      Alert.alert('Not Signed In', 'Sign in from the Template screen Cloud tab to upload labels.');
-      return;
-    }
     uploadToCloud(recentLabel);
-    Alert.alert('Uploaded', `"${recentLabel.name}" synced to cloud.`);
+    Alert.alert(
+      'Template saved',
+      `"${recentLabel.name}" is in Select Existing Template and Template → Cloud.`,
+    );
   };
 
   const connected = printerStatus === 'connected';
@@ -209,7 +208,7 @@ export default function HomeScreen() {
         style={styles.scroll}
         contentContainerStyle={[
           styles.content,
-          { paddingBottom: BottomTabInset + Spacing.five },
+          { paddingBottom: tabPad },
         ]}
         showsVerticalScrollIndicator={false}>
         <View style={styles.inner}>
@@ -341,13 +340,25 @@ export default function HomeScreen() {
               />
             </View>
 
-            {/* Row 3: 1 Square Button (Label Clone) */}
+            {/* Row 3: Label Clone, Shipping Label, Customize */}
             <View style={styles.menuRow}>
               <Tile
-                style={{ width: thirdTileWidth }}
+                style={styles.menuThird}
                 iconComponent={<LabelCloneIcon size={30} color={Palette.accent} />}
                 label="Label Clone"
                 href="/new-label-setup?isClone=true"
+              />
+              <Tile
+                style={styles.menuThird}
+                iconComponent={<ShippingLabelIcon size={30} color={Palette.accent} />}
+                label="Shipping Label"
+                href="/shipping-label"
+              />
+              <Tile
+                style={styles.menuThird}
+                iconComponent={<CustomizeIcon size={30} color={Palette.accent} />}
+                label="Customize"
+                href="/customize-template"
               />
             </View>
           </View>

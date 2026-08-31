@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,7 @@ import {
   DEFAULT_QRCODE_STATE,
 } from '@/components/editor/types';
 import { LabelPreview } from '@/components/label-preview';
+import { PrintSizeSelector } from '@/components/print-size-selector';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette, Type } from '@/constants/ui';
 import { dataPageCount, resolveDocumentData } from '@/lib/data-binding';
@@ -33,23 +34,27 @@ import {
   type PaperType,
 } from '@/lib/label-document';
 import {
-  encodeEscPosJob,
-  grayToBits,
-  pngBase64ToGray,
-  rotateGray,
-  shiftBits,
-} from '@/lib/printer/escpos';
+  PRINT_CAPTURE_OPTIONS,
+  encodeConnectedPrinterJob,
+  formatPrintFailure,
+  orientedPrintSize,
+  printCaptureLayout,
+  printJobSizeError,
+  rasterizePngForPrint,
+  sendIsolatedPrintCopies,
+  waitForNextPaint,
+} from '@/lib/printer/print-job';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
-import { encodeTscBitmapJob } from '@/lib/printer/tsc';
 import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
-import { PRINT_DOTS_PER_MM } from '@/lib/label-geometry';
+import { fitLabelSize, type LabelSizeMm } from '@/lib/label-geometry';
+import { applyPrintSize, formatPrintSize, type PrintSizePreset } from '@/lib/print-sizes';
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
-const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent'] as const;
+const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent', 'Black mark'] as const;
 
 function buildScanDocument(
   scanType: string,
@@ -271,7 +276,7 @@ function ChipGroup<T extends string>({
 
 export default function PrintScreen() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams<{
     labelId?: string;
     imageUri?: string;
@@ -306,6 +311,10 @@ export default function PrintScreen() {
   const [zoom, setZoom] = useState(1);
   const [pageIndex, setPageIndex] = useState(0);
   const [printing, setPrinting] = useState(false);
+  const [sizeSheetOpen, setSizeSheetOpen] = useState(false);
+  const [printSize, setPrintSize] = useState<LabelSizeMm | null>(null);
+  const [printPreset, setPrintPreset] = useState<PrintSizePreset | null>(null);
+  const printingLockRef = useRef(false);
 
   const shotRef = useRef<ViewShot>(null);
 
@@ -386,15 +395,38 @@ export default function PrintScreen() {
     [buildPageDocument, pageIndex, pageCount],
   );
 
+  const displayDocument = useMemo(() => {
+    if (!previewDocument || !printSize) return previewDocument;
+    return applyPrintSize(previewDocument, printPreset, printSize);
+  }, [previewDocument, printSize, printPreset]);
+
+  /** Native printer-dot artboard for capture — true mm→dots (8-dot pad applied after). */
+  const printCaptureSize = useMemo(() => {
+    const doc = displayDocument ?? previewDocument;
+    if (!doc) return { widthPx: 8, heightPx: 8 };
+    return printCaptureLayout(doc.widthMm, doc.heightMm).content;
+  }, [displayDocument, previewDocument]);
+
+  useEffect(() => {
+    if (!previewDocument || printSize) return;
+    setPrintSize({ widthMm: previewDocument.widthMm, heightMm: previewDocument.heightMm });
+  }, [previewDocument, printSize]);
+
   const connected = status === 'connected';
   const footerHeight = 72 + insets.bottom;
 
+  // Bound the preview to 42 % of the screen height so tall documents
+  // (A4 portrait, long receipts) never overflow the preview area.
+  const maxPreviewHeight = Math.round(height * 0.42);
   const baseCardWidth = Math.min(width - 48, MaxContentWidth - 48);
-  const cardWidth = Math.round(baseCardWidth * zoom);
-  const labelAspect = previewDocument
-    ? previewDocument.heightMm / previewDocument.widthMm
-    : 1 / 1.8;
-  const cardHeight = Math.round(cardWidth * labelAspect);
+  const activeDoc = displayDocument ?? previewDocument;
+  const { widthPx: cardWidth, heightPx: cardHeight } = fitLabelSize(
+    activeDoc?.widthMm ?? 80,
+    activeDoc?.heightMm ?? 44,
+    Math.round(baseCardWidth * zoom),
+    Math.round(maxPreviewHeight * zoom),
+  );
+  const previewAreaMinHeight = maxPreviewHeight + 56; // 28 px padding each side
 
   const historySource: PrintHistoryEntry['source'] = params.labelId
     ? 'label'
@@ -412,6 +444,7 @@ export default function PrintScreen() {
     previewDocument?.name ?? params.docName ?? (isPdfJob ? 'PDF Document' : 'Label');
 
   const handlePrint = useCallback(async () => {
+    if (printingLockRef.current) return;
     // PDFs can't be rasterized for a thermal printer here; hand them to the OS
     // print dialog (AirPrint / Android print services) instead.
     if (isPdfJob && params.docUri) {
@@ -449,58 +482,75 @@ export default function PrintScreen() {
       return;
     }
 
+    const widthMm = (displayDocument ?? previewDocument)?.widthMm ?? defaults.labelWidth;
+    const heightMm = (displayDocument ?? previewDocument)?.heightMm ?? defaults.labelHeight;
+    const orientationDeg = parseInt(orientation.replace('°', ''), 10) as LabelOrientation;
+    const paper = orientedPrintSize(widthMm, heightMm, orientationDeg);
+    const sizeError = printJobSizeError(paper.widthMm, paper.heightMm);
+    if (sizeError) {
+      Alert.alert('Unsupported Size', sizeError);
+      return;
+    }
+
     setPrinting(true);
+    printingLockRef.current = true;
     try {
-      const widthMm = previewDocument?.widthMm ?? defaults.labelWidth;
-      const heightMm = previewDocument?.heightMm ?? defaults.labelHeight;
-      const targetW = Math.round(widthMm * PRINT_DOTS_PER_MM);
-      const targetH = Math.round(heightMm * PRINT_DOTS_PER_MM);
-      const orientationDeg = parseInt(orientation.replace('°', ''), 10) as LabelOrientation;
+      await waitForNextPaint();
       const dither = defaults.colorMode === 'Halftone';
-      // Darkness biases the threshold: higher darkness prints more pixels.
       const threshold = Math.min(
         250,
         Math.max(10, defaults.grayThreshold + (darkness != null ? (darkness - 8) * 10 : 0)),
       );
-      const useTsc = manager.usesTd404CommandSet;
 
       for (let page = 0; page < pageCount; page++) {
         if (pageCount > 1) {
           setPageIndex(page);
-          // Give React a frame to render the new page before capturing.
-          await new Promise((resolve) => setTimeout(resolve, 80));
+          await waitForNextPaint();
         }
-        const base64 = await captureRef(shotRef, {
-          format: 'png',
-          quality: 1,
-          result: 'base64',
-          width: targetW,
-          height: targetH,
+        const base64 = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
+        if (!base64) {
+          throw new Error('Could not capture the label for printing.');
+        }
+
+        const bits = rasterizePngForPrint(base64, {
+          widthMm,
+          heightMm,
+          orientation: orientationDeg,
+          threshold,
+          dither,
+          hOffsetMm: hOffset,
         });
 
-        let gray = pngBase64ToGray(base64);
-        gray = rotateGray(gray, orientationDeg);
-        let bits = grayToBits(gray, { threshold, dither });
-        const offsetDots = Math.round(hOffset * PRINT_DOTS_PER_MM);
-        if (offsetDots !== 0) bits = shiftBits(bits, offsetDots);
-
-        const bytes = useTsc
-          ? encodeTscBitmapJob(bits, {
-              widthMm,
-              heightMm,
-              gapMm: gapLength,
-              copies,
-              density: darkness,
-              speed: speed ?? 5,
-            })
-          : encodeEscPosJob(bits, {
-              copies,
-              leadFeedLines: Math.max(0, Math.round(vOffset * PRINT_DOTS_PER_MM)),
-              trailFeedLines: Math.max(0, Math.round(gapLength * PRINT_DOTS_PER_MM)),
-              density: darkness,
-              speed,
-            });
-        await manager.print(bytes);
+        const media =
+          paperType === 'Receipt'
+            ? 'continuous'
+            : paperType === 'Black mark'
+              ? 'bline'
+              : 'gap';
+        // Prefer BLINE when the design itself declares black-mark stock (common supermarket templates).
+        const wantsBline =
+          media === 'bline' ||
+          /black\s*mark/i.test(jobName) ||
+          (displayDocument ?? previewDocument)?.elements.some(
+            (el) =>
+              (el.type === 'text' || el.type === 'degrees') &&
+              /black\s*mark/i.test(
+                'text' in el ? String(el.text) : 'content' in el ? String(el.content) : '',
+              ),
+          );
+        const bytes = encodeConnectedPrinterJob(bits, {
+          widthMm: paper.widthMm,
+          heightMm: paper.heightMm,
+          gapMm: gapLength,
+          copies: 1,
+          density: darkness,
+          speed: speed ?? 5,
+          vOffsetMm: vOffset,
+          hOffsetMm: hOffset,
+          media: wantsBline ? 'bline' : media,
+        });
+        // One complete job per physical copy — never stack multiple labels into one page.
+        await sendIsolatedPrintCopies(bytes, copies);
       }
 
       if (printingSettings.recordHistory) {
@@ -515,17 +565,17 @@ export default function PrintScreen() {
       Alert.alert('Print Sent', `${jobName} was sent to ${deviceName ?? 'the printer'}.`);
       if (printingSettings.returnPrevious) router.back();
     } catch (error) {
-      Alert.alert(
-        'Print Failed',
-        error instanceof Error ? error.message : 'Could not send data to the printer.',
-      );
+      const message = formatPrintFailure(error);
+      if (message) Alert.alert('Print Failed', message);
     } finally {
+      printingLockRef.current = false;
       setPrinting(false);
     }
   }, [
     isPdfJob,
     params.docUri,
     previewDocument,
+    displayDocument,
     defaults.labelWidth,
     defaults.labelHeight,
     defaults.colorMode,
@@ -538,6 +588,7 @@ export default function PrintScreen() {
     vOffset,
     gapLength,
     copies,
+    paperType,
     printingSettings.recordHistory,
     printingSettings.returnPrevious,
     addHistoryEntry,
@@ -579,14 +630,14 @@ export default function PrintScreen() {
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: footerHeight + Spacing.three }}
         showsVerticalScrollIndicator={false}>
-        <View style={styles.previewArea}>
-          <ViewShot ref={shotRef} options={{ format: 'png', quality: 1 }}>
-            {previewDocument ? (
+        <View style={[styles.previewArea, { minHeight: previewAreaMinHeight }]}>
+          <View style={styles.previewShadow}>
+            {(displayDocument ?? previewDocument) ? (
               <LabelPreview
-                document={previewDocument}
+                document={(displayDocument ?? previewDocument)!}
                 width={cardWidth}
-                maxHeight={Math.min(320, cardWidth * 1.4)}
-                style={styles.previewShadow}
+                maxHeight={cardHeight}
+                showArtboardBorder={false}
               />
             ) : params.imageUri ? (
               <View style={[styles.previewCard, { width: cardWidth, height: cardHeight }]}>
@@ -612,7 +663,46 @@ export default function PrintScreen() {
                 </Text>
               </View>
             )}
-          </ViewShot>
+          </View>
+
+          {/* Dedicated 1:1 Hardware Dot Print Artboard (captured at true printer DPI) */}
+          {(displayDocument ?? previewDocument) ? (
+            <View
+              style={{
+                position: 'absolute',
+                left: -9999,
+                top: -9999,
+                opacity: 0,
+                pointerEvents: 'none',
+                overflow: 'hidden',
+                backgroundColor: '#FFFFFF',
+              }}>
+              <ViewShot
+                ref={shotRef}
+                options={PRINT_CAPTURE_OPTIONS}
+                style={{
+                  width: printCaptureSize.widthPx,
+                  height: printCaptureSize.heightPx,
+                  backgroundColor: '#FFFFFF',
+                }}>
+                <LabelPreview
+                  document={(displayDocument ?? previewDocument)!}
+                  exactWidthPx={printCaptureSize.widthPx}
+                  exactHeightPx={printCaptureSize.heightPx}
+                  showArtboardBorder={false}
+                />
+              </ViewShot>
+            </View>
+          ) : null}
+
+          {/* Actual print-size badge — shows the real mm / in dimensions that will be sent to the printer. */}
+          {activeDoc ? (
+            <View style={styles.sizeBadge}>
+              <Text style={styles.sizeBadgeText}>
+                {formatPrintSize(activeDoc.widthMm, activeDoc.heightMm)}
+              </Text>
+            </View>
+          ) : null}
 
           {pageCount > 1 ? (
             <View style={styles.pageNav}>
@@ -735,10 +825,25 @@ export default function PrintScreen() {
           style={({ pressed }) => [styles.gearBtn, pressed && styles.pressed]}>
           <AppIcon name="gearshape.fill" tintColor="#FFFFFF" size={24} />
         </Pressable>
+        {/* Size picker — opens sheet to choose a different paper/label size. */}
+        <Pressable
+          disabled={printing || isPdfJob}
+          onPress={() => setSizeSheetOpen(true)}
+          style={({ pressed }) => [styles.sizeBtn, (pressed || isPdfJob) && styles.pressed]}>
+          <AppIcon name="rectangle.dashed" tintColor="#FFFFFF" size={18} />
+          <Text style={styles.sizeBtnText} numberOfLines={1}>
+            {activeDoc
+              ? `${Math.round(activeDoc.widthMm)}×${Math.round(activeDoc.heightMm)}mm`
+              : 'Size'}
+          </Text>
+        </Pressable>
+        {/* Print button — prints the active label at its selected/previewed dimensions */}
         <Pressable
           disabled={printing}
           style={({ pressed }) => [styles.printBtn, (pressed || printing) && styles.pressed]}
-          onPress={() => void handlePrint()}>
+          onPress={() => {
+            void handlePrint();
+          }}>
           {printing ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
@@ -746,6 +851,18 @@ export default function PrintScreen() {
           )}
         </Pressable>
       </View>
+
+      <PrintSizeSelector
+        visible={sizeSheetOpen}
+        initialWidthMm={previewDocument?.widthMm ?? defaults.labelWidth}
+        initialHeightMm={previewDocument?.heightMm ?? defaults.labelHeight}
+        onCancel={() => setSizeSheetOpen(false)}
+        onSelect={(size, preset) => {
+          setPrintSize(size);
+          setPrintPreset(preset);
+          setSizeSheetOpen(false);
+        }}
+      />
     </View>
   );
 }
@@ -791,7 +908,7 @@ const styles = StyleSheet.create({
   },
   previewArea: {
     backgroundColor: '#AEB4BC',
-    minHeight: 210,
+    // minHeight is set inline from previewAreaMinHeight (dynamic).
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 28,
@@ -799,6 +916,38 @@ const styles = StyleSheet.create({
   },
   previewShadow: {
     borderRadius: 6,
+    // Subtle drop-shadow so the label lifts off the grey stage.
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  sizeBadge: {
+    marginTop: 10,
+    backgroundColor: 'rgba(0,0,0,0.38)',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  sizeBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  printCapture: {
+    backgroundColor: '#FFFFFF',
+  },
+  printCaptureNative: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    zIndex: -999,
+    opacity: 1,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    pointerEvents: 'none',
   },
   previewCard: {
     borderRadius: 10,
@@ -1005,6 +1154,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#5CB85C',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sizeBtn: {
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#525860',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    paddingHorizontal: 14,
+    gap: 6,
+  },
+  sizeBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   printBtn: {
     flex: 1,

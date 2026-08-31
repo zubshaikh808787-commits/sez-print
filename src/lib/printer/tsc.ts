@@ -4,6 +4,7 @@
  */
 
 import type { BitRaster } from '@/lib/printer/escpos';
+import { formatTsplSizeCommand } from '@/lib/label-geometry';
 
 export type TscJobOptions = {
   widthMm: number;
@@ -16,6 +17,11 @@ export type TscJobOptions = {
   /** Dot offset for BITMAP x,y */
   x?: number;
   y?: number;
+  /**
+   * Media sensor: gap (default), black-mark (BLINE), or continuous.
+   * Wrong mode causes overlapping prints on one physical label.
+   */
+  media?: 'gap' | 'bline' | 'continuous';
 };
 
 function concatBytes(parts: Uint8Array[]): Uint8Array {
@@ -37,32 +43,66 @@ function ascii(s: string): Uint8Array {
 }
 
 /**
+ * TSPL BITMAP (Ninestar / TD-404 / Gprinter): 0 = print black, 1 = white.
+ * Our BitRaster matches ESC/POS GS v 0 (1 = black). Invert into a fresh buffer
+ * (never mutate the source) so batch / multi-copy jobs cannot share dirty state.
+ */
+function invertEscPosBitsForTspl(data: Uint8Array): Uint8Array {
+  const out = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) out[i] = data[i] ^ 0xff;
+  return out;
+}
+
+function mediaCommand(media: TscJobOptions['media'], gapMm: number): string {
+  const g = Math.max(0, gapMm);
+  if (media === 'bline') return `BLINE ${g} mm,0 mm\r\n`;
+  if (media === 'continuous') return `GAP 0 mm,0 mm\r\n`;
+  return `GAP ${g} mm,0 mm\r\n`;
+}
+
+/**
  * Encode a 1-bit packed raster as a full TSPL job with BITMAP payload.
- * Mode 0 = OVERWRITE (same as LabelCommand.BITMAP_MODE.OVERWRITE).
+ * Mode 0 = OVERWRITE. Always emits PRINT 1,1 — callers that need N copies must
+ * send N independent jobs.
+ *
+ * DIRECTION 0,0 keeps the same top-left origin as the editor preview so
+ * alignment matches on-screen layout (DIRECTION 1 flips print vs preview).
  */
 export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): Uint8Array {
   const gap = options.gapMm ?? 2;
-  const copies = Math.max(1, options.copies ?? 1);
   const density =
     options.density != null ? Math.min(15, Math.max(0, Math.round(options.density))) : 8;
   const speed = options.speed != null ? Math.min(6, Math.max(1, Math.round(options.speed))) : 5;
   const x = options.x ?? 0;
   const y = options.y ?? 0;
+  const payload = invertEscPosBitsForTspl(bitmap.data);
+
+  const sizeCmd = formatTsplSizeCommand(options.widthMm, options.heightMm);
+  const mediaCmd = mediaCommand(options.media ?? 'gap', gap);
+
+  console.info(
+    '[tsc] TSPL job:',
+    sizeCmd, '|',
+    mediaCmd.trim(), '|',
+    'BITMAP', x + ',' + y + ',' + bitmap.bytesPerRow + ',' + bitmap.height + ',0 |',
+    'SPEED', speed, '| DENSITY', density, '|',
+    'payload:', payload.length, 'bytes',
+  );
 
   const header =
     '\r\n' +
-    `SIZE ${options.widthMm} mm,${options.heightMm} mm\r\n` +
-    `GAP ${gap} mm,0 mm\r\n` +
+    `${sizeCmd}\r\n` +
+    mediaCmd +
     `SPEED ${speed}\r\n` +
-    'DIRECTION 1,0\r\n' +
+    'DIRECTION 0,0\r\n' +
     'REFERENCE 0,0\r\n' +
     `DENSITY ${density}\r\n` +
     'CLS\r\n' +
     `BITMAP ${x},${y},${bitmap.bytesPerRow},${bitmap.height},0,`;
 
-  const footer = `\r\nPRINT ${copies},1\r\n`;
+  const footer = `\r\nPRINT 1,1\r\n`;
 
-  return concatBytes([ascii(header), bitmap.data, ascii(footer)]);
+  return concatBytes([ascii(header), payload, ascii(footer)]);
 }
 
 /** Simple text-only sample label (no bitmap) — good for connection smoke tests. */
@@ -80,10 +120,10 @@ export function encodeTscTextSample(options: {
   const text = String(options.text ?? 'Sez Print TD-404').replace(/"/g, '');
   const cmd =
     '\r\n' +
-    `SIZE ${widthMm} mm,${heightMm} mm\r\n` +
+    `${formatTsplSizeCommand(widthMm, heightMm)}\r\n` +
     `GAP ${gapMm} mm,0 mm\r\n` +
     'SPEED 5\r\n' +
-    'DIRECTION 1,0\r\n' +
+    'DIRECTION 0,0\r\n' +
     'REFERENCE 0,0\r\n' +
     `DENSITY ${density}\r\n` +
     'CLS\r\n' +
