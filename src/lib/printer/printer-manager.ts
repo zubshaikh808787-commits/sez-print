@@ -49,30 +49,40 @@ const BLE_REQUESTED_MTU = 512;
 const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function bytesToBase64(bytes: Uint8Array): string {
-  let result = '';
   const len = bytes.length;
-  const mainLen = len - (len % 3);
-  for (let i = 0; i < mainLen; i += 3) {
-    const chunk = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-    result +=
-      B64_CHARS[(chunk >> 18) & 63] +
-      B64_CHARS[(chunk >> 12) & 63] +
-      B64_CHARS[(chunk >> 6) & 63] +
-      B64_CHARS[chunk & 63];
+  if (len === 0) return '';
+  const parts: string[] = [];
+  const chunkSize = 32766; // multiple of 3
+  for (let i = 0; i < len; i += chunkSize) {
+    const end = Math.min(i + chunkSize, len);
+    let sub = '';
+    const mainEnd = end - ((end - i) % 3);
+    for (let j = i; j < mainEnd; j += 3) {
+      const b0 = bytes[j];
+      const b1 = bytes[j + 1];
+      const b2 = bytes[j + 2];
+      sub +=
+        B64_CHARS[b0 >> 2] +
+        B64_CHARS[((b0 & 3) << 4) | (b1 >> 4)] +
+        B64_CHARS[((b1 & 15) << 2) | (b2 >> 6)] +
+        B64_CHARS[b2 & 63];
+    }
+    const rem = end - mainEnd;
+    if (rem === 1) {
+      const b0 = bytes[mainEnd];
+      sub += B64_CHARS[b0 >> 2] + B64_CHARS[(b0 & 3) << 4] + '==';
+    } else if (rem === 2) {
+      const b0 = bytes[mainEnd];
+      const b1 = bytes[mainEnd + 1];
+      sub +=
+        B64_CHARS[b0 >> 2] +
+        B64_CHARS[((b0 & 3) << 4) | (b1 >> 4)] +
+        B64_CHARS[(b1 & 15) << 2] +
+        '=';
+    }
+    parts.push(sub);
   }
-  const remaining = len - mainLen;
-  if (remaining === 1) {
-    const chunk = bytes[mainLen];
-    result += B64_CHARS[chunk >> 2] + B64_CHARS[(chunk & 3) << 4] + '==';
-  } else if (remaining === 2) {
-    const chunk = (bytes[mainLen] << 8) | bytes[mainLen + 1];
-    result +=
-      B64_CHARS[chunk >> 10] +
-      B64_CHARS[(chunk >> 4) & 63] +
-      B64_CHARS[(chunk & 15) << 2] +
-      '=';
-  }
-  return result;
+  return parts.join('');
 }
 
 export function isLikelyTd404Name(name: string | null | undefined): boolean {

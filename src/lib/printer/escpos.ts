@@ -97,24 +97,24 @@ export type BitRaster = {
   data: Uint8Array;
 };
 
+const B64_MAP = new Uint8Array(128);
+const B64_CHARS_STR = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+for (let i = 0; i < B64_CHARS_STR.length; i++) B64_MAP[B64_CHARS_STR.charCodeAt(i)] = i;
+
 export function base64ToBytes(base64: string): Uint8Array {
-  const clean = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-  const lookup = new Uint8Array(128);
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-
+  const len = base64.length;
   let padding = 0;
-  if (clean.endsWith('==')) padding = 2;
-  else if (clean.endsWith('=')) padding = 1;
+  if (base64.endsWith('==')) padding = 2;
+  else if (base64.endsWith('=')) padding = 1;
 
-  const byteLength = (clean.length / 4) * 3 - padding;
+  const byteLength = Math.max(0, Math.floor((len * 3) / 4) - padding);
   const bytes = new Uint8Array(byteLength);
   let out = 0;
-  for (let i = 0; i < clean.length; i += 4) {
-    const a = lookup[clean.charCodeAt(i)];
-    const b = lookup[clean.charCodeAt(i + 1)];
-    const c = lookup[clean.charCodeAt(i + 2)];
-    const d = lookup[clean.charCodeAt(i + 3)];
+  for (let i = 0; i < len; i += 4) {
+    const a = B64_MAP[base64.charCodeAt(i) & 127] || 0;
+    const b = B64_MAP[base64.charCodeAt(i + 1) & 127] || 0;
+    const c = B64_MAP[base64.charCodeAt(i + 2) & 127] || 0;
+    const d = B64_MAP[base64.charCodeAt(i + 3) & 127] || 0;
     if (out < byteLength) bytes[out++] = (a << 2) | (b >> 4);
     if (out < byteLength) bytes[out++] = ((b & 15) << 4) | (c >> 2);
     if (out < byteLength) bytes[out++] = ((c & 3) << 6) | d;
@@ -122,36 +122,42 @@ export function base64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-/** Decode a PNG (base64) into a luminance raster. Transparent pixels become white. */
+/** Decode a PNG (base64) into a luminance raster using fast integer math. */
 export function pngBase64ToGray(base64: string): GrayRaster {
   const png = loadFastPng()(base64ToBytes(base64));
   const { width, height, channels, depth } = png;
   const data = png.data;
-  const gray = new Uint8Array(width * height);
-  const maxValue = depth === 16 ? 65535 : 255;
+  const total = width * height;
+  const gray = new Uint8Array(total);
 
-  for (let i = 0; i < width * height; i++) {
-    const base = i * channels;
-    let r: number;
-    let g: number;
-    let b: number;
-    let a = maxValue;
-    if (channels === 1) {
-      r = g = b = data[base];
-    } else if (channels === 2) {
-      r = g = b = data[base];
-      a = data[base + 1];
-    } else {
-      r = data[base];
-      g = data[base + 1];
-      b = data[base + 2];
-      if (channels === 4) a = data[base + 3];
+  if (channels === 4 && depth === 8) {
+    for (let i = 0, base = 0; i < total; i++, base += 4) {
+      const a = data[base + 3];
+      if (a < 16) {
+        gray[i] = 255;
+      } else {
+        const lum = (data[base] * 77 + data[base + 1] * 150 + data[base + 2] * 29) >> 8;
+        gray[i] = a === 255 ? lum : Math.min(255, lum + (((255 - a) * (255 - lum)) >> 8));
+      }
     }
-    // Composite over white using alpha.
-    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / maxValue;
-    const alpha = a / maxValue;
-    const value = lum * alpha + (1 - alpha);
-    gray[i] = Math.round(value * 255);
+  } else if (channels === 3 && depth === 8) {
+    for (let i = 0, base = 0; i < total; i++, base += 3) {
+      gray[i] = (data[base] * 77 + data[base + 1] * 150 + data[base + 2] * 29) >> 8;
+    }
+  } else if (channels === 1 && depth === 8) {
+    gray.set(data.subarray(0, total));
+  } else {
+    const maxValue = depth === 16 ? 65535 : 255;
+    for (let i = 0; i < total; i++) {
+      const base = i * channels;
+      const r = data[base];
+      const g = channels >= 3 ? data[base + 1] : r;
+      const b = channels >= 3 ? data[base + 2] : r;
+      const a = channels === 4 ? data[base + 3] : maxValue;
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / maxValue;
+      const alpha = a / maxValue;
+      gray[i] = Math.round((lum * alpha + (1 - alpha)) * 255);
+    }
   }
   return { width, height, gray };
 }
