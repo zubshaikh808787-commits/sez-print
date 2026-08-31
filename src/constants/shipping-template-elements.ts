@@ -113,7 +113,7 @@ function vrule(left: number, top: number, height: number): LabelElement {
 
 function shipPlastic(w: number, h: number): LabelElement[] {
   const { titlePt, bodyPt, smallPt } = templateFontSizes(w, h);
-  const m = Math.max(1 + 0.6, w * 0.018);
+  const m = Math.max(2.5, w * 0.025);
   const innerW = w - m * 2;
   const innerH = h - m * 2;
   const mid = m + innerW * 0.38;
@@ -195,7 +195,7 @@ function shipPlastic(w: number, h: number): LabelElement[] {
 
 function shipParcel(w: number, h: number): LabelElement[] {
   const { titlePt, bodyPt, smallPt } = templateFontSizes(w, h);
-  const m = Math.max(1.5, w * 0.02);
+  const m = Math.max(2.5, w * 0.025);
   const innerW = w - m * 2;
   const innerH = h - m * 2;
   const colW = innerW / 2;

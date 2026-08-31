@@ -381,8 +381,11 @@ function ShapeContent({
 }) {
   const color = inkColor(element.drawingColorIndex);
   const strokeWidth = Math.max(1, element.lineWidth * scale);
-  const inset = strokeWidth / 2;
+  const safePad = Math.max(1, Math.round(scale * 0.4));
+  const inset = strokeWidth / 2 + safePad;
   const fill = shapeFillColor(element);
+  const innerW = Math.max(1, widthPx - strokeWidth - safePad * 2);
+  const innerH = Math.max(1, heightPx - strokeWidth - safePad * 2);
 
   if (element.figureShape === 'oval' || element.figureShape === 'circle') {
     const rx =
@@ -414,8 +417,8 @@ function ShapeContent({
       <Rect
         x={inset}
         y={inset}
-        width={Math.max(1, widthPx - strokeWidth)}
-        height={Math.max(1, heightPx - strokeWidth)}
+        width={innerW}
+        height={innerH}
         rx={radius}
         ry={radius}
         stroke={color}
