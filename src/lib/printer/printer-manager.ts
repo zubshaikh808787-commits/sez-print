@@ -38,11 +38,11 @@ export type BluetoothCapabilities = {
 
 const SCAN_TIMEOUT_MS = 8000;
 const BLE_SCAN_MS = 2500;
-/** Default BLE payload chunk (128 bytes allows fast bursts on standard BLE peripherals). */
-const BLE_DEFAULT_CHUNK = 128;
+/** Default BLE payload chunk (244 bytes fits standard BLE 4.2+ ATT payload size). */
+const BLE_DEFAULT_CHUNK = 244;
 /** Inter-chunk delay in ms. Packet bursting is used so writes complete in < 500ms. */
 const BLE_INTER_CHUNK_MS = 1;
-const BLE_BURST_INTERVAL = 4;
+const BLE_BURST_INTERVAL = 8;
 /** MTU we request from the peripheral. */
 const BLE_REQUESTED_MTU = 512;
 
@@ -577,24 +577,25 @@ class PrinterManager {
     usePrinterStore.getState().setStatus('connecting');
     const connectStart = Date.now();
 
-    const preferSpp =
-      transport === 'bluetooth-spp' ||
-      (transport !== 'bluetooth-ble' && transport !== 'wifi' && Platform.OS === 'android');
+    const isMacAddress = /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(deviceId.trim());
     const td404 = this.getTd404();
+    const canUseSpp =
+      Platform.OS === 'android' &&
+      td404?.isTd404NativeAvailable() &&
+      (transport === 'bluetooth-spp' || isMacAddress) &&
+      transport !== 'wifi';
 
-    if (preferSpp && td404?.isTd404NativeAvailable()) {
+    if (canUseSpp && td404) {
       try {
         await this.ensurePermissions('connect-only');
-        console.info('[printer] SPP connect →', deviceId, deviceName);
-        // Native Kotlin module handles its own 8s timeout with proper socket cleanup.
-        // A JS-side Promise.race would leave a zombie socket if it fires first.
+        console.info('[printer] Trying high-speed Classic SPP connect →', deviceId, deviceName);
         const result = await td404.connectTd404(deviceId, deviceName);
         this.activeTransport = 'td404-spp';
         this.connectedDevice = null;
         this.writableTarget = null;
         this.backendPrinterId = null;
         this.bleNegotiatedMtu = 0;
-        console.info('[printer] SPP connected in', Date.now() - connectStart, 'ms →', result.id);
+        console.info('[printer] High-speed SPP connected in', Date.now() - connectStart, 'ms →', result.id);
         usePrinterStore.getState().setConnectedDevice(result.id, result.name ?? deviceId, {
           transport: 'bluetooth-spp',
           sdkId: 'td404',
@@ -602,10 +603,10 @@ class PrinterManager {
         });
         return;
       } catch (error) {
-        console.warn('[printer] SPP connect failed after', Date.now() - connectStart, 'ms:', error);
-        if (transport === 'bluetooth-spp' || !this.getBle()) {
+        console.warn('[printer] SPP connect failed after', Date.now() - connectStart, 'ms, trying BLE:', error);
+        if (transport === 'bluetooth-spp' && !this.getBle()) {
           usePrinterStore.getState().clearConnection();
-          throw error instanceof Error ? error : new Error('Failed to connect to TD-404 printer.');
+          throw error instanceof Error ? error : new Error('Failed to connect to printer.');
         }
       }
     }
@@ -713,7 +714,9 @@ class PrinterManager {
 
   private async findWritableTarget(device: any): Promise<WritableTarget | null> {
     const services = await device.services();
-    let fallback: WritableTarget | null = null;
+    let preferredTarget: WritableTarget | null = null;
+    let fallbackTarget: WritableTarget | null = null;
+
     for (const service of services) {
       const characteristics = await service.characteristics();
       for (const ch of characteristics) {
@@ -724,20 +727,29 @@ class PrinterManager {
             withResponse: !ch.isWritableWithoutResponse,
           };
           const uuid = service.uuid.toLowerCase();
-          if (
+          const isKnownPrinterService =
             uuid.startsWith('0000ff00') ||
             uuid.startsWith('0000ffe0') ||
             uuid.startsWith('0000ae30') ||
             uuid.startsWith('49535343') ||
-            uuid.startsWith('0000fee7')
-          ) {
+            uuid.startsWith('0000fee7') ||
+            uuid.startsWith('e7810a71');
+
+          if (isKnownPrinterService && ch.isWritableWithoutResponse) {
             return target;
           }
-          if (!fallback) fallback = target;
+          if (isKnownPrinterService && !preferredTarget) {
+            preferredTarget = target;
+          }
+          if (ch.isWritableWithoutResponse && !fallbackTarget) {
+            fallbackTarget = target;
+          } else if (!fallbackTarget) {
+            fallbackTarget = target;
+          }
         }
       }
     }
-    return fallback;
+    return preferredTarget ?? fallbackTarget;
   }
 
   async disconnect(): Promise<void> {
