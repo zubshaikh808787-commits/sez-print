@@ -253,7 +253,7 @@ export async function sendIsolatedPrintCopies(jobBytes: Uint8Array, copies: numb
   console.info('[print-job] sending', n, 'copies,', jobBytes.length, 'bytes/copy');
   const t0 = Date.now();
   for (let i = 0; i < n; i++) {
-    await manager.print(Uint8Array.from(jobBytes));
+    await manager.print(jobBytes);
   }
   console.info('[print-job] all', n, 'copies sent in', Date.now() - t0, 'ms');
 }

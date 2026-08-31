@@ -75,7 +75,24 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
   const speed = options.speed != null ? Math.min(6, Math.max(1, Math.round(options.speed))) : 5;
   const x = options.x ?? 0;
   const y = options.y ?? 0;
-  const payload = invertEscPosBitsForTspl(bitmap.data);
+
+  // Trim trailing empty rows (where all bytes are 0/white) so TSPL doesn't send unnecessary data over Bluetooth
+  let lastRow = bitmap.height - 1;
+  while (lastRow >= 0) {
+    const start = lastRow * bitmap.bytesPerRow;
+    let hasBlack = false;
+    for (let i = 0; i < bitmap.bytesPerRow; i++) {
+      if (bitmap.data[start + i] !== 0) {
+        hasBlack = true;
+        break;
+      }
+    }
+    if (hasBlack) break;
+    lastRow--;
+  }
+  const activeHeight = Math.max(1, lastRow + 1);
+  const trimmedData = bitmap.data.subarray(0, activeHeight * bitmap.bytesPerRow);
+  const payload = invertEscPosBitsForTspl(trimmedData);
 
   const sizeCmd = formatTsplSizeCommand(options.widthMm, options.heightMm);
   const mediaCmd = mediaCommand(options.media ?? 'gap', gap);
@@ -84,9 +101,9 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
     '[tsc] TSPL job:',
     sizeCmd, '|',
     mediaCmd.trim(), '|',
-    'BITMAP', x + ',' + y + ',' + bitmap.bytesPerRow + ',' + bitmap.height + ',0 |',
+    'BITMAP', x + ',' + y + ',' + bitmap.bytesPerRow + ',' + activeHeight + ',0 |',
     'SPEED', speed, '| DENSITY', density, '|',
-    'payload:', payload.length, 'bytes',
+    'payload:', payload.length, 'bytes (trimmed from', bitmap.data.length, 'bytes)',
   );
 
   const header =
@@ -98,7 +115,7 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
     'REFERENCE 0,0\r\n' +
     `DENSITY ${density}\r\n` +
     'CLS\r\n' +
-    `BITMAP ${x},${y},${bitmap.bytesPerRow},${bitmap.height},0,`;
+    `BITMAP ${x},${y},${bitmap.bytesPerRow},${activeHeight},0,`;
 
   const footer = `\r\nPRINT 1,1\r\n`;
 
