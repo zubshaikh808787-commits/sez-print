@@ -97,29 +97,109 @@ export type BitRaster = {
   data: Uint8Array;
 };
 
+const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const B64_LOOKUP = new Uint8Array(256);
+for (let i = 0; i < B64_CHARS.length; i++) {
+  B64_LOOKUP[B64_CHARS.charCodeAt(i)] = i;
+}
+
 export function base64ToBytes(base64: string): Uint8Array {
-  const clean = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-  const lookup = new Uint8Array(128);
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
+  let len = base64.length;
+  if (len === 0) return new Uint8Array(0);
 
   let padding = 0;
-  if (clean.endsWith('==')) padding = 2;
-  else if (clean.endsWith('=')) padding = 1;
+  if (base64.charCodeAt(len - 1) === 61) padding++;
+  if (base64.charCodeAt(len - 2) === 61) padding++;
 
-  const byteLength = (clean.length / 4) * 3 - padding;
+  const byteLength = Math.max(0, (len * 3) / 4 - padding);
   const bytes = new Uint8Array(byteLength);
+
   let out = 0;
-  for (let i = 0; i < clean.length; i += 4) {
-    const a = lookup[clean.charCodeAt(i)];
-    const b = lookup[clean.charCodeAt(i + 1)];
-    const c = lookup[clean.charCodeAt(i + 2)];
-    const d = lookup[clean.charCodeAt(i + 3)];
-    if (out < byteLength) bytes[out++] = (a << 2) | (b >> 4);
-    if (out < byteLength) bytes[out++] = ((b & 15) << 4) | (c >> 2);
-    if (out < byteLength) bytes[out++] = ((c & 3) << 6) | d;
+  const limit = len - (padding > 0 ? 4 : 0);
+  for (let i = 0; i < limit; i += 4) {
+    const a = B64_LOOKUP[base64.charCodeAt(i)];
+    const b = B64_LOOKUP[base64.charCodeAt(i + 1)];
+    const c = B64_LOOKUP[base64.charCodeAt(i + 2)];
+    const d = B64_LOOKUP[base64.charCodeAt(i + 3)];
+    bytes[out++] = (a << 2) | (b >> 4);
+    bytes[out++] = ((b & 15) << 4) | (c >> 2);
+    bytes[out++] = ((c & 3) << 6) | d;
   }
+
+  if (padding === 1 && limit < len) {
+    const a = B64_LOOKUP[base64.charCodeAt(limit)];
+    const b = B64_LOOKUP[base64.charCodeAt(limit + 1)];
+    const c = B64_LOOKUP[base64.charCodeAt(limit + 2)];
+    bytes[out++] = (a << 2) | (b >> 4);
+    bytes[out++] = ((b & 15) << 4) | (c >> 2);
+  } else if (padding === 2 && limit < len) {
+    const a = B64_LOOKUP[base64.charCodeAt(limit)];
+    const b = B64_LOOKUP[base64.charCodeAt(limit + 1)];
+    bytes[out++] = (a << 2) | (b >> 4);
+  }
+
   return bytes;
+}
+
+/** Ultra-fast single-pass conversion from Base64 PNG directly to 1-bit BitRaster */
+export function fastPngBase64ToBits(
+  base64: string,
+  options: {
+    threshold: number;
+    orientation?: LabelOrientation;
+  },
+): BitRaster {
+  const png = loadFastPng()(base64ToBytes(base64));
+  const { width, height, channels, data } = png;
+  const threshold = Math.min(255, Math.max(0, options.threshold));
+  const orientation = options.orientation ?? 0;
+
+  const isLandscape = orientation === 90 || orientation === 270;
+  const outWidth = isLandscape ? height : width;
+  const outHeight = isLandscape ? width : height;
+  const bytesPerRow = Math.ceil(outWidth / 8);
+  const outBits = new Uint8Array(bytesPerRow * outHeight);
+
+  const isRgba = channels === 4;
+  const isRgb = channels === 3;
+  const isGray = channels === 1;
+
+  for (let y = 0; y < height; y++) {
+    const rowBase = y * width * channels;
+    for (let x = 0; x < width; x++) {
+      const idx = rowBase + x * channels;
+      let lum = 255;
+      if (isRgba) {
+        const a = data[idx + 3];
+        if (a > 0) {
+          const l = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
+          lum = (l * a + (255 - a) * 255) / 255;
+        }
+      } else if (isRgb) {
+        lum = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
+      } else if (isGray) {
+        lum = data[idx];
+      }
+
+      if (lum < threshold) {
+        let destX = x;
+        let destY = y;
+        if (orientation === 90) {
+          destX = height - 1 - y;
+          destY = x;
+        } else if (orientation === 180) {
+          destX = width - 1 - x;
+          destY = height - 1 - y;
+        } else if (orientation === 270) {
+          destX = y;
+          destY = width - 1 - x;
+        }
+        outBits[destY * bytesPerRow + (destX >> 3)] |= 0x80 >> (destX & 7);
+      }
+    }
+  }
+
+  return { bytesPerRow, height: outHeight, data: outBits };
 }
 
 /** Decode a PNG (base64) into a luminance raster. Transparent pixels become white. */

@@ -49,30 +49,42 @@ const BLE_REQUESTED_MTU = 512;
 const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function bytesToBase64(bytes: Uint8Array): string {
-  let result = '';
   const len = bytes.length;
+  if (len === 0) return '';
+
+  const CHUNK_SIZE = 0x8000; // 32KB block
+  const b64Chunks: string[] = [];
   const mainLen = len - (len % 3);
+
+  let str = '';
   for (let i = 0; i < mainLen; i += 3) {
     const chunk = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-    result +=
+    str +=
       B64_CHARS[(chunk >> 18) & 63] +
       B64_CHARS[(chunk >> 12) & 63] +
       B64_CHARS[(chunk >> 6) & 63] +
       B64_CHARS[chunk & 63];
+    if (str.length >= CHUNK_SIZE) {
+      b64Chunks.push(str);
+      str = '';
+    }
   }
+  if (str.length > 0) b64Chunks.push(str);
+
   const remaining = len - mainLen;
   if (remaining === 1) {
     const chunk = bytes[mainLen];
-    result += B64_CHARS[chunk >> 2] + B64_CHARS[(chunk & 3) << 4] + '==';
+    b64Chunks.push(B64_CHARS[chunk >> 2] + B64_CHARS[(chunk & 3) << 4] + '==');
   } else if (remaining === 2) {
     const chunk = (bytes[mainLen] << 8) | bytes[mainLen + 1];
-    result +=
+    b64Chunks.push(
       B64_CHARS[chunk >> 10] +
-      B64_CHARS[(chunk >> 4) & 63] +
-      B64_CHARS[(chunk & 15) << 2] +
-      '=';
+        B64_CHARS[(chunk >> 4) & 63] +
+        B64_CHARS[(chunk & 15) << 2] +
+        '=',
+    );
   }
-  return result;
+  return b64Chunks.join('');
 }
 
 export function isLikelyTd404Name(name: string | null | undefined): boolean {

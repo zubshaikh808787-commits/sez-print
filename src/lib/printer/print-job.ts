@@ -8,6 +8,7 @@ import {
 } from '@/lib/label-geometry';
 import {
   encodeEscPosJob,
+  fastPngBase64ToBits,
   fitGrayToSize,
   grayToBits,
   padBitsCentered,
@@ -141,6 +142,20 @@ export function rasterizePngForPrint(
   },
 ): BitRaster {
   const t0 = Date.now();
+
+  if (!options.dither) {
+    const bits = fastPngBase64ToBits(base64, {
+      threshold: options.threshold,
+      orientation: options.orientation,
+    });
+    console.info(
+      '[print-job] fastRasterize done in', Date.now() - t0, 'ms →',
+      bits.bytesPerRow * 8, '×', bits.height, 'dots |',
+      bits.data.length, 'bytes raster',
+    );
+    return bits;
+  }
+
   let gray = pngBase64ToGray(base64);
   console.info(
     '[print-job] rasterize: PNG decoded →', gray.width, '×', gray.height,
