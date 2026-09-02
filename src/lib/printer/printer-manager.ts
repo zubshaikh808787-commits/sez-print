@@ -359,8 +359,8 @@ class PrinterManager {
       return PRINTER_PROFILES['receipt-58mm'];
     }
 
-    // Default to 203 DPI (native resolution of desktop thermal label printers like TD-404)
-    const dpi = settings.printerDpi ?? 203;
+    // TSPL label printers — resolve from user settings (default 304 DPI / 12 dots/mm)
+    const dpi = settings.printerDpi ?? 304;
     const alignment = settings.printerAlignment ?? 'center';
     const headWidthMm = settings.printheadWidthMm ?? 108;
     const headWidthDots = Math.round((headWidthMm * dpi) / 25.4);
@@ -1091,11 +1091,9 @@ class PrinterManager {
         await this.ensureConnected();
         const dpi = options.dpi ?? this.getPrintDpi();
         const profile = this.getActivePrinterProfile();
-        // Integer mm for TSPL SIZE (101.6×152.4 → 102×152). Decimals break TD-404.
-        const media = printMediaSizeMm(options.widthMm, options.heightMm);
         const spec = createPrintSpec({
-          widthMm: media.widthMm,
-          heightMm: media.heightMm,
+          widthMm: options.widthMm,
+          heightMm: options.heightMm,
           dpi,
           profile,
           mediaType: options.media ?? 'gap',
@@ -1103,7 +1101,6 @@ class PrinterManager {
           calibration: {
             horizontalOffsetMm: options.hOffsetMm ?? 0,
             verticalOffsetMm: options.vOffsetMm ?? 0,
-            forceLeftAligned: true,
           },
         });
         const t0 = Date.now();

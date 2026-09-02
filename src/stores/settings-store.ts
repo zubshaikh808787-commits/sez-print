@@ -78,7 +78,7 @@ export const DEFAULT_PRINTING_SETTINGS: PrintingSettings = {
   recordHistory: true,
   autoPages: true,
   returnPrevious: false,
-  printerDpi: 203,
+  printerDpi: 304,
   printerAlignment: 'left',
   printheadWidthMm: 108,
   customPaperWidthMm: 210,
@@ -120,13 +120,6 @@ export const useSettingsStore = create<SettingsStoreState>()(
     {
       name: 'sez-print/settings',
       storage: createJSONStorage(() => AsyncStorage),
-      version: 2,
-      migrate: (persistedState: any, version: number) => {
-        if (version < 2 && persistedState?.printing?.printerDpi === 304) {
-          persistedState.printing.printerDpi = 203;
-        }
-        return persistedState;
-      },
     },
   ),
 );

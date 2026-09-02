@@ -14,6 +14,7 @@ import {
   padBitsCentered,
   pngBase64ToGray,
   rotateGray,
+  shiftBits,
   type BitRaster,
   type GrayRaster,
 } from '@/lib/printer/escpos';
@@ -116,38 +117,33 @@ export function finalizeGrayForPrint(
     heightMm: number;
     threshold: number;
     dither: boolean;
-    /** @deprecated Applied in encodeConnectedPrinterJob as BITMAP x — ignored here. */
-    hOffsetMm?: number;
+    hOffsetMm: number;
   },
 ): BitRaster {
   const dpi = getPrinterManager().getPrintDpi();
-  const media = printMediaSizeMm(options.widthMm, options.heightMm);
-  const content = printContentSize(media.widthMm, media.heightMm, dpi);
-  const canvas = printRasterSize(media.widthMm, media.heightMm, dpi);
+  const canvas = printRasterSize(options.widthMm, options.heightMm, dpi);
 
   console.info(
     '[print-job] finalizeGray:',
-    media.widthMm, '×', media.heightMm, 'mm (from',
-    options.widthMm.toFixed(1), '×', options.heightMm.toFixed(1), ') @', dpi, 'DPI →',
-    content.widthPx, '×', content.heightPx, 'content |',
-    canvas.widthPx, '×', canvas.heightPx, 'canvas |',
+    options.widthMm.toFixed(1), '×', options.heightMm.toFixed(1), 'mm @', dpi, 'DPI →',
+    canvas.widthPx, '×', canvas.heightPx, 'px canvas |',
     'src:', gray.width, '×', gray.height, '|',
     'threshold:', options.threshold, 'dither:', options.dither,
   );
 
-  // Capture should already be content-sized; stretch only repairs 1–2 px ViewShot drift.
   const fitted =
-    gray.width === content.widthPx && gray.height === content.heightPx
+    gray.width === canvas.widthPx && gray.height === canvas.heightPx
       ? gray
-      : fitGrayToSize(gray, content.widthPx, content.heightPx, 'stretch');
+      : fitGrayToSize(gray, canvas.widthPx, canvas.heightPx, 'stretch');
 
   let bits = grayToBits(fitted, { threshold: options.threshold, dither: options.dither });
 
-  // Even L/R pad into byte-aligned canvas — keeps true mm width, no stretch warp.
   if (bits.bytesPerRow * 8 !== canvas.widthPx || bits.height !== canvas.heightPx) {
     bits = padBitsCentered(bits, canvas.widthPx, canvas.heightPx);
   }
 
+  const offsetDots = mmToDots(options.hOffsetMm, dpi);
+  if (offsetDots !== 0) bits = shiftBits(bits, offsetDots);
   return bits;
 }
 
@@ -219,11 +215,10 @@ export function encodeConnectedPrinterJob(
   const manager = getPrinterManager();
   const dpi = manager.getPrintDpi();
   const profile = manager.getActivePrinterProfile();
-  const media = printMediaSizeMm(options.widthMm, options.heightMm);
 
   const spec = createPrintSpec({
-    widthMm: media.widthMm,
-    heightMm: media.heightMm,
+    widthMm: options.widthMm,
+    heightMm: options.heightMm,
     dpi,
     profile,
     mediaType: options.media ?? 'gap',
@@ -231,8 +226,7 @@ export function encodeConnectedPrinterJob(
     calibration: {
       horizontalOffsetMm: options.hOffsetMm ?? 0,
       verticalOffsetMm: options.vOffsetMm,
-      // TSPL SIZE uses label mm; BITMAP is label-local (vendor 0,0). User offsets only.
-      forceLeftAligned: options.forceLeftAligned ?? true,
+      forceLeftAligned: options.forceLeftAligned,
     },
   });
 

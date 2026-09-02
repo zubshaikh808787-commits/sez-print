@@ -420,11 +420,8 @@ class Td404PrinterModule : Module() {
     }
     val tRotate = System.currentTimeMillis()
 
-    // Scale to integer-mm media size (matches TSPL SIZE). 4×6 in → 102×152 mm.
-    val mediaW = Math.max(1.0, Math.round(widthMm).toDouble())
-    val mediaH = Math.max(1.0, Math.round(heightMm).toDouble())
-    val targetDotsW = Math.max(1, Math.round(mediaW * dpi / 25.4).toInt())
-    val targetDotsH = Math.max(1, Math.round(mediaH * dpi / 25.4).toInt())
+    val targetDotsW = Math.max(1, Math.round(widthMm * dpi / 25.4).toInt())
+    val targetDotsH = Math.max(1, Math.round(heightMm * dpi / 25.4).toInt())
     if (bitmap.width != targetDotsW || bitmap.height != targetDotsH) {
       val scaled = Bitmap.createScaledBitmap(bitmap, targetDotsW, targetDotsH, true)
       if (scaled !== bitmap) {
@@ -433,23 +430,17 @@ class Td404PrinterModule : Module() {
       }
     }
 
-    // SIZE must match the same integer mm used for dots.
-    val sizeW = formatSizeMm(mediaW)
-    val sizeH = formatSizeMm(mediaH)
+    val sizeW = Math.max(1, Math.round(widthMm).toInt())
+    val sizeH = Math.max(1, Math.round(heightMm).toInt())
 
     val contentW = bitmap.width
     val contentH = bitmap.height
-    // Byte-align width; center the 0–7 pad columns L/R (no stretch).
-    val rasterW = Math.max(8, ((contentW + 7) / 8) * 8)
-    val padLeft = (rasterW - contentW) / 2
-    val bytesPerRow = rasterW / 8
+    val bytesPerRow = (contentW + 7) / 8
     val pixels = IntArray(contentW * contentH)
     bitmap.getPixels(pixels, 0, contentW, 0, 0, contentW, contentH)
     val rawBmp = ByteArray(bytesPerRow * contentH)
 
-    // Direct high-speed 1-bit packing in native code:
-    // TSPL BITMAP mode 0: bit 0 = black (print dot), bit 1 = white (no print)
-    // Pre-fill white (bit 1 set) so pad columns stay blank.
+    // Pre-fill white (bit 1 set) so unused trailing bits stay blank
     java.util.Arrays.fill(rawBmp, 0xFF.toByte())
     for (y in 0 until contentH) {
       val rowOffset = y * bytesPerRow
@@ -460,12 +451,9 @@ class Td404PrinterModule : Module() {
         val g = (c shr 8) and 0xFF
         val b = c and 0xFF
         val lum = (77 * r + 150 * g + 29 * b) shr 8
-        val rx = x + padLeft
-        val byteIndex = rowOffset + (rx shr 3)
-        val bitIndex = 7 - (rx and 7)
-        if (lum >= 128) {
-          rawBmp[byteIndex] = (rawBmp[byteIndex].toInt() or (1 shl bitIndex)).toByte()
-        } else {
+        if (lum < 128) {
+          val byteIndex = rowOffset + (x shr 3)
+          val bitIndex = 7 - (x and 7)
           rawBmp[byteIndex] = (rawBmp[byteIndex].toInt() and (1 shl bitIndex).inv()).toByte()
         }
       }
@@ -524,10 +512,6 @@ class Td404PrinterModule : Module() {
     )
   }
 
-  private fun formatSizeMm(mm: Double): String {
-    // Integer mm only — TD-404 / Ninestar addSize(w,h). Decimals are often ignored.
-    return Math.max(1, Math.round(mm).toInt()).toString()
-  }
 
   private fun formatGap(gapMm: Double): String {
     val rounded = Math.round(gapMm * 100.0) / 100.0

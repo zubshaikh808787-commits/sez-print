@@ -9,9 +9,7 @@
 import { dotsToMm, MM_PER_INCH, mmToDots } from '@/lib/printer/print-spec';
 
 export { dotsToMm, MM_PER_INCH, mmToDots };
-/** Default DPI when a caller omits it — matches TD-404 native resolution. */
-export const PRINT_DPI = 203;
-/** @deprecated Prefer mmToDots(mm, dpi). 203 DPI ≈ 7.992 dots/mm, not exactly 8. */
+export const PRINT_DPI = 304;
 export const PRINT_DOTS_PER_MM = PRINT_DPI / MM_PER_INCH;
 export const MIN_LABEL_MM = 8;
 export const MAX_LABEL_MM = 310;

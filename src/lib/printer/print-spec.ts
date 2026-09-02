@@ -100,12 +100,12 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
   },
 };
 
-export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-203'];
+export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-304'];
 
 /** Authoritative conversion from physical millimetres to printer dots. */
-export function mmToDots(mm: number, dpi = 203): number {
+export function mmToDots(mm: number, dpi = 304): number {
   if (!Number.isFinite(mm) || mm <= 0) return 0;
-  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : 203;
+  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : 304;
   return Math.round((mm * d) / MM_PER_INCH);
 }
 
@@ -167,22 +167,20 @@ export type CreatePrintSpecOptions = {
 
 /**
  * Compute the printhead X offset (in dots) to center a label on the printhead.
+ * Compute the printhead X offset (in dots) to center a label on the printhead.
+ * Center-fed printers (most desktop thermal) physically center the media under
+ * a printhead that is wider than the label. The BITMAP x coordinate must account
+ * for this so the image lands on the media, not shifted to one side of the
+ * printhead.
  *
- * IMPORTANT (TD-404 / Ninestar TSPL): SIZE sets the label coordinate space, and
- * BITMAP 0,0 is the top-left of the *label* (vendor demo uses 0,0). Physical
- * media is centered by the paper guides — do not add a hardware offset into
- * BITMAP x or content shifts off the label.
- *
- * This helper remains for diagnostics / non-TSPL profiles that use head-absolute
- * coordinates. TSPL jobs should pass forceLeftAligned or leave alignment 'left'.
+ * Left-aligned printers (receipt printers) feed from the left edge — no offset.
  */
 export function computePrintheadCenteringOffset(
   labelWidthDots: number,
   profile: PrinterProfile,
 ): number {
-  if (profile.commandLanguage === 'tspl') return 0;
   if (profile.alignment !== 'center') return 0;
-  // Full-width labels align to the left guide — do not shift off-edge
+  // Full-width labels (e.g. 4x6 / 100mm / 108mm) align to the left guide — do not shift off-edge
   if (labelWidthDots >= profile.printheadWidthDots * 0.85) return 0;
   const gap = profile.printheadWidthDots - labelWidthDots;
   return gap > 0 ? Math.round(gap / 2) : 0;

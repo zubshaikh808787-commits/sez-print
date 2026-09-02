@@ -1,4 +1,4 @@
-import { fitDocumentToFillPage } from '@/lib/element-sizing';
+import { fitDocumentCenteredOnPage } from '@/lib/element-sizing';
 import { generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import {
   clampLabelMm,
@@ -262,18 +262,16 @@ export function applyPrintSize(
 ): LabelDocument {
   if (preset?.id === 'a4' || preset?.sheet) return tileDocumentOnA4(source);
   if (preset?.id === '2ups') return tileDocumentTwoUp(source);
-  const clamped = clampLabelMm(custom.widthMm, custom.heightMm);
-  // Integer mm matches TSPL SIZE — 4×6 in (101.6×152.4) → 102×152 mm on the printer.
-  const page = printMediaSizeMm(clamped.widthMm, clamped.heightMm);
-  // Already on the same media SIZE — keep layout; only rematch mm if fractional.
+  const page = clampLabelMm(custom.widthMm, custom.heightMm);
+  // Same size as the design — keep element positions (preview == print).
   if (
     Math.abs(page.widthMm - source.widthMm) < 0.05 &&
     Math.abs(page.heightMm - source.heightMm) < 0.05
   ) {
     return source;
   }
-  // Stretch to fill selected paper edge-to-edge (avoids tiny centered stamp on 4×6).
-  return fitDocumentToFillPage(source, page.widthMm, page.heightMm);
+  // Uniform scale, centered — fills as much of the paper as the preview aspect allows.
+  return fitDocumentCenteredOnPage(source, page.widthMm, page.heightMm);
 }
 
 export function formatPrintSize(widthMm: number, heightMm: number, unit: LabelUnit = 'mm'): string {
