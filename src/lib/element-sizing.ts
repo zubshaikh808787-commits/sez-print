@@ -363,6 +363,58 @@ export function fitDocumentCenteredOnPage(
   return { ...nextDoc, elements };
 }
 
+/**
+ * Stretch design to fill the full print page (edge-to-edge).
+ * Used when the user picks a target size like 4×6 so the print is not a
+ * small stamp in the middle of the label.
+ */
+export function fitDocumentToFillPage(
+  doc: LabelDocument,
+  widthMm: number,
+  heightMm: number,
+): LabelDocument {
+  const scaleX = widthMm / Math.max(doc.widthMm, 0.01);
+  const scaleY = heightMm / Math.max(doc.heightMm, 0.01);
+  const fontScale = Math.min(scaleX, scaleY);
+  const nextDoc = { ...doc, widthMm, heightMm };
+  const elements = doc.elements.map((el) => {
+    if (el.type === 'border') {
+      return clampElementToLabel(
+        {
+          ...el,
+          left: 0,
+          top: 0,
+          width: widthMm,
+          height: heightMm,
+          rotation: 0 as const,
+        },
+        nextDoc,
+      );
+    }
+    const scaled: LabelElement = {
+      ...el,
+      left: el.left * scaleX,
+      top: el.top * scaleY,
+      width: el.width * scaleX,
+    };
+    if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
+      (scaled as { height: number }).height *= scaleY;
+    }
+    if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
+      (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * fontScale);
+    }
+    if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
+      (scaled as { lineWidth: number }).lineWidth *= fontScale;
+    }
+    if (scaled.type === 'table') {
+      scaled.columnWidths = scaled.columnWidths.map((n) => n * scaleX);
+      scaled.rowHeights = scaled.rowHeights.map((n) => n * scaleY);
+    }
+    return clampElementToLabel(scaled, nextDoc);
+  });
+  return { ...nextDoc, elements };
+}
+
 /** Template title/body font sizes derived from label mm (not raw mm as pt). */
 export function templateFontSizes(widthMm: number, heightMm: number) {
   const isLargeLabel = widthMm >= 75 && heightMm >= 95;

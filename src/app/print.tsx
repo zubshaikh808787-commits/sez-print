@@ -53,7 +53,7 @@ import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
-import { fitLabelSize, type LabelSizeMm } from '@/lib/label-geometry';
+import { fitLabelSize, printMediaSizeMm, type LabelSizeMm } from '@/lib/label-geometry';
 import { applyPrintSize, formatPrintSize, type PrintSizePreset } from '@/lib/print-sizes';
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
@@ -427,7 +427,9 @@ export default function PrintScreen() {
 
   useEffect(() => {
     if (!previewDocument || printSize) return;
-    setPrintSize({ widthMm: previewDocument.widthMm, heightMm: previewDocument.heightMm });
+    // Lock to integer media mm so SIZE / capture / preview stay in sync (4×6 → 102×152).
+    const media = printMediaSizeMm(previewDocument.widthMm, previewDocument.heightMm);
+    setPrintSize(media);
   }, [previewDocument, printSize]);
 
   // Keep print size locked to the composed strip for ups jobs (exact mm, no rescale).
@@ -941,7 +943,8 @@ export default function PrintScreen() {
         initialHeightMm={previewDocument?.heightMm ?? defaults.labelHeight}
         onCancel={() => setSizeSheetOpen(false)}
         onSelect={(size, preset) => {
-          setPrintSize(size);
+          const media = printMediaSizeMm(size.widthMm, size.heightMm);
+          setPrintSize(media);
           setPrintPreset(preset);
           setSizeSheetOpen(false);
         }}

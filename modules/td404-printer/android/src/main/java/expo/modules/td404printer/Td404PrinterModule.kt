@@ -420,10 +420,11 @@ class Td404PrinterModule : Module() {
     }
     val tRotate = System.currentTimeMillis()
 
-    // Always scale to exact label dots for the selected mm size (up or down).
-    // Matches JS printContentSize / ViewShot capture so 50×50 mm prints as 50×50.
-    val targetDotsW = Math.max(1, Math.round(widthMm * dpi / 25.4).toInt())
-    val targetDotsH = Math.max(1, Math.round(heightMm * dpi / 25.4).toInt())
+    // Scale to integer-mm media size (matches TSPL SIZE). 4×6 in → 102×152 mm.
+    val mediaW = Math.max(1.0, Math.round(widthMm).toDouble())
+    val mediaH = Math.max(1.0, Math.round(heightMm).toDouble())
+    val targetDotsW = Math.max(1, Math.round(mediaW * dpi / 25.4).toInt())
+    val targetDotsH = Math.max(1, Math.round(mediaH * dpi / 25.4).toInt())
     if (bitmap.width != targetDotsW || bitmap.height != targetDotsH) {
       val scaled = Bitmap.createScaledBitmap(bitmap, targetDotsW, targetDotsH, true)
       if (scaled !== bitmap) {
@@ -432,9 +433,9 @@ class Td404PrinterModule : Module() {
       }
     }
 
-    // SIZE must match the same mm used for dots (one decimal when needed).
-    val sizeW = formatSizeMm(widthMm)
-    val sizeH = formatSizeMm(heightMm)
+    // SIZE must match the same integer mm used for dots.
+    val sizeW = formatSizeMm(mediaW)
+    val sizeH = formatSizeMm(mediaH)
 
     val contentW = bitmap.width
     val contentH = bitmap.height
@@ -524,8 +525,8 @@ class Td404PrinterModule : Module() {
   }
 
   private fun formatSizeMm(mm: Double): String {
-    val n = Math.max(1.0, Math.round(mm * 10.0) / 10.0)
-    return if (n == n.toLong().toDouble()) n.toLong().toString() else String.format("%.1f", n)
+    // Integer mm only — TD-404 / Ninestar addSize(w,h). Decimals are often ignored.
+    return Math.max(1, Math.round(mm).toInt()).toString()
   }
 
   private fun formatGap(gapMm: Double): String {

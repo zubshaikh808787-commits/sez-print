@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { AppState, type AppStateStatus, NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
-import { PRINT_DPI } from '@/lib/label-geometry';
+import { PRINT_DPI, printMediaSizeMm } from '@/lib/label-geometry';
 import {
   connectWifiPrinter,
   wifiPrintRaw,
@@ -1091,11 +1091,11 @@ class PrinterManager {
         await this.ensureConnected();
         const dpi = options.dpi ?? this.getPrintDpi();
         const profile = this.getActivePrinterProfile();
-        // TSPL SIZE = label mm → BITMAP 0,0 is label top-left (Ninestar demo).
-        // Only user H/V calibration offsets are applied — not printhead centering.
+        // Integer mm for TSPL SIZE (101.6×152.4 → 102×152). Decimals break TD-404.
+        const media = printMediaSizeMm(options.widthMm, options.heightMm);
         const spec = createPrintSpec({
-          widthMm: options.widthMm,
-          heightMm: options.heightMm,
+          widthMm: media.widthMm,
+          heightMm: media.heightMm,
           dpi,
           profile,
           mediaType: options.media ?? 'gap',

@@ -3,6 +3,7 @@ import {
   mmToDots,
   printCaptureLayout as geometryPrintCaptureLayout,
   printContentSize,
+  printMediaSizeMm,
   printRasterSize,
   validateLabelSize,
 } from '@/lib/label-geometry';
@@ -73,17 +74,20 @@ export function printJobSizeError(widthMm: number, heightMm: number): string | n
 
 /** Exact content dots for on-screen preview math. */
 export function currentPrintRaster(widthMm: number, heightMm: number) {
-  return printContentSize(widthMm, heightMm, getPrinterManager().getPrintDpi());
+  const media = printMediaSizeMm(widthMm, heightMm);
+  return printContentSize(media.widthMm, media.heightMm, getPrinterManager().getPrintDpi());
 }
 
 /** Full BITMAP canvas (width aligned to 8 dots for TSPL). */
 export function printBitmapSize(widthMm: number, heightMm: number) {
-  return printRasterSize(widthMm, heightMm, getPrinterManager().getPrintDpi());
+  const media = printMediaSizeMm(widthMm, heightMm);
+  return printRasterSize(media.widthMm, media.heightMm, getPrinterManager().getPrintDpi());
 }
 
 /** ViewShot size (`content`) vs TSPL canvas (`canvas`) at the connected printer DPI. */
 export function printCaptureLayout(widthMm: number, heightMm: number) {
-  return geometryPrintCaptureLayout(widthMm, heightMm, getPrinterManager().getPrintDpi());
+  const media = printMediaSizeMm(widthMm, heightMm);
+  return geometryPrintCaptureLayout(media.widthMm, media.heightMm, getPrinterManager().getPrintDpi());
 }
 
 /** 90° / 270° swap paper millimetres so TSPL SIZE matches the rotated bitmap. */
@@ -117,12 +121,14 @@ export function finalizeGrayForPrint(
   },
 ): BitRaster {
   const dpi = getPrinterManager().getPrintDpi();
-  const content = printContentSize(options.widthMm, options.heightMm, dpi);
-  const canvas = printRasterSize(options.widthMm, options.heightMm, dpi);
+  const media = printMediaSizeMm(options.widthMm, options.heightMm);
+  const content = printContentSize(media.widthMm, media.heightMm, dpi);
+  const canvas = printRasterSize(media.widthMm, media.heightMm, dpi);
 
   console.info(
     '[print-job] finalizeGray:',
-    options.widthMm.toFixed(1), '×', options.heightMm.toFixed(1), 'mm @', dpi, 'DPI →',
+    media.widthMm, '×', media.heightMm, 'mm (from',
+    options.widthMm.toFixed(1), '×', options.heightMm.toFixed(1), ') @', dpi, 'DPI →',
     content.widthPx, '×', content.heightPx, 'content |',
     canvas.widthPx, '×', canvas.heightPx, 'canvas |',
     'src:', gray.width, '×', gray.height, '|',
@@ -213,10 +219,11 @@ export function encodeConnectedPrinterJob(
   const manager = getPrinterManager();
   const dpi = manager.getPrintDpi();
   const profile = manager.getActivePrinterProfile();
+  const media = printMediaSizeMm(options.widthMm, options.heightMm);
 
   const spec = createPrintSpec({
-    widthMm: options.widthMm,
-    heightMm: options.heightMm,
+    widthMm: media.widthMm,
+    heightMm: media.heightMm,
     dpi,
     profile,
     mediaType: options.media ?? 'gap',
