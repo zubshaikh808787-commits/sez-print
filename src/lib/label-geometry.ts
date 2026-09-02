@@ -9,7 +9,8 @@
 import { dotsToMm, MM_PER_INCH, mmToDots } from '@/lib/printer/print-spec';
 
 export { dotsToMm, MM_PER_INCH, mmToDots };
-export const PRINT_DPI = 304;
+/** Default DPI when a caller omits it — matches TD-404 native resolution. */
+export const PRINT_DPI = 203;
 /** @deprecated Prefer mmToDots(mm, dpi). 203 DPI ≈ 7.992 dots/mm, not exactly 8. */
 export const PRINT_DOTS_PER_MM = PRINT_DPI / MM_PER_INCH;
 export const MIN_LABEL_MM = 8;
@@ -167,11 +168,13 @@ export function printCaptureLayout(widthMm: number, heightMm: number, dpi = PRIN
 }
 
 /**
- * TSPL SIZE command. Always emits explicit integer `N mm,N mm` format
- * which is universally supported by all TSPL firmware versions.
+ * TSPL SIZE command. Preserves one decimal when needed (e.g. 101.6 mm for 4")
+ * so SIZE matches the same mm used for mm→dots capture math.
  */
 export function formatTsplSizeCommand(widthMm: number, heightMm: number): string {
-  const w = Math.max(1, Math.round(widthMm));
-  const h = Math.max(1, Math.round(heightMm));
-  return `SIZE ${w} mm,${h} mm`;
+  const fmt = (mm: number) => {
+    const n = Math.max(1, Math.round(mm * 10) / 10);
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  };
+  return `SIZE ${fmt(widthMm)} mm,${fmt(heightMm)} mm`;
 }

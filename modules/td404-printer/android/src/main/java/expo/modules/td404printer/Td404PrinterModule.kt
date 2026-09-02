@@ -420,11 +420,11 @@ class Td404PrinterModule : Module() {
     }
     val tRotate = System.currentTimeMillis()
 
-    // Downscale if bitmap was captured at excessive resolution (e.g. 300 DPI on a 203 DPI printer).
-    // This halves memory, halves processing time, and prevents buffer overflow on 4x6 labels.
+    // Always scale to exact label dots for the selected mm size (up or down).
+    // Matches JS printContentSize / ViewShot capture so 50×50 mm prints as 50×50.
     val targetDotsW = Math.max(1, Math.round(widthMm * dpi / 25.4).toInt())
     val targetDotsH = Math.max(1, Math.round(heightMm * dpi / 25.4).toInt())
-    if (bitmap.width > targetDotsW * 1.05 && targetDotsW > 0) {
+    if (bitmap.width != targetDotsW || bitmap.height != targetDotsH) {
       val scaled = Bitmap.createScaledBitmap(bitmap, targetDotsW, targetDotsH, true)
       if (scaled !== bitmap) {
         bitmap.recycle()
@@ -432,31 +432,40 @@ class Td404PrinterModule : Module() {
       }
     }
 
-    val sizeW = Math.max(1, Math.round(widthMm).toInt())
-    val sizeH = Math.max(1, Math.round(heightMm).toInt())
+    // SIZE must match the same mm used for dots (one decimal when needed).
+    val sizeW = formatSizeMm(widthMm)
+    val sizeH = formatSizeMm(heightMm)
 
-    val w = bitmap.width
-    val h = bitmap.height
-    val bytesPerRow = (w + 7) / 8
-    val pixels = IntArray(w * h)
-    bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-    val rawBmp = ByteArray(bytesPerRow * h)
+    val contentW = bitmap.width
+    val contentH = bitmap.height
+    // Byte-align width; center the 0–7 pad columns L/R (no stretch).
+    val rasterW = Math.max(8, ((contentW + 7) / 8) * 8)
+    val padLeft = (rasterW - contentW) / 2
+    val bytesPerRow = rasterW / 8
+    val pixels = IntArray(contentW * contentH)
+    bitmap.getPixels(pixels, 0, contentW, 0, 0, contentW, contentH)
+    val rawBmp = ByteArray(bytesPerRow * contentH)
 
-    // Direct high-speed 1-bit packing in native code (takes < 10ms, zero boxing, zero GC pauses):
+    // Direct high-speed 1-bit packing in native code:
     // TSPL BITMAP mode 0: bit 0 = black (print dot), bit 1 = white (no print)
-    for (y in 0 until h) {
+    // Pre-fill white (bit 1 set) so pad columns stay blank.
+    java.util.Arrays.fill(rawBmp, 0xFF.toByte())
+    for (y in 0 until contentH) {
       val rowOffset = y * bytesPerRow
-      val pixRowOffset = y * w
-      for (x in 0 until w) {
+      val pixRowOffset = y * contentW
+      for (x in 0 until contentW) {
         val c = pixels[pixRowOffset + x]
         val r = (c shr 16) and 0xFF
         val g = (c shr 8) and 0xFF
         val b = c and 0xFF
         val lum = (77 * r + 150 * g + 29 * b) shr 8
+        val rx = x + padLeft
+        val byteIndex = rowOffset + (rx shr 3)
+        val bitIndex = 7 - (rx and 7)
         if (lum >= 128) {
-          val byteIndex = rowOffset + (x shr 3)
-          val bitIndex = 7 - (x and 7)
           rawBmp[byteIndex] = (rawBmp[byteIndex].toInt() or (1 shl bitIndex)).toByte()
+        } else {
+          rawBmp[byteIndex] = (rawBmp[byteIndex].toInt() and (1 shl bitIndex).inv()).toByte()
         }
       }
     }
@@ -475,7 +484,7 @@ class Td404PrinterModule : Module() {
       "DIRECTION 0,0\r\n" +
       "REFERENCE 0,0\r\n" +
       "CLS\r\n" +
-      "BITMAP $xDots,$yDots,$bytesPerRow,$h,0,"
+      "BITMAP $xDots,$yDots,$bytesPerRow,$contentH,0,"
     val footer = "\r\nPRINT 1,1\r\n"
 
     val headerBytes = header.toByteArray(Charsets.US_ASCII)
@@ -497,7 +506,8 @@ class Td404PrinterModule : Module() {
       "Td404Printer",
       "SDK fast print: decode=${tDecode - t0}ms rotate=${tRotate - tDecode}ms " +
         "encode=${tEncode - tRotate}ms write=${tWrite - tEncode}ms " +
-        "job=${job.size}B copies=$copies bmp=${bitmap.width}x${bitmap.height}",
+        "job=${job.size}B copies=$copies bmp=${bitmap.width}x${bitmap.height} " +
+        "target=${targetDotsW}x${targetDotsH} size=${sizeW}x${sizeH}mm padL=$padLeft",
     )
 
     if (!bitmap.isRecycled) bitmap.recycle()
@@ -511,6 +521,11 @@ class Td404PrinterModule : Module() {
       "writeMs" to (tWrite - tEncode),
       "path" to "labelcommand-sdk",
     )
+  }
+
+  private fun formatSizeMm(mm: Double): String {
+    val n = Math.max(1.0, Math.round(mm * 10.0) / 10.0)
+    return if (n == n.toLong().toDouble()) n.toLong().toString() else String.format("%.1f", n)
   }
 
   private fun formatGap(gapMm: Double): String {

@@ -13,7 +13,6 @@ import {
   padBitsCentered,
   pngBase64ToGray,
   rotateGray,
-  shiftBits,
   type BitRaster,
   type GrayRaster,
 } from '@/lib/printer/escpos';
@@ -101,8 +100,10 @@ export function orientedPrintSize(
 
 /**
  * Map captured PNG onto the full label bitmap.
- * Uniform contain onto the 8-dot TSPL canvas (centers 0–7 pad columns).
- * Never stretch independently on X/Y — that distorts vs the preview.
+ *
+ * 1) Fit to exact content dots (selected mm × DPI) — no independent X/Y warp.
+ * 2) Center-pad into the 8-dot TSPL canvas (0–7 columns split L/R).
+ * Horizontal user offset is applied later as BITMAP x (not here) so native/JS stay in sync.
  */
 export function finalizeGrayForPrint(
   gray: GrayRaster,
@@ -111,37 +112,36 @@ export function finalizeGrayForPrint(
     heightMm: number;
     threshold: number;
     dither: boolean;
-    hOffsetMm: number;
+    /** @deprecated Applied in encodeConnectedPrinterJob as BITMAP x — ignored here. */
+    hOffsetMm?: number;
   },
 ): BitRaster {
   const dpi = getPrinterManager().getPrintDpi();
+  const content = printContentSize(options.widthMm, options.heightMm, dpi);
   const canvas = printRasterSize(options.widthMm, options.heightMm, dpi);
 
   console.info(
     '[print-job] finalizeGray:',
     options.widthMm.toFixed(1), '×', options.heightMm.toFixed(1), 'mm @', dpi, 'DPI →',
-    canvas.widthPx, '×', canvas.heightPx, 'px canvas |',
+    content.widthPx, '×', content.heightPx, 'content |',
+    canvas.widthPx, '×', canvas.heightPx, 'canvas |',
     'src:', gray.width, '×', gray.height, '|',
     'threshold:', options.threshold, 'dither:', options.dither,
   );
 
-  // The captured PNG is already at the correct label aspect (rendered from a
-  // label-sized artboard at exact printer dots). Use 'stretch' so the bitmap
-  // fills the full TSPL canvas — 'contain' was letterboxing by up to 7 dots
-  // (the 8-dot alignment pad) which made the print smaller than the preview.
+  // Capture should already be content-sized; stretch only repairs 1–2 px ViewShot drift.
   const fitted =
-    gray.width === canvas.widthPx && gray.height === canvas.heightPx
+    gray.width === content.widthPx && gray.height === content.heightPx
       ? gray
-      : fitGrayToSize(gray, canvas.widthPx, canvas.heightPx, 'stretch');
+      : fitGrayToSize(gray, content.widthPx, content.heightPx, 'stretch');
 
   let bits = grayToBits(fitted, { threshold: options.threshold, dither: options.dither });
 
+  // Even L/R pad into byte-aligned canvas — keeps true mm width, no stretch warp.
   if (bits.bytesPerRow * 8 !== canvas.widthPx || bits.height !== canvas.heightPx) {
     bits = padBitsCentered(bits, canvas.widthPx, canvas.heightPx);
   }
 
-  const offsetDots = mmToDots(options.hOffsetMm, dpi);
-  if (offsetDots !== 0) bits = shiftBits(bits, offsetDots);
   return bits;
 }
 
@@ -224,7 +224,8 @@ export function encodeConnectedPrinterJob(
     calibration: {
       horizontalOffsetMm: options.hOffsetMm ?? 0,
       verticalOffsetMm: options.vOffsetMm,
-      forceLeftAligned: options.forceLeftAligned,
+      // TSPL SIZE uses label mm; BITMAP is label-local (vendor 0,0). User offsets only.
+      forceLeftAligned: options.forceLeftAligned ?? true,
     },
   });
 

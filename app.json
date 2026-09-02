@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "sez-print",
-    "slug": "gesu",
+    "slug": "sez-print",
     "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -106,9 +106,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "60d952e6-6455-4094-bfaa-64f230c0083c"
+        "projectId": "bbcee482-b5c1-4862-bb52-a2b8fcbd4da7"
       }
     },
-    "owner": "gesu1212s-team"
+    "owner": "zub705787s-team"
   }
 }

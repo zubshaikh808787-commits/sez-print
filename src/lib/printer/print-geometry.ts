@@ -56,14 +56,10 @@ export function calculatePrintGeometry(
   const bytesPerRow = rasterWidthDots / 8;
 
   // Printhead hardware centering:
-  // Desktop thermal printers (TD-404, Zebra 4", TSC) have fixed center-fed paper guides.
-  // A 100mm label sits in the middle of the 108mm printhead (26 dots margin each side).
-  // A 50mm label sits in the middle (232 dots margin each side).
-  const printheadDots = Math.round(THERMAL_PRINTHEAD_WIDTH_MM * dotsPerMm);
-  let hardwareXOffsetDots = 0;
-  if (printheadDots > widthDots) {
-    hardwareXOffsetDots = Math.max(0, Math.round((printheadDots - widthDots) / 2));
-  }
+  // TD-404 / Ninestar TSPL uses label-local coordinates (SIZE = label mm, BITMAP 0,0 =
+  // label top-left — vendor demo). Physical centering is done by the paper guides.
+  // Do not shift BITMAP x or content prints off the right edge of narrow labels.
+  const hardwareXOffsetDots = 0;
 
   // User calibration offsets
   const calibXDots = Math.round(calibrationOffsetMm.x * dotsPerMm);

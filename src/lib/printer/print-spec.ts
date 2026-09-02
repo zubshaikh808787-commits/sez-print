@@ -167,19 +167,22 @@ export type CreatePrintSpecOptions = {
 
 /**
  * Compute the printhead X offset (in dots) to center a label on the printhead.
- * Center-fed printers (most desktop thermal) physically center the media under
- * a printhead that is wider than the label. The BITMAP x coordinate must account
- * for this so the image lands on the media, not shifted to one side of the
- * printhead.
  *
- * Left-aligned printers (receipt printers) feed from the left edge — no offset.
+ * IMPORTANT (TD-404 / Ninestar TSPL): SIZE sets the label coordinate space, and
+ * BITMAP 0,0 is the top-left of the *label* (vendor demo uses 0,0). Physical
+ * media is centered by the paper guides — do not add a hardware offset into
+ * BITMAP x or content shifts off the label.
+ *
+ * This helper remains for diagnostics / non-TSPL profiles that use head-absolute
+ * coordinates. TSPL jobs should pass forceLeftAligned or leave alignment 'left'.
  */
 export function computePrintheadCenteringOffset(
   labelWidthDots: number,
   profile: PrinterProfile,
 ): number {
+  if (profile.commandLanguage === 'tspl') return 0;
   if (profile.alignment !== 'center') return 0;
-  // Full-width labels (e.g. 4x6 / 100mm / 108mm) align to the left guide — do not shift off-edge
+  // Full-width labels align to the left guide — do not shift off-edge
   if (labelWidthDots >= profile.printheadWidthDots * 0.85) return 0;
   const gap = profile.printheadWidthDots - labelWidthDots;
   return gap > 0 ? Math.round(gap / 2) : 0;

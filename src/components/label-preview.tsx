@@ -108,7 +108,7 @@ type LabelPreviewProps = {
   document: LabelDocument;
   width?: number;
   maxHeight?: number;
-  /** Force exact pixel dimensions (print capture). Uniform scale, centered in the box. */
+  /** Force exact pixel dimensions (print capture at printer dots for selected mm). */
   exactWidthPx?: number;
   exactHeightPx?: number;
   showStage?: boolean;
@@ -205,12 +205,10 @@ export function LabelPreview({
   if (exactWidthPx != null && exactHeightPx != null) {
     const w = Math.max(1, Math.round(exactWidthPx));
     const h = Math.max(1, Math.round(exactHeightPx));
-    const scale = Math.min(
-      w / Math.max(document.widthMm, 0.01),
-      h / Math.max(document.heightMm, 0.01),
-    );
-    const contentW = Math.max(1, Math.round(document.widthMm * scale));
-    const contentH = Math.max(1, Math.round(document.heightMm * scale));
+    // Fill the capture box exactly (1:1 printer dots for the selected mm size).
+    // Uniform scale from width keeps element aspect; artboard height is forced to h
+    // so ViewShot matches SIZE / mm→dots (avoids 1px letterbox from independent rounding).
+    const scale = w / Math.max(document.widthMm, 0.01);
     return (
       <View
         collapsable={false}
@@ -218,8 +216,6 @@ export function LabelPreview({
           {
             width: w,
             height: h,
-            alignItems: 'center',
-            justifyContent: 'center',
             overflow: 'hidden',
             backgroundColor: canvasFillFromDocument(document),
           },
@@ -227,7 +223,7 @@ export function LabelPreview({
         ]}>
         <LabelCanvas
           document={document}
-          fitted={{ widthPx: contentW, heightPx: contentH, scale }}
+          fitted={{ widthPx: w, heightPx: h, scale }}
           showBorder={showArtboardBorder}
         />
       </View>

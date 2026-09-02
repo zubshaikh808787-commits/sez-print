@@ -8,6 +8,7 @@ import {
   wifiPrintSample,
 } from '@/lib/printer/backend-api';
 import {
+  createPrintSpec,
   DEFAULT_PRINTER_PROFILE,
   PRINTER_PROFILES,
   type PrinterProfile,
@@ -1089,22 +1090,36 @@ class PrinterManager {
       try {
         await this.ensureConnected();
         const dpi = options.dpi ?? this.getPrintDpi();
-        const xDots = Math.round(((options.hOffsetMm ?? 0) * dpi) / 25.4);
-        const yDots = Math.round(((options.vOffsetMm ?? 0) * dpi) / 25.4);
+        const profile = this.getActivePrinterProfile();
+        // TSPL SIZE = label mm → BITMAP 0,0 is label top-left (Ninestar demo).
+        // Only user H/V calibration offsets are applied — not printhead centering.
+        const spec = createPrintSpec({
+          widthMm: options.widthMm,
+          heightMm: options.heightMm,
+          dpi,
+          profile,
+          mediaType: options.media ?? 'gap',
+          gapMm: options.gapMm,
+          calibration: {
+            horizontalOffsetMm: options.hOffsetMm ?? 0,
+            verticalOffsetMm: options.vOffsetMm ?? 0,
+            forceLeftAligned: true,
+          },
+        });
         const t0 = Date.now();
         const result = await td404.printTd404PngLabel({
           pngBase64: options.pngBase64,
-          widthMm: options.widthMm,
-          heightMm: options.heightMm,
-          gapMm: options.gapMm,
+          widthMm: spec.widthMm,
+          heightMm: spec.heightMm,
+          gapMm: spec.gapMm,
           density: options.density ?? 8,
           speed: options.speed ?? 6,
-          xDots,
-          yDots,
+          xDots: spec.xOffsetDots,
+          yDots: spec.yOffsetDots,
           copies: Math.max(1, Math.round(options.copies ?? 1)),
           media: options.media ?? 'gap',
           orientation: options.orientation ?? 0,
-          dpi,
+          dpi: spec.dpi,
         });
         if (!result) {
           // Module present but method missing at runtime (old binary) — signal fallback.
