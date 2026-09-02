@@ -26,6 +26,7 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette, Type } from '@/constants/ui';
 import { dataPageCount, resolveDocumentData } from '@/lib/data-binding';
 import {
+  composeUpsDocument,
   createLabelDocument,
   generateId,
   mmToPt,
@@ -39,12 +40,14 @@ import {
   formatPrintFailure,
   orientedPrintSize,
   printCaptureLayout,
+  printCaptureOptionsForSize,
   printJobSizeError,
   rasterizePngForPrint,
   sendIsolatedPrintCopies,
+  tryNativeSdkPngPrint,
   waitForNextPaint,
 } from '@/lib/printer/print-job';
-import { getPrinterManager } from '@/lib/printer/printer-manager';
+import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
 import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
@@ -315,6 +318,7 @@ export default function PrintScreen() {
   const [printSize, setPrintSize] = useState<LabelSizeMm | null>(null);
   const [printPreset, setPrintPreset] = useState<PrintSizePreset | null>(null);
   const printingLockRef = useRef(false);
+  const upsGapInitialized = useRef(false);
 
   const shotRef = useRef<ViewShot>(null);
 
@@ -326,17 +330,17 @@ export default function PrintScreen() {
 
   /** Base document (page-independent). Null for PDF documents, which show a card. */
   const baseDocument = useMemo<LabelDocument | null>(() => {
-    if (params.labelId) return getDocument(params.labelId) ?? null;
-    if (params.scanData) {
-      return buildScanDocument(
+    let doc: LabelDocument | null = null;
+    if (params.labelId) doc = getDocument(params.labelId) ?? null;
+    else if (params.scanData) {
+      doc = buildScanDocument(
         params.scanType ?? '',
         params.scanData,
         defaults.labelWidth,
         defaults.labelHeight,
       );
-    }
-    if (params.imageUri) {
-      return buildPhotoDocument(
+    } else if (params.imageUri) {
+      doc = buildPhotoDocument(
         params.imageUri,
         Number(params.imageWidth) || 0,
         Number(params.imageHeight) || 0,
@@ -345,7 +349,8 @@ export default function PrintScreen() {
         defaults.labelHeight,
       );
     }
-    return null;
+    // N-up labels are edited panel-by-panel; flatten for preview/print.
+    return doc?.ups ? composeUpsDocument(doc) : doc;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     params.labelId,
@@ -407,10 +412,30 @@ export default function PrintScreen() {
     return printCaptureLayout(doc.widthMm, doc.heightMm).content;
   }, [displayDocument, previewDocument]);
 
+  /** Live store ups config (compose strips it from the print document). */
+  const upsSource = useMemo(() => {
+    if (!params.labelId) return null;
+    return getDocument(params.labelId)?.ups ?? null;
+  }, [params.labelId, getDocument]);
+
+  // Stick 2-up media: default feed gap to 2 mm (user can go negative for calibration).
+  useEffect(() => {
+    if (!upsSource || upsGapInitialized.current) return;
+    upsGapInitialized.current = true;
+    setGapLength(2);
+  }, [upsSource]);
+
   useEffect(() => {
     if (!previewDocument || printSize) return;
     setPrintSize({ widthMm: previewDocument.widthMm, heightMm: previewDocument.heightMm });
   }, [previewDocument, printSize]);
+
+  // Keep print size locked to the composed strip for ups jobs (exact mm, no rescale).
+  useEffect(() => {
+    if (!upsSource || !previewDocument) return;
+    setPrintSize({ widthMm: previewDocument.widthMm, heightMm: previewDocument.heightMm });
+    setPrintPreset(null);
+  }, [upsSource, previewDocument?.widthMm, previewDocument?.heightMm, previewDocument]);
 
   const connected = status === 'connected';
   const footerHeight = 72 + insets.bottom;
@@ -494,8 +519,9 @@ export default function PrintScreen() {
 
     setPrinting(true);
     printingLockRef.current = true;
+    const timer = new PrintTimingLogger();
+
     try {
-      await waitForNextPaint();
       const dither = defaults.colorMode === 'Halftone';
       const threshold = Math.min(
         250,
@@ -503,23 +529,41 @@ export default function PrintScreen() {
       );
 
       for (let page = 0; page < pageCount; page++) {
+        const pageStart = Date.now();
         if (pageCount > 1) {
           setPageIndex(page);
+          timer.start('pageWaitForPaint');
           await waitForNextPaint();
+          timer.end('pageWaitForPaint');
         }
-        const base64 = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
+
+        // KEY OPTIMIZATION: Run connection verification IN PARALLEL with ViewShot capture.
+        // When connection is healthy (common case), ensureConnected() returns in <1ms
+        // while the expensive ViewShot capture runs concurrently.
+        timer.start('capture+verify');
+        const captureTarget = printCaptureLayout(widthMm, heightMm).content;
+        const [connectionResult, base64] = await Promise.all([
+          manager.ensureConnected().catch((err) => {
+            // Let the error surface after capture is done.
+            return { error: err };
+          }),
+          captureRef(shotRef, printCaptureOptionsForSize(
+            captureTarget.widthPx,
+            captureTarget.heightPx,
+          )),
+        ]);
+        timer.end('capture+verify');
+
+        // Check if connection verification failed.
+        if (connectionResult && 'error' in connectionResult) {
+          throw connectionResult.error;
+        }
+
+        const tCapture1 = Date.now();
+        console.info('[print] ViewShot capture+verify:', tCapture1 - pageStart, 'ms |', Math.round((base64?.length ?? 0) / 1024), 'KB base64');
         if (!base64) {
           throw new Error('Could not capture the label for printing.');
         }
-
-        const bits = rasterizePngForPrint(base64, {
-          widthMm,
-          heightMm,
-          orientation: orientationDeg,
-          threshold,
-          dither,
-          hOffsetMm: hOffset,
-        });
 
         const media =
           paperType === 'Receipt'
@@ -527,7 +571,6 @@ export default function PrintScreen() {
             : paperType === 'Black mark'
               ? 'bline'
               : 'gap';
-        // Prefer BLINE when the design itself declares black-mark stock (common supermarket templates).
         const wantsBline =
           media === 'bline' ||
           /black\s*mark/i.test(jobName) ||
@@ -538,20 +581,69 @@ export default function PrintScreen() {
                 'text' in el ? String(el.text) : 'content' in el ? String(el.content) : '',
               ),
           );
-        const bytes = encodeConnectedPrinterJob(bits, {
+
+        // SDK fast path: native LabelCommand (same as Ninestar demo) — skips JS rasterize.
+        timer.start('sdkFastPrint');
+        const usedNative = await tryNativeSdkPngPrint({
+          pngBase64: base64,
           widthMm: paper.widthMm,
           heightMm: paper.heightMm,
           gapMm: gapLength,
-          copies: 1,
+          copies,
           density: darkness,
-          speed: speed ?? 5,
+          speed: speed ?? 6,
           vOffsetMm: vOffset,
           hOffsetMm: hOffset,
           media: wantsBline ? 'bline' : media,
+          orientation: orientationDeg,
+          dpi: manager.getPrintDpi(),
         });
-        // One complete job per physical copy — never stack multiple labels into one page.
-        await sendIsolatedPrintCopies(bytes, copies);
+        timer.end('sdkFastPrint');
+
+        if (!usedNative) {
+          timer.start('rasterize');
+          const bits = rasterizePngForPrint(base64, {
+            widthMm,
+            heightMm,
+            orientation: orientationDeg,
+            threshold,
+            dither,
+            hOffsetMm: hOffset,
+          });
+          timer.end('rasterize');
+
+          timer.start('encode');
+          const bytes = encodeConnectedPrinterJob(bits, {
+            widthMm: paper.widthMm,
+            heightMm: paper.heightMm,
+            gapMm: gapLength,
+            copies: 1,
+            density: darkness,
+            speed: speed ?? 6,
+            vOffsetMm: vOffset,
+            hOffsetMm: hOffset,
+            media: wantsBline ? 'bline' : media,
+          });
+          timer.end('encode');
+
+          timer.start('transmit');
+          await sendIsolatedPrintCopies(bytes, copies);
+          timer.end('transmit');
+
+          console.info(
+            '[print] page', page + 1, 'total:', Date.now() - pageStart, 'ms |',
+            'data:', bytes.length, 'bytes (JS path)',
+          );
+        } else {
+          console.info(
+            '[print] page', page + 1, 'total:', Date.now() - pageStart, 'ms | SDK LabelCommand path',
+          );
+        }
       }
+
+      // Store timing for diagnostics screen.
+      timer.dump('PRINT JOB');
+      manager.setLastPrintTiming(timer.getEntries());
 
       if (printingSettings.recordHistory) {
         addHistoryEntry({
@@ -667,16 +759,7 @@ export default function PrintScreen() {
 
           {/* Dedicated 1:1 Hardware Dot Print Artboard (captured at true printer DPI) */}
           {(displayDocument ?? previewDocument) ? (
-            <View
-              style={{
-                position: 'absolute',
-                left: -9999,
-                top: -9999,
-                opacity: 0,
-                pointerEvents: 'none',
-                overflow: 'hidden',
-                backgroundColor: '#FFFFFF',
-              }}>
+            <View style={styles.printCaptureNative}>
               <ViewShot
                 ref={shotRef}
                 options={PRINT_CAPTURE_OPTIONS}
@@ -795,8 +878,8 @@ export default function PrintScreen() {
             <StepperRow
               label="Gap Length"
               value={`${gapLength.toFixed(2)} mm`}
-              minusDisabled={gapLength <= 0}
-              onMinus={() => setGapLength((v) => Math.max(0, Math.round((v - 0.5) * 100) / 100))}
+              minusDisabled={gapLength <= -10}
+              onMinus={() => setGapLength((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
               onPlus={() => setGapLength((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
               bordered
             />

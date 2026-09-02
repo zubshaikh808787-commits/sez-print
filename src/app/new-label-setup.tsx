@@ -18,45 +18,48 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LabelSizeEditor } from '@/components/label-size-editor';
 import { Spacing } from '@/constants/theme';
 import { Palette } from '@/constants/ui';
-import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { useTranslation } from '@/lib/i18n';
+import {
+  createLabelDocument,
+  createUpsConfig,
+  type LabelElement,
+} from '@/lib/label-document';
 import { clampLabelMm, validateLabelSize } from '@/lib/label-geometry';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
-
-function previewTypeForColumns(columns: number): string {
-  if (columns >= 4) return 'four-ups-20x15';
-  if (columns === 3) return 'three-ups-30x20';
-  if (columns === 2) return 'two-ups-30x20';
-  return '';
-}
 
 export default function NewLabelSetupScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const params = useLocalSearchParams<{
     isClone?: string;
+    isTwoUps?: string;
     cloneFromId?: string;
     cloneName?: string;
     cloneWidth?: string;
     cloneHeight?: string;
     focusSize?: string;
   }>();
-  const isClone = params.isClone === 'true';
+  const isTwoUps = params.isTwoUps === 'true' || params.isClone === 'true';
   const defaults = useSettingsStore((s) => s.defaults);
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
 
   const [labelName, setLabelName] = useState(
-    isClone ? `${params.cloneName ?? 'Label'} Copy` : 'Default label',
+    isTwoUps
+      ? params.cloneName
+        ? `${params.cloneName} · 2ups`
+        : '2ups label'
+      : 'Default label',
   );
   const [labelWidth, setLabelWidth] = useState(
-    isClone && params.cloneWidth ? parseFloat(params.cloneWidth) : 57,
+    params.cloneWidth ? parseFloat(params.cloneWidth) : 57,
   );
   const [labelHeight, setLabelHeight] = useState(
-    isClone && params.cloneHeight ? parseFloat(params.cloneHeight) : 30,
+    params.cloneHeight ? parseFloat(params.cloneHeight) : 30,
   );
-  const [columns, setColumns] = useState(1);
-  const [columnSpacing, setColumnSpacing] = useState(1);
+  const [columns, setColumns] = useState(isTwoUps ? 2 : 1);
+  // Stick 2-up: labels sit flush (0 mm). User can dial negative/positive gutter.
+  const [columnSpacing, setColumnSpacing] = useState(isTwoUps ? 0 : 1);
   const [batchEdit, setBatchEdit] = useState(false);
 
   const [nameModalVisible, setNameModalVisible] = useState(false);
@@ -75,15 +78,32 @@ export default function NewLabelSetupScreen() {
       return;
     }
 
+    let seedElements: LabelElement[] = [];
+    if (params.cloneFromId) {
+      const source = useLabelStore.getState().getDocument(params.cloneFromId);
+      if (source) {
+        seedElements = JSON.parse(JSON.stringify(source.elements)) as LabelElement[];
+      }
+    }
+
     if (columns > 1) {
-      const previewType = previewTypeForColumns(columns);
-      const doc = createIndustryTemplateDocument({
-        name: labelName,
-        category: 'Multi-UP',
-        widthMm: size.widthMm * columns + columnSpacing * Math.max(0, columns - 1),
-        heightMm: size.heightMm,
-        previewType,
+      const ups = createUpsConfig({
+        columns,
+        columnSpacingMm: columnSpacing,
+        batchEdit,
+        seedElements,
       });
+      const doc = createLabelDocument({
+        name: labelName,
+        widthMm: size.widthMm,
+        heightMm: size.heightMm,
+        orientation: defaults.orientation,
+        paperType: defaults.paperType,
+        elements: ups.panels[0] ?? [],
+        background: { type: 'color', color: '#FFFFFF' },
+      });
+      doc.ups = ups;
+      doc.templateCategory = 'Multi-UP';
       upsertDocument(doc);
       router.replace({ pathname: '/edit', params: { labelId: doc.id } });
       return;
@@ -97,7 +117,7 @@ export default function NewLabelSetupScreen() {
         labelHeight: String(size.heightMm),
         orientation: `${defaults.orientation}°`,
         paperType: defaults.paperType,
-        ...(isClone && params.cloneFromId ? { cloneFromId: params.cloneFromId } : {}),
+        ...(params.cloneFromId ? { cloneFromId: params.cloneFromId } : {}),
       },
     });
   };
@@ -111,7 +131,7 @@ export default function NewLabelSetupScreen() {
           style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
           <Text style={styles.backChevron}>‹</Text>
         </Pressable>
-        <Text style={styles.headerTitle}>{isClone ? 'Label Clone' : t('editor.newLabel')}</Text>
+        <Text style={styles.headerTitle}>{isTwoUps ? '2ups label' : t('editor.newLabel')}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -127,13 +147,24 @@ export default function NewLabelSetupScreen() {
                 style={[
                   styles.previewCell,
                   {
-                    marginRight: i < columns - 1 ? Math.max(4, columnSpacing * 4) : 0,
+                    marginRight: i < columns - 1 ? Math.max(0, columnSpacing * 4) : 0,
                     aspectRatio: labelWidth / Math.max(labelHeight, 1),
                   },
-                ]}
-              />
+                ]}>
+                {columns > 1 ? <Text style={styles.previewCellLabel}>{i + 1}</Text> : null}
+              </View>
             ))}
           </View>
+          {columns > 1 ? (
+            <Text style={styles.previewHint}>
+              Each panel is {labelWidth}×{labelHeight} mm — edit one at a time. Print strip ≈{' '}
+              {Math.max(
+                labelWidth,
+                Math.round((labelWidth * columns + columnSpacing * (columns - 1)) * 10) / 10,
+              )}
+              ×{labelHeight} mm.
+            </Text>
+          ) : null}
         </View>
 
         <Pressable
@@ -158,13 +189,14 @@ export default function NewLabelSetupScreen() {
           <View style={styles.fieldValueWrap}>
             <Text style={styles.fieldValueText}>
               {labelWidth}×{labelHeight} mm
+              {columns > 1 ? ' (each)' : ''}
             </Text>
             <Text style={styles.chevronRight}>›</Text>
           </View>
         </Pressable>
 
         <View style={styles.card}>
-          <Text style={styles.fieldLabel}>{t('editor.columns')}</Text>
+          <Text style={styles.fieldLabel}>{columns > 1 ? 'Labels across' : t('editor.columns')}</Text>
           <View style={styles.stepper}>
             <Pressable
               onPress={() => setColumns((c) => Math.max(1, c - 1))}
@@ -180,44 +212,48 @@ export default function NewLabelSetupScreen() {
           </View>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.fieldLabel}>{t('editor.columnSpacing')}</Text>
-          <View style={styles.stepper}>
-            <Pressable
-              onPress={() => setColumnSpacing((s) => Math.max(0, Math.round((s - 0.5) * 10) / 10))}
-              style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
-              <Text style={styles.stepBtnText}>−</Text>
-            </Pressable>
-            <Text style={styles.stepValue}>{columnSpacing}</Text>
-            <Pressable
-              onPress={() => setColumnSpacing((s) => Math.min(8, Math.round((s + 0.5) * 10) / 10))}
-              style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
-              <Text style={styles.stepBtnText}>+</Text>
-            </Pressable>
+        {columns > 1 ? (
+          <View style={styles.card}>
+            <Text style={styles.fieldLabel}>{t('editor.columnSpacing')}</Text>
+            <View style={styles.stepper}>
+              <Pressable
+                onPress={() => setColumnSpacing((s) => Math.max(-4, Math.round((s - 0.5) * 10) / 10))}
+                style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
+                <Text style={styles.stepBtnText}>−</Text>
+              </Pressable>
+              <Text style={styles.stepValue}>{columnSpacing}</Text>
+              <Pressable
+                onPress={() => setColumnSpacing((s) => Math.min(8, Math.round((s + 0.5) * 10) / 10))}
+                style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
+                <Text style={styles.stepBtnText}>+</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
+        ) : null}
 
-        <View style={styles.card}>
-          <View style={styles.batchRow}>
-            <Text style={styles.fieldLabel}>{t('editor.batchEdit')}</Text>
-            <Pressable
-              hitSlop={8}
-              onPress={() =>
-                Alert.alert(
-                  t('editor.batchEdit'),
-                  'When enabled, edits apply across all columns of a multi-up label.',
-                )
-              }>
-              <Text style={styles.infoHint}>?</Text>
-            </Pressable>
+        {columns > 1 ? (
+          <View style={styles.card}>
+            <View style={styles.batchRow}>
+              <Text style={styles.fieldLabel}>{t('editor.batchEdit')}</Text>
+              <Pressable
+                hitSlop={8}
+                onPress={() =>
+                  Alert.alert(
+                    t('editor.batchEdit'),
+                    'When enabled, edits on one label are mirrored to every label in the series.',
+                  )
+                }>
+                <Text style={styles.infoHint}>?</Text>
+              </Pressable>
+            </View>
+            <Switch
+              value={batchEdit}
+              onValueChange={setBatchEdit}
+              trackColor={{ false: '#D1D5DB', true: Palette.accent }}
+              thumbColor="#FFFFFF"
+            />
           </View>
-          <Switch
-            value={batchEdit}
-            onValueChange={setBatchEdit}
-            trackColor={{ false: '#D1D5DB', true: Palette.accent }}
-            thumbColor="#FFFFFF"
-          />
-        </View>
+        ) : null}
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + Spacing.two + 6 }]}>
@@ -330,6 +366,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 12,
   },
   previewRow: { flexDirection: 'row', alignItems: 'stretch', maxWidth: '100%' },
   previewCell: {
@@ -340,6 +377,19 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#C8D0D8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewCellLabel: {
+    color: '#94A3B8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  previewHint: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   card: {
     backgroundColor: '#FFFFFF',

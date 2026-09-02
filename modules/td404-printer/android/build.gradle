@@ -16,6 +16,9 @@ android {
 
 dependencies {
   implementation 'androidx.core:core-ktx:1.13.1'
+  // Ninestar / TD-404 LabelCommand + BitmapUtils (same AAR as vendor demo).
+  implementation files('libs/labelprinter.aar')
 }
 
 // Classic Bluetooth SPP matches Ninestar TD-404 SppBluetoothPort transport.
+// Print jobs use LabelCommand → fire-and-forget socket stream (no ACK wait).

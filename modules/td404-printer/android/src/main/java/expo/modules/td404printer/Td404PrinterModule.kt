@@ -11,13 +11,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.ninestar.printer.command.LabelCommand
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.IOException
 import java.util.UUID
+import java.util.Vector
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -30,7 +35,7 @@ import java.util.concurrent.TimeUnit
 class Td404PrinterModule : Module() {
   private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
   private val ioExecutor = Executors.newCachedThreadPool()
-  private val connectTimeoutMs = 8_000L
+  private val connectTimeoutMs = 5_000L
   private val printChunk = 32 * 1024
   private var socket: BluetoothSocket? = null
   private var connectedMac: String? = null
@@ -235,11 +240,11 @@ class Td404PrinterModule : Module() {
     }
 
     Function("isConnected") {
-      socket?.isConnected == true
+      isSocketAlive()
     }
 
     Function("getConnectedDevice") {
-      if (socket?.isConnected == true && connectedMac != null) {
+      if (isSocketAlive() && connectedMac != null) {
         mapOf(
           "id" to connectedMac,
           "name" to connectedName,
@@ -251,7 +256,44 @@ class Td404PrinterModule : Module() {
       }
     }
 
+    /** Lightweight health check: verifies the socket and output stream are still viable. */
+    Function("isSocketAlive") {
+      isSocketAlive()
+    }
+
+    /** Returns connection diagnostics for the debug screen. */
+    Function("getConnectionInfo") {
+      mapOf(
+        "connected" to isSocketAlive(),
+        "mac" to connectedMac,
+        "name" to connectedName,
+        "transport" to "bluetooth-spp",
+        "sdkId" to "td404",
+        "socketClass" to (socket?.javaClass?.simpleName ?: "none"),
+      )
+    }
+
     AsyncFunction("printBase64") { base64: String, promise: Promise ->
+      try {
+        val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+        writeBytesToSocket(bytes, promise)
+      } catch (e: Exception) {
+        promise.reject("DECODE_FAILED", e.message, e)
+      }
+    }
+
+    AsyncFunction("printRaw") { bytes: ByteArray, promise: Promise ->
+      writeBytesToSocket(bytes, promise)
+    }
+
+    /**
+     * Fast SDK-style print: PNG → LabelCommand (native) → SPP write without waiting
+     * for printer ACK. Skips the slow JS PNG→gray→1-bit→TSPL path.
+     *
+     * Mirrors Ninestar demo: LabelCommand.addSize/addGap/addBitmap/addPrint then
+     * writeDataImmediately(..., isReadReceive=false).
+     */
+    AsyncFunction("printPngLabel") { options: Map<String, Any?>, promise: Promise ->
       val sock = socket
       if (sock == null || !sock.isConnected) {
         promise.reject("NOT_CONNECTED", "No TD-404 printer connected.", null)
@@ -259,33 +301,228 @@ class Td404PrinterModule : Module() {
       }
       ioExecutor.execute {
         try {
-          val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-          val out = sock.outputStream
-          val startMs = System.currentTimeMillis()
-          var offset = 0
-          while (offset < bytes.size) {
-            val end = minOf(offset + printChunk, bytes.size)
-            out.write(bytes, offset, end - offset)
-            offset = end
+          val result = printPngLabelNative(options)
+          promise.resolve(result)
+        } catch (e: Exception) {
+          android.util.Log.e("Td404Printer", "printPngLabel failed: ${e.message}", e)
+          if (e is IOException) {
+            closeSocket()
+            sendEvent(
+              "onConnectionChanged",
+              mapOf("connected" to false, "sdkId" to "td404"),
+            )
           }
-          val writeMs = System.currentTimeMillis() - startMs
-          out.flush()
-          val totalMs = System.currentTimeMillis() - startMs
-          android.util.Log.i("Td404Printer", "SPP wrote ${bytes.size} bytes in ${writeMs}ms (flush: ${totalMs - writeMs}ms)")
-          promise.resolve(mapOf("bytesSent" to bytes.size))
-        } catch (e: IOException) {
-          android.util.Log.e("Td404Printer", "SPP write failed, closing dead socket: ${e.message}")
-          // Auto-close the dead socket so the JS layer detects disconnection immediately.
-          closeSocket()
-          sendEvent(
-            "onConnectionChanged",
-            mapOf("connected" to false, "sdkId" to "td404"),
-          )
           promise.reject("PRINT_FAILED", e.message, e)
         }
       }
     }
   }
+
+  private fun writeBytesToSocket(bytes: ByteArray, promise: Promise) {
+    val sock = socket
+    if (sock == null || !sock.isConnected) {
+      promise.reject("NOT_CONNECTED", "No TD-404 printer connected.", null)
+      return
+    }
+    ioExecutor.execute {
+      try {
+        val written = writeBytesToSocketSync(bytes)
+        promise.resolve(mapOf("bytesSent" to written))
+      } catch (e: IOException) {
+        android.util.Log.e("Td404Printer", "SPP write failed, closing dead socket: ${e.message}")
+        closeSocket()
+        sendEvent(
+          "onConnectionChanged",
+          mapOf("connected" to false, "sdkId" to "td404"),
+        )
+        promise.reject("PRINT_FAILED", e.message, e)
+      }
+    }
+  }
+
+  /** Fire-and-forget SPP stream with pacing for large payloads to prevent UART buffer overrun. */
+  private fun writeBytesToSocketSync(bytes: ByteArray): Int {
+    val sock = socket
+    if (sock == null || !sock.isConnected) {
+      throw IOException("No TD-404 printer connected.")
+    }
+    val rawOut = sock.outputStream ?: throw IOException("Printer output stream unavailable.")
+    val startMs = System.currentTimeMillis()
+
+    // Fast path: small payloads (test prints, small labels <= 32KB) fit in printer RAM.
+    // Stream directly with zero delay.
+    if (bytes.size <= 32 * 1024) {
+      rawOut.write(bytes)
+      rawOut.flush()
+      val totalMs = System.currentTimeMillis() - startMs
+      android.util.Log.i("Td404Printer", "SPP fast write ${bytes.size} bytes in ${totalMs}ms")
+      return bytes.size
+    }
+
+    // Paced path for large payloads (4x6 labels, 100KB–300KB):
+    // Write in 4096-byte chunks with a micro-pause (3ms).
+    // This allows the printer's 115200-baud UART buffer to drain smoothly without
+    // overflowing its hardware FIFO, preventing the printer Bluetooth chip from crashing or resetting.
+    val chunkSize = 4096
+    var offset = 0
+    while (offset < bytes.size) {
+      val count = minOf(chunkSize, bytes.size - offset)
+      rawOut.write(bytes, offset, count)
+      rawOut.flush()
+      offset += count
+      if (offset < bytes.size) {
+        try {
+          Thread.sleep(3) // 3ms breather between 4KB packets prevents UART RX overrun
+        } catch (_: InterruptedException) {
+          Thread.currentThread().interrupt()
+          break
+        }
+      }
+    }
+    val totalMs = System.currentTimeMillis() - startMs
+    android.util.Log.i("Td404Printer", "SPP paced write ${bytes.size} bytes in ${totalMs}ms (stable)")
+    return bytes.size
+  }
+
+  /**
+   * Build a TSPL job with Ninestar LabelCommand (native bitmap packing) and
+   * stream it over the open SPP socket. Matches vendor demo PrintContent.getLabel.
+   */
+  private fun printPngLabelNative(options: Map<String, Any?>): Map<String, Any?> {
+    val pngBase64 = options["pngBase64"] as? String
+      ?: throw IllegalArgumentException("pngBase64 is required")
+    val widthMm = (options["widthMm"] as? Number)?.toDouble() ?: 50.0
+    val heightMm = (options["heightMm"] as? Number)?.toDouble() ?: 30.0
+    val gapMm = (options["gapMm"] as? Number)?.toDouble() ?: 2.0
+    val density = (options["density"] as? Number)?.toInt() ?: 8
+    val speed = (options["speed"] as? Number)?.toInt() ?: 6
+    val xDots = (options["xDots"] as? Number)?.toInt() ?: 0
+    val yDots = (options["yDots"] as? Number)?.toInt() ?: 0
+    val copies = ((options["copies"] as? Number)?.toInt() ?: 1).coerceAtLeast(1)
+    val media = (options["media"] as? String) ?: "gap"
+    val orientation = (options["orientation"] as? Number)?.toInt() ?: 0
+    val dpi = (options["dpi"] as? Number)?.toInt() ?: 203
+
+    val t0 = System.currentTimeMillis()
+    val raw = android.util.Base64.decode(pngBase64, android.util.Base64.DEFAULT)
+    var bitmap = BitmapFactory.decodeByteArray(raw, 0, raw.size)
+      ?: throw IllegalArgumentException("Could not decode PNG for print.")
+    val tDecode = System.currentTimeMillis()
+
+    val deg = ((orientation % 360) + 360) % 360
+    if (deg == 90 || deg == 180 || deg == 270) {
+      val matrix = Matrix().apply { postRotate(deg.toFloat()) }
+      val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+      if (rotated !== bitmap) {
+        bitmap.recycle()
+        bitmap = rotated
+      }
+    }
+    val tRotate = System.currentTimeMillis()
+
+    // Downscale if bitmap was captured at excessive resolution (e.g. 300 DPI on a 203 DPI printer).
+    // This halves memory, halves processing time, and prevents buffer overflow on 4x6 labels.
+    val targetDotsW = Math.max(1, Math.round(widthMm * dpi / 25.4).toInt())
+    val targetDotsH = Math.max(1, Math.round(heightMm * dpi / 25.4).toInt())
+    if (bitmap.width > targetDotsW * 1.05 && targetDotsW > 0) {
+      val scaled = Bitmap.createScaledBitmap(bitmap, targetDotsW, targetDotsH, true)
+      if (scaled !== bitmap) {
+        bitmap.recycle()
+        bitmap = scaled
+      }
+    }
+
+    val sizeW = Math.max(1, Math.round(widthMm).toInt())
+    val sizeH = Math.max(1, Math.round(heightMm).toInt())
+
+    val w = bitmap.width
+    val h = bitmap.height
+    val bytesPerRow = (w + 7) / 8
+    val pixels = IntArray(w * h)
+    bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+    val rawBmp = ByteArray(bytesPerRow * h)
+
+    // Direct high-speed 1-bit packing in native code (takes < 10ms, zero boxing, zero GC pauses):
+    // TSPL BITMAP mode 0: bit 0 = black (print dot), bit 1 = white (no print)
+    for (y in 0 until h) {
+      val rowOffset = y * bytesPerRow
+      val pixRowOffset = y * w
+      for (x in 0 until w) {
+        val c = pixels[pixRowOffset + x]
+        val r = (c shr 16) and 0xFF
+        val g = (c shr 8) and 0xFF
+        val b = c and 0xFF
+        val lum = (77 * r + 150 * g + 29 * b) shr 8
+        if (lum >= 128) {
+          val byteIndex = rowOffset + (x shr 3)
+          val bitIndex = 7 - (x and 7)
+          rawBmp[byteIndex] = (rawBmp[byteIndex].toInt() or (1 shl bitIndex)).toByte()
+        }
+      }
+    }
+
+    val gapCmd = when (media) {
+      "bline" -> "BLINE ${formatGap(gapMm)} mm,0 mm\r\n"
+      "continuous" -> "GAP 0 mm,0 mm\r\n"
+      else -> "GAP ${formatGap(gapMm)} mm,0 mm\r\n"
+    }
+
+    val header = "\r\n" +
+      "SIZE $sizeW mm,$sizeH mm\r\n" +
+      gapCmd +
+      "SPEED $speed\r\n" +
+      "DENSITY $density\r\n" +
+      "DIRECTION 0,0\r\n" +
+      "REFERENCE 0,0\r\n" +
+      "CLS\r\n" +
+      "BITMAP $xDots,$yDots,$bytesPerRow,$h,0,"
+    val footer = "\r\nPRINT 1,1\r\n"
+
+    val headerBytes = header.toByteArray(Charsets.US_ASCII)
+    val footerBytes = footer.toByteArray(Charsets.US_ASCII)
+
+    val job = ByteArray(headerBytes.size + rawBmp.size + footerBytes.size)
+    System.arraycopy(headerBytes, 0, job, 0, headerBytes.size)
+    System.arraycopy(rawBmp, 0, job, headerBytes.size, rawBmp.size)
+    System.arraycopy(footerBytes, 0, job, headerBytes.size + rawBmp.size, footerBytes.size)
+    val tEncode = System.currentTimeMillis()
+
+    var totalSent = 0
+    for (i in 0 until copies) {
+      totalSent += writeBytesToSocketSync(job)
+    }
+    val tWrite = System.currentTimeMillis()
+
+    android.util.Log.i(
+      "Td404Printer",
+      "SDK fast print: decode=${tDecode - t0}ms rotate=${tRotate - tDecode}ms " +
+        "encode=${tEncode - tRotate}ms write=${tWrite - tEncode}ms " +
+        "job=${job.size}B copies=$copies bmp=${bitmap.width}x${bitmap.height}",
+    )
+
+    if (!bitmap.isRecycled) bitmap.recycle()
+
+    return mapOf(
+      "bytesSent" to totalSent,
+      "jobBytes" to job.size,
+      "copies" to copies,
+      "decodeMs" to (tDecode - t0),
+      "encodeMs" to (tEncode - tRotate),
+      "writeMs" to (tWrite - tEncode),
+      "path" to "labelcommand-sdk",
+    )
+  }
+
+  private fun formatGap(gapMm: Double): String {
+    val rounded = Math.round(gapMm * 100.0) / 100.0
+    return if (rounded == rounded.toLong().toDouble()) {
+      rounded.toLong().toString()
+    } else {
+      rounded.toString()
+    }
+  }
+
+
 
   @SuppressLint("MissingPermission")
   private fun openSppSocket(device: BluetoothDevice): BluetoothSocket {
@@ -429,6 +666,21 @@ class Td404PrinterModule : Module() {
       n.startsWith("btprinter") ||
       n.contains("gp-") ||
       n.contains("printer")
+  }
+
+  /**
+   * Non-destructive socket health check.
+   * Verifies both socket.isConnected and that the outputStream is accessible.
+   * On some Android devices, socket.isConnected stays true even after the
+   * physical BT link drops — checking outputStream catches those cases.
+   */
+  private fun isSocketAlive(): Boolean {
+    val sock = socket ?: return false
+    return try {
+      sock.isConnected && sock.outputStream != null
+    } catch (_: Exception) {
+      false
+    }
   }
 
   private fun closeSocket() {

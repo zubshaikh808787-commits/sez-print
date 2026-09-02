@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import {
   SettingsCard,
+  SettingsDivider,
   SettingsNavRow,
   SettingsScreenShell,
   SettingsSegmentRow,
@@ -80,6 +81,11 @@ export default function PrintingSettingsScreen() {
         <SettingsNavRow
           label="Print Calibration Grid"
           onPress={() => router.push('/calibration-print')}
+        />
+        <SettingsDivider />
+        <SettingsNavRow
+          label="Printer Diagnostics & Latency Log"
+          onPress={() => router.push('/printer-diagnostics')}
         />
       </SettingsCard>
     </SettingsScreenShell>

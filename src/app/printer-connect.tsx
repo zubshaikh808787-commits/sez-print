@@ -426,6 +426,12 @@ export default function PrinterConnectScreen() {
                   <Text style={styles.connectBtnText}>Test Print</Text>
                 )}
               </Pressable>
+              <Pressable
+                onPress={() => router.push('/printer-diagnostics')}
+                style={({ pressed }) => [styles.diagQuickBtn, pressed && styles.pressed]}>
+                <AppIcon name="waveform.path.ecg" tintColor={Palette.accent} size={15} />
+                <Text style={styles.diagQuickBtnText}>View Latency & Connection Diagnostics</Text>
+              </Pressable>
             </View>
           ) : null}
 
@@ -542,6 +548,23 @@ export default function PrinterConnectScreen() {
               )}
             </Pressable>
           </View>
+
+          <Pressable
+            onPress={() => router.push('/printer-diagnostics')}
+            style={({ pressed }) => [styles.card, styles.diagCard, pressed && styles.pressed]}>
+            <View style={styles.diagCardLeft}>
+              <View style={styles.diagIconWrap}>
+                <AppIcon name="waveform.path.ecg" tintColor={Palette.accent} size={20} />
+              </View>
+              <View style={styles.diagCardTextWrap}>
+                <Text style={styles.diagCardTitle}>Diagnostics & Latency Log</Text>
+                <Text style={styles.diagCardSub}>
+                  Inspect stage-by-stage pipeline timing, BLE MTU, queue depth & error logs
+                </Text>
+              </View>
+              <AppIcon name="chevron.right" tintColor="#94A3B8" size={16} />
+            </View>
+          </Pressable>
         </View>
       </ScrollView>
     </View>
@@ -694,5 +717,52 @@ const styles = StyleSheet.create({
   },
   settingsBtnText: { color: Palette.accent, fontSize: 14, fontWeight: '600' },
   settingsHint: { color: Palette.muted, fontSize: 12.5, lineHeight: 18 },
+  diagQuickBtn: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#F0F7FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+  },
+  diagQuickBtnText: {
+    color: Palette.accent,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  diagCard: {
+    paddingVertical: 14,
+  },
+  diagCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  diagIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F0F7FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  diagCardTextWrap: {
+    flex: 1,
+  },
+  diagCardTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Palette.ink,
+    marginBottom: 2,
+  },
+  diagCardSub: {
+    fontSize: 12,
+    color: Palette.muted,
+    lineHeight: 16,
+  },
   pressed: { opacity: 0.65 },
 });

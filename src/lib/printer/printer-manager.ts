@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
+import { AppState, type AppStateStatus, NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
 import { PRINT_DPI } from '@/lib/label-geometry';
 import {
@@ -36,13 +36,92 @@ export type BluetoothCapabilities = {
   reason: string | null;
 };
 
+/** Connection state machine — prevents invalid transitions & duplicate operations. */
+export type ConnectionState =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'printing'
+  | 'reconnecting'
+  | 'error';
+
+/** Diagnostic info snapshot for the debug screen. */
+export type DiagnosticInfo = {
+  connectionState: ConnectionState;
+  activeTransport: string | null;
+  deviceId: string | null;
+  deviceName: string | null;
+  bleNegotiatedMtu: number;
+  bleChunkSize: number;
+  bleServiceUuid: string | null;
+  bleCharacteristicUuid: string | null;
+  bleWriteWithResponse: boolean | null;
+  lastPrintTimingMs: PrintTimingEntry[] | null;
+  lastError: string | null;
+  printQueueLength: number;
+  retryCount: number;
+};
+
+export type PrintTimingEntry = {
+  stage: string;
+  durationMs: number;
+};
+
+/**
+ * Debug print pipeline timer.
+ * Collects high-resolution (Date.now) timing around every pipeline stage.
+ * Disabled by default in production; enable via `PrintTimingLogger.enabled`.
+ */
+export class PrintTimingLogger {
+  static enabled = __DEV__ ?? false;
+  private entries: PrintTimingEntry[] = [];
+  private marks = new Map<string, number>();
+
+  start(stage: string): void {
+    if (!PrintTimingLogger.enabled) return;
+    this.marks.set(stage, Date.now());
+  }
+
+  end(stage: string): number {
+    if (!PrintTimingLogger.enabled) return 0;
+    const startTime = this.marks.get(stage);
+    if (startTime == null) return 0;
+    const duration = Date.now() - startTime;
+    this.entries.push({ stage, durationMs: duration });
+    this.marks.delete(stage);
+    return duration;
+  }
+
+  getEntries(): PrintTimingEntry[] {
+    return [...this.entries];
+  }
+
+  reset(): void {
+    this.entries = [];
+    this.marks.clear();
+  }
+
+  dump(label = 'PRINT PIPELINE'): void {
+    if (!PrintTimingLogger.enabled || this.entries.length === 0) return;
+    const total = this.entries.reduce((sum, e) => sum + e.durationMs, 0);
+    const lines = this.entries.map(
+      (e) => `  [${e.stage}] ${e.durationMs}ms`,
+    );
+    console.info(
+      `\n=== ${label} (${total}ms total) ===\n${lines.join('\n')}\n${'='.repeat(40)}`,
+    );
+  }
+}
+
 const SCAN_TIMEOUT_MS = 8000;
 const BLE_SCAN_MS = 2500;
 /** Default BLE payload chunk (128 bytes allows fast bursts on standard BLE peripherals). */
 const BLE_DEFAULT_CHUNK = 128;
 /** Inter-chunk delay in ms. Packet bursting is used so writes complete in < 500ms. */
 const BLE_INTER_CHUNK_MS = 1;
-const BLE_BURST_INTERVAL = 4;
+const BLE_BURST_INTERVAL = 8;
+/** Max write retries: 1 reconnect attempt + 1 retry write. No blind multi-retry. */
+const PRINT_MAX_RETRIES = 1;
 /** MTU we request from the peripheral. */
 const BLE_REQUESTED_MTU = 512;
 
@@ -51,40 +130,36 @@ const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345678
 function bytesToBase64(bytes: Uint8Array): string {
   const len = bytes.length;
   if (len === 0) return '';
-
-  const CHUNK_SIZE = 0x8000; // 32KB block
-  const b64Chunks: string[] = [];
+  const parts: string[] = [];
+  const CHUNK_SIZE = 16384; // 16KB text blocks avoid Hermes GC pressure
+  let buf = '';
   const mainLen = len - (len % 3);
-
-  let str = '';
   for (let i = 0; i < mainLen; i += 3) {
     const chunk = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-    str +=
+    buf +=
       B64_CHARS[(chunk >> 18) & 63] +
       B64_CHARS[(chunk >> 12) & 63] +
       B64_CHARS[(chunk >> 6) & 63] +
       B64_CHARS[chunk & 63];
-    if (str.length >= CHUNK_SIZE) {
-      b64Chunks.push(str);
-      str = '';
+    if (buf.length >= CHUNK_SIZE) {
+      parts.push(buf);
+      buf = '';
     }
   }
-  if (str.length > 0) b64Chunks.push(str);
-
   const remaining = len - mainLen;
   if (remaining === 1) {
     const chunk = bytes[mainLen];
-    b64Chunks.push(B64_CHARS[chunk >> 2] + B64_CHARS[(chunk & 3) << 4] + '==');
+    buf += B64_CHARS[chunk >> 2] + B64_CHARS[(chunk & 3) << 4] + '==';
   } else if (remaining === 2) {
     const chunk = (bytes[mainLen] << 8) | bytes[mainLen + 1];
-    b64Chunks.push(
+    buf +=
       B64_CHARS[chunk >> 10] +
-        B64_CHARS[(chunk >> 4) & 63] +
-        B64_CHARS[(chunk & 15) << 2] +
-        '=',
-    );
+      B64_CHARS[(chunk >> 4) & 63] +
+      B64_CHARS[(chunk & 15) << 2] +
+      '=';
   }
-  return b64Chunks.join('');
+  if (buf.length > 0) parts.push(buf);
+  return parts.join('');
 }
 
 export function isLikelyTd404Name(name: string | null | undefined): boolean {
@@ -169,6 +244,19 @@ class PrinterManager {
   private bleNegotiatedMtu: number = 0;
   /** Serializes print() so batch copies never overlap on the wire. */
   private printChain: Promise<void> = Promise.resolve();
+  /** Connection state machine — prevents invalid transitions. */
+  private connectionState: ConnectionState = 'disconnected';
+  /** Single-flight connect guard: if a connect() is in progress, all callers share this promise. */
+  private connectInFlight: Promise<void> | null = null;
+  private connectInFlightDeviceId: string | null = null;
+  /** Last print timing entries for diagnostics. */
+  private lastPrintTiming: PrintTimingEntry[] | null = null;
+  /** Last error message for diagnostics. */
+  private lastErrorMessage: string | null = null;
+  /** Retry count for the last print job. */
+  private lastRetryCount: number = 0;
+  /** Number of pending jobs in the serial print chain. */
+  private printQueueDepth: number = 0;
 
   private getBle(): any {
     if (!this.bleLoadTried) {
@@ -270,8 +358,8 @@ class PrinterManager {
       return PRINTER_PROFILES['receipt-58mm'];
     }
 
-    // TSPL label printers — resolve from user settings (default 304 DPI / 12 dots/mm)
-    const dpi = settings.printerDpi ?? 304;
+    // Default to 203 DPI (native resolution of desktop thermal label printers like TD-404)
+    const dpi = settings.printerDpi ?? 203;
     const alignment = settings.printerAlignment ?? 'center';
     const headWidthMm = settings.printheadWidthMm ?? 108;
     const headWidthDots = Math.round((headWidthMm * dpi) / 25.4);
@@ -585,6 +673,46 @@ class PrinterManager {
     deviceName: string | null,
     transport?: DiscoveredPrinter['transport'],
   ): Promise<void> {
+    // Single-flight guard: if a connect to the same device is in progress, share it.
+    if (
+      this.connectInFlight &&
+      this.connectInFlightDeviceId === deviceId &&
+      this.connectionState === 'connecting'
+    ) {
+      console.info('[printer] connect() deduped — sharing existing flight for', deviceId);
+      return this.connectInFlight;
+    }
+
+    // If already connected to this device, no-op.
+    if (this.isConnected && usePrinterStore.getState().deviceId === deviceId) {
+      console.info('[printer] connect() no-op — already connected to', deviceId);
+      return;
+    }
+
+    this.connectInFlightDeviceId = deviceId;
+    this.connectionState = 'connecting';
+    const flight = this.connectInner(deviceId, deviceName, transport);
+    this.connectInFlight = flight;
+
+    try {
+      await flight;
+      this.connectionState = 'connected';
+    } catch (error) {
+      this.connectionState = 'error';
+      throw error;
+    } finally {
+      if (this.connectInFlight === flight) {
+        this.connectInFlight = null;
+        this.connectInFlightDeviceId = null;
+      }
+    }
+  }
+
+  private async connectInner(
+    deviceId: string,
+    deviceName: string | null,
+    transport?: DiscoveredPrinter['transport'],
+  ): Promise<void> {
     this.stopScan();
     usePrinterStore.getState().setStatus('connecting');
     const connectStart = Date.now();
@@ -598,7 +726,7 @@ class PrinterManager {
       try {
         await this.ensurePermissions('connect-only');
         console.info('[printer] SPP connect →', deviceId, deviceName);
-        // Native Kotlin module handles its own 8s timeout with proper socket cleanup.
+        // Native Kotlin module handles its own timeout with proper socket cleanup.
         // A JS-side Promise.race would leave a zombie socket if it fires first.
         const result = await td404.connectTd404(deviceId, deviceName);
         this.activeTransport = 'td404-spp';
@@ -606,6 +734,7 @@ class PrinterManager {
         this.writableTarget = null;
         this.backendPrinterId = null;
         this.bleNegotiatedMtu = 0;
+        this.lastErrorMessage = null;
         console.info('[printer] SPP connected in', Date.now() - connectStart, 'ms →', result.id);
         usePrinterStore.getState().setConnectedDevice(result.id, result.name ?? deviceId, {
           transport: 'bluetooth-spp',
@@ -615,6 +744,7 @@ class PrinterManager {
         return;
       } catch (error) {
         console.warn('[printer] SPP connect failed after', Date.now() - connectStart, 'ms:', error);
+        this.lastErrorMessage = error instanceof Error ? error.message : String(error);
         if (transport === 'bluetooth-spp' || !this.getBle()) {
           usePrinterStore.getState().clearConnection();
           throw error instanceof Error ? error : new Error('Failed to connect to TD-404 printer.');
@@ -753,6 +883,11 @@ class PrinterManager {
   }
 
   async disconnect(): Promise<void> {
+    // Prevent disconnect during active transmission.
+    if (this.connectionState === 'printing') {
+      console.warn('[printer] disconnect blocked — print in progress');
+      return;
+    }
     console.info('[printer] disconnect requested, transport:', this.activeTransport);
     if (this.activeTransport === 'td404-spp') {
       await this.getTd404()?.disconnectTd404();
@@ -775,6 +910,7 @@ class PrinterManager {
     this.activeTransport = null;
     this.backendPrinterId = null;
     this.bleNegotiatedMtu = 0;
+    this.connectionState = 'disconnected';
     usePrinterStore.getState().clearConnection();
   }
 
@@ -792,6 +928,81 @@ class PrinterManager {
   private get bleChunkSize(): number {
     if (this.bleNegotiatedMtu > 3) return this.bleNegotiatedMtu - 3;
     return BLE_DEFAULT_CHUNK;
+  }
+
+  /**
+   * Lightweight connection health check.
+   * Does NOT perform I/O — only validates that the transport handle is still viable.
+   * Use this to avoid starting expensive data preparation when the connection is dead.
+   */
+  isConnectionHealthy(): boolean {
+    if (this.activeTransport === 'td404-spp') {
+      return Boolean(this.getTd404()?.isTd404Connected());
+    }
+    if (this.activeTransport === 'wifi') {
+      return Boolean(this.backendPrinterId);
+    }
+    if (this.activeTransport === 'ble') {
+      return this.connectedDevice !== null && this.writableTarget !== null;
+    }
+    return false;
+  }
+
+  /**
+   * Ensure the printer is connected before printing.
+   * If already connected and healthy, returns immediately (< 1ms).
+   * If disconnected, attempts ONE reconnect to the last known device.
+   * Returns the connection latency in ms for diagnostics.
+   *
+   * Call this in parallel with data preparation to overlap connection
+   * verification with ViewShot capture.
+   */
+  async ensureConnected(): Promise<{ alreadyConnected: boolean; reconnectMs: number }> {
+    if (this.isConnectionHealthy()) {
+      return { alreadyConnected: true, reconnectMs: 0 };
+    }
+
+    // Connection is dead or missing — attempt reconnect.
+    const t0 = Date.now();
+    console.info('[printer] ensureConnected: connection unhealthy, attempting reconnect');
+    this.connectionState = 'reconnecting';
+    const reconnected = await this.reconnectLastDevice();
+    const elapsed = Date.now() - t0;
+
+    if (!reconnected) {
+      this.connectionState = 'error';
+      this.lastErrorMessage = 'Printer disconnected. Reconnect failed.';
+      throw new Error('Printer disconnected. Reconnect Bluetooth and try again.');
+    }
+
+    this.connectionState = 'connected';
+    console.info('[printer] ensureConnected: reconnected in', elapsed, 'ms');
+    return { alreadyConnected: false, reconnectMs: elapsed };
+  }
+
+  /** Snapshot of internal state for the diagnostics screen. */
+  getDiagnostics(): DiagnosticInfo {
+    const store = usePrinterStore.getState();
+    return {
+      connectionState: this.connectionState,
+      activeTransport: this.activeTransport,
+      deviceId: store.deviceId,
+      deviceName: store.deviceName,
+      bleNegotiatedMtu: this.bleNegotiatedMtu,
+      bleChunkSize: this.bleChunkSize,
+      bleServiceUuid: this.writableTarget?.serviceUUID ?? null,
+      bleCharacteristicUuid: this.writableTarget?.characteristicUUID ?? null,
+      bleWriteWithResponse: this.writableTarget?.withResponse ?? null,
+      lastPrintTimingMs: this.lastPrintTiming,
+      lastError: this.lastErrorMessage,
+      printQueueLength: this.printQueueDepth,
+      retryCount: this.lastRetryCount,
+    };
+  }
+
+  /** Store timing data from the last print for the diagnostics screen. */
+  setLastPrintTiming(entries: PrintTimingEntry[]): void {
+    this.lastPrintTiming = entries;
   }
 
   /**
@@ -816,6 +1027,7 @@ class PrinterManager {
       return true;
     } catch (error) {
       console.warn('[printer] auto-reconnect failed:', error);
+      this.lastErrorMessage = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
@@ -841,16 +1053,164 @@ class PrinterManager {
     await this.print(Uint8Array.from(parts));
   }
 
+  /**
+   * SDK-style fast print: PNG → native LabelCommand → SPP (no JS rasterize).
+   * Same fire-and-forget write semantics as Ninestar sendDataToPrinter(..., false).
+   * Returns false when transport/native path is unavailable (caller falls back).
+   * Throws if the native path is selected but the write fails.
+   */
+  async printPngLabelFast(options: {
+    pngBase64: string;
+    widthMm: number;
+    heightMm: number;
+    gapMm: number;
+    copies?: number;
+    density?: number | null;
+    speed?: number | null;
+    vOffsetMm?: number;
+    hOffsetMm?: number;
+    media?: 'gap' | 'bline' | 'continuous';
+    orientation?: number;
+    dpi?: number;
+  }): Promise<boolean> {
+    if (this.activeTransport !== 'td404-spp' || !this.usesTd404CommandSet) {
+      return false;
+    }
+    const td404 = this.getTd404();
+    if (!td404 || typeof td404.printTd404PngLabel !== 'function') {
+      return false;
+    }
+
+    this.printQueueDepth++;
+    const run = this.printChain.then(async () => {
+      const store = usePrinterStore.getState();
+      store.setStatus('printing');
+      this.connectionState = 'printing';
+      try {
+        await this.ensureConnected();
+        const dpi = options.dpi ?? this.getPrintDpi();
+        const xDots = Math.round(((options.hOffsetMm ?? 0) * dpi) / 25.4);
+        const yDots = Math.round(((options.vOffsetMm ?? 0) * dpi) / 25.4);
+        const t0 = Date.now();
+        const result = await td404.printTd404PngLabel({
+          pngBase64: options.pngBase64,
+          widthMm: options.widthMm,
+          heightMm: options.heightMm,
+          gapMm: options.gapMm,
+          density: options.density ?? 8,
+          speed: options.speed ?? 6,
+          xDots,
+          yDots,
+          copies: Math.max(1, Math.round(options.copies ?? 1)),
+          media: options.media ?? 'gap',
+          orientation: options.orientation ?? 0,
+          dpi,
+        });
+        if (!result) {
+          // Module present but method missing at runtime (old binary) — signal fallback.
+          const err = new Error('NATIVE_PNG_UNAVAILABLE');
+          (err as Error & { code?: string }).code = 'NATIVE_PNG_UNAVAILABLE';
+          throw err;
+        }
+        console.info(
+          '[printer] SDK fast print done in',
+          Date.now() - t0,
+          'ms |',
+          result,
+        );
+      } finally {
+        const currentStore = usePrinterStore.getState();
+        if (currentStore.status === 'printing') {
+          currentStore.setStatus(this.isConnected ? 'connected' : 'disconnected');
+        }
+        this.connectionState = this.isConnected ? 'connected' : 'disconnected';
+      }
+    });
+    this.printChain = run.then(
+      () => {
+        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+      },
+      () => {
+        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+      },
+    );
+    try {
+      await run;
+      return true;
+    } catch (error) {
+      const code = error instanceof Error ? (error as Error & { code?: string }).code : null;
+      const msg = error instanceof Error ? error.message : String(error);
+      if (code === 'NATIVE_PNG_UNAVAILABLE' || msg.includes('NATIVE_PNG_UNAVAILABLE')) {
+        console.warn('[printer] Native printPngLabel missing — falling back to JS raster path');
+        return false;
+      }
+      throw error;
+    }
+  }
+
   async print(bytes: Uint8Array): Promise<void> {
     // Serialize all transports so a second job cannot start while SPP/BLE is
     // still writing — overlapping writes were a source of intermittent garbage
     // / polarity flips on subsequent labels in a batch.
-    const run = this.printChain.then(() => this.printUnlocked(bytes));
+    this.printQueueDepth++;
+    const run = this.printChain.then(() => this.printWithRetry(bytes));
     this.printChain = run.then(
-      () => undefined,
-      () => undefined,
+      () => { this.printQueueDepth = Math.max(0, this.printQueueDepth - 1); },
+      () => { this.printQueueDepth = Math.max(0, this.printQueueDepth - 1); },
     );
     return run;
+  }
+
+  /**
+   * Event-driven retry: on write failure, check connection → reconnect once
+   * if dead → retry immediately (no arbitrary sleep). Avoids blind multi-retry
+   * with sleep(500)/sleep(1000) that added 1.5s+ latency on every failure.
+   */
+  private async printWithRetry(bytes: Uint8Array): Promise<void> {
+    const store = usePrinterStore.getState();
+    store.setStatus('printing');
+    this.connectionState = 'printing';
+    this.lastRetryCount = 0;
+    try {
+      try {
+        await this.printUnlocked(bytes);
+        return; // success on first attempt
+      } catch (firstError) {
+        const error = firstError instanceof Error ? firstError : new Error(String(firstError));
+        this.lastErrorMessage = error.message;
+
+        // If the connection is still alive, the write itself failed — don't retry
+        // (could cause duplicate prints on printers that partially received data).
+        if (this.isConnected) {
+          console.warn('[printer] write failed but connection alive, not retrying:', error.message);
+          throw error;
+        }
+
+        // Connection is dead — attempt ONE reconnect, then retry immediately.
+        console.warn('[printer] write failed, connection dead. Attempting reconnect:', error.message);
+        this.connectionState = 'reconnecting';
+        this.lastRetryCount = 1;
+
+        const reconnected = await this.reconnectLastDevice();
+        if (!reconnected) {
+          console.warn('[printer] reconnect failed, giving up');
+          this.lastErrorMessage = 'Printer disconnected during print. Reconnect failed.';
+          throw new Error('Printer disconnected during transmission. Reconnect and try again.');
+        }
+
+        // Reconnected — retry the write immediately (no sleep).
+        console.info('[printer] reconnected, retrying write immediately');
+        this.connectionState = 'printing';
+        await this.printUnlocked(bytes);
+      }
+    } finally {
+      // Restore previous status (connected) unless the connection dropped.
+      const currentStore = usePrinterStore.getState();
+      if (currentStore.status === 'printing') {
+        currentStore.setStatus(this.isConnected ? 'connected' : 'disconnected');
+      }
+      this.connectionState = this.isConnected ? 'connected' : 'disconnected';
+    }
   }
 
   private async printUnlocked(bytes: Uint8Array): Promise<void> {
@@ -867,7 +1227,14 @@ class PrinterManager {
       const td404 = this.getTd404();
       if (!td404?.isTd404Connected()) throw new Error('No printer connected.');
       console.info('[printer] SPP write:', bytes.length, 'bytes');
-      await td404.printTd404Base64(bytesToBase64(bytes));
+      if (typeof td404.printTd404Raw === 'function') {
+        await td404.printTd404Raw(bytes);
+      } else {
+        const b64Start = Date.now();
+        const b64 = bytesToBase64(bytes);
+        console.info('[printer] SPP base64 encoded in', Date.now() - b64Start, 'ms |', b64.length, 'chars');
+        await td404.printTd404Base64(b64);
+      }
       console.info('[printer] SPP write done in', Date.now() - writeStart, 'ms');
       return;
     }
@@ -876,20 +1243,28 @@ class PrinterManager {
       throw new Error('No printer connected.');
     }
 
-    // BLE: use negotiated MTU chunk size with inter-chunk pacing.
+    // BLE: pre-encode entire payload to base64 once, then slice per chunk.
+    // This eliminates N-1 redundant base64 encoding setups in the hot loop.
     const chunkSize = this.bleChunkSize;
     const { serviceUUID, characteristicUUID, withResponse } = this.writableTarget;
-    const totalChunks = Math.ceil(bytes.length / chunkSize);
+
+    const b64Start = Date.now();
+    const fullBase64 = bytesToBase64(bytes);
+    const b64Time = Date.now() - b64Start;
+
+    // base64 chunk size: each 3 raw bytes = 4 base64 chars
+    const b64ChunkSize = Math.ceil(chunkSize / 3) * 4;
+    const totalChunks = Math.ceil(fullBase64.length / b64ChunkSize);
     console.info(
       '[printer] BLE write:', bytes.length, 'bytes |',
       totalChunks, 'chunks @', chunkSize, 'B/chunk |',
-      withResponse ? 'withResponse' : 'withoutResponse',
+      withResponse ? 'withResponse' : 'withoutResponse', '|',
+      'base64 pre-encode:', b64Time, 'ms',
     );
 
     let chunkIndex = 0;
-    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-      const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
-      const payload = bytesToBase64(chunk);
+    for (let b64Offset = 0; b64Offset < fullBase64.length; b64Offset += b64ChunkSize) {
+      const payload = fullBase64.slice(b64Offset, b64Offset + b64ChunkSize);
       if (withResponse) {
         await this.connectedDevice.writeCharacteristicWithResponseForService(
           serviceUUID,
@@ -903,8 +1278,8 @@ class PrinterManager {
           payload,
         );
         chunkIndex++;
-        // Micro-pause only on burst intervals to prevent buffer backpressure while keeping speed high
-        if (chunkIndex % BLE_BURST_INTERVAL === 0 && offset + chunkSize < bytes.length) {
+        // Micro-pause on burst intervals to prevent buffer backpressure while keeping speed high
+        if (chunkIndex % BLE_BURST_INTERVAL === 0 && b64Offset + b64ChunkSize < fullBase64.length) {
           await new Promise<void>((r) => setTimeout(r, BLE_INTER_CHUNK_MS));
         }
       }
@@ -914,8 +1289,38 @@ class PrinterManager {
 }
 
 let manager: PrinterManager | null = null;
+let appStateListenerSetup = false;
+
+/**
+ * Listen for app state changes to clean up stale BLE connections.
+ * Android kills GATT connections in the background; stale handles cause the
+ * next print to hang. Proactively disconnect after 30s of backgrounding.
+ */
+function setupAppStateListener() {
+  if (appStateListenerSetup || Platform.OS === 'web') return;
+  appStateListenerSetup = true;
+
+  let backgroundedAt: number | null = null;
+  const BG_DISCONNECT_MS = 30_000;
+
+  AppState.addEventListener('change', (nextState: AppStateStatus) => {
+    if (nextState === 'background' || nextState === 'inactive') {
+      backgroundedAt = Date.now();
+    } else if (nextState === 'active' && backgroundedAt) {
+      const elapsed = Date.now() - backgroundedAt;
+      backgroundedAt = null;
+      if (elapsed > BG_DISCONNECT_MS && manager?.isConnected) {
+        console.info('[printer] app was backgrounded for', Math.round(elapsed / 1000), 's — disconnecting stale BLE/SPP');
+        void manager.disconnect().catch(() => {});
+      }
+    }
+  });
+}
 
 export function getPrinterManager(): PrinterManager {
-  if (!manager) manager = new PrinterManager();
+  if (!manager) {
+    manager = new PrinterManager();
+    setupAppStateListener();
+  }
   return manager;
 }

@@ -8,7 +8,8 @@ export type PrinterConnectionStatus =
   | 'disconnected'
   | 'scanning'
   | 'connecting'
-  | 'connected';
+  | 'connected'
+  | 'printing';
 
 export type PrinterTransport = 'bluetooth-spp' | 'bluetooth-ble' | 'wifi';
 

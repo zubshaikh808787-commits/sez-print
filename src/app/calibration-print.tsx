@@ -27,12 +27,14 @@ import {
   encodeConnectedPrinterJob,
   PRINT_CAPTURE_OPTIONS,
   printCaptureLayout,
+  printCaptureOptionsForSize,
   rasterizePngForPrint,
   sendIsolatedPrintCopies,
+  tryNativeSdkPngPrint,
   waitForNextPaint,
   formatPrintFailure,
 } from '@/lib/printer/print-job';
-import { getPrinterManager } from '@/lib/printer/printer-manager';
+import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
 import {
   computePrintheadCenteringOffset,
   formatPrintSpecDiagnostics,
@@ -216,33 +218,74 @@ export default function CalibrationPrintScreen() {
     }
 
     setPrinting(true);
+    const timer = new PrintTimingLogger();
     try {
-      await waitForNextPaint();
-      const base64 = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
+      timer.start('capture+verify');
+      const [connectionResult, base64] = await Promise.all([
+        manager.ensureConnected().catch((err) => ({ error: err })),
+        captureRef(shotRef, printCaptureOptionsForSize(
+          captureSize.widthPx,
+          captureSize.heightPx,
+        )),
+      ]);
+      timer.end('capture+verify');
+
+      if (connectionResult && 'error' in connectionResult) {
+        throw connectionResult.error;
+      }
       if (!base64) throw new Error('Could not capture calibration grid.');
 
       console.info(formatPrintSpecDiagnostics(spec));
 
-      const bits = rasterizePngForPrint(base64, {
-        widthMm,
-        heightMm,
-        orientation: 0,
-        threshold: 128,
-        dither: false,
-        hOffsetMm: 0,
-      });
-
-      const bytes = encodeConnectedPrinterJob(bits, {
+      timer.start('sdkFastPrint');
+      const usedNative = await tryNativeSdkPngPrint({
+        pngBase64: base64,
         widthMm,
         heightMm,
         gapMm: 2,
         copies: 1,
-        density: null,
-        speed: null,
+        density: 8,
+        speed: 6,
         vOffsetMm: 0,
+        hOffsetMm: 0,
+        media: 'gap',
+        orientation: 0,
+        dpi: manager.getPrintDpi(),
       });
+      timer.end('sdkFastPrint');
 
-      await sendIsolatedPrintCopies(bytes, 1);
+      if (!usedNative) {
+        timer.start('rasterize');
+        const bits = rasterizePngForPrint(base64, {
+          widthMm,
+          heightMm,
+          orientation: 0,
+          threshold: 128,
+          dither: false,
+          hOffsetMm: 0,
+        });
+        timer.end('rasterize');
+
+        timer.start('encode');
+        const bytes = encodeConnectedPrinterJob(bits, {
+          widthMm,
+          heightMm,
+          gapMm: 2,
+          copies: 1,
+          density: null,
+          speed: 6,
+          vOffsetMm: 0,
+        });
+        timer.end('encode');
+
+        timer.start('transmit');
+        await sendIsolatedPrintCopies(bytes, 1);
+        timer.end('transmit');
+      }
+
+      timer.dump('CALIBRATION PRINT');
+      manager.setLastPrintTiming(timer.getEntries());
+
       Alert.alert(
         'Calibration Printed',
         `Printed ${widthMm}×${heightMm}mm calibration grid.\n\n` +
@@ -257,7 +300,7 @@ export default function CalibrationPrintScreen() {
     } finally {
       setPrinting(false);
     }
-  }, [manager, spec, widthMm, heightMm]);
+  }, [manager, spec, widthMm, heightMm, captureSize]);
 
   return (
     <View style={styles.root}>
@@ -425,9 +468,11 @@ const styles = StyleSheet.create({
   },
   offscreen: {
     position: 'absolute',
-    left: -9999,
-    top: -9999,
-    opacity: 0,
+    left: 0,
+    top: 0,
+    zIndex: -999,
+    opacity: 1,
+    overflow: 'hidden',
     pointerEvents: 'none',
   },
   infoCard: {

@@ -43,10 +43,12 @@ import {
 } from '@/lib/printer/print-geometry';
 import {
   encodeConnectedPrinterJob,
+  printCaptureOptionsForSize,
   PRINT_CAPTURE_OPTIONS,
   rasterizePngForPrint,
+  tryNativeSdkPngPrint,
 } from '@/lib/printer/print-job';
-import { getPrinterManager } from '@/lib/printer/printer-manager';
+import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
 import { usePrinterStore } from '@/stores/printer-store';
 
 type LabelEditorProps = {
@@ -100,6 +102,12 @@ export function LabelEditor({
     () => template.fields.find((f) => f.id === selectedFieldId) || null,
     [template.fields, selectedFieldId],
   );
+
+  const activePrintGeometry = useMemo(() => {
+    const w = template.customWidthMm || sizePreset.widthMm;
+    const h = template.customHeightMm || sizePreset.heightMm;
+    return calculatePrintGeometry(w, h, dpi);
+  }, [template.customWidthMm, sizePreset.widthMm, template.customHeightMm, sizePreset.heightMm, dpi]);
 
   // Reset to starter template
   const handleResetToTemplate = () => {
@@ -186,38 +194,80 @@ export function LabelEditor({
     console.info(formatPrintGeometryDiagnostics(geometry, 'Shipping Label'));
 
     setPrinting(true);
+    const timer = new PrintTimingLogger();
     try {
       if (!printShotRef.current) {
         throw new Error('Print canvas is not ready.');
       }
 
-      const base64 = await captureRef(printShotRef, PRINT_CAPTURE_OPTIONS);
+      timer.start('capture+verify');
+      const [connectionResult, base64] = await Promise.all([
+        manager.ensureConnected().catch((err) => ({ error: err })),
+        captureRef(printShotRef, printCaptureOptionsForSize(
+          geometry.widthDots,
+          geometry.heightDots,
+        )),
+      ]);
+      timer.end('capture+verify');
+
+      if (connectionResult && 'error' in connectionResult) {
+        throw connectionResult.error;
+      }
       if (!base64) {
         throw new Error('Failed to capture label bitmap.');
       }
 
-      const bits = rasterizePngForPrint(base64, {
-        widthMm: geometry.labelWidthMm,
-        heightMm: geometry.labelHeightMm,
-        orientation: 0,
-        threshold: 128,
-        dither: false,
-        hOffsetMm: 0,
-      });
-
-      const bytes = encodeConnectedPrinterJob(bits, {
+      timer.start('sdkFastPrint');
+      const usedNative = await tryNativeSdkPngPrint({
+        pngBase64: base64,
         widthMm: geometry.labelWidthMm,
         heightMm: geometry.labelHeightMm,
         gapMm: 2,
         copies: 1,
         density: 8,
-        speed: 5,
+        speed: 6,
         vOffsetMm: 0,
+        hOffsetMm: 0,
         media: 'gap',
+        orientation: 0,
+        dpi,
       });
+      timer.end('sdkFastPrint');
 
-      console.info('[shipping-editor] Transmitting WYSIWYG bitmap:', bytes.length, 'bytes');
-      await manager.print(bytes);
+      if (!usedNative) {
+        timer.start('rasterize');
+        const bits = rasterizePngForPrint(base64, {
+          widthMm: geometry.labelWidthMm,
+          heightMm: geometry.labelHeightMm,
+          orientation: 0,
+          threshold: 128,
+          dither: false,
+          hOffsetMm: 0,
+        });
+        timer.end('rasterize');
+
+        timer.start('encode');
+        const bytes = encodeConnectedPrinterJob(bits, {
+          widthMm: geometry.labelWidthMm,
+          heightMm: geometry.labelHeightMm,
+          gapMm: 2,
+          copies: 1,
+          density: 8,
+          speed: 6,
+          vOffsetMm: 0,
+          media: 'gap',
+        });
+        timer.end('encode');
+
+        console.info('[shipping-editor] Transmitting WYSIWYG bitmap:', bytes.length, 'bytes');
+        timer.start('transmit');
+        await manager.print(bytes);
+        timer.end('transmit');
+      }
+
+      timer.dump('SHIPPING LABEL PRINT');
+      manager.setLastPrintTiming(timer.getEntries());
+
       Alert.alert('Print Sent', 'Shipping label was transmitted to printer.');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to send label to printer.';
@@ -333,9 +383,10 @@ export function LabelEditor({
       <View
         style={{
           position: 'absolute',
-          left: -9999,
-          top: -9999,
-          opacity: 0,
+          left: 0,
+          top: 0,
+          zIndex: -999,
+          opacity: 1,
           pointerEvents: 'none',
           backgroundColor: '#FFFFFF',
           overflow: 'hidden',
@@ -344,29 +395,15 @@ export function LabelEditor({
           ref={printShotRef}
           options={PRINT_CAPTURE_OPTIONS}
           style={{
-            width: calculatePrintGeometry(
-              template.customWidthMm || sizePreset.widthMm,
-              template.customHeightMm || sizePreset.heightMm,
-              dpi,
-            ).widthDots,
-            height: calculatePrintGeometry(
-              template.customWidthMm || sizePreset.widthMm,
-              template.customHeightMm || sizePreset.heightMm,
-              dpi,
-            ).heightDots,
+            width: activePrintGeometry.widthDots,
+            height: activePrintGeometry.heightDots,
             backgroundColor: '#FFFFFF',
           }}>
           <ShippingLabelCanvas
             template={template}
             orderData={orderData}
             sizePreset={sizePreset}
-            canvasWidthPx={
-              calculatePrintGeometry(
-                template.customWidthMm || sizePreset.widthMm,
-                template.customHeightMm || sizePreset.heightMm,
-                dpi,
-              ).widthDots
-            }
+            canvasWidthPx={activePrintGeometry.widthDots}
             showSafeZone={false}
             showGrid={false}
             showRulers={false}

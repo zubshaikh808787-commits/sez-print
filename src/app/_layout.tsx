@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { Component, type ErrorInfo, type ReactNode, useEffect } from 'react';
 import { ScrollView, Text, View, useColorScheme } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { APP_FONT_MAP } from '@/lib/app-fonts';
 
@@ -92,6 +93,7 @@ function AppRoot() {
         <Stack.Screen name="app-permissions" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="printing-history" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="printer-connect" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="printer-diagnostics" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="calibration-print" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="new-label-setup" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen
@@ -110,7 +112,9 @@ function AppRoot() {
 export default function RootLayout() {
   return (
     <RootErrorBoundary>
-      <AppRoot />
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <AppRoot />
+      </GestureHandlerRootView>
     </RootErrorBoundary>
   );
 }

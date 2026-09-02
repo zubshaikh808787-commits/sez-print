@@ -44,7 +44,9 @@ export function canvasFillFromTemplate(background: TemplateBackground | undefine
 
 export function canvasFillFromDocument(doc: Pick<LabelDocument, 'background' | 'paperType' | 'templatePreviewType'>): string {
   if (templateUsesDieCutBackground(doc.templatePreviewType ?? '')) return 'transparent';
-  if (doc.background) return canvasFillFromTemplate(doc.background);
+  if (doc.background?.type === 'color') return doc.background.color;
+  if (doc.background?.type === 'image') return 'transparent';
+  // Absent / `none` → solid white artboard (no border element required).
   return doc.paperType === 'Transparent' ? 'transparent' : '#FFFFFF';
 }
 

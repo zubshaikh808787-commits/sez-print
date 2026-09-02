@@ -340,13 +340,13 @@ export default function HomeScreen() {
               />
             </View>
 
-            {/* Row 3: Label Clone, Shipping Label, Customize */}
+            {/* Row 3: 2ups Label, Shipping Label, Customize */}
             <View style={styles.menuRow}>
               <Tile
                 style={styles.menuThird}
                 iconComponent={<LabelCloneIcon size={30} color={Palette.accent} />}
-                label="Label Clone"
-                href="/new-label-setup?isClone=true"
+                label="2ups Label"
+                href="/new-label-setup?isTwoUps=true"
               />
               <Tile
                 style={styles.menuThird}

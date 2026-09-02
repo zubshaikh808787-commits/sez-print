@@ -305,7 +305,7 @@ export function PrintPhotoIcon({ color = TEAL, size = 32 }: { color?: string; si
 }
 
 /**
- * 4-corner brackets with "C" for "Label Clone"
+ * 4-corner brackets with "C" — used for the 2ups Label home tile.
  */
 export function LabelCloneIcon({ color = TEAL, size = 32 }: { color?: string; size?: number }) {
   const scale = size / 32;

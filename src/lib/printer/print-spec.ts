@@ -100,12 +100,12 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
   },
 };
 
-export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-304'];
+export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-203'];
 
 /** Authoritative conversion from physical millimetres to printer dots. */
-export function mmToDots(mm: number, dpi = 304): number {
+export function mmToDots(mm: number, dpi = 203): number {
   if (!Number.isFinite(mm) || mm <= 0) return 0;
-  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : 304;
+  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : 203;
   return Math.round((mm * d) / MM_PER_INCH);
 }
 

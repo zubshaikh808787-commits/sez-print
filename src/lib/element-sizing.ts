@@ -1,10 +1,12 @@
 import { mmToPt, ptToMm, type LabelDocument, type LabelElement } from '@/lib/label-document';
 
 const PAD_RATIO = 0.05;
-const MIN_PAD_MM = 0.6;
+const MIN_PAD_MM = 0.5;
 
 function padMm(widthMm: number, heightMm: number) {
-  return Math.max(MIN_PAD_MM, Math.min(widthMm, heightMm) * PAD_RATIO);
+  // Keep a usable content inset on tiny stick labels (25×15) without eating the pad.
+  const ratioPad = Math.min(widthMm, heightMm) * PAD_RATIO;
+  return Math.max(MIN_PAD_MM, Math.min(ratioPad, Math.min(widthMm, heightMm) * 0.12));
 }
 
 function bboxOf(element: LabelElement) {
@@ -36,16 +38,18 @@ function bboxOf(element: LabelElement) {
 
 /** Typical body-line font (pt) for this label — not a title that fills the pad. */
 export function fitFontSizePt(widthMm: number, heightMm: number, lines = 1) {
-  const perLineMm = Math.max(2.2, (heightMm * 0.26) / Math.max(1, lines));
+  const perLineMm = Math.max(1.6, (heightMm * 0.26) / Math.max(1, lines));
   const fromHeight = mmToPt(perLineMm / 1.25);
   const fromWidth = mmToPt(widthMm * 0.12);
   const pt = Math.min(fromHeight, fromWidth);
-  return Math.max(6, Math.min(Math.round(pt * 2) / 2, 28));
+  // Tiny stick labels (e.g. 25×15) need smaller body type to stay inside the pad.
+  const minPt = Math.min(widthMm, heightMm) < 18 ? 4 : 6;
+  return Math.max(minPt, Math.min(Math.round(pt * 2) / 2, 28));
 }
 
 export function fitTextWidth(widthMm: number) {
   const pad = padMm(widthMm, widthMm);
-  return Math.max(8, widthMm - pad * 2);
+  return Math.max(4, widthMm - pad * 2);
 }
 
 function median(values: number[]) {
@@ -102,27 +106,28 @@ function placeInLabel(
 
 export function fitTextDefaults(widthMm: number, heightMm: number, existing: LabelElement[] = []) {
   const fonts = existingTextFonts(existing);
+  const minPt = Math.min(widthMm, heightMm) < 18 ? 4 : 6;
   const fromExisting = median(fonts);
   const fontSize = fromExisting
-    ? Math.max(6, Math.min(28, Math.round(fromExisting * 2) / 2))
+    ? Math.max(minPt, Math.min(28, Math.round(fromExisting * 2) / 2))
     : fitFontSizePt(widthMm, heightMm, 1);
   const boxH = textBlockHeightMm(fontSize, 1);
-  const boxW = Math.max(10, Math.min(fitTextWidth(widthMm), widthMm * 0.78));
+  const boxW = Math.max(4, Math.min(fitTextWidth(widthMm), widthMm * 0.88));
   const placed = placeInLabel(widthMm, heightMm, boxW, boxH, existing);
   return { left: placed.left, top: placed.top, width: placed.width, fontSize };
 }
 
 export function fitBarcodeDefaults(widthMm: number, heightMm: number, existing: LabelElement[] = []) {
   const pad = padMm(widthMm, heightMm);
-  const width = Math.max(10, widthMm - pad * 2);
-  const height = Math.max(4, Math.min(heightMm * 0.36, 12));
+  const width = Math.max(6, widthMm - pad * 2);
+  const height = Math.max(3, Math.min(heightMm * 0.36, heightMm - pad * 2, 12));
   const placed = placeInLabel(widthMm, heightMm, width, height, existing);
   return {
     left: placed.left,
     top: placed.top,
     width: placed.width,
     height: placed.height,
-    fontSize: Math.max(6, Math.min(mmToPt(heightMm * 0.1), 9)),
+    fontSize: Math.max(4, Math.min(mmToPt(heightMm * 0.1), 9)),
   };
 }
 
@@ -152,8 +157,8 @@ export function fitLineDefaults(widthMm: number, heightMm: number, existing: Lab
 
 export function fitShapeDefaults(widthMm: number, heightMm: number, existing: LabelElement[] = []) {
   const pad = padMm(widthMm, heightMm);
-  const width = Math.max(8, Math.min(widthMm - pad * 2, widthMm * 0.7));
-  const height = Math.max(6, Math.min(heightMm - pad * 2, heightMm * 0.45));
+  const width = Math.max(4, Math.min(widthMm - pad * 2, widthMm * 0.7));
+  const height = Math.max(3, Math.min(heightMm - pad * 2, heightMm * 0.45));
   const placed = placeInLabel(widthMm, heightMm, width, height, existing);
   return {
     left: placed.left,
@@ -255,35 +260,50 @@ export function scaleDocumentToSize(
   const sy = heightMm / Math.max(doc.heightMm, 0.01);
   const fontScale = Math.min(sx, sy);
   const nextDoc = { ...doc, widthMm, heightMm };
-  const elements = doc.elements.map((el) => {
-    if (el.type === 'border') {
-      return clampElementToLabel(
-        { ...el, left: 0, top: 0, width: widthMm, height: heightMm, rotation: 0 as const },
-        nextDoc,
-      );
-    }
-    const scaled: LabelElement = {
-      ...el,
-      left: el.left * sx,
-      top: el.top * sy,
-      width: el.width * sx,
-    };
-    if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
-      (scaled as { height: number }).height *= sy;
-    }
-    if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
-      (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * fontScale);
-    }
-    if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
-      (scaled as { lineWidth: number }).lineWidth *= fontScale;
-    }
-    if (scaled.type === 'table') {
-      scaled.columnWidths = scaled.columnWidths.map((n) => n * sx);
-      scaled.rowHeights = scaled.rowHeights.map((n) => n * sy);
-    }
-    return clampElementToLabel(scaled, nextDoc);
-  });
-  return { ...nextDoc, elements };
+
+  const scaleElements = (source: LabelElement[]): LabelElement[] =>
+    source.map((el) => {
+      if (el.type === 'border') {
+        return clampElementToLabel(
+          { ...el, left: 0, top: 0, width: widthMm, height: heightMm, rotation: 0 as const },
+          nextDoc,
+        );
+      }
+      const scaled: LabelElement = {
+        ...el,
+        left: el.left * sx,
+        top: el.top * sy,
+        width: el.width * sx,
+      };
+      if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
+        (scaled as { height: number }).height *= sy;
+      }
+      if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
+        (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * fontScale);
+      }
+      if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
+        (scaled as { lineWidth: number }).lineWidth *= fontScale;
+      }
+      if (scaled.type === 'table') {
+        scaled.columnWidths = scaled.columnWidths.map((n) => n * sx);
+        scaled.rowHeights = scaled.rowHeights.map((n) => n * sy);
+      }
+      return clampElementToLabel(scaled, nextDoc);
+    });
+
+  const elements = scaleElements(doc.elements);
+  if (!doc.ups) {
+    return { ...nextDoc, elements };
+  }
+
+  const panels = doc.ups.panels.map((panel, i) =>
+    i === doc.ups!.activeIndex ? elements : scaleElements(panel),
+  );
+  return {
+    ...nextDoc,
+    elements,
+    ups: { ...doc.ups, panels },
+  };
 }
 
 /**

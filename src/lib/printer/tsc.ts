@@ -42,19 +42,9 @@ function ascii(s: string): Uint8Array {
   return out;
 }
 
-/**
- * TSPL BITMAP (Ninestar / TD-404 / Gprinter): 0 = print black, 1 = white.
- * Our BitRaster matches ESC/POS GS v 0 (1 = black). Invert into a fresh buffer
- * (never mutate the source) so batch / multi-copy jobs cannot share dirty state.
- */
-function invertEscPosBitsForTspl(data: Uint8Array): Uint8Array {
-  const out = new Uint8Array(data.length);
-  for (let i = 0; i < data.length; i++) out[i] = data[i] ^ 0xff;
-  return out;
-}
-
 function mediaCommand(media: TscJobOptions['media'], gapMm: number): string {
-  const g = Math.max(0, gapMm);
+  // Allow negative GAP for stick-label sensor calibration (We Print / TSC style).
+  const g = Math.round(gapMm * 100) / 100;
   if (media === 'bline') return `BLINE ${g} mm,0 mm\r\n`;
   if (media === 'continuous') return `GAP 0 mm,0 mm\r\n`;
   return `GAP ${g} mm,0 mm\r\n`;
@@ -65,6 +55,9 @@ function mediaCommand(media: TscJobOptions['media'], gapMm: number): string {
  * Mode 0 = OVERWRITE. Always emits PRINT 1,1 — callers that need N copies must
  * send N independent jobs.
  *
+ * Single-allocation zero-copy: inverts raster directly into output buffer
+ * without allocating intermediate 250KB payloads or multi-array concatenation.
+ *
  * DIRECTION 0,0 keeps the same top-left origin as the editor preview so
  * alignment matches on-screen layout (DIRECTION 1 flips print vs preview).
  */
@@ -72,10 +65,9 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
   const gap = options.gapMm ?? 2;
   const density =
     options.density != null ? Math.min(15, Math.max(0, Math.round(options.density))) : 8;
-  const speed = options.speed != null ? Math.min(6, Math.max(1, Math.round(options.speed))) : 5;
+  const speed = options.speed != null ? Math.min(6, Math.max(1, Math.round(options.speed))) : 6;
   const x = options.x ?? 0;
   const y = options.y ?? 0;
-  const payload = invertEscPosBitsForTspl(bitmap.data);
 
   const sizeCmd = formatTsplSizeCommand(options.widthMm, options.heightMm);
   const mediaCmd = mediaCommand(options.media ?? 'gap', gap);
@@ -86,7 +78,7 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
     mediaCmd.trim(), '|',
     'BITMAP', x + ',' + y + ',' + bitmap.bytesPerRow + ',' + bitmap.height + ',0 |',
     'SPEED', speed, '| DENSITY', density, '|',
-    'payload:', payload.length, 'bytes',
+    'payload:', bitmap.data.length, 'bytes',
   );
 
   const header =
@@ -100,9 +92,27 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
     'CLS\r\n' +
     `BITMAP ${x},${y},${bitmap.bytesPerRow},${bitmap.height},0,`;
 
-  const footer = `\r\nPRINT 1,1\r\n`;
+  const footer = '\r\nPRINT 1,1\r\n';
 
-  return concatBytes([ascii(header), payload, ascii(footer)]);
+  const headerLen = header.length;
+  const dataLen = bitmap.data.length;
+  const footerLen = footer.length;
+  const out = new Uint8Array(headerLen + dataLen + footerLen);
+
+  // 1. Write header directly
+  for (let i = 0; i < headerLen; i++) out[i] = header.charCodeAt(i) & 0xff;
+
+  // 2. Invert directly into output buffer (zero intermediate allocation)
+  const src = bitmap.data;
+  for (let i = 0; i < dataLen; i++) {
+    out[headerLen + i] = src[i] ^ 0xff;
+  }
+
+  // 3. Write footer directly
+  const footerOffset = headerLen + dataLen;
+  for (let i = 0; i < footerLen; i++) out[footerOffset + i] = footer.charCodeAt(i) & 0xff;
+
+  return out;
 }
 
 /** Simple text-only sample label (no bitmap) — good for connection smoke tests. */

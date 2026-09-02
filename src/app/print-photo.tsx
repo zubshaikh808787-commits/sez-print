@@ -1,18 +1,18 @@
-import * as ImagePicker from 'expo-image-picker';
-import { Image } from 'expo-image';
-import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Alert,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    useWindowDimensions,
+    View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ViewShot, { captureRef } from 'react-native-view-shot';
@@ -21,21 +21,23 @@ import { PhotoFramePreview } from '@/components/photo-frame-preview';
 import { PrintSizeSelector } from '@/components/print-size-selector';
 import { getPhotoFrame } from '@/constants/photo-frames';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { Palette, cardShadow } from '@/constants/ui';
+import { cardShadow, Palette } from '@/constants/ui';
 import { type LabelSizeMm } from '@/lib/label-geometry';
 import { pngBase64ToGray, rotateGray } from '@/lib/printer/escpos';
 import {
-  PRINT_CAPTURE_OPTIONS,
-  encodeConnectedPrinterJob,
-  finalizeGrayForPrint,
-  formatPrintFailure,
-  orientedPrintSize,
-  printCaptureLayout,
-  printJobSizeError,
-  sendIsolatedPrintCopies,
-  waitForNextPaint,
+    encodeConnectedPrinterJob,
+    finalizeGrayForPrint,
+    formatPrintFailure,
+    orientedPrintSize,
+    PRINT_CAPTURE_OPTIONS,
+    printCaptureLayout,
+    printCaptureOptionsForSize,
+    printJobSizeError,
+    sendIsolatedPrintCopies,
+    tryNativeSdkPngPrint,
+    waitForNextPaint,
 } from '@/lib/printer/print-job';
-import { getPrinterManager } from '@/lib/printer/printer-manager';
+import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
 import { usePrinterStore } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
@@ -244,62 +246,111 @@ export default function PrintPhotoScreen() {
     }
 
     setPrinting(true);
+    const timer = new PrintTimingLogger();
     try {
-      await waitForNextPaint();
       const dither = colorMode === 'Halftone';
       const threshold =
         colorMode === 'Original'
           ? 200
           : Math.min(250, Math.max(10, grayThreshold + (darkness != null ? (darkness - 8) * 10 : 0)));
 
-      const base64 = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
+      timer.start('capture+verify');
+      // Force exact printer resolution — pixelRatio:1 alone still densifies on many Androids.
+      const captureTarget = printCaptureLayout(widthMm, heightMm).content;
+      const [connectionResult, base64] = await Promise.all([
+        manager.ensureConnected().catch((err) => ({ error: err })),
+        captureRef(
+          shotRef,
+          printCaptureOptionsForSize(captureTarget.widthPx, captureTarget.heightPx),
+        ),
+      ]);
+      timer.end('capture+verify');
+
+      if (connectionResult && 'error' in connectionResult) {
+        throw connectionResult.error;
+      }
       if (!base64) {
         throw new Error('Could not capture the photo for printing.');
       }
 
-      let gray = pngBase64ToGray(base64);
-      if (flipH) {
-        const { width: gw, height: gh, gray: data } = gray;
-        const flipped = new Uint8Array(data.length);
-        for (let y = 0; y < gh; y += 1) {
-          for (let x = 0; x < gw; x += 1) {
-            flipped[y * gw + (gw - 1 - x)] = data[y * gw + x];
+      const media =
+        paperType === 'Receipt'
+          ? 'continuous'
+          : paperType === 'Black mark'
+            ? 'bline'
+            : 'gap';
+
+      // Native SDK path when no JS-only photo transforms are needed.
+      let usedNative = false;
+      if (!flipH && !antiColor) {
+        timer.start('sdkFastPrint');
+        usedNative = await tryNativeSdkPngPrint({
+          pngBase64: base64,
+          widthMm: paper.widthMm,
+          heightMm: paper.heightMm,
+          gapMm: gapLength,
+          copies,
+          density: darkness,
+          speed: speed ?? 6,
+          vOffsetMm: vOffset,
+          hOffsetMm: hOffset,
+          media,
+          orientation: orientationDeg,
+          dpi: manager.getPrintDpi(),
+        });
+        timer.end('sdkFastPrint');
+      }
+
+      if (!usedNative) {
+        timer.start('rasterize');
+        let gray = pngBase64ToGray(base64);
+        if (flipH) {
+          const { width: gw, height: gh, gray: data } = gray;
+          const flipped = new Uint8Array(data.length);
+          for (let y = 0; y < gh; y += 1) {
+            for (let x = 0; x < gw; x += 1) {
+              flipped[y * gw + (gw - 1 - x)] = data[y * gw + x];
+            }
           }
+          gray = { width: gw, height: gh, gray: flipped };
         }
-        gray = { width: gw, height: gh, gray: flipped };
-      }
-      if (antiColor) {
-        const inverted = new Uint8Array(gray.gray.length);
-        for (let i = 0; i < gray.gray.length; i += 1) inverted[i] = 255 - gray.gray[i];
-        gray = { ...gray, gray: inverted };
+        if (antiColor) {
+          const inverted = new Uint8Array(gray.gray.length);
+          for (let i = 0; i < gray.gray.length; i += 1) inverted[i] = 255 - gray.gray[i];
+          gray = { ...gray, gray: inverted };
+        }
+
+        gray = rotateGray(gray, orientationDeg);
+        const bits = finalizeGrayForPrint(gray, {
+          widthMm: paper.widthMm,
+          heightMm: paper.heightMm,
+          threshold,
+          dither: dither || colorMode === 'B & W',
+          hOffsetMm: hOffset,
+        });
+        timer.end('rasterize');
+
+        timer.start('encode');
+        const bytes = encodeConnectedPrinterJob(bits, {
+          widthMm: paper.widthMm,
+          heightMm: paper.heightMm,
+          gapMm: gapLength,
+          copies: 1,
+          density: darkness,
+          speed: speed ?? 6,
+          vOffsetMm: vOffset,
+          hOffsetMm: hOffset,
+          media,
+        });
+        timer.end('encode');
+
+        timer.start('transmit');
+        await sendIsolatedPrintCopies(bytes, copies);
+        timer.end('transmit');
       }
 
-      gray = rotateGray(gray, orientationDeg);
-      const bits = finalizeGrayForPrint(gray, {
-        widthMm: paper.widthMm,
-        heightMm: paper.heightMm,
-        threshold,
-        dither: dither || colorMode === 'B & W',
-        hOffsetMm: hOffset,
-      });
-
-      const bytes = encodeConnectedPrinterJob(bits, {
-        widthMm: paper.widthMm,
-        heightMm: paper.heightMm,
-        gapMm: gapLength,
-        copies: 1,
-        density: darkness,
-        speed,
-        vOffsetMm: vOffset,
-        hOffsetMm: hOffset,
-        media:
-          paperType === 'Receipt'
-            ? 'continuous'
-            : paperType === 'Black mark'
-              ? 'bline'
-              : 'gap',
-      });
-      await sendIsolatedPrintCopies(bytes, copies);
+      timer.dump('PHOTO PRINT');
+      manager.setLastPrintTiming(timer.getEntries());
 
       if (printingSettings.recordHistory) {
         addHistoryEntry({

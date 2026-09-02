@@ -8,7 +8,6 @@ import {
 } from '@/lib/label-geometry';
 import {
   encodeEscPosJob,
-  fastPngBase64ToBits,
   fitGrayToSize,
   grayToBits,
   padBitsCentered,
@@ -38,6 +37,23 @@ export const PRINT_CAPTURE_OPTIONS = {
   result: 'base64' as const,
   pixelRatio: 1,
 };
+
+/**
+ * Build ViewShot capture options that force the output to exact printer resolution.
+ *
+ * `pixelRatio: 1` alone doesn't reliably prevent density inflation on all Android
+ * devices (a 3× screen still captures 3600×5400 instead of 1216×1824). Passing
+ * explicit `width`/`height` makes ViewShot resize natively (fast) so the PNG is
+ * exactly the size the printer needs — eliminates the 30+ second JS-side PNG decode
+ * of an over-sized image.
+ */
+export function printCaptureOptionsForSize(widthPx: number, heightPx: number) {
+  return {
+    ...PRINT_CAPTURE_OPTIONS,
+    width: widthPx,
+    height: heightPx,
+  };
+}
 
 export function waitForNextPaint(): Promise<void> {
   return new Promise((resolve) => {
@@ -142,27 +158,22 @@ export function rasterizePngForPrint(
   },
 ): BitRaster {
   const t0 = Date.now();
-
-  if (!options.dither) {
-    const bits = fastPngBase64ToBits(base64, {
-      threshold: options.threshold,
-      orientation: options.orientation,
-    });
-    console.info(
-      '[print-job] fastRasterize done in', Date.now() - t0, 'ms →',
-      bits.bytesPerRow * 8, '×', bits.height, 'dots |',
-      bits.data.length, 'bytes raster',
-    );
-    return bits;
-  }
+  const inputLen = base64.length;
 
   let gray = pngBase64ToGray(base64);
+  const tDecode = Date.now();
+
   console.info(
     '[print-job] rasterize: PNG decoded →', gray.width, '×', gray.height,
+    '| base64:', Math.round(inputLen / 1024), 'KB',
+    '| decode:', tDecode - t0, 'ms',
     '| label:', options.widthMm.toFixed(1), '×', options.heightMm.toFixed(1), 'mm',
     '| orient:', options.orientation + '°',
   );
+
   gray = rotateGray(gray, options.orientation);
+  const tRotate = Date.now();
+
   const paper = orientedPrintSize(options.widthMm, options.heightMm, options.orientation);
   const bits = finalizeGrayForPrint(gray, {
     widthMm: paper.widthMm,
@@ -171,10 +182,15 @@ export function rasterizePngForPrint(
     dither: options.dither,
     hOffsetMm: options.hOffsetMm,
   });
+  const tFinalize = Date.now();
+
   console.info(
-    '[print-job] rasterize done in', Date.now() - t0, 'ms →',
+    '[print-job] rasterize done in', tFinalize - t0, 'ms →',
     bits.bytesPerRow * 8, '×', bits.height, 'dots |',
-    bits.data.length, 'bytes raster',
+    bits.data.length, 'bytes raster |',
+    'decode:', tDecode - t0, 'ms |',
+    'rotate:', tRotate - tDecode, 'ms |',
+    'finalize:', tFinalize - tRotate, 'ms',
   );
   return bits;
 }
@@ -230,7 +246,7 @@ export function encodeConnectedPrinterJob(
       gapMm: spec.gapMm,
       copies: 1,
       density: options.density,
-      speed: options.speed ?? 5,
+      speed: options.speed ?? 6,
       media: spec.mediaType,
       x: spec.xOffsetDots,
       y: spec.yOffsetDots,
@@ -240,7 +256,7 @@ export function encodeConnectedPrinterJob(
       spec.widthMm.toFixed(1), '×', spec.heightMm.toFixed(1), 'mm |',
       'gap:', spec.gapMm, 'mm | media:', spec.mediaType,
       '| xOffset:', spec.xOffsetDots, 'dots | yOffset:', spec.yOffsetDots, 'dots |',
-      'density:', options.density, '| speed:', options.speed ?? 5,
+      'density:', options.density, '| speed:', options.speed ?? 6,
     );
     return job;
   }
@@ -268,9 +284,34 @@ export async function sendIsolatedPrintCopies(jobBytes: Uint8Array, copies: numb
   console.info('[print-job] sending', n, 'copies,', jobBytes.length, 'bytes/copy');
   const t0 = Date.now();
   for (let i = 0; i < n; i++) {
-    await manager.print(Uint8Array.from(jobBytes));
+    // jobBytes is already immutable (fresh buffer from encodeTscBitmapJob / encodeEscPosJob).
+    // Avoid Uint8Array.from() deep copy — saves ~200–300 KB allocation per copy.
+    await manager.print(jobBytes);
   }
   console.info('[print-job] all', n, 'copies sent in', Date.now() - t0, 'ms');
+}
+
+export type NativePngPrintOptions = {
+  pngBase64: string;
+  widthMm: number;
+  heightMm: number;
+  gapMm: number;
+  copies?: number;
+  density?: number | null;
+  speed?: number | null;
+  vOffsetMm?: number;
+  hOffsetMm?: number;
+  media?: 'gap' | 'bline' | 'continuous';
+  orientation?: number;
+  dpi?: number;
+};
+
+/**
+ * Prefer Ninestar LabelCommand native path (SDK-style, no JS rasterize).
+ * Returns true when the job was sent natively; false → caller should use JS path.
+ */
+export async function tryNativeSdkPngPrint(options: NativePngPrintOptions): Promise<boolean> {
+  return getPrinterManager().printPngLabelFast(options);
 }
 
 export function formatPrintFailure(error: unknown): string {
