@@ -73,7 +73,12 @@ function boxEl(
   };
 }
 
-function lineEl(left: number, top: number, width: number): LabelElement {
+function lineEl(
+  left: number,
+  top: number,
+  width: number,
+  extra: Partial<typeof DEFAULT_LINE_STATE> = {},
+): LabelElement {
   return {
     ...DEFAULT_LINE_STATE,
     id: generateId(),
@@ -82,6 +87,7 @@ function lineEl(left: number, top: number, width: number): LabelElement {
     top,
     width,
     height: 0.35,
+    ...extra,
   };
 }
 
@@ -316,21 +322,23 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
     }
 
     case 'jew-rattail-3row-14x100': {
-      // 3 labels across: each width 14.3 mm, distance between labels 1.7 mm, length 100 mm.
-      // Total active span = 3 * 14.3 + 2 * 1.7 = 42.9 + 3.4 = 46.3 mm.
-      // Total roll/paper width = 50.0 mm (standard 2" / 50 mm jewelry roll).
-      // Left/Right margin = (50.0 - 46.3) / 2 = 1.85 mm.
+      // 3 labels across matching user diagram:
+      // - Rectangular printable body at the TOP (y = 1.0 to 59.0 mm)
+      // - Dashed fold line in the middle of the body (y = 30.0 mm)
+      // - Narrow loop strap/tail extending at the BOTTOM (y = 59.0 to 99.0 mm)
+      // Each label width = 14.3 mm, distance between labels = 1.7 mm, total roll = 50.0 mm
       const colW = 14.3;
       const colGap = 1.7;
       const startX = 1.85;
-      const tailW = 3.2;
+      const bodyTop = 1.0;
+      const bodyH = 58.0;
+      const foldY = 30.0; // Fold line at Y = 30.0 mm (splits body into two 29 mm panels)
+      const tailW = 2.8;
+      const tailTop = 59.0;
       const tailH = 40.0;
-      const bodyTop = 41.5;
-      const bodyH = 57.0;
-      const foldY = bodyTop + 28.5; // Fold line at Y = 70.0 mm
       const allEls: LabelElement[] = [];
 
-      const mockData = {
+      const itemData = {
         title: 'GOLD RING',
         karat: '22K (916) BIS',
         grWt: '3.450g',
@@ -344,59 +352,58 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
       for (let i = 0; i < 3; i++) {
         const colX = startX + i * (colW + colGap);
         const tailX = colX + (colW - tailW) / 2;
-        const data = mockData;
 
-        // 1. Narrow loop tail at the top (3.2 mm x 40.0 mm)
-        allEls.push(boxEl(tailX, 1.5, tailW, tailH, { rounded: true, radius: 1.6 }));
-        // 2. Main printable tag body (14.3 mm x 57.0 mm)
+        // 1. Main printable tag body at the TOP (14.3 mm x 58.0 mm)
         allEls.push(boxEl(colX, bodyTop, colW, bodyH, { rounded: true, radius: 2.2 }));
-        // 3. Middle fold guide line (at Y = 70.0 mm)
-        allEls.push(lineEl(colX + 0.6, foldY, colW - 1.2));
+        // 2. Middle dashed fold guide line (at Y = 30.0 mm)
+        allEls.push(lineEl(colX + 0.6, foldY, colW - 1.2, { lineStyle: 'dashed' }));
+        // 3. Narrow loop tail extending at the BOTTOM (2.8 mm x 40.0 mm)
+        allEls.push(boxEl(tailX, tailTop, tailW, tailH, { rounded: true, radius: 1.4 }));
 
-        // --- Upper Fold Panel (Front Details: 14.3 mm x 28.5 mm) ---
+        // --- Upper Fold Panel (Front Details: 14.3 mm x 29.0 mm) ---
         allEls.push(
-          textEl({ left: colX + 0.4, top: bodyTop + 2.0, width: colW - 0.8 }, data.title, smallPt * 0.9, {
+          textEl({ left: colX + 0.4, top: bodyTop + 2.0, width: colW - 0.8 }, itemData.title, smallPt * 0.9, {
             align: 'center',
             bold: true,
           }),
         );
         allEls.push(
-          textEl({ left: colX + 0.4, top: bodyTop + 7.5, width: colW - 0.8 }, data.karat, smallPt * 0.75, {
+          textEl({ left: colX + 0.4, top: bodyTop + 7.5, width: colW - 0.8 }, itemData.karat, smallPt * 0.75, {
             align: 'center',
           }),
         );
         allEls.push(
-          textEl({ left: colX + 0.4, top: bodyTop + 12.8, width: colW - 0.8 }, `Gr: ${data.grWt}`, smallPt * 0.72, {
+          textEl({ left: colX + 0.4, top: bodyTop + 12.8, width: colW - 0.8 }, `Gr: ${itemData.grWt}`, smallPt * 0.72, {
             align: 'center',
           }),
         );
         allEls.push(
-          textEl({ left: colX + 0.4, top: bodyTop + 17.5, width: colW - 0.8 }, `Nt: ${data.ntWt}`, smallPt * 0.72, {
+          textEl({ left: colX + 0.4, top: bodyTop + 17.5, width: colW - 0.8 }, `Nt: ${itemData.ntWt}`, smallPt * 0.72, {
             align: 'center',
           }),
         );
         allEls.push(
-          textEl({ left: colX + 0.4, top: bodyTop + 22.8, width: colW - 0.8 }, data.price, smallPt * 0.82, {
+          textEl({ left: colX + 0.4, top: bodyTop + 22.8, width: colW - 0.8 }, itemData.price, smallPt * 0.82, {
             align: 'center',
             bold: true,
           }),
         );
 
-        // --- Lower Fold Panel (Back Details & Barcode: 14.3 mm x 28.5 mm) ---
+        // --- Lower Fold Panel (Back Details & Barcode: 14.3 mm x 29.0 mm) ---
         allEls.push(
           barcodeEl(
             { left: colX + 0.8, top: foldY + 3.0, width: colW - 1.6, height: 11.0 },
-            `9160${i + 1}450`,
+            itemData.barcode,
             { fontSize: smallPt * 0.65 },
           ),
         );
         allEls.push(
-          textEl({ left: colX + 0.4, top: foldY + 16.0, width: colW - 0.8 }, data.sku, smallPt * 0.75, {
+          textEl({ left: colX + 0.4, top: foldY + 16.0, width: colW - 0.8 }, itemData.sku, smallPt * 0.75, {
             align: 'center',
           }),
         );
         allEls.push(
-          textEl({ left: colX + 0.4, top: foldY + 21.0, width: colW - 0.8 }, 'HUID: A916B2', smallPt * 0.7, {
+          textEl({ left: colX + 0.4, top: foldY + 21.0, width: colW - 0.8 }, itemData.huid, smallPt * 0.7, {
             align: 'center',
           }),
         );
@@ -406,25 +413,29 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
     }
 
     case 'jew-rattail-single-14x100': {
-      // Single 14.3 mm x 100 mm Rat Tail Jewelry Tag
-      const tailW = 3.2;
-      const tailH = 40.0;
-      const tailX = (w - tailW) / 2;
+      // Single 14.3 mm x 100 mm Rat Tail Jewelry Tag matching user diagram:
+      // - Body at the TOP (y = 1.0 to 59.0 mm)
+      // - Dashed fold line in the middle (y = 30.0 mm)
+      // - Tail at the BOTTOM (y = 59.0 to 99.0 mm)
       const bodyW = 14.3;
       const bodyX = 0;
-      const bodyTop = 41.5;
-      const bodyH = 57.0;
-      const foldY = bodyTop + 28.5; // at Y = 70.0 mm
+      const bodyTop = 1.0;
+      const bodyH = 58.0;
+      const foldY = 30.0;
+      const tailW = 2.8;
+      const tailTop = 59.0;
+      const tailH = 40.0;
+      const tailX = (w - tailW) / 2;
 
       return [
-        // Loop strap at the top
-        boxEl(tailX, 1.5, tailW, tailH, { rounded: true, radius: 1.6 }),
-        // Printable foldable body
+        // Printable foldable body at top
         boxEl(bodyX, bodyTop, bodyW, bodyH, { rounded: true, radius: 2.2 }),
-        // Fold guide line
-        lineEl(bodyX + 0.6, foldY, bodyW - 1.2),
+        // Fold guide line (dashed)
+        lineEl(bodyX + 0.6, foldY, bodyW - 1.2, { lineStyle: 'dashed' }),
+        // Loop strap at bottom
+        boxEl(tailX, tailTop, tailW, tailH, { rounded: true, radius: 1.4 }),
 
-        // Front details (upper half of body)
+        // Front details (upper half of body: y = 1 to 30 mm)
         textEl({ left: bodyX + 0.4, top: bodyTop + 2.0, width: bodyW - 0.8 }, 'GOLD RING', smallPt * 0.95, {
           align: 'center',
           bold: true,
@@ -443,7 +454,7 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
           bold: true,
         }),
 
-        // Back details (lower half of body)
+        // Back details (lower half of body: y = 30 to 59 mm)
         barcodeEl({ left: bodyX + 0.8, top: foldY + 3.0, width: bodyW - 1.6, height: 11.5 }, '91603450', {
           fontSize: smallPt * 0.7,
         }),
