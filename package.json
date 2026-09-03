@@ -81,6 +81,15 @@
     "build:android:dev": "node ./scripts/eas-build.js android development"
   },
   "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "@react-native-ml-kit/text-recognition",
+          "td404-printer"
+        ],
+        "listUnknownPackages": false
+      }
+    },
     "autolinking": {
       "android": {
         "exclude": [
