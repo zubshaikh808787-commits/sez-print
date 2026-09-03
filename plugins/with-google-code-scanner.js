@@ -2,10 +2,11 @@ const { withAndroidManifest } = require('@expo/config-plugins');
 
 /**
  * Expo Config Plugin to ensure Google Play Services downloads the Code Scanner
- * ('barcode_ui') module at app install/runtime.
+ * ('barcode_ui'), Barcode Scanning ('barcode'), and Text Recognition ('ocr')
+ * modules at app install/runtime.
  *
  * This prevents the GmsBarcodeScanning error:
- * "Scanning failed: Failed to scan code." in expo-dev-launcher.
+ * "Scanning failed: Failed to scan code." in expo-dev-launcher and expo-camera.
  */
 function withGoogleCodeScanner(config) {
   return withAndroidManifest(config, (config) => {
@@ -19,18 +20,22 @@ function withGoogleCodeScanner(config) {
       (item) => item.$ && item.$['android:name'] === depName,
     );
 
+    const requiredModules = ['barcode_ui', 'barcode', 'ocr'];
+
     if (!existing) {
       mainApplication['meta-data'].push({
         $: {
           'android:name': depName,
-          'android:value': 'barcode_ui',
+          'android:value': requiredModules.join(','),
         },
       });
     } else {
-      const current = existing.$['android:value'] || '';
-      if (!current.includes('barcode_ui')) {
-        existing.$['android:value'] = current ? `${current},barcode_ui` : 'barcode_ui';
-      }
+      const current = (existing.$['android:value'] || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const combined = Array.from(new Set([...current, ...requiredModules]));
+      existing.$['android:value'] = combined.join(',');
     }
 
     return config;
