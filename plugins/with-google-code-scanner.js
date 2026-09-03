@@ -5,12 +5,17 @@ const { withAndroidManifest } = require('@expo/config-plugins');
  * ('barcode_ui'), Barcode Scanning ('barcode'), and Text Recognition ('ocr')
  * modules at app install/runtime.
  *
- * This prevents the GmsBarcodeScanning error:
- * "Scanning failed: Failed to scan code." in expo-dev-launcher and expo-camera.
+ * Adds tools:replace="android:value" to override the default single 'barcode_ui'
+ * from expo-dev-launcher and prevent Gradle manifest merger conflicts.
  */
 function withGoogleCodeScanner(config) {
   return withAndroidManifest(config, (config) => {
-    const mainApplication = config.modResults.manifest.application[0];
+    const manifest = config.modResults.manifest;
+    if (!manifest.$['xmlns:tools']) {
+      manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
+    }
+
+    const mainApplication = manifest.application[0];
     if (!mainApplication['meta-data']) {
       mainApplication['meta-data'] = [];
     }
@@ -27,6 +32,7 @@ function withGoogleCodeScanner(config) {
         $: {
           'android:name': depName,
           'android:value': requiredModules.join(','),
+          'tools:replace': 'android:value',
         },
       });
     } else {
@@ -36,6 +42,7 @@ function withGoogleCodeScanner(config) {
         .filter(Boolean);
       const combined = Array.from(new Set([...current, ...requiredModules]));
       existing.$['android:value'] = combined.join(',');
+      existing.$['tools:replace'] = 'android:value';
     }
 
     return config;
