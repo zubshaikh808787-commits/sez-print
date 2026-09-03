@@ -39,6 +39,7 @@ import {
 import { DegreesPropertyPanel } from '@/components/editor/degrees-property-panel';
 import { ArcTextPropertyPanel } from '@/components/editor/arctext-property-panel';
 import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel';
+import { ImagePropertyPanel, type ImagePropertyTab } from '@/components/editor/image-property-panel';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { ZoomableEditPad } from '@/components/editor/zoomable-edit-pad';
 import {
@@ -76,6 +77,7 @@ import {
   type LinePropertyTab,
   type PropertyTab,
   type QrcodePropertyTab,
+  type Rotation,
   type ShapePropertyTab,
   type TablePropertyTab,
   type TimePropertyTab,
@@ -243,6 +245,7 @@ type CanvasElementProps = {
   onDragEnd: (id: string, totalDxMm: number, totalDyMm: number) => void;
   /** Total resize offset in mm since the gesture started. */
   onResize: (id: string, totalDwMm: number, totalDhMm: number) => void;
+  onRotate?: (id: string) => void;
 };
 
 const CanvasElement = memo(function CanvasElement({
@@ -261,6 +264,7 @@ const CanvasElement = memo(function CanvasElement({
   onDragStart,
   onDragEnd,
   onResize,
+  onRotate,
 }: CanvasElementProps) {
   const size = elementSizeMm(element);
   const widthPx = Math.max(1, size.width * scale);
@@ -452,6 +456,15 @@ const CanvasElement = memo(function CanvasElement({
             pointerEvents="none"
             style={[styles.selectionOutline, { borderColor: selectionColor }]}
           />
+          <Pressable
+            hitSlop={10}
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onRotate?.(element.id);
+            }}
+            style={styles.rotateHandle}>
+            <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={11} />
+          </Pressable>
           <View
             {...resizeResponder.panHandlers}
             hitSlop={{ top: 10, bottom: 12, left: 10, right: 12 }}
@@ -593,6 +606,7 @@ export default function EditScreen() {
   const [timeTab, setTimeTab] = useState<TimePropertyTab>('Regular');
   const [arcTextTab, setArcTextTab] = useState<ArcTextPropertyTab>('Regular');
   const [degreesTab, setDegreesTab] = useState<PropertyTab>('Regular');
+  const [imageTab, setImageTab] = useState<ImagePropertyTab>('Regular');
 
   const [textEditId, setTextEditId] = useState<string | null>(null);
   const [textEditDraft, setTextEditDraft] = useState('');
@@ -1274,6 +1288,21 @@ export default function EditScreen() {
     setShowOpenModal(false);
   }, []);
 
+  const handleRotateElement = useCallback(
+    (id: string) => {
+      setElements(
+        (items) =>
+          items.map((el) => {
+            if (el.id !== id) return el;
+            const next = (((el.rotation ?? 0) + 90) % 360) as Rotation;
+            return { ...el, rotation: next };
+          }),
+        true,
+      );
+    },
+    [setElements],
+  );
+
   const handlePrint = useCallback(() => {
     saveDocument(false);
     router.push({ pathname: '/print', params: { labelId: docRef.current.id } });
@@ -1298,11 +1327,15 @@ export default function EditScreen() {
     const asset = result.assets[0];
     const maxW = docRef.current.widthMm * 0.5;
     const ratio = asset.width && asset.height ? asset.height / asset.width : 1;
-    addElement('image', {
+    const el = addElement('image', {
       uri: asset.uri,
       width: maxW,
       height: Math.min(maxW * ratio, docRef.current.heightMm - 2),
     });
+    if (el) {
+      setImageTab('Regular');
+      setPanelOpen(true);
+    }
   }, [addElement]);
 
   useFocusEffect(
@@ -1708,6 +1741,7 @@ export default function EditScreen() {
                             onDragStart={handleDragStart}
                             onDragEnd={handleDragEnd}
                             onResize={handleResize}
+                            onRotate={handleRotateElement}
                           />
                         ))
                       : null}
@@ -1840,6 +1874,18 @@ export default function EditScreen() {
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}
             contentFocusRequest={contentFocusRequest}
+          />
+        );
+      case 'image':
+        return (
+          <ImagePropertyPanel
+            activeTab={imageTab}
+            onTabChange={setImageTab}
+            state={selectedElement}
+            patch={patchSelected}
+            labelWidthMm={labelBounds.widthMm}
+            labelHeightMm={labelBounds.heightMm}
+            elementHeightMm={selectedElementHeightMm}
           />
         );
       default:
@@ -2344,6 +2390,23 @@ const styles = StyleSheet.create({
     borderRightWidth: 2.5,
     borderBottomWidth: 2.5,
     borderColor: Palette.accent,
+  },
+  rotateHandle: {
+    position: 'absolute',
+    right: -10,
+    top: -10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Palette.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.25,
+    shadowRadius: 2,
+    elevation: 3,
   },
   lockBadge: {
     position: 'absolute',

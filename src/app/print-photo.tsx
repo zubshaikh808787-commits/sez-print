@@ -179,6 +179,7 @@ export default function PrintPhotoScreen() {
   const [footerHeight, setFooterHeight] = useState(72);
   const [sizeSheetOpen, setSizeSheetOpen] = useState(false);
   const [printSize, setPrintSize] = useState<LabelSizeMm | null>(null);
+  const [photoRotation, setPhotoRotation] = useState<0 | 90 | 180 | 270>(0);
   const pendingPrintRef = useRef(false);
 
   const shotRef = useRef<ViewShot>(null);
@@ -471,7 +472,10 @@ export default function PrintPhotoScreen() {
                 ]}>
                 <Image
                   source={{ uri: primaryPhoto }}
-                  style={StyleSheet.absoluteFillObject}
+                  style={[
+                    StyleSheet.absoluteFillObject,
+                    { transform: [{ rotate: `${photoRotation}deg` }] },
+                  ]}
                   contentFit="contain"
                 />
               </View>
@@ -509,13 +513,27 @@ export default function PrintPhotoScreen() {
                 }}>
                 <Image
                   source={{ uri: primaryPhoto }}
-                  style={StyleSheet.absoluteFillObject}
+                  style={[
+                    StyleSheet.absoluteFillObject,
+                    { transform: [{ rotate: `${photoRotation}deg` }] },
+                  ]}
                   contentFit="contain"
                 />
               </View>
             ) : null}
           </ViewShot>
         </View>
+
+        {primaryPhoto ? (
+          <View style={[styles.photoActionRow, { width: contentWidth - 24 }]}>
+            <Pressable
+              onPress={() => setPhotoRotation((r) => ((r + 90) % 360) as 0 | 90 | 180 | 270)}
+              style={({ pressed }) => [styles.photoRotateBtn, pressed && styles.pressed]}>
+              <AppIcon name="arrow.clockwise" tintColor="#0274DF" size={16} />
+              <Text style={styles.photoRotateBtnText}>Rotate Photo ({photoRotation}°)</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         <Pressable
           onPress={pickPhoto}
@@ -605,7 +623,13 @@ export default function PrintPhotoScreen() {
         </View>
 
         <View style={[styles.card, { width: contentWidth - 24 }]}>
-          <Text style={styles.groupLabel}>Orientation</Text>
+          <Text style={styles.groupLabel}>Photo Rotation</Text>
+          <ChipGroup
+            options={['0°', '90°', '180°', '270°']}
+            selected={`${photoRotation}°`}
+            onSelect={(deg) => setPhotoRotation(parseInt(deg, 10) as 0 | 90 | 180 | 270)}
+          />
+          <Text style={[styles.groupLabel, styles.groupSpaced]}>Orientation</Text>
           <ChipGroup options={ORIENTATIONS} selected={orientation} onSelect={setOrientation} />
           <Text style={[styles.groupLabel, styles.groupSpaced]}>Paper Type</Text>
           <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
@@ -747,6 +771,27 @@ const styles = StyleSheet.create({
     ...cardShadow,
   },
   placeholderHint: { color: Palette.muted, fontSize: 13, fontWeight: '400' },
+  photoActionRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+  },
+  photoRotateBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  photoRotateBtnText: {
+    color: '#0274DF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   addPhotoCard: {
     marginTop: 14,
     backgroundColor: '#FFFFFF',
