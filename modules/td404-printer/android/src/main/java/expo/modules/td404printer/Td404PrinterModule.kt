@@ -430,8 +430,7 @@ class Td404PrinterModule : Module() {
       }
     }
 
-    val sizeW = Math.max(1, Math.round(widthMm).toInt())
-    val sizeH = Math.max(1, Math.round(heightMm).toInt())
+    val sizeCmd = "SIZE ${formatMm(widthMm)} mm,${formatMm(heightMm)} mm\r\n"
 
     val contentW = bitmap.width
     val contentH = bitmap.height
@@ -466,7 +465,7 @@ class Td404PrinterModule : Module() {
     }
 
     val header = "\r\n" +
-      "SIZE $sizeW mm,$sizeH mm\r\n" +
+      sizeCmd +
       gapCmd +
       "SPEED $speed\r\n" +
       "DENSITY $density\r\n" +
@@ -515,6 +514,15 @@ class Td404PrinterModule : Module() {
 
   private fun formatGap(gapMm: Double): String {
     val rounded = Math.round(gapMm * 100.0) / 100.0
+    return if (rounded == rounded.toLong().toDouble()) {
+      rounded.toLong().toString()
+    } else {
+      rounded.toString()
+    }
+  }
+
+  private fun formatMm(mm: Double): String {
+    val rounded = Math.round(mm * 100.0) / 100.0
     return if (rounded == rounded.toLong().toDouble()) {
       rounded.toLong().toString()
     } else {

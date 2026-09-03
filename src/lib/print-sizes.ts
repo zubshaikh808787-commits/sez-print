@@ -86,6 +86,13 @@ export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
     heightMm: 40,
   },
   {
+    id: '50x50',
+    label: '50 × 50 mm',
+    detail: '2 × 2 in Square Label',
+    widthMm: 50,
+    heightMm: 50,
+  },
+  {
     id: '50x30',
     label: '50 × 30 mm',
     detail: 'Standard Retail Tag',
@@ -332,8 +339,8 @@ export function applyPrintSize(
   const page = clampLabelMm(custom.widthMm, custom.heightMm);
   // Same size as the design — keep element positions (preview == print).
   if (
-    Math.abs(page.widthMm - source.widthMm) < 0.05 &&
-    Math.abs(page.heightMm - source.heightMm) < 0.05
+    Math.abs(page.widthMm - source.widthMm) < 0.2 &&
+    Math.abs(page.heightMm - source.heightMm) < 0.2
   ) {
     return source;
   }

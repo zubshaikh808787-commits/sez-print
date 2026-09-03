@@ -166,13 +166,14 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 const CALIBRATION_SIZES = [
-  { label: '100×155 mm', widthMm: 100, heightMm: 155 },
+  { label: '4×6 in (101.6×152.4 mm)', widthMm: 101.6, heightMm: 152.4 },
+  { label: '50×50 mm', widthMm: 50, heightMm: 50 },
+  { label: '50×30 mm', widthMm: 50, heightMm: 30 },
   { label: '100×150 mm', widthMm: 100, heightMm: 150 },
-  { label: '4×6 in', widthMm: 101.6, heightMm: 152.4 },
   { label: '100×100 mm', widthMm: 100, heightMm: 100 },
   { label: '76×130 mm', widthMm: 76, heightMm: 130 },
-  { label: '50×30 mm', widthMm: 50, heightMm: 30 },
   { label: '57×30 mm', widthMm: 57, heightMm: 30 },
+  { label: '100×155 mm', widthMm: 100, heightMm: 155 },
 ];
 
 export default function CalibrationPrintScreen() {
@@ -194,8 +195,8 @@ export default function CalibrationPrintScreen() {
   const dpi = profile.dpi;
 
   const captureSize = useMemo(
-    () => printCaptureLayout(widthMm, heightMm).content,
-    [widthMm, heightMm],
+    () => printCaptureLayout(widthMm, heightMm, dpi).content,
+    [widthMm, heightMm, dpi],
   );
 
   const previewFit = fitLabelSize(widthMm, heightMm, 280, 180);

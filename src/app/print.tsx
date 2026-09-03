@@ -409,7 +409,7 @@ export default function PrintScreen() {
   const printCaptureSize = useMemo(() => {
     const doc = displayDocument ?? previewDocument;
     if (!doc) return { widthPx: 8, heightPx: 8 };
-    return printCaptureLayout(doc.widthMm, doc.heightMm).content;
+    return printCaptureLayout(doc.widthMm, doc.heightMm, getPrinterManager().getPrintDpi()).content;
   }, [displayDocument, previewDocument]);
 
   /** Live store ups config (compose strips it from the print document). */
@@ -543,7 +543,7 @@ export default function PrintScreen() {
         // When connection is healthy (common case), ensureConnected() returns in <1ms
         // while the expensive ViewShot capture runs concurrently.
         timer.start('capture+verify');
-        const captureTarget = printCaptureLayout(widthMm, heightMm).content;
+        const captureTarget = printCaptureLayout(widthMm, heightMm, manager.getPrintDpi()).content;
         const [connectionResult, base64] = await Promise.all([
           manager.ensureConnected().catch((err) => {
             // Let the error surface after capture is done.

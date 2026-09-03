@@ -100,12 +100,12 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
   },
 };
 
-export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-304'];
+export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-203'];
 
 /** Authoritative conversion from physical millimetres to printer dots. */
-export function mmToDots(mm: number, dpi = 304): number {
+export function mmToDots(mm: number, dpi = 203): number {
   if (!Number.isFinite(mm) || mm <= 0) return 0;
-  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : 304;
+  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : 203;
   return Math.round((mm * d) / MM_PER_INCH);
 }
 
@@ -167,23 +167,17 @@ export type CreatePrintSpecOptions = {
 
 /**
  * Compute the printhead X offset (in dots) to center a label on the printhead.
- * Compute the printhead X offset (in dots) to center a label on the printhead.
- * Center-fed printers (most desktop thermal) physically center the media under
- * a printhead that is wider than the label. The BITMAP x coordinate must account
- * for this so the image lands on the media, not shifted to one side of the
- * printhead.
- *
- * Left-aligned printers (receipt printers) feed from the left edge — no offset.
+ * In TSPL command language, the printer firmware uses the SIZE command and
+ * hardware sensor calibration (GAP / BLINE / REFERENCE 0,0) to establish
+ * the label's origin at the top-left of the media.
+ * Injecting an artificial printhead offset shifts the image off the physical label.
+ * Hardware offset is 0; fine-tuning is controlled by user calibration offsets.
  */
 export function computePrintheadCenteringOffset(
-  labelWidthDots: number,
-  profile: PrinterProfile,
+  _labelWidthDots: number,
+  _profile: PrinterProfile,
 ): number {
-  if (profile.alignment !== 'center') return 0;
-  // Full-width labels (e.g. 4x6 / 100mm / 108mm) align to the left guide — do not shift off-edge
-  if (labelWidthDots >= profile.printheadWidthDots * 0.85) return 0;
-  const gap = profile.printheadWidthDots - labelWidthDots;
-  return gap > 0 ? Math.round(gap / 2) : 0;
+  return 0;
 }
 
 /**

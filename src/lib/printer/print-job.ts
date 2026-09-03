@@ -86,9 +86,10 @@ export function printBitmapSize(widthMm: number, heightMm: number) {
 }
 
 /** ViewShot size (`content`) vs TSPL canvas (`canvas`) at the connected printer DPI. */
-export function printCaptureLayout(widthMm: number, heightMm: number) {
+export function printCaptureLayout(widthMm: number, heightMm: number, dpi?: number) {
   const media = printMediaSizeMm(widthMm, heightMm);
-  return geometryPrintCaptureLayout(media.widthMm, media.heightMm, getPrinterManager().getPrintDpi());
+  const targetDpi = Number.isFinite(dpi) && (dpi as number) > 0 ? (dpi as number) : getPrinterManager().getPrintDpi();
+  return geometryPrintCaptureLayout(media.widthMm, media.heightMm, targetDpi);
 }
 
 /** 90° / 270° swap paper millimetres so TSPL SIZE matches the rotated bitmap. */

@@ -171,23 +171,22 @@ export function printCaptureLayout(widthMm: number, heightMm: number, dpi = PRIN
 }
 
 /**
- * TSPL SIZE uses integer millimetres only (Ninestar `addSize(w, h)` / TD-404 firmware).
- * Decimals like `101.6` are often ignored → printer falls back to a tiny default size
- * (looks like a small, off-center print on 4×6 stock).
+ * TSPL SIZE command with accurate physical millimetres.
+ * Cleanly formats integers (50 mm) or decimals (101.6 mm).
  */
 export function formatTsplSizeCommand(widthMm: number, heightMm: number): string {
-  const w = Math.max(1, Math.round(widthMm));
-  const h = Math.max(1, Math.round(heightMm));
+  const w = Number((Math.round(widthMm * 100) / 100).toFixed(2));
+  const h = Number((Math.round(heightMm * 100) / 100).toFixed(2));
   return `SIZE ${w} mm,${h} mm`;
 }
 
 /**
- * Media size used for both TSPL SIZE and mm→dots so the bitmap matches the SIZE command.
- * 4×6 in (101.6×152.4) → 102×152 mm at the printer.
+ * Media size preserving true physical millimetres for exact 1:1 preview/print fidelity.
+ * 4×6 in is preserved as 101.6 × 152.4 mm (no artificial integer rounding distortion).
  */
 export function printMediaSizeMm(widthMm: number, heightMm: number): LabelSizeMm {
   return {
-    widthMm: Math.max(1, Math.round(widthMm)),
-    heightMm: Math.max(1, Math.round(heightMm)),
+    widthMm: Math.max(0.1, Math.round(widthMm * 100) / 100),
+    heightMm: Math.max(0.1, Math.round(heightMm * 100) / 100),
   };
 }
