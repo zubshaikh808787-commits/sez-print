@@ -330,16 +330,21 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
       const foldY = bodyTop + 28.5; // Fold line at Y = 70.0 mm
       const allEls: LabelElement[] = [];
 
-      const mockData = [
-        { title: 'Au 750', karat: '18K Gold', grWt: '3.250g', ntWt: '3.100g', sku: 'RNG-101', price: '₹ 22,500' },
-        { title: 'Au 916', karat: '22K Gold', grWt: '4.450g', ntWt: '4.280g', sku: 'ERN-204', price: '₹ 32,900' },
-        { title: 'Pt 950', karat: 'Platinum', grWt: '5.100g', ntWt: '4.950g', sku: 'PND-308', price: '₹ 41,200' },
-      ];
+      const mockData = {
+        title: 'GOLD RING',
+        karat: '22K (916) BIS',
+        grWt: '3.450g',
+        ntWt: '3.280g',
+        sku: 'RNG-450',
+        price: '₹ 24,950',
+        barcode: '91603450',
+        huid: 'HUID: A916B2',
+      };
 
       for (let i = 0; i < 3; i++) {
         const colX = startX + i * (colW + colGap);
         const tailX = colX + (colW - tailW) / 2;
-        const data = mockData[i];
+        const data = mockData;
 
         // 1. Narrow loop tail at the top (3.2 mm x 40.0 mm)
         allEls.push(boxEl(tailX, 1.5, tailW, tailH, { rounded: true, radius: 1.6 }));

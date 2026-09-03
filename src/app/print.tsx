@@ -54,7 +54,12 @@ import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store'
 import { useSettingsStore } from '@/stores/settings-store';
 
 import { fitLabelSize, printMediaSizeMm, type LabelSizeMm } from '@/lib/label-geometry';
-import { applyPrintSize, formatPrintSize, type PrintSizePreset } from '@/lib/print-sizes';
+import {
+  applyPrintSize,
+  formatPrintSize,
+  PRINT_SIZE_PRESETS,
+  type PrintSizePreset,
+} from '@/lib/print-sizes';
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
 const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent', 'Black mark'] as const;
@@ -425,12 +430,37 @@ export default function PrintScreen() {
     setGapLength(2);
   }, [upsSource]);
 
+  const isJewelryTag = useMemo(() => {
+    if (!previewDocument) return false;
+    const cat = previewDocument.templateCategory?.toLowerCase() ?? '';
+    const name = previewDocument.name?.toLowerCase() ?? '';
+    const prev = previewDocument.templatePreviewType?.toLowerCase() ?? '';
+    return (
+      cat.includes('jewel') ||
+      name.includes('jewel') ||
+      name.includes('rat tail') ||
+      name.includes('rattail') ||
+      prev.startsWith('jew-') ||
+      (previewDocument.widthMm <= 18 && previewDocument.heightMm >= 50)
+    );
+  }, [previewDocument]);
+
   useEffect(() => {
     if (!previewDocument || printSize) return;
-    // Lock to integer media mm so SIZE / capture / preview stay in sync (4×6 → 102×152).
+    // For jewelry tags, automatically default to 3-Across (3-UPS)
+    // so the design prints equally across all 3 labels on the 50 mm roll.
+    if (isJewelryTag && previewDocument.widthMm <= 18) {
+      const preset3up = PRINT_SIZE_PRESETS.find((p) => p.id === 'jewellery-3up-14x100');
+      if (preset3up) {
+        setPrintPreset(preset3up);
+        setPrintSize({ widthMm: 50, heightMm: 100 });
+        return;
+      }
+    }
+
     const media = printMediaSizeMm(previewDocument.widthMm, previewDocument.heightMm);
     setPrintSize(media);
-  }, [previewDocument, printSize]);
+  }, [previewDocument, printSize, isJewelryTag]);
 
   // Keep print size locked to the composed strip for ups jobs (exact mm, no rescale).
   useEffect(() => {
@@ -873,6 +903,35 @@ export default function PrintScreen() {
           <View style={styles.settingsCard}>
             <Text style={styles.groupLabel}>Orientation</Text>
             <ChipGroup options={ORIENTATIONS} selected={orientation} onSelect={setOrientation} />
+
+            {isJewelryTag ? (
+              <>
+                <Text style={[styles.groupLabel, styles.groupLabelSpaced]}>Jewelry Row Layout</Text>
+                <ChipGroup
+                  options={['3-Across (All 3 Labels)', 'Single Label']}
+                  selected={
+                    printPreset?.id === 'jewellery-3up-14x100'
+                      ? '3-Across (All 3 Labels)'
+                      : 'Single Label'
+                  }
+                  onSelect={(opt) => {
+                    if (opt === '3-Across (All 3 Labels)') {
+                      const p =
+                        PRINT_SIZE_PRESETS.find((preset) => preset.id === 'jewellery-3up-14x100') ??
+                        null;
+                      setPrintPreset(p);
+                      setPrintSize({ widthMm: 50, heightMm: 100 });
+                    } else {
+                      setPrintPreset(null);
+                      setPrintSize({
+                        widthMm: previewDocument?.widthMm ?? 14.3,
+                        heightMm: previewDocument?.heightMm ?? 100,
+                      });
+                    }
+                  }}
+                />
+              </>
+            ) : null}
 
             <Text style={[styles.groupLabel, styles.groupLabelSpaced]}>Paper Type</Text>
             <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
