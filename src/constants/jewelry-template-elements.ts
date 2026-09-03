@@ -85,6 +85,18 @@ function lineEl(left: number, top: number, width: number): LabelElement {
   };
 }
 
+function vLineEl(left: number, top: number, height: number): LabelElement {
+  return {
+    ...DEFAULT_LINE_STATE,
+    id: generateId(),
+    type: 'line',
+    left,
+    top,
+    width: 0.35,
+    height,
+  };
+}
+
 function jewFlagRight(w: number, h: number, smallPt: number, withText = true) {
   const panelW = w * 0.64;
   const panelH = (h - 1.2) / 2;
@@ -300,6 +312,156 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
         ),
         textEl({ left: pad + headW * 0.42, top: h * 0.68, width: headW * 0.55 }, '22 grams', smallPt * 0.9),
         boxEl(headW + pad, h * 0.2, stripW, h * 0.6, { rounded: false }),
+      ];
+    }
+
+    case 'jew-rattail-3row-55x80': {
+      const colW = 14.5;
+      const colGap = 3.5;
+      const startX = 2.2;
+      const tailW = 3.2;
+      const tailH = 32.0;
+      const bodyTop = 33.5;
+      const bodyH = 44.0;
+      const foldY = bodyTop + 22.0;
+      const allEls: LabelElement[] = [];
+
+      const mockData = [
+        { title: 'Au 750', karat: '18K Gold', wt: '2.45g', sku: 'RNG-101', price: '₹ 18,500' },
+        { title: 'Au 916', karat: '22K Gold', wt: '3.80g', sku: 'ERN-204', price: '₹ 28,900' },
+        { title: 'Pt 950', karat: 'Platinum', wt: '4.10g', sku: 'PND-308', price: '₹ 34,200' },
+      ];
+
+      for (let i = 0; i < 3; i++) {
+        const colX = startX + i * (colW + colGap);
+        const tailX = colX + (colW - tailW) / 2;
+        const data = mockData[i];
+
+        // Narrow loop strap/tail at the top (matching photo)
+        allEls.push(boxEl(tailX, 1.5, tailW, tailH, { rounded: true, radius: 1.5 }));
+        // Main printable tag body at the bottom
+        allEls.push(boxEl(colX, bodyTop, colW, bodyH, { rounded: true, radius: 2.2 }));
+        // Subtle horizontal fold line dividing front and back
+        allEls.push(lineEl(colX + 0.8, foldY, colW - 1.6));
+
+        // Upper Fold Panel (Front)
+        allEls.push(
+          textEl({ left: colX + 0.5, top: bodyTop + 1.8, width: colW - 1 }, data.title, smallPt * 0.85, {
+            align: 'center',
+            bold: true,
+          }),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.5, top: bodyTop + 6.8, width: colW - 1 }, data.karat, smallPt * 0.72, {
+            align: 'center',
+          }),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.5, top: bodyTop + 11.5, width: colW - 1 }, `Wt: ${data.wt}`, smallPt * 0.75, {
+            align: 'center',
+          }),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.5, top: bodyTop + 16.2, width: colW - 1 }, data.price, smallPt * 0.78, {
+            align: 'center',
+            bold: true,
+          }),
+        );
+
+        // Lower Fold Panel (Back) - Barcode & SKU
+        allEls.push(
+          barcodeEl(
+            { left: colX + 1.0, top: foldY + 2.5, width: colW - 2.0, height: 9.0 },
+            `9160${i + 1}45`,
+            { fontSize: smallPt * 0.65 },
+          ),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.5, top: foldY + 13.0, width: colW - 1 }, data.sku, smallPt * 0.72, {
+            align: 'center',
+          }),
+        );
+      }
+
+      return allEls;
+    }
+
+    case 'jew-rattail-vertical-15x80': {
+      const tailW = 3.5;
+      const tailH = 33.0;
+      const tailX = (w - tailW) / 2;
+      const bodyW = w - 1.2;
+      const bodyX = 0.6;
+      const bodyTop = 34.5;
+      const bodyH = 43.5;
+      const foldY = bodyTop + 21.5;
+
+      return [
+        // Top narrow strap / tail
+        boxEl(tailX, 1.5, tailW, tailH, { rounded: true, radius: 1.5 }),
+        // Main foldable body
+        boxEl(bodyX, bodyTop, bodyW, bodyH, { rounded: true, radius: 2.2 }),
+        // Fold guide line
+        lineEl(bodyX + 0.8, foldY, bodyW - 1.6),
+
+        // Upper Panel (Front Details)
+        textEl({ left: bodyX + 0.5, top: bodyTop + 2.0, width: bodyW - 1 }, 'GOLD RING', smallPt * 0.95, {
+          align: 'center',
+          bold: true,
+        }),
+        textEl({ left: bodyX + 0.5, top: bodyTop + 6.8, width: bodyW - 1 }, '22K (916) BIS', smallPt * 0.8, {
+          align: 'center',
+        }),
+        textEl({ left: bodyX + 0.5, top: bodyTop + 11.2, width: bodyW - 1 }, 'Gr: 3.450g', smallPt * 0.8, {
+          align: 'center',
+        }),
+        textEl({ left: bodyX + 0.5, top: bodyTop + 15.5, width: bodyW - 1 }, 'Nt: 3.280g', smallPt * 0.8, {
+          align: 'center',
+        }),
+
+        // Lower Panel (Back: Barcode, Code & MRP)
+        barcodeEl({ left: bodyX + 1.0, top: foldY + 2.5, width: bodyW - 2.0, height: 9.5 }, '91603450', {
+          fontSize: smallPt * 0.7,
+        }),
+        textEl({ left: bodyX + 0.5, top: foldY + 13.5, width: bodyW - 1 }, 'SKU: RNG-450', smallPt * 0.75, {
+          align: 'center',
+        }),
+        textEl({ left: bodyX + 0.5, top: foldY + 17.5, width: bodyW - 1 }, 'MRP: ₹ 24,950', smallPt * 0.85, {
+          align: 'center',
+          bold: true,
+        }),
+      ];
+    }
+
+    case 'jew-rattail-horizontal-80x15': {
+      const tailL = 1.5;
+      const tailW = 33.0;
+      const tailH = 3.5;
+      const tailY = (h - tailH) / 2;
+      const bodyL = 36.0;
+      const bodyW = 42.5;
+      const bodyH = h - 1.2;
+      const bodyY = 0.6;
+      const foldX = bodyL + 21.0;
+
+      return [
+        // Horizontal narrow strap / tail on the left
+        boxEl(tailL, tailY, tailW, tailH, { rounded: true, radius: 1.5 }),
+        // Main printable tag body on the right
+        boxEl(bodyL, bodyY, bodyW, bodyH, { rounded: true, radius: 2.2 }),
+        // Vertical fold separator
+        vLineEl(foldX, bodyY + 0.8, bodyH - 1.6),
+
+        // Left Tag Panel
+        textEl({ left: bodyL + 1.0, top: 1.5, width: 19.5 }, 'GOLD RING 22K', smallPt * 0.85, { bold: true }),
+        textEl({ left: bodyL + 1.0, top: 5.8, width: 19.5 }, 'Gr: 3.45g | Nt: 3.28g', smallPt * 0.72),
+        textEl({ left: bodyL + 1.0, top: 9.8, width: 19.5 }, '₹ 24,950', smallPt * 0.85, { bold: true }),
+
+        // Right Tag Panel (Barcode + SKU)
+        barcodeEl({ left: foldX + 1.5, top: 1.8, width: 18.5, height: 7.8 }, '91603450'),
+        textEl({ left: foldX + 1.5, top: 10.2, width: 18.5 }, 'SKU: RNG-916-450', smallPt * 0.72, {
+          align: 'center',
+        }),
       ];
     }
 

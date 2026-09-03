@@ -1,4 +1,4 @@
-﻿import { useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -139,6 +139,9 @@ interface TemplateItem {
     | 'jew-sample-50x19-tabs'
     | 'jew-sample-53x14-bar'
     | 'jew-rattail-143x635'
+    | 'jew-rattail-3row-55x80'
+    | 'jew-rattail-vertical-15x80'
+    | 'jew-rattail-horizontal-80x15'
     // --- SUPERMARKET ---
     | 'smkt-black-yellow-60x40'
     | 'smkt-orange-50x30'
@@ -852,7 +855,37 @@ const TEMPLATES: TemplateItem[] = [
     previewType: 'circle-50',
   },
 
-  // --- JEWELRY (14 items in exact order as screenshots) ---
+  // --- JEWELRY ---
+  {
+    id: 'jwl-rattail-3row',
+    name: '3-Row Rat Tail Tag',
+    nameLine2: 'Label-55x80 (3-Across)',
+    dimensions: '55 x 80',
+    category: 'Jewelry',
+    width: 55,
+    height: 80,
+    previewType: 'jew-rattail-3row-55x80',
+  },
+  {
+    id: 'jwl-rattail-vertical',
+    name: 'Rat Tail Vertical Tag',
+    nameLine2: 'Label-15x80 (Foldable)',
+    dimensions: '15 x 80',
+    category: 'Jewelry',
+    width: 15,
+    height: 80,
+    previewType: 'jew-rattail-vertical-15x80',
+  },
+  {
+    id: 'jwl-rattail-horizontal',
+    name: 'Rat Tail Horizontal Tag',
+    nameLine2: 'Label-80x15 (Landscape)',
+    dimensions: '80 x 15',
+    category: 'Jewelry',
+    width: 80,
+    height: 15,
+    previewType: 'jew-rattail-horizontal-80x15',
+  },
   {
     id: 'jwl-1',
     name: 'Dumbell Label-13x85',

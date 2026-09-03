@@ -106,6 +106,21 @@ export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
     widthMm: 50,
     heightMm: 15,
   },
+  {
+    id: 'jewellery-3up',
+    label: 'Jewellery 3-Row — 55 × 80 mm',
+    detail: '3 labels per row rat-tail sheet',
+    widthMm: 55,
+    heightMm: 80,
+    labelsPerRow: 3,
+  },
+  {
+    id: 'jewellery-rattail',
+    label: 'Rat Tail Jewellery — 15 × 80 mm',
+    detail: 'Foldable jewellery tag with loop strap',
+    widthMm: 15,
+    heightMm: 80,
+  },
   { id: 'cable', label: 'Cable Tag — 50 × 15 mm', widthMm: 50, heightMm: 15 },
   {
     id: '2ups',
