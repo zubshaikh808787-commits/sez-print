@@ -139,6 +139,8 @@ interface TemplateItem {
     | 'jew-sample-50x19-tabs'
     | 'jew-sample-53x14-bar'
     | 'jew-rattail-143x635'
+    | 'jew-rattail-3row-14x100'
+    | 'jew-rattail-single-14x100'
     | 'jew-rattail-3row-55x80'
     | 'jew-rattail-vertical-15x80'
     | 'jew-rattail-horizontal-80x15'
@@ -856,6 +858,26 @@ const TEMPLATES: TemplateItem[] = [
   },
 
   // --- JEWELRY ---
+  {
+    id: 'jwl-rattail-3row-14x100',
+    name: '3-Row Rat Tail Tag',
+    nameLine2: '14.3x100 mm (1.7mm gap)',
+    dimensions: '50 x 100',
+    category: 'Jewelry',
+    width: 50,
+    height: 100,
+    previewType: 'jew-rattail-3row-14x100',
+  },
+  {
+    id: 'jwl-rattail-single-14x100',
+    name: 'Rat Tail Vertical Tag',
+    nameLine2: '14.3x100 mm (Single)',
+    dimensions: '14.3 x 100',
+    category: 'Jewelry',
+    width: 14.3,
+    height: 100,
+    previewType: 'jew-rattail-single-14x100',
+  },
   {
     id: 'jwl-rattail-3row',
     name: '3-Row Rat Tail Tag',

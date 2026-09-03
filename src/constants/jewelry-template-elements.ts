@@ -315,6 +315,142 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
       ];
     }
 
+    case 'jew-rattail-3row-14x100': {
+      // 3 labels across: each width 14.3 mm, distance between labels 1.7 mm, length 100 mm.
+      // Total active span = 3 * 14.3 + 2 * 1.7 = 42.9 + 3.4 = 46.3 mm.
+      // Total roll/paper width = 50.0 mm (standard 2" / 50 mm jewelry roll).
+      // Left/Right margin = (50.0 - 46.3) / 2 = 1.85 mm.
+      const colW = 14.3;
+      const colGap = 1.7;
+      const startX = 1.85;
+      const tailW = 3.2;
+      const tailH = 40.0;
+      const bodyTop = 41.5;
+      const bodyH = 57.0;
+      const foldY = bodyTop + 28.5; // Fold line at Y = 70.0 mm
+      const allEls: LabelElement[] = [];
+
+      const mockData = [
+        { title: 'Au 750', karat: '18K Gold', grWt: '3.250g', ntWt: '3.100g', sku: 'RNG-101', price: '₹ 22,500' },
+        { title: 'Au 916', karat: '22K Gold', grWt: '4.450g', ntWt: '4.280g', sku: 'ERN-204', price: '₹ 32,900' },
+        { title: 'Pt 950', karat: 'Platinum', grWt: '5.100g', ntWt: '4.950g', sku: 'PND-308', price: '₹ 41,200' },
+      ];
+
+      for (let i = 0; i < 3; i++) {
+        const colX = startX + i * (colW + colGap);
+        const tailX = colX + (colW - tailW) / 2;
+        const data = mockData[i];
+
+        // 1. Narrow loop tail at the top (3.2 mm x 40.0 mm)
+        allEls.push(boxEl(tailX, 1.5, tailW, tailH, { rounded: true, radius: 1.6 }));
+        // 2. Main printable tag body (14.3 mm x 57.0 mm)
+        allEls.push(boxEl(colX, bodyTop, colW, bodyH, { rounded: true, radius: 2.2 }));
+        // 3. Middle fold guide line (at Y = 70.0 mm)
+        allEls.push(lineEl(colX + 0.6, foldY, colW - 1.2));
+
+        // --- Upper Fold Panel (Front Details: 14.3 mm x 28.5 mm) ---
+        allEls.push(
+          textEl({ left: colX + 0.4, top: bodyTop + 2.0, width: colW - 0.8 }, data.title, smallPt * 0.9, {
+            align: 'center',
+            bold: true,
+          }),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.4, top: bodyTop + 7.5, width: colW - 0.8 }, data.karat, smallPt * 0.75, {
+            align: 'center',
+          }),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.4, top: bodyTop + 12.8, width: colW - 0.8 }, `Gr: ${data.grWt}`, smallPt * 0.72, {
+            align: 'center',
+          }),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.4, top: bodyTop + 17.5, width: colW - 0.8 }, `Nt: ${data.ntWt}`, smallPt * 0.72, {
+            align: 'center',
+          }),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.4, top: bodyTop + 22.8, width: colW - 0.8 }, data.price, smallPt * 0.82, {
+            align: 'center',
+            bold: true,
+          }),
+        );
+
+        // --- Lower Fold Panel (Back Details & Barcode: 14.3 mm x 28.5 mm) ---
+        allEls.push(
+          barcodeEl(
+            { left: colX + 0.8, top: foldY + 3.0, width: colW - 1.6, height: 11.0 },
+            `9160${i + 1}450`,
+            { fontSize: smallPt * 0.65 },
+          ),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.4, top: foldY + 16.0, width: colW - 0.8 }, data.sku, smallPt * 0.75, {
+            align: 'center',
+          }),
+        );
+        allEls.push(
+          textEl({ left: colX + 0.4, top: foldY + 21.0, width: colW - 0.8 }, 'HUID: A916B2', smallPt * 0.7, {
+            align: 'center',
+          }),
+        );
+      }
+
+      return allEls;
+    }
+
+    case 'jew-rattail-single-14x100': {
+      // Single 14.3 mm x 100 mm Rat Tail Jewelry Tag
+      const tailW = 3.2;
+      const tailH = 40.0;
+      const tailX = (w - tailW) / 2;
+      const bodyW = 14.3;
+      const bodyX = 0;
+      const bodyTop = 41.5;
+      const bodyH = 57.0;
+      const foldY = bodyTop + 28.5; // at Y = 70.0 mm
+
+      return [
+        // Loop strap at the top
+        boxEl(tailX, 1.5, tailW, tailH, { rounded: true, radius: 1.6 }),
+        // Printable foldable body
+        boxEl(bodyX, bodyTop, bodyW, bodyH, { rounded: true, radius: 2.2 }),
+        // Fold guide line
+        lineEl(bodyX + 0.6, foldY, bodyW - 1.2),
+
+        // Front details (upper half of body)
+        textEl({ left: bodyX + 0.4, top: bodyTop + 2.0, width: bodyW - 0.8 }, 'GOLD RING', smallPt * 0.95, {
+          align: 'center',
+          bold: true,
+        }),
+        textEl({ left: bodyX + 0.4, top: bodyTop + 7.5, width: bodyW - 0.8 }, '22K (916) BIS', smallPt * 0.8, {
+          align: 'center',
+        }),
+        textEl({ left: bodyX + 0.4, top: bodyTop + 12.8, width: bodyW - 0.8 }, 'Gr Wt: 3.450g', smallPt * 0.75, {
+          align: 'center',
+        }),
+        textEl({ left: bodyX + 0.4, top: bodyTop + 17.5, width: bodyW - 0.8 }, 'Nt Wt: 3.280g', smallPt * 0.75, {
+          align: 'center',
+        }),
+        textEl({ left: bodyX + 0.4, top: bodyTop + 22.8, width: bodyW - 0.8 }, 'MRP: ₹ 24,950', smallPt * 0.85, {
+          align: 'center',
+          bold: true,
+        }),
+
+        // Back details (lower half of body)
+        barcodeEl({ left: bodyX + 0.8, top: foldY + 3.0, width: bodyW - 1.6, height: 11.5 }, '91603450', {
+          fontSize: smallPt * 0.7,
+        }),
+        textEl({ left: bodyX + 0.4, top: foldY + 16.5, width: bodyW - 0.8 }, 'SKU: RNG-450', smallPt * 0.75, {
+          align: 'center',
+        }),
+        textEl({ left: bodyX + 0.4, top: foldY + 21.5, width: bodyW - 0.8 }, 'HUID: B7810A', smallPt * 0.7, {
+          align: 'center',
+        }),
+      ];
+    }
+
     case 'jew-rattail-3row-55x80': {
       const colW = 14.5;
       const colGap = 3.5;

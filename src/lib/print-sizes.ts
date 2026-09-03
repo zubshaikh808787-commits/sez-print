@@ -107,6 +107,21 @@ export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
     heightMm: 15,
   },
   {
+    id: 'jewellery-3up-14x100',
+    label: 'Jewellery 3-Row — 50 × 100 mm',
+    detail: '14.3 mm width × 3, 1.7 mm distance',
+    widthMm: 50,
+    heightMm: 100,
+    labelsPerRow: 3,
+  },
+  {
+    id: 'jewellery-rattail-14x100',
+    label: 'Rat Tail Jewellery — 14.3 × 100 mm',
+    detail: '14.3 × 100 mm single tag with loop strap',
+    widthMm: 14.3,
+    heightMm: 100,
+  },
+  {
     id: 'jewellery-3up',
     label: 'Jewellery 3-Row — 55 × 80 mm',
     detail: '3 labels per row rat-tail sheet',
@@ -270,6 +285,42 @@ export function tileDocumentTwoUp(source: LabelDocument): LabelDocument {
   };
 }
 
+/** Three 14.3×100 mm labels across with 1.7 mm gutter (total 46.3 mm active on 50 mm roll). */
+export function tileDocumentThreeUpRatTail(source: LabelDocument): LabelDocument {
+  const cellW = 14.3;
+  const gap = 1.7;
+  const cellH = 100.0;
+  const leftMargin = 1.85; // Centers 46.3 mm active label area on 50 mm liner
+  const sx = cellW / Math.max(source.widthMm, 0.01);
+  const sy = cellH / Math.max(source.heightMm, 0.01);
+  const scaled: LabelElement[] = source.elements.map((el) => {
+    const next = {
+      ...el,
+      left: el.left * sx,
+      top: el.top * sy,
+      width: el.width * sx,
+    } as LabelElement;
+    if ('height' in next && typeof next.height === 'number') {
+      (next as { height: number }).height *= sy;
+    }
+    return next;
+  });
+  const elements = [
+    ...offsetElements(scaled, leftMargin, 0),
+    ...offsetElements(scaled, leftMargin + cellW + gap, 0),
+    ...offsetElements(scaled, leftMargin + 2 * (cellW + gap), 0),
+  ];
+  return {
+    ...source,
+    id: generateId('label'),
+    name: `${source.name} · 3-UPS (14.3mm)`,
+    widthMm: 50,
+    heightMm: cellH,
+    elements,
+    updatedAt: Date.now(),
+  };
+}
+
 export function applyPrintSize(
   source: LabelDocument,
   preset: PrintSizePreset | null,
@@ -277,6 +328,7 @@ export function applyPrintSize(
 ): LabelDocument {
   if (preset?.id === 'a4' || preset?.sheet) return tileDocumentOnA4(source);
   if (preset?.id === '2ups') return tileDocumentTwoUp(source);
+  if (preset?.id === 'jewellery-3up-14x100') return tileDocumentThreeUpRatTail(source);
   const page = clampLabelMm(custom.widthMm, custom.heightMm);
   // Same size as the design — keep element positions (preview == print).
   if (

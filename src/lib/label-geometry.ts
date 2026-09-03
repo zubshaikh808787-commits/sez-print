@@ -44,6 +44,8 @@ export const LABEL_SIZE_PRESETS: LabelSizePreset[] = [
   { id: '25x15', label: '25×15 mm Small', widthMm: 25, heightMm: 15 },
   { id: '20x15', label: '20×15 mm Tiny', widthMm: 20, heightMm: 15 },
   { id: '50x15', label: '50×15 mm Jewelry', widthMm: 50, heightMm: 15 },
+  { id: '14.3x100', label: '14.3×100 mm Rat Tail Jewelry', widthMm: 14.3, heightMm: 100 },
+  { id: '50x100-3up', label: '50×100 mm 3-Row Jewelry (14.3mm × 3)', widthMm: 50, heightMm: 100 },
   { id: '55x80-3up', label: '55×80 mm 3-Row Jewelry', widthMm: 55, heightMm: 80 },
   { id: '15x80', label: '15×80 mm Rat Tail Jewelry', widthMm: 15, heightMm: 80 },
   { id: '80x15', label: '80×15 mm Rat Tail Tag', widthMm: 80, heightMm: 15 },
