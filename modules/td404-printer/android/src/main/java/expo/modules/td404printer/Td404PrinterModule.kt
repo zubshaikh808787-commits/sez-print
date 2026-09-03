@@ -496,7 +496,7 @@ class Td404PrinterModule : Module() {
       "SDK fast print: decode=${tDecode - t0}ms rotate=${tRotate - tDecode}ms " +
         "encode=${tEncode - tRotate}ms write=${tWrite - tEncode}ms " +
         "job=${job.size}B copies=$copies bmp=${bitmap.width}x${bitmap.height} " +
-        "target=${targetDotsW}x${targetDotsH} size=${sizeW}x${sizeH}mm padL=$padLeft",
+        "target=${targetDotsW}x${targetDotsH} size=${sizeW}x${sizeH}mm",
     )
 
     if (!bitmap.isRecycled) bitmap.recycle()
