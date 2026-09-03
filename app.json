@@ -47,6 +47,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "./plugins/with-google-code-scanner.js",
       "expo-router",
       [
         "expo-dev-client",
