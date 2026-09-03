@@ -308,25 +308,6 @@ export default function PrintScreen() {
   const excelFiles = useDataStore((s) => s.excelFiles);
   const activeExcelFileId = useDataStore((s) => s.activeExcelFileId);
 
-  const [copies, setCopies] = useState(1);
-  const [darkness, setDarkness] = useState<number | null>(null);
-  const [speed, setSpeed] = useState<number | null>(null);
-  const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]>('0°');
-  const [paperType, setPaperType] = useState<PaperType>(defaults.paperType);
-  const [gapLength, setGapLength] = useState(3);
-  const [hOffset, setHOffset] = useState(0);
-  const [vOffset, setVOffset] = useState(0);
-  const [zoom, setZoom] = useState(1);
-  const [pageIndex, setPageIndex] = useState(0);
-  const [printing, setPrinting] = useState(false);
-  const [sizeSheetOpen, setSizeSheetOpen] = useState(false);
-  const [printSize, setPrintSize] = useState<LabelSizeMm | null>(null);
-  const [printPreset, setPrintPreset] = useState<PrintSizePreset | null>(null);
-  const printingLockRef = useRef(false);
-  const upsGapInitialized = useRef(false);
-
-  const shotRef = useRef<ViewShot>(null);
-
   const excelSheet = useMemo<ExcelSheet | null>(() => {
     const fileId = params.excelFileId ?? activeExcelFileId;
     const file = excelFiles.find((f) => f.id === fileId) ?? null;
@@ -356,7 +337,6 @@ export default function PrintScreen() {
     }
     // N-up labels are edited panel-by-panel; flatten for preview/print.
     return doc?.ups ? composeUpsDocument(doc) : doc;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     params.labelId,
     params.scanData,
@@ -369,6 +349,57 @@ export default function PrintScreen() {
     defaults.labelWidth,
     defaults.labelHeight,
   ]);
+
+  const isJewelryTag = useMemo(() => {
+    if (!baseDocument) return false;
+    const cat = baseDocument.templateCategory?.toLowerCase() ?? '';
+    const name = baseDocument.name?.toLowerCase() ?? '';
+    const prev = baseDocument.templatePreviewType?.toLowerCase() ?? '';
+    return (
+      cat.includes('jewel') ||
+      name.includes('jewel') ||
+      name.includes('rat tail') ||
+      name.includes('rattail') ||
+      prev.startsWith('jew-') ||
+      (baseDocument.widthMm <= 18 && baseDocument.heightMm >= 50)
+    );
+  }, [baseDocument]);
+
+  const defaultPreset = useMemo<PrintSizePreset | null>(() => {
+    if (!baseDocument) return null;
+    if (isJewelryTag && baseDocument.widthMm <= 18) {
+      return PRINT_SIZE_PRESETS.find((p) => p.id === 'jewellery-3up-14x100') ?? null;
+    }
+    return null;
+  }, [baseDocument, isJewelryTag]);
+
+  const defaultPrintSize = useMemo<LabelSizeMm>(() => {
+    if (!baseDocument) return { widthMm: defaults.labelWidth, heightMm: defaults.labelHeight };
+    if (defaultPreset?.id === 'jewellery-3up-14x100') {
+      return { widthMm: 50, heightMm: 100 };
+    }
+    return printMediaSizeMm(baseDocument.widthMm, baseDocument.heightMm);
+  }, [baseDocument, defaultPreset, defaults.labelWidth, defaults.labelHeight]);
+
+  const [copies, setCopies] = useState(1);
+  const [darkness, setDarkness] = useState<number | null>(null);
+  const [speed, setSpeed] = useState<number | null>(null);
+  const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]>('0°');
+  const [paperType, setPaperType] = useState<PaperType>(defaults.paperType);
+  const [gapLength, setGapLength] = useState(3);
+  const [hOffset, setHOffset] = useState(0);
+  const [vOffset, setVOffset] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [printing, setPrinting] = useState(false);
+  const [sizeSheetOpen, setSizeSheetOpen] = useState(false);
+  const [printSize, setPrintSize] = useState<LabelSizeMm>(defaultPrintSize);
+  const [printPreset, setPrintPreset] = useState<PrintSizePreset | null>(defaultPreset);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const printingLockRef = useRef(false);
+  const upsGapInitialized = useRef(false);
+
+  const shotRef = useRef<ViewShot>(null);
 
   const isExcelJob = params.docType === 'Excel' && excelSheet !== null;
   const isPdfJob = params.docType === 'PDF';
@@ -430,44 +461,15 @@ export default function PrintScreen() {
     setGapLength(2);
   }, [upsSource]);
 
-  const isJewelryTag = useMemo(() => {
-    if (!previewDocument) return false;
-    const cat = previewDocument.templateCategory?.toLowerCase() ?? '';
-    const name = previewDocument.name?.toLowerCase() ?? '';
-    const prev = previewDocument.templatePreviewType?.toLowerCase() ?? '';
-    return (
-      cat.includes('jewel') ||
-      name.includes('jewel') ||
-      name.includes('rat tail') ||
-      name.includes('rattail') ||
-      prev.startsWith('jew-') ||
-      (previewDocument.widthMm <= 18 && previewDocument.heightMm >= 50)
-    );
-  }, [previewDocument]);
-
+  // Sync print size if a different document ID is loaded
+  const lastDocIdRef = useRef(baseDocument?.id);
   useEffect(() => {
-    if (!previewDocument || printSize) return;
-    // For jewelry tags, automatically default to 3-Across (3-UPS)
-    // so the design prints equally across all 3 labels on the 50 mm roll.
-    if (isJewelryTag && previewDocument.widthMm <= 18) {
-      const preset3up = PRINT_SIZE_PRESETS.find((p) => p.id === 'jewellery-3up-14x100');
-      if (preset3up) {
-        setPrintPreset(preset3up);
-        setPrintSize({ widthMm: 50, heightMm: 100 });
-        return;
-      }
+    if (baseDocument && baseDocument.id !== lastDocIdRef.current) {
+      lastDocIdRef.current = baseDocument.id;
+      setPrintPreset(defaultPreset);
+      setPrintSize(defaultPrintSize);
     }
-
-    const media = printMediaSizeMm(previewDocument.widthMm, previewDocument.heightMm);
-    setPrintSize(media);
-  }, [previewDocument, printSize, isJewelryTag]);
-
-  // Keep print size locked to the composed strip for ups jobs (exact mm, no rescale).
-  useEffect(() => {
-    if (!upsSource || !previewDocument) return;
-    setPrintSize({ widthMm: previewDocument.widthMm, heightMm: previewDocument.heightMm });
-    setPrintPreset(null);
-  }, [upsSource, previewDocument?.widthMm, previewDocument?.heightMm, previewDocument]);
+  }, [baseDocument, defaultPreset, defaultPrintSize]);
 
   const connected = status === 'connected';
   const footerHeight = 72 + insets.bottom;
@@ -869,6 +871,7 @@ export default function PrintScreen() {
         <Text style={styles.referenceNote}>Reference only. Depends on the actual print effect.</Text>
 
         <View style={styles.settingsWrap}>
+          {/* Main Primary Settings Card (Clean & Simple) */}
           <View style={styles.settingsCard}>
             <StepperRow
               label="Number of Copies"
@@ -877,36 +880,12 @@ export default function PrintScreen() {
               minusDisabled={copies <= 1}
               onMinus={() => setCopies((n) => Math.max(1, n - 1))}
               onPlus={() => setCopies((n) => n + 1)}
-            />
-          </View>
-
-          <View style={styles.settingsCard}>
-            <StepperRow
-              label="Print Darkness"
-              value={darkness == null ? 'Auto' : String(darkness)}
-              minusDisabled={darkness == null}
-              plusDisabled={darkness != null && darkness >= 15}
-              onMinus={() => setDarkness((d) => (d == null || d <= 1 ? null : d - 1))}
-              onPlus={() => setDarkness((d) => (d == null ? 8 : Math.min(15, d + 1)))}
               bordered
             />
-            <StepperRow
-              label="Print Speed"
-              value={speed == null ? 'Auto' : String(speed)}
-              minusDisabled={speed == null}
-              plusDisabled={speed != null && speed >= 5}
-              onMinus={() => setSpeed((s) => (s == null || s <= 1 ? null : s - 1))}
-              onPlus={() => setSpeed((s) => (s == null ? 3 : Math.min(5, s + 1)))}
-            />
-          </View>
-
-          <View style={styles.settingsCard}>
-            <Text style={styles.groupLabel}>Orientation</Text>
-            <ChipGroup options={ORIENTATIONS} selected={orientation} onSelect={setOrientation} />
 
             {isJewelryTag ? (
-              <>
-                <Text style={[styles.groupLabel, styles.groupLabelSpaced]}>Jewelry Row Layout</Text>
+              <View style={styles.cardSection}>
+                <Text style={styles.groupLabel}>Jewelry Row Mode</Text>
                 <ChipGroup
                   options={['3-Across (All 3 Labels)', 'Single Label']}
                   selected={
@@ -930,35 +909,91 @@ export default function PrintScreen() {
                     }
                   }}
                 />
-              </>
+                <Text style={styles.helperText}>
+                  {printPreset?.id === 'jewellery-3up-14x100'
+                    ? 'Prints the design equally across all 3 labels on the 50 mm roll.'
+                    : 'Prints only 1 single label on the left.'}
+                </Text>
+              </View>
             ) : null}
 
-            <Text style={[styles.groupLabel, styles.groupLabelSpaced]}>Paper Type</Text>
-            <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
+            <View style={styles.cardSection}>
+              <Text style={styles.groupLabel}>Paper Type</Text>
+              <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
+            </View>
+          </View>
 
-            <StepperRow
-              label="Gap Length"
-              value={`${gapLength.toFixed(2)} mm`}
-              minusDisabled={gapLength <= -10}
-              onMinus={() => setGapLength((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
-              onPlus={() => setGapLength((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
-              bordered
-            />
-            <StepperRow
-              label="Horizontal Offset"
-              value={`${hOffset.toFixed(2)} mm`}
-              minusDisabled={hOffset <= -10}
-              onMinus={() => setHOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
-              onPlus={() => setHOffset((v) => Math.min(10, Math.round((v + 0.5) * 100) / 100))}
-              bordered
-            />
-            <StepperRow
-              label="Vertical Offset"
-              value={`${vOffset.toFixed(2)} mm`}
-              minusDisabled={vOffset <= 0}
-              onMinus={() => setVOffset((v) => Math.max(0, Math.round((v - 0.5) * 100) / 100))}
-              onPlus={() => setVOffset((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
-            />
+          {/* Collapsible Advanced Settings (Darkness, Speed, Offsets, Orientation) */}
+          <View style={styles.settingsCard}>
+            <Pressable
+              onPress={() => setShowAdvanced((v) => !v)}
+              style={({ pressed }) => [styles.advancedHeader, pressed && styles.pressed]}>
+              <View style={styles.advancedHeaderLeft}>
+                <AppIcon name="slider.horizontal.3" tintColor="#475569" size={18} />
+                <Text style={styles.advancedHeaderTitle}>Advanced Settings</Text>
+              </View>
+              <View style={styles.advancedHeaderRight}>
+                <Text style={styles.advancedStatusText}>
+                  {showAdvanced
+                    ? 'Hide'
+                    : `${orientation} · Darkness ${darkness == null ? 'Auto' : darkness}`}
+                </Text>
+                <AppIcon
+                  name={showAdvanced ? 'chevron.up' : 'chevron.down'}
+                  tintColor="#94A3B8"
+                  size={14}
+                />
+              </View>
+            </Pressable>
+
+            {showAdvanced ? (
+              <View style={styles.advancedBody}>
+                <Text style={[styles.groupLabel, { marginTop: 8 }]}>Orientation</Text>
+                <ChipGroup options={ORIENTATIONS} selected={orientation} onSelect={setOrientation} />
+
+                <StepperRow
+                  label="Print Darkness"
+                  value={darkness == null ? 'Auto' : String(darkness)}
+                  minusDisabled={darkness == null}
+                  plusDisabled={darkness != null && darkness >= 15}
+                  onMinus={() => setDarkness((d) => (d == null || d <= 1 ? null : d - 1))}
+                  onPlus={() => setDarkness((d) => (d == null ? 8 : Math.min(15, d + 1)))}
+                  bordered
+                />
+                <StepperRow
+                  label="Print Speed"
+                  value={speed == null ? 'Auto' : String(speed)}
+                  minusDisabled={speed == null}
+                  plusDisabled={speed != null && speed >= 5}
+                  onMinus={() => setSpeed((s) => (s == null || s <= 1 ? null : s - 1))}
+                  onPlus={() => setSpeed((s) => (s == null ? 3 : Math.min(5, s + 1)))}
+                  bordered
+                />
+                <StepperRow
+                  label="Gap Length"
+                  value={`${gapLength.toFixed(2)} mm`}
+                  minusDisabled={gapLength <= -10}
+                  onMinus={() => setGapLength((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
+                  onPlus={() => setGapLength((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
+                  bordered
+                />
+                <StepperRow
+                  label="Horizontal Offset"
+                  value={`${hOffset.toFixed(2)} mm`}
+                  minusDisabled={hOffset <= -10}
+                  onMinus={() => setHOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
+                  onPlus={() => setHOffset((v) => Math.min(10, Math.round((v + 0.5) * 100) / 100))}
+                  bordered
+                />
+                <StepperRow
+                  label="Vertical Offset"
+                  value={`${vOffset.toFixed(2)} mm`}
+                  minusDisabled={vOffset <= 0}
+                  onMinus={() => setVOffset((v) => Math.max(0, Math.round((v - 0.5) * 100) / 100))}
+                  onPlus={() => setVOffset((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
+                />
+              </View>
+            ) : null}
           </View>
         </View>
       </ScrollView>
@@ -1086,10 +1121,8 @@ const styles = StyleSheet.create({
   },
   printCaptureNative: {
     position: 'absolute',
+    top: -10000,
     left: 0,
-    top: 0,
-    zIndex: -999,
-    opacity: 1,
     backgroundColor: '#FFFFFF',
     overflow: 'hidden',
     pointerEvents: 'none',
@@ -1196,7 +1229,51 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.card,
     borderRadius: 12,
     paddingHorizontal: 16,
+    paddingVertical: 4,
     ...cardShadow,
+  },
+  cardSection: {
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#ECEEF1',
+  },
+  advancedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 52,
+    paddingVertical: 10,
+  },
+  advancedHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  advancedHeaderTitle: {
+    ...Type.body,
+    fontWeight: '600',
+    color: Palette.ink,
+  },
+  advancedHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  advancedStatusText: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  advancedBody: {
+    paddingTop: 6,
+    paddingBottom: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#ECEEF1',
+  },
+  helperText: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 6,
+    marginBottom: 4,
   },
   stepperRow: {
     flexDirection: 'row',
