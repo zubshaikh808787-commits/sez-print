@@ -6,6 +6,7 @@
  * Print raster: dots = round(mm × DPI / 25.4). TD-404 is 203 DPI.
  */
 
+import { JEWELRY_DIECUT } from '@/constants/jewelry-diecut';
 import { dotsToMm, MM_PER_INCH, mmToDots } from '@/lib/printer/print-spec';
 
 export { dotsToMm, MM_PER_INCH, mmToDots };
@@ -44,10 +45,8 @@ export const LABEL_SIZE_PRESETS: LabelSizePreset[] = [
   { id: '25x15', label: '25×15 mm Small', widthMm: 25, heightMm: 15 },
   { id: '20x15', label: '20×15 mm Tiny', widthMm: 20, heightMm: 15 },
   { id: '50x15', label: '50×15 mm Jewelry', widthMm: 50, heightMm: 15 },
-  { id: '14.3x100', label: '14.3×100 mm Rat Tail Jewelry', widthMm: 14.3, heightMm: 100 },
-  { id: '50x100-3up', label: '50×100 mm 3-Row Jewelry (14.3mm × 3)', widthMm: 50, heightMm: 100 },
-  { id: '55x80-3up', label: '55×80 mm 3-Row Jewelry', widthMm: 55, heightMm: 80 },
-  { id: '15x80', label: '15×80 mm Rat Tail Jewelry', widthMm: 15, heightMm: 80 },
+  { id: '14x96', label: '14×96 mm Jewellery Tag', widthMm: JEWELRY_DIECUT.tagWidthMm, heightMm: JEWELRY_DIECUT.tagHeightMm },
+  { id: '54x96-3up', label: '54×96 mm 3-Up Jewellery Sheet', widthMm: JEWELRY_DIECUT.sheetWidthMm, heightMm: JEWELRY_DIECUT.sheetHeightMm },
   { id: '80x15', label: '80×15 mm Rat Tail Tag', widthMm: 80, heightMm: 15 },
   { id: '85x13', label: '85×13 mm Barbell', widthMm: 85, heightMm: 13 },
   { id: '85x15', label: '85×15 mm Barbell', widthMm: 85, heightMm: 15 },

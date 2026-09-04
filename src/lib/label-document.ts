@@ -31,6 +31,13 @@ export type ImageElementState = {
   lockMovement: boolean;
   needPrinting: boolean;
   antiColor: boolean;
+  flipH?: boolean;
+  flipV?: boolean;
+  contentFit?: 'fill' | 'contain' | 'cover';
+  colorMode?: 'Original' | 'B & W' | 'Halftone';
+  grayThreshold?: number;
+  aspectRatioLocked?: boolean;
+  originalAspect?: number;
 };
 
 export type ClipartElementState = {

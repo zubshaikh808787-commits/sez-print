@@ -5,7 +5,7 @@ import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelDocument } from '@/lib/label-document';
 import { fitLabelSize } from '@/lib/label-geometry';
-import { canvasFillFromDocument, sortLayers, templateUsesDieCutBackground } from '@/lib/template-schema';
+import { canvasFillFromDocument, sortLayers } from '@/lib/template-schema';
 
 /** Workspace chrome around the artboard — not part of template content. */
 export const LABEL_PAD_STAGE_COLOR = '#C5CDD6';
@@ -70,7 +70,7 @@ export function ArtboardFrame({
 }) {
   const w = Math.max(1, widthPx);
   const h = Math.max(1, heightPx);
-  const dieCut = templateUsesDieCutBackground(document.templatePreviewType ?? '');
+  const bg = canvasFillFromDocument(document);
 
   return (
     <View
@@ -80,15 +80,15 @@ export function ArtboardFrame({
           width: w,
           height: h,
           overflow: 'hidden',
-          backgroundColor: canvasFillFromDocument(document),
+          backgroundColor: bg,
         },
         style,
       ]}>
       {/* Nested clip — absolute + rotated children must stay inside the label border. */}
-      <View collapsable={false} style={{ width: w, height: h, overflow: 'hidden' }}>
+      <View collapsable={false} style={{ width: w, height: h, overflow: 'hidden', backgroundColor: bg }}>
         {children}
       </View>
-      {dieCut || !showBorder ? null : (
+      {!showBorder ? null : (
         <View
           pointerEvents="none"
           style={[
@@ -114,18 +114,24 @@ type LabelPreviewProps = {
   showStage?: boolean;
   style?: StyleProp<ViewStyle>;
   showArtboardBorder?: boolean;
+  /** Omit elements with needPrinting === false (print capture only). */
+  hideNonPrinting?: boolean;
 };
 
 function LabelElements({
   document,
   scale,
+  hideNonPrinting = false,
 }: {
   document: LabelDocument;
   scale: number;
+  hideNonPrinting?: boolean;
 }) {
   return (
     <>
-      {sortLayers(document.elements).map((element) => {
+      {sortLayers(document.elements)
+        .filter((element) => !hideNonPrinting || element.needPrinting !== false)
+        .map((element) => {
         const size = elementSizeMm(element);
         const widthPx = Math.max(1, size.width * scale);
         const heightPx = Math.max(1, size.height * scale);
@@ -138,6 +144,7 @@ function LabelElements({
               top: element.top * scale,
               width: widthPx,
               height: heightPx,
+              overflow: 'hidden',
               opacity: element.opacity ?? 1,
               zIndex: element.zIndex ?? 0,
               transform: [{ rotate: `${element.rotation}deg` }],
@@ -171,11 +178,13 @@ function LabelCanvas({
   fitted,
   style,
   showBorder = true,
+  hideNonPrinting = false,
 }: {
   document: LabelDocument;
   fitted: { widthPx: number; heightPx: number; scale: number };
   style?: StyleProp<ViewStyle>;
   showBorder?: boolean;
+  hideNonPrinting?: boolean;
 }) {
   return (
     <ArtboardFrame
@@ -185,7 +194,9 @@ function LabelCanvas({
       style={style}
       showBorder={showBorder}>
       <TemplateBackgroundImage document={document} />
-      {fitted.scale > 0 ? <LabelElements document={document} scale={fitted.scale} /> : null}
+      {fitted.scale > 0 ? (
+        <LabelElements document={document} scale={fitted.scale} hideNonPrinting={hideNonPrinting} />
+      ) : null}
     </ArtboardFrame>
   );
 }
@@ -199,6 +210,7 @@ export function LabelPreview({
   showStage = false,
   style,
   showArtboardBorder = true,
+  hideNonPrinting = false,
 }: LabelPreviewProps) {
   const [stageWidth, setStageWidth] = useState(0);
 
@@ -225,6 +237,7 @@ export function LabelPreview({
           document={document}
           fitted={{ widthPx: w, heightPx: h, scale }}
           showBorder={showArtboardBorder}
+          hideNonPrinting={hideNonPrinting}
         />
       </View>
     );
@@ -244,6 +257,7 @@ export function LabelPreview({
         fitted={fitted}
         style={style}
         showBorder={showArtboardBorder}
+        hideNonPrinting={hideNonPrinting}
       />
     );
   }
@@ -260,7 +274,12 @@ export function LabelPreview({
         const next = event.nativeEvent.layout.width;
         if (Math.abs(next - stageWidth) > 1) setStageWidth(next);
       }}>
-      <LabelCanvas document={document} fitted={fitted} showBorder={showArtboardBorder} />
+      <LabelCanvas
+        document={document}
+        fitted={fitted}
+        showBorder={showArtboardBorder}
+        hideNonPrinting={hideNonPrinting}
+      />
     </View>
   );
 }

@@ -15,6 +15,7 @@ import { AppIcon, type AppIconName } from '@/components/app-icon';
 import {
   CustomizeIcon,
   DocBadgeIcon,
+  JewelleryLabelIcon,
   LabelCloneIcon,
   NewLabelIcon,
   PrintPhotoIcon,
@@ -340,22 +341,28 @@ export default function HomeScreen() {
               />
             </View>
 
-            {/* Row 3: 2ups Label, Shipping Label, Customize */}
+            {/* Row 3: 2ups Label, Shipping Label, Jewellery Label, Customize */}
             <View style={styles.menuRow}>
               <Tile
-                style={styles.menuThird}
+                style={styles.menuQuarter}
                 iconComponent={<LabelCloneIcon size={30} color={Palette.accent} />}
                 label="2ups Label"
                 href="/new-label-setup?isTwoUps=true"
               />
               <Tile
-                style={styles.menuThird}
+                style={styles.menuQuarter}
                 iconComponent={<ShippingLabelIcon size={30} color={Palette.accent} />}
-                label="Shipping Label"
+                label="Shipping"
                 href="/shipping-label"
               />
               <Tile
-                style={styles.menuThird}
+                style={styles.menuQuarter}
+                iconComponent={<JewelleryLabelIcon size={30} color={Palette.accent} />}
+                label="Jewellery"
+                href="/jewellery-label"
+              />
+              <Tile
+                style={styles.menuQuarter}
                 iconComponent={<CustomizeIcon size={30} color={Palette.accent} />}
                 label="Customize"
                 href="/customize-template"
@@ -517,6 +524,10 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   menuThird: {
+    flex: 1,
+    minWidth: 0,
+  },
+  menuQuarter: {
     flex: 1,
     minWidth: 0,
   },

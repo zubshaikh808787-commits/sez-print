@@ -1,34 +1,26 @@
 /**
- * Play Store–style zoomable editing pad.
- * Pinch to zoom, two-finger pan, double-tap zoom, +/- controls, and fit reset.
- * Transform runs on the UI thread via Reanimated for smooth 60fps scaling.
+ * Zoomable editing pad.
+ * Pinch/one-finger pan are intentionally NOT attached to the canvas — nested
+ * GestureDetectors steal element tap/drag/resize on Android. Zoom with +/-.
  */
 
 import { Palette } from '@/constants/ui';
-import { ReactNode, useCallback, useEffect, useMemo } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import { ReactNode, useCallback, useEffect } from 'react';
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 const MIN_ZOOM = 0.55;
 const MAX_ZOOM = 5;
 const ZOOM_STEP = 1.25;
-const DOUBLE_TAP_ZOOM = 2;
 
 type ZoomableEditPadProps = {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
-  /** Current interaction zoom (1 = fit). Used by parent for accurate element drag math. */
   zoom: number;
   onZoomChange: (zoom: number) => void;
   minZoom?: number;
   maxZoom?: number;
-  /** When false, one-finger pan is disabled so element drag stays primary. */
+  /** Kept for call-site compatibility; canvas gestures are owned by elements. */
   oneFingerPanEnabled?: boolean;
 };
 
@@ -39,160 +31,34 @@ export function ZoomableEditPad({
   onZoomChange,
   minZoom = MIN_ZOOM,
   maxZoom = MAX_ZOOM,
-  oneFingerPanEnabled = true,
 }: ZoomableEditPadProps) {
   const zoomSv = useSharedValue(zoom);
-  const savedZoom = useSharedValue(zoom);
   const panX = useSharedValue(0);
   const panY = useSharedValue(0);
-  const savedPanX = useSharedValue(0);
-  const savedPanY = useSharedValue(0);
-  const originX = useSharedValue(0);
-  const originY = useSharedValue(0);
 
-  // Keep shared value in sync when parent resets zoom (e.g. label size change).
   useEffect(() => {
-    if (Math.abs(zoomSv.value - zoom) > 0.001) {
-      zoomSv.value = withTiming(zoom, { duration: 160 });
-      savedZoom.value = zoom;
-      if (zoom <= 1.01) {
-        panX.value = withTiming(0, { duration: 160 });
-        panY.value = withTiming(0, { duration: 160 });
-        savedPanX.value = 0;
-        savedPanY.value = 0;
-      }
+    zoomSv.value = zoom;
+    if (zoom <= 1.01) {
+      panX.value = 0;
+      panY.value = 0;
     }
-  }, [zoom, zoomSv, savedZoom, panX, panY, savedPanX, savedPanY]);
-
-  const publishZoom = useCallback(
-    (next: number) => {
-      onZoomChange(next);
-    },
-    [onZoomChange],
-  );
-
-  const clampZoom = (value: number) => {
-    'worklet';
-    return Math.min(maxZoom, Math.max(minZoom, value));
-  };
-
-  const pinch = useMemo(
-    () =>
-      Gesture.Pinch()
-        .onBegin((e) => {
-          originX.value = e.focalX;
-          originY.value = e.focalY;
-        })
-        .onUpdate((e) => {
-          const next = clampZoom(savedZoom.value * e.scale);
-          // Zoom toward focal point for natural “pinch here” feel.
-          const scaleRatio = next / Math.max(savedZoom.value, 0.001);
-          const focalDx = e.focalX - originX.value;
-          const focalDy = e.focalY - originY.value;
-          zoomSv.value = next;
-          panX.value = savedPanX.value * scaleRatio + focalDx;
-          panY.value = savedPanY.value * scaleRatio + focalDy;
-        })
-        .onEnd(() => {
-          savedZoom.value = zoomSv.value;
-          savedPanX.value = panX.value;
-          savedPanY.value = panY.value;
-          runOnJS(publishZoom)(zoomSv.value);
-        }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [maxZoom, minZoom, publishZoom],
-  );
-
-  // Two-finger pan never fights single-finger element drag.
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .minPointers(2)
-        .averageTouches(true)
-        .onUpdate((e) => {
-          panX.value = savedPanX.value + e.translationX;
-          panY.value = savedPanY.value + e.translationY;
-        })
-        .onEnd(() => {
-          savedPanX.value = panX.value;
-          savedPanY.value = panY.value;
-        }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-
-  const panWhenZoomed = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(oneFingerPanEnabled && zoom > 1.02)
-        .minPointers(1)
-        .maxPointers(1)
-        .activeOffsetX([-16, 16])
-        .activeOffsetY([-16, 16])
-        .onUpdate((e) => {
-          if (savedZoom.value <= 1.02) return;
-          panX.value = savedPanX.value + e.translationX;
-          panY.value = savedPanY.value + e.translationY;
-        })
-        .onEnd(() => {
-          if (savedZoom.value <= 1.02) return;
-          savedPanX.value = panX.value;
-          savedPanY.value = panY.value;
-        }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [oneFingerPanEnabled, zoom],
-  );
-
-  const doubleTap = useMemo(
-    () =>
-      Gesture.Tap()
-        .numberOfTaps(2)
-        .maxDuration(280)
-        .onEnd((_e, success) => {
-          if (!success) return;
-          const target = savedZoom.value > 1.15 ? 1 : DOUBLE_TAP_ZOOM;
-          const next = clampZoom(target);
-          zoomSv.value = withTiming(next, { duration: 200 });
-          savedZoom.value = next;
-          if (next <= 1.01) {
-            panX.value = withTiming(0, { duration: 200 });
-            panY.value = withTiming(0, { duration: 200 });
-            savedPanX.value = 0;
-            savedPanY.value = 0;
-          }
-          runOnJS(publishZoom)(next);
-        }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [maxZoom, minZoom, publishZoom],
-  );
-
-  const composed = useMemo(
-    () => Gesture.Simultaneous(pinch, pan, panWhenZoomed, doubleTap),
-    [pinch, pan, panWhenZoomed, doubleTap],
-  );
+  }, [zoom, zoomSv, panX, panY]);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: panX.value },
-      { translateY: panY.value },
-      { scale: zoomSv.value },
-    ],
+    transform: [{ translateX: panX.value }, { translateY: panY.value }, { scale: zoomSv.value }],
   }));
 
   const setZoomAnimated = useCallback(
     (next: number) => {
       const clamped = Math.min(maxZoom, Math.max(minZoom, next));
       zoomSv.value = withTiming(clamped, { duration: 180 });
-      savedZoom.value = clamped;
       if (clamped <= 1.01) {
         panX.value = withTiming(0, { duration: 180 });
         panY.value = withTiming(0, { duration: 180 });
-        savedPanX.value = 0;
-        savedPanY.value = 0;
       }
       onZoomChange(clamped);
     },
-    [maxZoom, minZoom, onZoomChange, zoomSv, savedZoom, panX, panY, savedPanX, savedPanY],
+    [maxZoom, minZoom, onZoomChange, zoomSv, panX, panY],
   );
 
   const zoomIn = () => setZoomAnimated(zoom * ZOOM_STEP);
@@ -203,16 +69,9 @@ export function ZoomableEditPad({
 
   return (
     <View style={[styles.root, style]}>
-      <GestureDetector gesture={composed}>
-        <Animated.View
-          style={[styles.viewport, animatedStyle]}
-          collapsable={false}
-          // Keep the transform on the GPU for smoother pinch/pan (Play Store feel).
-          renderToHardwareTextureAndroid={Platform.OS === 'android'}
-          shouldRasterizeIOS={false}>
-          {children}
-        </Animated.View>
-      </GestureDetector>
+      <Animated.View style={[styles.viewport, animatedStyle]} collapsable={false}>
+        {children}
+      </Animated.View>
 
       <View pointerEvents="box-none" style={styles.controls}>
         <Pressable

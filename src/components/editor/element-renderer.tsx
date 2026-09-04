@@ -102,6 +102,7 @@ function textStyleFor(
   return {
     fontSize: size,
     lineHeight: size * lineMult,
+    includeFontPadding: false,
     fontFamily: resolveFontFamily(state.fontFamily),
     fontWeight: state.bold ? ('700' as const) : ('400' as const),
     fontStyle: state.italic ? ('italic' as const) : ('normal' as const),
@@ -122,9 +123,11 @@ function textStyleFor(
 function TextContent({
   element,
   scale,
+  widthPx,
 }: {
   element: EditorElementState & { verticalDisplay?: boolean; charSpacing?: number };
   scale: number;
+  widthPx: number;
 }) {
   const style = textStyleFor(element, scale);
   const raw =
@@ -132,10 +135,28 @@ function TextContent({
       ? `{${element.columnNameContent}}`
       : element.text;
   const text = element.verticalDisplay ? raw.split('').join('\n') : raw;
+  const align = element.align === 'spacing' ? 'justify' : element.align;
   return (
-    <View style={[styles.fill, element.antiColor && styles.antiBg]}>
+    <View
+      style={[
+        styles.fill,
+        {
+          width: widthPx,
+          justifyContent: 'center',
+          alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
+        },
+        element.antiColor && styles.antiBg,
+      ]}>
       <Text
-        style={[style, styles.textFill, element.charSpacing ? { letterSpacing: element.charSpacing } : null]}
+        allowFontScaling={false}
+        includeFontPadding={false}
+        ellipsizeMode="clip"
+        style={[
+          style,
+          styles.textFill,
+          { width: widthPx, textAlign: align },
+          element.charSpacing ? { letterSpacing: element.charSpacing } : null,
+        ]}
         numberOfLines={element.verticalDisplay ? undefined : element.autoWrapping === 'Close' ? 1 : 6}>
         {text}
       </Text>
@@ -143,7 +164,15 @@ function TextContent({
   );
 }
 
-function DegreesContent({ element, scale }: { element: DegreesElementState; scale: number }) {
+function DegreesContent({
+  element,
+  scale,
+  widthPx,
+}: {
+  element: DegreesElementState;
+  scale: number;
+  widthPx: number;
+}) {
   const style = textStyleFor(element, scale);
   const base =
     element.contentType === 'Data Source' && element.columnNameContent
@@ -154,20 +183,58 @@ function DegreesContent({ element, scale }: { element: DegreesElementState; scal
       ? applySerialOffset(base, element.degreesOffset, 1)
       : base;
   const text = element.verticalDisplay ? resolved.split('').join('\n') : resolved;
+  const align = element.align === 'spacing' ? 'justify' : element.align;
   return (
-    <View style={[styles.fill, element.antiColor && styles.antiBg]}>
-      <Text style={style}>{text}</Text>
+    <View
+      style={[
+        styles.fill,
+        {
+          width: widthPx,
+          justifyContent: 'center',
+          alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
+        },
+        element.antiColor && styles.antiBg,
+      ]}>
+      <Text
+        allowFontScaling={false}
+        includeFontPadding={false}
+        style={[style, { width: widthPx, textAlign: align }]}>
+        {text}
+      </Text>
     </View>
   );
 }
 
-function TimeContent({ element, scale }: { element: TimeElementState; scale: number }) {
+function TimeContent({
+  element,
+  scale,
+  widthPx,
+}: {
+  element: TimeElementState;
+  scale: number;
+  widthPx: number;
+}) {
   const now = useClock(true);
   const adjusted = applyTimeOffsets(now, element);
   const style = textStyleFor(element, scale);
+  const align = element.align === 'spacing' ? 'justify' : element.align;
   return (
-    <View style={[styles.fill, element.antiColor && styles.antiBg]}>
-      <Text style={style}>{`${formatLiveDate(adjusted)} ${formatLiveTime(adjusted)}`}</Text>
+    <View
+      style={[
+        styles.fill,
+        {
+          width: widthPx,
+          justifyContent: 'center',
+          alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
+        },
+        element.antiColor && styles.antiBg,
+      ]}>
+      <Text
+        allowFontScaling={false}
+        includeFontPadding={false}
+        style={[style, { width: widthPx, textAlign: align }]}>
+        {`${formatLiveDate(adjusted)} ${formatLiveTime(adjusted)}`}
+      </Text>
     </View>
   );
 }
@@ -199,6 +266,8 @@ function BarcodeContent({
   const label = showLabel ? (
     <Text
       numberOfLines={1}
+      allowFontScaling={false}
+      includeFontPadding={false}
       style={{
         fontSize: labelSize,
         lineHeight: labelSize * 1.2,
@@ -212,7 +281,7 @@ function BarcodeContent({
   ) : null;
 
   return (
-    <View style={[styles.fill, { backgroundColor: bgColor }]}>
+    <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
       {element.textFlag === 'Top' ? label : null}
       {bars ? (
         <Svg width={widthPx} height={Math.max(2, barsHeight)}>
@@ -221,7 +290,7 @@ function BarcodeContent({
               key={i}
               x={bar.x * widthPx}
               y={0}
-              width={bar.width * widthPx}
+              width={Math.max(1, bar.width * widthPx)}
               height={Math.max(2, barsHeight)}
               fill={color}
             />
@@ -536,11 +605,11 @@ function ArcTextContent({
 export function ElementContentView({ element, widthPx, heightPx, scale }: ContentProps) {
   switch (element.type) {
     case 'text':
-      return <TextContent element={element} scale={scale} />;
+      return <TextContent element={element} scale={scale} widthPx={widthPx} />;
     case 'degrees':
-      return <DegreesContent element={element} scale={scale} />;
+      return <DegreesContent element={element} scale={scale} widthPx={widthPx} />;
     case 'time':
-      return <TimeContent element={element} scale={scale} />;
+      return <TimeContent element={element} scale={scale} widthPx={widthPx} />;
     case 'barcode':
       return (
         <BarcodeContent element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />
@@ -561,14 +630,25 @@ export function ElementContentView({ element, widthPx, heightPx, scale }: Conten
       return (
         <ArcTextContent element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />
       );
-    case 'image':
+    case 'image': {
+      const transforms: ({ scaleX: number } | { scaleY: number })[] = [];
+      if (element.flipH) transforms.push({ scaleX: -1 });
+      if (element.flipV) transforms.push({ scaleY: -1 });
+      const fit = element.contentFit ?? 'fill';
       return (
-        <Image
-          source={{ uri: element.uri }}
-          style={styles.fill}
-          contentFit="fill"
-        />
+        <View style={[styles.fill, { overflow: 'hidden' }, element.antiColor && styles.antiBg]}>
+          <Image
+            source={{ uri: element.uri }}
+            style={[
+              styles.fill,
+              transforms.length > 0 ? { transform: transforms } : null,
+              element.colorMode === 'B & W' ? { tintColor: '#111827' } : null,
+            ]}
+            contentFit={fit}
+          />
+        </View>
       );
+    }
     case 'clipart': {
       const sticker = getClipartById(element.clipartId);
       const size = Math.min(widthPx, heightPx);

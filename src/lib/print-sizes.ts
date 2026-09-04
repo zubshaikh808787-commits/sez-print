@@ -1,9 +1,15 @@
 import { fitDocumentCenteredOnPage } from '@/lib/element-sizing';
+import {
+  JEWELRY_DIECUT,
+  JEWELRY_DIECUT_PRINT_PRESET_3UP,
+  jewelryDieCutColumnX,
+  jewelryDieCutComposedWidthMm,
+  isNearMm,
+} from '@/constants/jewelry-diecut';
 import { generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import {
   clampLabelMm,
   MM_PER_INCH,
-  printMediaSizeMm,
   type LabelSizeMm,
   type LabelUnit,
 } from '@/lib/label-geometry';
@@ -113,35 +119,21 @@ export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
     widthMm: 50,
     heightMm: 15,
   },
+
   {
-    id: 'jewellery-3up-14x100',
-    label: 'Jewellery 3-Row — 50 × 100 mm',
-    detail: '14.3 mm width × 3, 1.7 mm distance',
-    widthMm: 50,
-    heightMm: 100,
-    labelsPerRow: 3,
+    id: 'jewellery-3up-diecut-54x100',
+    label: 'Jewellery 3-Up — 54 × 96 mm',
+    detail: '3 labels (14 mm × 96 mm), 3 mm gaps, 3 mm margins',
+    widthMm: JEWELRY_DIECUT.sheetWidthMm,
+    heightMm: JEWELRY_DIECUT.sheetHeightMm,
+    labelsPerRow: JEWELRY_DIECUT.columns,
   },
   {
-    id: 'jewellery-rattail-14x100',
-    label: 'Rat Tail Jewellery — 14.3 × 100 mm',
-    detail: '14.3 × 100 mm single tag with loop strap',
-    widthMm: 14.3,
-    heightMm: 100,
-  },
-  {
-    id: 'jewellery-3up',
-    label: 'Jewellery 3-Row — 55 × 80 mm',
-    detail: '3 labels per row rat-tail sheet',
-    widthMm: 55,
-    heightMm: 80,
-    labelsPerRow: 3,
-  },
-  {
-    id: 'jewellery-rattail',
-    label: 'Rat Tail Jewellery — 15 × 80 mm',
-    detail: 'Foldable jewellery tag with loop strap',
-    widthMm: 15,
-    heightMm: 80,
+    id: 'jewellery-rattail-12x100',
+    label: 'Jewellery Tag — 14 × 96 mm',
+    detail: 'Single 14 × 96 mm tag for 3-up die-cut sheet',
+    widthMm: JEWELRY_DIECUT.tagWidthMm,
+    heightMm: JEWELRY_DIECUT.tagHeightMm,
   },
   { id: 'cable', label: 'Cable Tag — 50 × 15 mm', widthMm: 50, heightMm: 15 },
   {
@@ -328,6 +320,52 @@ export function tileDocumentThreeUpRatTail(source: LabelDocument): LabelDocument
   };
 }
 
+/**
+ * Place jewellery die-cut content onto the 54 × 96 mm sheet without scaling.
+ * - 14 mm tag: three copies at x = 3, 20, 37 mm
+ * - ~48 mm composed UPS strip: pad 3 mm left/right
+ * - already 54 mm: pass through
+ */
+export function tileDocumentThreeUpDieCut54(source: LabelDocument): LabelDocument {
+  const { sheetWidthMm, sheetHeightMm, sideMarginMm, columns } = JEWELRY_DIECUT;
+  const composedW = jewelryDieCutComposedWidthMm();
+
+  if (isNearMm(source.widthMm, sheetWidthMm)) {
+    if (isNearMm(source.heightMm, sheetHeightMm)) return source;
+    return {
+      ...source,
+      heightMm: sheetHeightMm,
+      updatedAt: Date.now(),
+    };
+  }
+
+  if (isNearMm(source.widthMm, composedW)) {
+    return {
+      ...source,
+      id: generateId('label'),
+      name: `${source.name} · 3-UPS`,
+      widthMm: sheetWidthMm,
+      heightMm: sheetHeightMm,
+      elements: offsetElements(source.elements, sideMarginMm, 0),
+      updatedAt: Date.now(),
+    };
+  }
+
+  const elements: LabelElement[] = [];
+  for (let i = 0; i < columns; i++) {
+    elements.push(...offsetElements(source.elements, jewelryDieCutColumnX(i), 0));
+  }
+  return {
+    ...source,
+    id: generateId('label'),
+    name: `${source.name} · 3-UPS`,
+    widthMm: sheetWidthMm,
+    heightMm: sheetHeightMm,
+    elements,
+    updatedAt: Date.now(),
+  };
+}
+
 export function applyPrintSize(
   source: LabelDocument,
   preset: PrintSizePreset | null,
@@ -336,6 +374,7 @@ export function applyPrintSize(
   if (preset?.id === 'a4' || preset?.sheet) return tileDocumentOnA4(source);
   if (preset?.id === '2ups') return tileDocumentTwoUp(source);
   if (preset?.id === 'jewellery-3up-14x100') return tileDocumentThreeUpRatTail(source);
+  if (preset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP) return tileDocumentThreeUpDieCut54(source);
   const page = clampLabelMm(custom.widthMm, custom.heightMm);
   // Same size as the design — keep element positions (preview == print).
   if (

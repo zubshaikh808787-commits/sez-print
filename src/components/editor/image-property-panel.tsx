@@ -9,7 +9,7 @@ import { formatMm, type Rotation } from '@/components/editor/types';
 import type { ImageElementState } from '@/lib/label-document';
 
 const ACCENT = '#48C3C7';
-const TABS = ['Regular', 'Position'] as const;
+const TABS = ['Regular', 'Position', 'Rotate'] as const;
 export type ImagePropertyTab = (typeof TABS)[number];
 
 function Divider() {
@@ -127,21 +127,86 @@ export function ImagePropertyPanel({
   elementHeightMm,
 }: ImagePropertyPanelProps) {
   const currentRotation = state.rotation ?? 0;
+  const isAspectLocked = state.aspectRatioLocked ?? true;
+  const currentAspect = state.width > 0 && state.height > 0 ? state.width / state.height : 1;
 
   const handleRotate90 = useCallback(() => {
     const next = ((currentRotation + 90) % 360) as Rotation;
     patch({ rotation: next });
   }, [currentRotation, patch]);
 
-  const handleReplaceImage = useCallback(async () => {
+  const handleCropImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 1,
+      allowsEditing: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
     patch({ uri: asset.uri });
   }, [patch]);
+
+  const handleReplaceImage = useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+      allowsEditing: false,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    patch({ uri: asset.uri });
+  }, [patch]);
+
+  const handleFlipH = useCallback(() => {
+    patch({ flipH: !state.flipH });
+  }, [state.flipH, patch]);
+
+  const handleFlipV = useCallback(() => {
+    patch({ flipV: !state.flipV });
+  }, [state.flipV, patch]);
+
+  const handleFitToWidth = useCallback(() => {
+    const newW = labelWidthMm;
+    const newH = isAspectLocked ? Math.round((newW / currentAspect) * 10) / 10 : state.height;
+    patch({
+      width: newW,
+      height: Math.min(newH, labelHeightMm),
+      left: 0,
+    });
+  }, [labelWidthMm, labelHeightMm, isAspectLocked, currentAspect, state.height, patch]);
+
+  const handleCenter = useCallback(() => {
+    patch({
+      left: Math.max(0, Math.round(((labelWidthMm - state.width) / 2) * 10) / 10),
+      top: Math.max(0, Math.round(((labelHeightMm - state.height) / 2) * 10) / 10),
+    });
+  }, [labelWidthMm, labelHeightMm, state.width, state.height, patch]);
+
+  const handleWidthChange = useCallback(
+    (delta: number) => {
+      const nextW = Math.max(1, Math.round((state.width + delta) * 10) / 10);
+      if (isAspectLocked) {
+        const nextH = Math.max(1, Math.round((nextW / currentAspect) * 10) / 10);
+        patch({ width: nextW, height: nextH });
+      } else {
+        patch({ width: nextW });
+      }
+    },
+    [state.width, isAspectLocked, currentAspect, patch],
+  );
+
+  const handleHeightChange = useCallback(
+    (delta: number) => {
+      const nextH = Math.max(1, Math.round((state.height + delta) * 10) / 10);
+      if (isAspectLocked) {
+        const nextW = Math.max(1, Math.round((nextH * currentAspect) * 10) / 10);
+        patch({ width: nextW, height: nextH });
+      } else {
+        patch({ height: nextH });
+      }
+    },
+    [state.height, isAspectLocked, currentAspect, patch],
+  );
 
   return (
     <View style={styles.panel}>
@@ -167,65 +232,162 @@ export function ImagePropertyPanel({
         contentContainerStyle={styles.bodyContent}>
         {activeTab === 'Regular' && (
           <>
-            {/* Quick Action Bar: Thumbnail, Replace, and One-Tap 90° Rotate */}
+            {/* Quick Actions: Preview, Crop, Replace, 90° Rotate */}
             <GraySection>
               <View style={styles.previewRow}>
                 {state.uri ? (
                   <View style={styles.thumbWrapper}>
                     <Image
                       source={{ uri: state.uri }}
-                      style={[styles.thumb, { transform: [{ rotate: `${currentRotation}deg` }] }]}
-                      contentFit="contain"
+                      style={[
+                        styles.thumb,
+                        {
+                          transform: [
+                            { rotate: `${currentRotation}deg` },
+                            { scaleX: state.flipH ? -1 : 1 },
+                            { scaleY: state.flipV ? -1 : 1 },
+                          ],
+                        },
+                      ]}
+                      contentFit={state.contentFit ?? 'contain'}
                     />
                   </View>
                 ) : null}
-                <View style={styles.quickActionGroup}>
-                  <Pressable
-                    onPress={handleRotate90}
-                    style={({ pressed }) => [styles.actionButton, styles.rotateButton, pressed && styles.pressed]}>
-                    <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={16} />
-                    <Text style={styles.rotateButtonText}>Rotate 90°</Text>
-                  </Pressable>
-
-                  <Pressable
-                    onPress={handleReplaceImage}
-                    style={({ pressed }) => [styles.actionButton, styles.replaceButton, pressed && styles.pressed]}>
-                    <AppIcon name="photo" tintColor="#374151" size={16} />
-                    <Text style={styles.replaceButtonText}>Replace</Text>
-                  </Pressable>
+                <View style={styles.quickActionCol}>
+                  <View style={styles.actionRow}>
+                    <Pressable
+                      onPress={handleCropImage}
+                      style={({ pressed }) => [styles.actionButton, styles.cropButton, pressed && styles.pressed]}>
+                      <AppIcon name="crop" tintColor="#FFFFFF" size={15} />
+                      <Text style={styles.cropButtonText}>Crop</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={handleReplaceImage}
+                      style={({ pressed }) => [styles.actionButton, styles.replaceButton, pressed && styles.pressed]}>
+                      <AppIcon name="photo" tintColor="#374151" size={15} />
+                      <Text style={styles.replaceButtonText}>Replace</Text>
+                    </Pressable>
+                  </View>
+                  <View style={styles.actionRow}>
+                    <Pressable
+                      onPress={handleRotate90}
+                      style={({ pressed }) => [styles.actionButton, styles.rotateButton, pressed && styles.pressed]}>
+                      <AppIcon name="arrow.clockwise" tintColor="#374151" size={15} />
+                      <Text style={styles.rotateButtonText}>Rotate 90°</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={handleCenter}
+                      style={({ pressed }) => [styles.actionButton, styles.centerButton, pressed && styles.pressed]}>
+                      <AppIcon name="target" tintColor="#374151" size={15} />
+                      <Text style={styles.centerButtonText}>Center</Text>
+                    </Pressable>
+                  </View>
                 </View>
               </View>
             </GraySection>
 
             <SectionGap />
 
-            {/* Rotation Angle Selector */}
+            {/* Mirror / Flip Controls */}
+            <GraySection>
+              <Text style={styles.rowLabel}>Mirror & Orientation</Text>
+              <View style={[styles.segmentRow, { marginTop: 6 }]}>
+                <Pressable
+                  onPress={handleFlipH}
+                  style={[styles.segmentChip, state.flipH && styles.segmentChipActive]}>
+                  <Text style={[styles.segmentText, state.flipH && styles.segmentTextActive]}>
+                    Flip Horizontal
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleFlipV}
+                  style={[styles.segmentChip, state.flipV && styles.segmentChipActive]}>
+                  <Text style={[styles.segmentText, state.flipV && styles.segmentTextActive]}>
+                    Flip Vertical
+                  </Text>
+                </Pressable>
+              </View>
+            </GraySection>
+
+            <SectionGap />
+
+            {/* Fit Mode & Sizing Tools */}
             <GraySection>
               <SegmentRow
-                label="Rotation Angle"
-                options={['0°', '90°', '180°', '270°'] as const}
-                selected={`${currentRotation}°`}
-                onSelect={(value) => patch({ rotation: parseInt(value, 10) as Rotation })}
+                label="Content Fit"
+                options={['fill', 'contain', 'cover'] as const}
+                selected={state.contentFit ?? 'fill'}
+                onSelect={(val) => patch({ contentFit: val })}
+              />
+              <Divider />
+              <View style={styles.quickFitRow}>
+                <Pressable
+                  onPress={handleFitToWidth}
+                  style={({ pressed }) => [styles.toolChip, pressed && styles.pressed]}>
+                  <AppIcon name="arrow.left.and.right" tintColor={ACCENT} size={15} />
+                  <Text style={styles.toolChipText}>Fit Label Width</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleCenter}
+                  style={({ pressed }) => [styles.toolChip, pressed && styles.pressed]}>
+                  <AppIcon name="align.horizontal.center" tintColor={ACCENT} size={15} />
+                  <Text style={styles.toolChipText}>Center on Tag</Text>
+                </Pressable>
+              </View>
+              <Divider />
+              <ToggleRow
+                label="Lock Aspect Ratio"
+                value={isAspectLocked}
+                onValueChange={(locked) => patch({ aspectRatioLocked: locked })}
               />
               <Divider />
               <StepperRow
                 label="Width"
                 value={formatMm(state.width)}
-                onMinus={() => patch({ width: Math.max(1, state.width - 0.5) })}
-                onPlus={() => patch({ width: state.width + 0.5 })}
+                onMinus={() => handleWidthChange(-0.5)}
+                onPlus={() => handleWidthChange(0.5)}
               />
               <Divider />
               <StepperRow
                 label="Height"
                 value={formatMm(state.height)}
-                onMinus={() => patch({ height: Math.max(1, state.height - 0.5) })}
-                onPlus={() => patch({ height: state.height + 0.5 })}
+                onMinus={() => handleHeightChange(-0.5)}
+                onPlus={() => handleHeightChange(0.5)}
               />
             </GraySection>
 
             <SectionGap />
 
-            {/* Lock & Print settings */}
+            {/* Color & Thermal Printing Mode */}
+            <GraySection>
+              <SegmentRow
+                label="Color Mode"
+                options={['Original', 'B & W'] as const}
+                selected={state.colorMode === 'B & W' ? 'B & W' : 'Original'}
+                onSelect={(val) => patch({ colorMode: val })}
+              />
+              {state.colorMode === 'B & W' ? (
+                <>
+                  <Divider />
+                  <StepperRow
+                    label="Gray Threshold"
+                    value={String(state.grayThreshold ?? 128)}
+                    onMinus={() => patch({ grayThreshold: Math.max(10, (state.grayThreshold ?? 128) - 10) })}
+                    onPlus={() => patch({ grayThreshold: Math.min(250, (state.grayThreshold ?? 128) + 10) })}
+                  />
+                </>
+              ) : null}
+              <Divider />
+              <ToggleRow
+                label="Invert Colors (Anti-Color)"
+                value={state.antiColor}
+                onValueChange={(antiColor) => patch({ antiColor })}
+              />
+            </GraySection>
+
+            <SectionGap />
+
+            {/* Lock Movement & Printing */}
             <GraySection>
               <ToggleRow
                 label="Lock Movement"
@@ -252,6 +414,44 @@ export function ImagePropertyPanel({
             labelHeightMm={labelHeightMm}
             onPatch={patch}
           />
+        )}
+
+        {activeTab === 'Rotate' && (
+          <GraySection>
+            <SegmentRow
+              label="Rotation Preset"
+              options={['0°', '90°', '180°', '270°'] as const}
+              selected={`${currentRotation}°`}
+              onSelect={(value) => patch({ rotation: parseInt(value, 10) as Rotation })}
+            />
+            <Divider />
+            <StepperRow
+              label="Adjust Angle (+/- 5°)"
+              value={`${currentRotation}°`}
+              onMinus={() => {
+                const next = ((currentRotation - 5 + 360) % 360) as Rotation;
+                patch({ rotation: next });
+              }}
+              onPlus={() => {
+                const next = ((currentRotation + 5) % 360) as Rotation;
+                patch({ rotation: next });
+              }}
+            />
+            <Divider />
+            <View style={styles.actionRow}>
+              <Pressable
+                onPress={() => patch({ rotation: 0 })}
+                style={({ pressed }) => [styles.actionButton, styles.replaceButton, pressed && styles.pressed]}>
+                <Text style={styles.replaceButtonText}>Reset to 0°</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleRotate90}
+                style={({ pressed }) => [styles.actionButton, styles.cropButton, pressed && styles.pressed]}>
+                <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={15} />
+                <Text style={styles.cropButtonText}>Rotate +90°</Text>
+              </Pressable>
+            </View>
+          </GraySection>
         )}
       </ScrollView>
     </View>
@@ -323,11 +523,11 @@ const styles = StyleSheet.create({
   previewRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
   },
   thumbWrapper: {
-    width: 60,
-    height: 60,
+    width: 68,
+    height: 68,
     borderRadius: 8,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -337,13 +537,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   thumb: {
-    width: 52,
-    height: 52,
+    width: 58,
+    height: 58,
   },
-  quickActionGroup: {
+  quickActionCol: {
     flex: 1,
+    gap: 8,
+  },
+  actionRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   actionButton: {
     flex: 1,
@@ -351,21 +554,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderRadius: 8,
   },
-  rotateButton: {
+  cropButton: {
     backgroundColor: ACCENT,
   },
-  rotateButtonText: {
+  cropButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '600',
   },
+  rotateButton: {
+    backgroundColor: '#EEF2F6',
+  },
+  rotateButtonText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   replaceButton: {
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#EEF2F6',
   },
   replaceButtonText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  centerButton: {
+    backgroundColor: '#EEF2F6',
+  },
+  centerButtonText: {
     color: '#374151',
     fontSize: 13,
     fontWeight: '600',
@@ -397,13 +616,34 @@ const styles = StyleSheet.create({
     borderColor: ACCENT,
   },
   segmentText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '500',
     color: '#4B5563',
   },
   segmentTextActive: {
     color: '#FFFFFF',
     fontWeight: '700',
+  },
+  quickFitRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toolChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: '#F0FDFA',
+    borderWidth: 1,
+    borderColor: '#CCFBF1',
+  },
+  toolChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0D9488',
   },
   stepperRow: {
     flexDirection: 'row',

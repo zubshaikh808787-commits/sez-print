@@ -401,7 +401,7 @@ class Td404PrinterModule : Module() {
     val copies = ((options["copies"] as? Number)?.toInt() ?: 1).coerceAtLeast(1)
     val media = (options["media"] as? String) ?: "gap"
     val orientation = (options["orientation"] as? Number)?.toInt() ?: 0
-    val dpi = (options["dpi"] as? Number)?.toInt() ?: 203
+    val dpi = (options["dpi"] as? Number)?.toDouble() ?: 203.0
 
     val t0 = System.currentTimeMillis()
     val raw = android.util.Base64.decode(pngBase64, android.util.Base64.DEFAULT)
@@ -434,7 +434,10 @@ class Td404PrinterModule : Module() {
 
     val contentW = bitmap.width
     val contentH = bitmap.height
-    val bytesPerRow = (contentW + 7) / 8
+    // TSPL BITMAP width is bytes×8. Center leftover 0–7 dots so content is not left-biased.
+    val packedW = (contentW + 7) / 8 * 8
+    val xPad = (packedW - contentW) / 2
+    val bytesPerRow = packedW / 8
     val pixels = IntArray(contentW * contentH)
     bitmap.getPixels(pixels, 0, contentW, 0, 0, contentW, contentH)
     val rawBmp = ByteArray(bytesPerRow * contentH)
@@ -451,8 +454,9 @@ class Td404PrinterModule : Module() {
         val b = c and 0xFF
         val lum = (77 * r + 150 * g + 29 * b) shr 8
         if (lum < 128) {
-          val byteIndex = rowOffset + (x shr 3)
-          val bitIndex = 7 - (x and 7)
+          val dx = x + xPad
+          val byteIndex = rowOffset + (dx shr 3)
+          val bitIndex = 7 - (dx and 7)
           rawBmp[byteIndex] = (rawBmp[byteIndex].toInt() and (1 shl bitIndex).inv()).toByte()
         }
       }

@@ -15,18 +15,30 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Image } from 'expo-image';
 import { LabelSizeEditor } from '@/components/label-size-editor';
 import { Spacing } from '@/constants/theme';
 import { Palette } from '@/constants/ui';
+import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
 import { useTranslation } from '@/lib/i18n';
 import {
   createLabelDocument,
   createUpsConfig,
+  generateId,
   type LabelElement,
 } from '@/lib/label-document';
 import { clampLabelMm, validateLabelSize } from '@/lib/label-geometry';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
+
+const SETUP_PRESETS = [
+  { label: '14 × 96 mm (Jewellery Tag)', width: JEWELRY_DIECUT.tagWidthMm, height: JEWELRY_DIECUT.tagHeightMm },
+  { label: '54 × 96 mm (3-Up Sheet)', width: JEWELRY_DIECUT.sheetWidthMm, height: JEWELRY_DIECUT.sheetHeightMm },
+  { label: '50 × 30 mm (Retail)', width: 50, height: 30 },
+  { label: '40 × 30 mm (Price Tag)', width: 40, height: 30 },
+  { label: '57 × 30 mm (Receipt)', width: 57, height: 30 },
+  { label: '50 × 50 mm (Square)', width: 50, height: 50 },
+];
 
 export default function NewLabelSetupScreen() {
   const insets = useSafeAreaInsets();
@@ -34,32 +46,67 @@ export default function NewLabelSetupScreen() {
   const params = useLocalSearchParams<{
     isClone?: string;
     isTwoUps?: string;
+    isJewellery3Up?: string;
     cloneFromId?: string;
     cloneName?: string;
     cloneWidth?: string;
     cloneHeight?: string;
     focusSize?: string;
+    importImageUri?: string;
+    importImageWidth?: string;
+    importImageHeight?: string;
+    defaultWidth?: string;
+    defaultHeight?: string;
+    isSingleCanvas?: string;
+    isJewelleryTag?: string;
   }>();
-  const isTwoUps = params.isTwoUps === 'true' || params.isClone === 'true';
+  const isImportImage = Boolean(params.importImageUri);
+  const isSingleCanvas = params.isSingleCanvas === 'true' || isImportImage;
+  const isTwoUps = !isSingleCanvas && (params.isTwoUps === 'true' || params.isClone === 'true');
+  const isJewellery3Up = !isSingleCanvas && params.isJewellery3Up === 'true';
   const defaults = useSettingsStore((s) => s.defaults);
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
 
   const [labelName, setLabelName] = useState(
-    isTwoUps
-      ? params.cloneName
-        ? `${params.cloneName} · 2ups`
-        : '2ups label'
-      : 'Default label',
+    isImportImage
+      ? params.isJewelleryTag === 'true'
+        ? 'Jewellery Image Label'
+        : 'Imported Image Label'
+      : isJewellery3Up
+        ? 'Jewellery Label'
+        : isTwoUps
+          ? params.cloneName
+            ? `${params.cloneName} · 2ups`
+            : '2ups label'
+          : 'Default label',
   );
   const [labelWidth, setLabelWidth] = useState(
-    params.cloneWidth ? parseFloat(params.cloneWidth) : 57,
+    params.defaultWidth
+      ? parseFloat(params.defaultWidth)
+      : isJewellery3Up
+        ? JEWELRY_DIECUT.tagWidthMm
+        : params.cloneWidth
+          ? parseFloat(params.cloneWidth)
+          : isImportImage
+            ? JEWELRY_DIECUT.tagWidthMm
+            : 57,
   );
   const [labelHeight, setLabelHeight] = useState(
-    params.cloneHeight ? parseFloat(params.cloneHeight) : 30,
+    params.defaultHeight
+      ? parseFloat(params.defaultHeight)
+      : isJewellery3Up
+        ? JEWELRY_DIECUT.tagHeightMm
+        : params.cloneHeight
+          ? parseFloat(params.cloneHeight)
+          : isImportImage
+            ? JEWELRY_DIECUT.tagHeightMm
+            : 30,
   );
-  const [columns, setColumns] = useState(isTwoUps ? 2 : 1);
-  // Stick 2-up: labels sit flush (0 mm). User can dial negative/positive gutter.
-  const [columnSpacing, setColumnSpacing] = useState(isTwoUps ? 0 : 1);
+  const [columns, setColumns] = useState(
+    isSingleCanvas ? 1 : isJewellery3Up ? JEWELRY_DIECUT.columns : isTwoUps ? 2 : 1,
+  );
+  // Stick 2-up: labels sit flush (0 mm). Jewellery 3-up: 3 mm gaps.
+  const [columnSpacing, setColumnSpacing] = useState(isJewellery3Up ? JEWELRY_DIECUT.gapMm : isTwoUps ? 0 : 1);
   const [batchEdit, setBatchEdit] = useState(false);
 
   const [nameModalVisible, setNameModalVisible] = useState(false);
@@ -75,6 +122,56 @@ export default function NewLabelSetupScreen() {
     const error = validateLabelSize(size.widthMm, size.heightMm);
     if (error) {
       Alert.alert('Invalid size', error);
+      return;
+    }
+
+    if (params.importImageUri) {
+      const imgId = generateId();
+      const assetW = parseFloat(params.importImageWidth || '0') || 1;
+      const assetH = parseFloat(params.importImageHeight || '0') || 1;
+      const ratio = assetH / assetW;
+      const maxBodyH = size.widthMm <= 15 ? JEWELRY_DIECUT.bodyHeightMm : size.heightMm - 2;
+      const imgH = Math.min(Math.round(size.widthMm * ratio * 10) / 10, maxBodyH);
+
+      const imgElement: LabelElement = {
+        id: imgId,
+        type: 'image',
+        uri: params.importImageUri,
+        rotation: 0,
+        left: 0,
+        top: 0,
+        width: size.widthMm,
+        height: Math.max(5, imgH),
+        lockMovement: false,
+        needPrinting: true,
+        antiColor: false,
+        contentFit: 'contain',
+        aspectRatioLocked: true,
+      };
+
+      // SINGLE CANVAS: user edits on one clean permanent canvas
+      const doc = createLabelDocument({
+        name: labelName,
+        widthMm: size.widthMm,
+        heightMm: size.heightMm,
+        orientation: defaults.orientation,
+        paperType: defaults.paperType,
+        elements: [imgElement],
+        background: { type: 'color', color: '#FFFFFF' },
+      });
+      if (params.isJewelleryTag === 'true' || size.widthMm <= 15) {
+        doc.templateCategory = 'jewelry';
+        doc.templatePreviewType = JEWELRY_DIECUT_PREVIEW_SINGLE;
+      }
+      upsertDocument(doc);
+      router.replace({
+        pathname: '/edit',
+        params: {
+          labelId: doc.id,
+          selectedElementId: imgId,
+          autoOpenPanel: 'true',
+        },
+      });
       return;
     }
 
@@ -131,7 +228,9 @@ export default function NewLabelSetupScreen() {
           style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
           <Text style={styles.backChevron}>‹</Text>
         </Pressable>
-        <Text style={styles.headerTitle}>{isTwoUps ? '2ups label' : t('editor.newLabel')}</Text>
+        <Text style={styles.headerTitle}>
+          {isImportImage ? 'Label Sizing Setup' : isTwoUps ? '2ups label' : t('editor.newLabel')}
+        </Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -148,10 +247,22 @@ export default function NewLabelSetupScreen() {
                   styles.previewCell,
                   {
                     marginRight: i < columns - 1 ? Math.max(0, columnSpacing * 4) : 0,
-                    aspectRatio: labelWidth / Math.max(labelHeight, 1),
+                    aspectRatio: isImportImage
+                      ? Math.max(0.6, Math.min(2.2, labelWidth / Math.max(labelHeight, 1)))
+                      : labelWidth / Math.max(labelHeight, 1),
+                    minWidth: isImportImage ? 160 : undefined,
+                    minHeight: isImportImage ? 110 : 48,
                   },
                 ]}>
-                {columns > 1 ? <Text style={styles.previewCellLabel}>{i + 1}</Text> : null}
+                {isImportImage && params.importImageUri ? (
+                  <Image
+                    source={{ uri: params.importImageUri }}
+                    style={StyleSheet.absoluteFillObject}
+                    contentFit="contain"
+                  />
+                ) : columns > 1 ? (
+                  <Text style={styles.previewCellLabel}>{i + 1}</Text>
+                ) : null}
               </View>
             ))}
           </View>
@@ -164,7 +275,38 @@ export default function NewLabelSetupScreen() {
               )}
               ×{labelHeight} mm.
             </Text>
-          ) : null}
+          ) : (
+            <Text style={styles.previewHint}>
+              Canvas: {labelWidth} × {labelHeight} mm (Single Canvas)
+            </Text>
+          )}
+        </View>
+
+        {/* Quick Size Presets */}
+        <View style={styles.presetSection}>
+          <Text style={styles.presetHeading}>Size Presets</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.presetScrollContent}>
+            {SETUP_PRESETS.map((p) => {
+              const active =
+                Math.abs(labelWidth - p.width) < 0.1 && Math.abs(labelHeight - p.height) < 0.1;
+              return (
+                <Pressable
+                  key={p.label}
+                  onPress={() => {
+                    setLabelWidth(p.width);
+                    setLabelHeight(p.height);
+                  }}
+                  style={[styles.presetChip, active && styles.presetChipActive]}>
+                  <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>
+                    {p.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
 
         <Pressable
@@ -185,82 +327,88 @@ export default function NewLabelSetupScreen() {
         <Pressable
           onPress={() => setSizeModalVisible(true)}
           style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
-          <Text style={styles.fieldLabel}>Set label size</Text>
+          <Text style={styles.fieldLabel}>Custom Size (Width × Height)</Text>
           <View style={styles.fieldValueWrap}>
             <Text style={styles.fieldValueText}>
-              {labelWidth}×{labelHeight} mm
+              {labelWidth} × {labelHeight} mm
               {columns > 1 ? ' (each)' : ''}
             </Text>
             <Text style={styles.chevronRight}>›</Text>
           </View>
         </Pressable>
 
-        <View style={styles.card}>
-          <Text style={styles.fieldLabel}>{columns > 1 ? 'Labels across' : t('editor.columns')}</Text>
-          <View style={styles.stepper}>
-            <Pressable
-              onPress={() => setColumns((c) => Math.max(1, c - 1))}
-              style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
-              <Text style={styles.stepBtnText}>−</Text>
-            </Pressable>
-            <Text style={styles.stepValue}>{columns}</Text>
-            <Pressable
-              onPress={() => setColumns((c) => Math.min(4, c + 1))}
-              style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
-              <Text style={styles.stepBtnText}>+</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {columns > 1 ? (
-          <View style={styles.card}>
-            <Text style={styles.fieldLabel}>{t('editor.columnSpacing')}</Text>
-            <View style={styles.stepper}>
-              <Pressable
-                onPress={() => setColumnSpacing((s) => Math.max(-4, Math.round((s - 0.5) * 10) / 10))}
-                style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
-                <Text style={styles.stepBtnText}>−</Text>
-              </Pressable>
-              <Text style={styles.stepValue}>{columnSpacing}</Text>
-              <Pressable
-                onPress={() => setColumnSpacing((s) => Math.min(8, Math.round((s + 0.5) * 10) / 10))}
-                style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
-                <Text style={styles.stepBtnText}>+</Text>
-              </Pressable>
+        {!isSingleCanvas && (
+          <>
+            <View style={styles.card}>
+              <Text style={styles.fieldLabel}>{columns > 1 ? 'Labels across' : t('editor.columns')}</Text>
+              <View style={styles.stepper}>
+                <Pressable
+                  onPress={() => setColumns((c) => Math.max(1, c - 1))}
+                  style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
+                  <Text style={styles.stepBtnText}>−</Text>
+                </Pressable>
+                <Text style={styles.stepValue}>{columns}</Text>
+                <Pressable
+                  onPress={() => setColumns((c) => Math.min(4, c + 1))}
+                  style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
+                  <Text style={styles.stepBtnText}>+</Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
-        ) : null}
 
-        {columns > 1 ? (
-          <View style={styles.card}>
-            <View style={styles.batchRow}>
-              <Text style={styles.fieldLabel}>{t('editor.batchEdit')}</Text>
-              <Pressable
-                hitSlop={8}
-                onPress={() =>
-                  Alert.alert(
-                    t('editor.batchEdit'),
-                    'When enabled, edits on one label are mirrored to every label in the series.',
-                  )
-                }>
-                <Text style={styles.infoHint}>?</Text>
-              </Pressable>
-            </View>
-            <Switch
-              value={batchEdit}
-              onValueChange={setBatchEdit}
-              trackColor={{ false: '#D1D5DB', true: Palette.accent }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-        ) : null}
+            {columns > 1 ? (
+              <View style={styles.card}>
+                <Text style={styles.fieldLabel}>{t('editor.columnSpacing')}</Text>
+                <View style={styles.stepper}>
+                  <Pressable
+                    onPress={() => setColumnSpacing((s) => Math.max(-4, Math.round((s - 0.5) * 10) / 10))}
+                    style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
+                    <Text style={styles.stepBtnText}>−</Text>
+                  </Pressable>
+                  <Text style={styles.stepValue}>{columnSpacing}</Text>
+                  <Pressable
+                    onPress={() => setColumnSpacing((s) => Math.min(8, Math.round((s + 0.5) * 10) / 10))}
+                    style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}>
+                    <Text style={styles.stepBtnText}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+
+            {columns > 1 ? (
+              <View style={styles.card}>
+                <View style={styles.batchRow}>
+                  <Text style={styles.fieldLabel}>{t('editor.batchEdit')}</Text>
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() =>
+                      Alert.alert(
+                        t('editor.batchEdit'),
+                        'When enabled, edits on one label are mirrored to every label in the series.',
+                      )
+                    }>
+                    <Text style={styles.infoHint}>?</Text>
+                  </Pressable>
+                </View>
+                <Switch
+                  value={batchEdit}
+                  onChange={() => setBatchEdit((b) => !b)}
+                  trackColor={{ false: '#D1D5DB', true: Palette.accent }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+            ) : null}
+          </>
+        )}
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + Spacing.two + 6 }]}>
         <Pressable
           onPress={handleCreateLabel}
           style={({ pressed }) => [styles.newButton, pressed && styles.pressed]}>
-          <Text style={styles.newButtonText}>New</Text>
+          <Text style={styles.newButtonText}>
+            {isImportImage ? 'Open in Editor' : 'New'}
+          </Text>
         </Pressable>
       </View>
 
@@ -390,6 +538,44 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     textAlign: 'center',
+  },
+  presetSection: {
+    gap: 8,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  presetHeading: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginLeft: 2,
+  },
+  presetScrollContent: {
+    gap: 8,
+    paddingVertical: 2,
+  },
+  presetChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  presetChipActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: Palette.accent,
+  },
+  presetChipText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#475569',
+  },
+  presetChipTextActive: {
+    color: Palette.accent,
+    fontWeight: '600',
   },
   card: {
     backgroundColor: '#FFFFFF',

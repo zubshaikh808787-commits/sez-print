@@ -6,6 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  Dimensions,
   KeyboardAvoidingView,
   Modal,
   PanResponder,
@@ -42,6 +43,8 @@ import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel
 import { ImagePropertyPanel, type ImagePropertyTab } from '@/components/editor/image-property-panel';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { ZoomableEditPad } from '@/components/editor/zoomable-edit-pad';
+import { KonvaCanvas } from '@/components/editor/konva-canvas';
+import type { TransformCommitPayload } from '@/components/editor/konva-transformer';
 import {
   ArtboardFrame,
   fitLabelCanvas,
@@ -104,6 +107,7 @@ import { clampLabelMm } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { textBlockHeightMm } from '@/lib/element-sizing';
+import { isJewelryDieCutDocument, refitJewelryDieCutDocument } from '@/constants/jewelry-diecut';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
@@ -225,262 +229,8 @@ function isTextEditableElement(type: LabelElement['type']) {
   return type === 'text' || type === 'degrees';
 }
 
-type CanvasElementProps = {
-  element: LabelElement;
-  scale: number;
-  /** Outer pad zoom — finger deltas must be divided by (scale * padZoom). */
-  padZoom: number;
-  selected: boolean;
-  selectionColor: string;
-  /** Shared live drag translation (px) applied to all selected elements. */
-  liveDragX: Animated.Value;
-  liveDragY: Animated.Value;
-  liveDragActiveIds: string[] | null;
-  onSelect: (id: string) => void;
-  onOpenPanel: (id: string) => void;
-  onEditText: (id: string) => void;
-  /** Total drag offset in mm since the gesture started (throttled). */
-  onDrag: (id: string, totalDxMm: number, totalDyMm: number) => void;
-  onDragStart: (id: string) => void;
-  onDragEnd: (id: string, totalDxMm: number, totalDyMm: number) => void;
-  /** Total resize offset in mm since the gesture started. */
-  onResize: (id: string, totalDwMm: number, totalDhMm: number) => void;
-  onRotate?: (id: string) => void;
-};
 
-const CanvasElement = memo(function CanvasElement({
-  element,
-  scale,
-  padZoom,
-  selected,
-  selectionColor,
-  liveDragX,
-  liveDragY,
-  liveDragActiveIds,
-  onSelect,
-  onOpenPanel,
-  onEditText,
-  onDrag,
-  onDragStart,
-  onDragEnd,
-  onResize,
-  onRotate,
-}: CanvasElementProps) {
-  const size = elementSizeMm(element);
-  const widthPx = Math.max(1, size.width * scale);
-  const heightPx = Math.max(1, size.height * scale);
-  // Expand touch area for thin elements (e.g. lines) so they can be grabbed.
-  const touchSlopX = Math.max(0, (28 - widthPx) / 2);
-  const touchSlopY = Math.max(0, (28 - heightPx) / 2);
 
-  const movedRef = useRef(false);
-  const lastDxRef = useRef(0);
-  const lastDyRef = useRef(0);
-  const scaleRef = useRef(scale);
-  scaleRef.current = scale;
-  const padZoomRef = useRef(padZoom);
-  padZoomRef.current = padZoom;
-  const callbacksRef = useRef({
-    onSelect,
-    onOpenPanel,
-    onEditText,
-    onDrag,
-    onDragStart,
-    onDragEnd,
-    onResize,
-  });
-  callbacksRef.current = {
-    onSelect,
-    onOpenPanel,
-    onEditText,
-    onDrag,
-    onDragStart,
-    onDragEnd,
-    onResize,
-  };
-  const elementRef = useRef(element);
-  elementRef.current = element;
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
-  const lastTapRef = useRef({ id: '', time: 0 });
-
-  const inLiveDrag =
-    liveDragActiveIds != null && liveDragActiveIds.includes(element.id);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_e, gesture) =>
-        Math.abs(gesture.dx) > DRAG_ACTIVATION_PX || Math.abs(gesture.dy) > DRAG_ACTIVATION_PX,
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
-      onPanResponderGrant: () => {
-        movedRef.current = false;
-        lastDxRef.current = 0;
-        lastDyRef.current = 0;
-      },
-      onPanResponderMove: (_e, gesture) => {
-        const current = elementRef.current;
-        if (current.lockMovement) return;
-        const s = scaleRef.current || 1;
-        const z = padZoomRef.current || 1;
-        const interaction = s * z;
-        if (
-          !movedRef.current &&
-          (Math.abs(gesture.dx) > DRAG_ACTIVATION_PX || Math.abs(gesture.dy) > DRAG_ACTIVATION_PX)
-        ) {
-          movedRef.current = true;
-          callbacksRef.current.onSelect(current.id);
-          callbacksRef.current.onDragStart(current.id);
-        }
-        if (!movedRef.current) return;
-        lastDxRef.current = gesture.dx;
-        lastDyRef.current = gesture.dy;
-        // Visual follow is handled by shared Animated values in the parent.
-        callbacksRef.current.onDrag(current.id, gesture.dx / interaction, gesture.dy / interaction);
-      },
-      onPanResponderRelease: () => {
-        const current = elementRef.current;
-        if (movedRef.current) {
-          const s = scaleRef.current || 1;
-          const z = padZoomRef.current || 1;
-          const interaction = s * z;
-          callbacksRef.current.onDragEnd(
-            current.id,
-            lastDxRef.current / interaction,
-            lastDyRef.current / interaction,
-          );
-        } else {
-          const now = Date.now();
-          const last = lastTapRef.current;
-          const isDoubleTap = last.id === current.id && now - last.time < DOUBLE_TAP_MS;
-          lastTapRef.current = { id: current.id, time: now };
-
-          if (isDoubleTap && isTextEditableElement(current.type)) {
-            callbacksRef.current.onEditText(current.id);
-            return;
-          }
-          if (selectedRef.current) {
-            callbacksRef.current.onOpenPanel(current.id);
-          } else {
-            callbacksRef.current.onSelect(current.id);
-          }
-        }
-      },
-      onPanResponderTerminate: () => {
-        const current = elementRef.current;
-        if (movedRef.current) {
-          const s = scaleRef.current || 1;
-          const z = padZoomRef.current || 1;
-          const interaction = s * z;
-          callbacksRef.current.onDragEnd(
-            current.id,
-            lastDxRef.current / interaction,
-            lastDyRef.current / interaction,
-          );
-        }
-      },
-    }),
-  ).current;
-
-  const resizeResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
-      onPanResponderGrant: () => {
-        callbacksRef.current.onDragStart(elementRef.current.id);
-      },
-      onPanResponderMove: (_e, gesture) => {
-        const s = scaleRef.current || 1;
-        const z = padZoomRef.current || 1;
-        const interaction = s * z;
-        callbacksRef.current.onResize(
-          elementRef.current.id,
-          gesture.dx / interaction,
-          gesture.dy / interaction,
-        );
-      },
-    }),
-  ).current;
-
-  if (element.type === 'border') {
-    return (
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          left: element.left * scale,
-          top: element.top * scale,
-          width: widthPx,
-          height: heightPx,
-          zIndex: 0,
-        }}>
-        <ElementContentView element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />
-      </View>
-    );
-  }
-
-  const baseStyle = {
-    position: 'absolute' as const,
-    left: element.left * scale,
-    top: element.top * scale,
-    width: widthPx,
-    height: heightPx,
-    opacity: element.opacity ?? 1,
-    zIndex: element.zIndex ?? 0,
-  };
-
-  return (
-    <Animated.View
-      {...panResponder.panHandlers}
-      {...({
-        hitSlop: { top: touchSlopY, bottom: touchSlopY, left: touchSlopX, right: touchSlopX },
-      } as object)}
-      style={[
-        baseStyle,
-        {
-          transform: [
-            ...(inLiveDrag
-              ? [{ translateX: liveDragX }, { translateY: liveDragY }]
-              : []),
-            { rotate: `${element.rotation}deg` },
-          ],
-        },
-      ]}>
-      <ElementContentView element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />
-      {selected ? (
-        <>
-          <View
-            pointerEvents="none"
-            style={[styles.selectionOutline, { borderColor: selectionColor }]}
-          />
-          <Pressable
-            hitSlop={10}
-            onPress={(e) => {
-              e.stopPropagation?.();
-              onRotate?.(element.id);
-            }}
-            style={styles.rotateHandle}>
-            <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={11} />
-          </Pressable>
-          <View
-            {...resizeResponder.panHandlers}
-            hitSlop={{ top: 10, bottom: 12, left: 10, right: 12 }}
-            style={styles.resizeHandle}>
-            <View style={styles.resizeHandleInner} />
-          </View>
-          {element.lockMovement ? (
-            <View style={styles.lockBadge}>
-              <AppIcon name="lock.fill" tintColor="#FFFFFF" size={9} />
-            </View>
-          ) : null}
-        </>
-      ) : null}
-    </Animated.View>
-  );
-});
 
 export default function EditScreen() {
   const insets = useSafeAreaInsets();
@@ -494,6 +244,8 @@ export default function EditScreen() {
     templateCategory?: string;
     templatePreviewType?: string;
     cloneFromId?: string;
+    selectedElementId?: string;
+    autoOpenPanel?: string;
   }>();
 
   const defaults = useSettingsStore((s) => s.defaults);
@@ -515,7 +267,10 @@ export default function EditScreen() {
       const existing = useLabelStore.getState().getDocument(params.labelId);
       if (existing) {
         const copy = JSON.parse(JSON.stringify(existing)) as LabelDocument;
-        return { ...copy, elements: normalizeDocumentElements(copy) };
+        const normalized = { ...copy, elements: normalizeDocumentElements(copy) };
+        return isJewelryDieCutDocument(normalized)
+          ? refitJewelryDieCutDocument(normalized)
+          : normalized;
       }
     }
 
@@ -574,9 +329,13 @@ export default function EditScreen() {
   const [savedToStore, setSavedToStore] = useState(() => Boolean(params.labelId));
   const [dirty, setDirty] = useState(false);
 
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
+    params.selectedElementId ? [params.selectedElementId] : []
+  );
   const [multipleMode, setMultipleMode] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(() =>
+    Boolean(params.autoOpenPanel === 'true' && params.selectedElementId)
+  );
 
   const [past, setPast] = useState<LabelElement[][]>([]);
   const [future, setFuture] = useState<LabelElement[][]>([]);
@@ -592,8 +351,9 @@ export default function EditScreen() {
   const [saveAsName, setSaveAsName] = useState('');
   const [pickerRows, setPickerRows] = useState(2);
   const [pickerColumns, setPickerColumns] = useState(3);
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const [stageWidth, setStageWidth] = useState(0);
+  const { width: windowWidth } = useWindowDimensions();
+  const initialStageWidth = useMemo(() => Math.min(Dimensions.get('window').width, MaxContentWidth), []);
+  const [stageWidth, setStageWidth] = useState(initialStageWidth);
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
   const [padZoom, setPadZoom] = useState(1);
 
@@ -614,19 +374,26 @@ export default function EditScreen() {
   const textEditInputRef = useRef<TextInput>(null);
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
 
-  const stageMaxHeight = Math.max(220, Math.min(windowHeight * 0.46, 400));
-  // Stage width is measured once from the viewport; canvas size is contain-fit into
-  // (stage − rulers) and does not change when elements are added/selected.
-  const layoutWidth = stageWidth > 0 ? stageWidth : windowWidth;
-  const fittedPad = fitLabelCanvas(
-    doc.widthMm,
-    doc.heightMm,
-    Math.max(40, layoutWidth - RULER_SIZE - 16),
-    Math.max(40, stageMaxHeight - RULER_SIZE - 16),
+  // Stable stage height based on screen height so pad size never shrinks or jumps when soft keyboard opens
+  const screenHeight = useRef(Dimensions.get('screen').height).current;
+  const stageMaxHeight = useMemo(
+    () => Math.max(240, Math.min(Math.round(screenHeight * 0.35), 360)),
+    [screenHeight],
   );
-  const canvasHeightPx = fittedPad.heightPx;
-  const canvasWidthPx = fittedPad.widthPx;
-  const scale = fittedPad.scale;
+  // Stage width is contain-fit into (stage − rulers) and stays permanent and stable
+  const layoutWidth = stageWidth > 0 ? stageWidth : initialStageWidth;
+  // Fixed, big, normal editing area on the screen
+  const canvasWidthPx = useMemo(() => {
+    return Math.max(280, Math.min(layoutWidth - RULER_SIZE - 20, 340));
+  }, [layoutWidth]);
+
+  const canvasHeightPx = useMemo(() => {
+    return Math.max(180, Math.min(stageMaxHeight - RULER_SIZE - 20, 220));
+  }, [stageMaxHeight]);
+
+  const scaleX = canvasWidthPx / Math.max(doc.widthMm, 0.1);
+  const scaleY = canvasHeightPx / Math.max(doc.heightMm, 0.1);
+  const scale = Math.min(scaleX, scaleY);
 
   // Reset pad zoom when the label size changes so fit stays correct.
   useEffect(() => {
@@ -974,8 +741,15 @@ export default function EditScreen() {
     setPanelOpen(false);
   }, [selectedIds, setElements]);
 
+  const handleDeselectAll = useCallback(() => {
+    setSelectedIds([]);
+    setPanelOpen(false);
+  }, []);
+
   const handleSelect = useCallback(
     (id: string) => {
+      const element = docRef.current.elements.find((el) => el.id === id);
+      if (!element || element.needPrinting === false || element.type === 'border') return;
       setSelectedIds((prev) => {
         if (multipleMode) {
           return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
@@ -994,11 +768,12 @@ export default function EditScreen() {
       setShowSignatureBoard(true);
       return;
     }
-    if (
-      element.type === 'image' ||
-      element.type === 'clipart' ||
-      element.type === 'border'
-    ) {
+    if (element.type === 'clipart' || element.type === 'border') {
+      return;
+    }
+    if (element.type === 'image') {
+      setImageTab('Regular');
+      setPanelOpen(true);
       return;
     }
     setPanelOpen(true);
@@ -1051,179 +826,32 @@ export default function EditScreen() {
     [doc.widthMm, doc.heightMm],
   );
 
-  /**
-   * Element geometry captured when a drag/resize gesture starts.
-   * Live motion uses Animated translate; model mm is committed once on release.
-   */
-  const gestureBasesRef = useRef(
-    new Map<
-      string,
-      { left: number; top: number; width: number; height: number; fontSize: number }
-    >(),
-  );
-  const liveDragX = useRef(new Animated.Value(0)).current;
-  const liveDragY = useRef(new Animated.Value(0)).current;
-  const [liveDragActiveIds, setLiveDragActiveIds] = useState<string[] | null>(null);
-  const liveDragIdsRef = useRef<string[]>([]);
-  const pendingDragMmRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
-
-  const handleDragStart = useCallback(
-    (id: string) => {
-      gestureBasesRef.current = new Map();
-      pushHistory();
-      const ids =
-        selectedIds.includes(id) && selectedIds.length > 0 ? [...selectedIds] : [id];
-      liveDragIdsRef.current = ids;
-      liveDragX.setValue(0);
-      liveDragY.setValue(0);
-      setLiveDragActiveIds(ids);
-
-      const doc = docRef.current;
-      for (const el of doc.elements) {
-        if (!ids.includes(el.id) || el.lockMovement) continue;
-        const size = elementSizeMm(el);
-        gestureBasesRef.current.set(el.id, {
-          left: el.left,
-          top: el.top,
-          width: el.width,
-          height:
-            'height' in el && typeof el.height === 'number' && el.height > 0
-              ? el.height
-              : size.height,
-          fontSize: 'fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : 0,
-        });
-      }
-    },
-    [pushHistory, selectedIds, liveDragX, liveDragY],
-  );
-
-  const baseFor = useCallback((el: LabelElement) => {
-    let base = gestureBasesRef.current.get(el.id);
-    if (!base) {
-      const size = elementSizeMm(el);
-      base = {
-        left: el.left,
-        top: el.top,
-        width: el.width,
-        height:
-          'height' in el && typeof el.height === 'number' && el.height > 0
-            ? el.height
-            : size.height,
-        fontSize: 'fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : 0,
-      };
-      gestureBasesRef.current.set(el.id, base);
-    }
-    return base;
-  }, []);
-
-  /** Live visual follow only — model mm positions update on drag end. */
-  const handleDrag = useCallback(
-    (_id: string, totalDxMm: number, totalDyMm: number) => {
-      const s = scale || 1;
-      liveDragX.setValue(totalDxMm * s);
-      liveDragY.setValue(totalDyMm * s);
-      pendingDragMmRef.current = { id: _id, dx: totalDxMm, dy: totalDyMm };
-    },
-    [scale, liveDragX, liveDragY],
-  );
-
-  const handleDragEnd = useCallback(
-    (id: string, totalDxMm: number, totalDyMm: number) => {
-      const pending = pendingDragMmRef.current;
-      const dx = pending?.id === id ? pending.dx : totalDxMm;
-      const dy = pending?.id === id ? pending.dy : totalDyMm;
-      pendingDragMmRef.current = null;
-
-      const moveIds = liveDragIdsRef.current.length > 0 ? liveDragIdsRef.current : [id];
-      const docNow = docRef.current;
-
-      setDoc((prev) => ({
-        ...prev,
-        elements: prev.elements.map((el) => {
-          if (!moveIds.includes(el.id) || el.lockMovement) return el;
-          const base = gestureBasesRef.current.get(el.id) ?? {
-            left: el.left,
-            top: el.top,
-            width: el.width,
-            height: elementSizeMm(el).height,
-            fontSize: 0,
+  const handleTransformEnd = useCallback(
+    (payload: TransformCommitPayload) => {
+      setElements((elements) =>
+        elements.map((el) => {
+          if (el.id !== payload.id) return el;
+          const next: LabelElement = {
+            ...el,
+            left: payload.leftMm,
+            top: payload.topMm,
+            width: payload.widthMm,
+            rotation: (payload.rotation % 360) as Rotation,
           };
-          const maxLeft = Math.max(0, prev.widthMm - base.width);
-          const maxTop = Math.max(0, prev.heightMm - Math.min(base.height, prev.heightMm));
-          let left = snapMm(base.left + dx);
-          let top = snapMm(base.top + dy);
-          left = Math.min(Math.max(left, 0), maxLeft);
-          top = Math.min(Math.max(top, 0), maxTop);
-
-          if (
-            useSettingsStore.getState().editor.pictureAdsorption &&
-            (el.type === 'image' || el.type === 'clipart')
-          ) {
-            const threshold = 1;
-            if (left < threshold) left = 0;
-            if (top < threshold) top = 0;
-            if (docNow.widthMm - (left + base.width) < threshold) {
-              left = Math.max(0, docNow.widthMm - base.width);
-            }
-            if (docNow.heightMm - (top + base.height) < threshold) {
-              top = Math.max(0, docNow.heightMm - base.height);
-            }
+          if ('height' in next && typeof next.height === 'number') {
+            (next as { height: number }).height = payload.heightMm;
           }
-
-          return { ...el, left, top };
-        }),
-      }));
-      setDirty(true);
-
-      // Same React tick: drop live translate + commit left/top together (no double offset).
-      liveDragIdsRef.current = [];
-      liveDragX.setValue(0);
-      liveDragY.setValue(0);
-      setLiveDragActiveIds(null);
-    },
-    [liveDragX, liveDragY],
-  );
-
-  const handleResize = useCallback(
-    (id: string, totalDwMm: number, totalDhMm: number) => {
-      setDoc((prev) => ({
-        ...prev,
-        elements: prev.elements.map((el) => {
-          if (el.id !== id) return el;
-          const base = baseFor(el);
-          const nextWidth = Math.min(
-            prev.widthMm - el.left,
-            Math.max(3, snapMm(base.width + totalDwMm)),
-          );
-
-          if (el.type === 'text' || el.type === 'degrees' || el.type === 'time') {
-            const source = el.type === 'time' ? ' ' : 'text' in el ? el.text : el.content;
-            const lines = Math.max(1, source.split('\n').length);
-            const nextHeight = Math.min(
-              prev.heightMm - el.top,
-              Math.max(2.4, snapMm(base.height + totalDhMm)),
-            );
-            const nextFont = Math.max(
-              6,
-              Math.min(48, Math.round((mmToPt(nextHeight / (1.25 * lines)) * 2)) / 2),
-            );
-            return { ...el, width: nextWidth, fontSize: nextFont };
-          }
-
-          const next: LabelElement = { ...el, width: nextWidth };
-          if ('height' in next && typeof next.height === 'number' && next.type !== 'line') {
-            (next as { height: number }).height = Math.min(
-              prev.heightMm - el.top,
-              Math.max(2, snapMm(base.height + totalDhMm)),
-            );
+          if (payload.fontSize !== undefined && 'fontSize' in next) {
+            (next as { fontSize: number }).fontSize = payload.fontSize;
           }
           return next;
         }),
-      }));
-      setDirty(true);
+        true,
+      );
     },
-    [baseFor],
+    [setElements],
   );
+
 
   const setLockOnSelection = useCallback(
     (locked: boolean) => {
@@ -1641,44 +1269,32 @@ export default function EditScreen() {
         disabled={selectedIds.length === 0}
         onPress={deleteSelected}
       />
+      {selectedElement?.type === 'image' ? (
+        <ToolbarItem
+          icon="photo"
+          label="Edit Image"
+          active={panelOpen}
+          onPress={() => {
+            setImageTab('Regular');
+            setPanelOpen((o) => !o);
+          }}
+        />
+      ) : null}
     </View>
-  );
-
-  const gridLines = useMemo(() => {
-    if (!editorSettings.editorGrid || scale <= 0) return null;
-    const stepPx = 5 * scale;
-    const vertical: number[] = [];
-    const horizontal: number[] = [];
-    for (let x = stepPx; x < canvasWidthPx; x += stepPx) vertical.push(x);
-    for (let y = stepPx; y < canvasHeightPx; y += stepPx) horizontal.push(y);
-    return (
-      <Svg
-        width={canvasWidthPx}
-        height={canvasHeightPx}
-        style={StyleSheet.absoluteFillObject}
-        pointerEvents="none">
-        {vertical.map((x) => (
-          <Line key={`v${x}`} x1={x} y1={0} x2={x} y2={canvasHeightPx} stroke="#E2E8F0" strokeWidth={1} />
-        ))}
-        {horizontal.map((y) => (
-          <Line key={`h${y}`} x1={0} y1={y} x2={canvasWidthPx} y2={y} stroke="#E2E8F0" strokeWidth={1} />
-        ))}
-      </Svg>
-    );
-  }, [editorSettings.editorGrid, scale, canvasWidthPx, canvasHeightPx]);
-
-  const renderCanvas = () => (
+  );  const renderCanvas = () => (
     <View
       style={[styles.stage, { height: stageMaxHeight }]}
       onLayout={(event) => {
-        const next = event.nativeEvent.layout.width;
-        if (Math.abs(next - stageWidth) > 1) setStageWidth(next);
+        const next = Math.round(event.nativeEvent.layout.width);
+        if (next > 0 && Math.abs(next - stageWidth) > 8) {
+          setStageWidth(next);
+        }
       }}>
       <ZoomableEditPad
         style={styles.stageZoom}
         zoom={padZoom}
         onZoomChange={setPadZoom}
-        oneFingerPanEnabled={selectedIds.length === 0 && liveDragActiveIds == null}>
+        oneFingerPanEnabled={selectedIds.length === 0}>
         <View
           style={[
             styles.rulerBoard,
@@ -1689,71 +1305,28 @@ export default function EditScreen() {
           ]}>
           <View style={styles.rulerTopRow}>
             <View style={styles.rulerCorner} />
-            <HorizontalRuler widthPx={canvasWidthPx || 1} lengthMm={doc.widthMm} pxPerMm={scale} />
+            <HorizontalRuler widthPx={canvasWidthPx || 1} lengthMm={doc.widthMm} pxPerMm={scaleX} />
           </View>
           <View style={styles.rulerBodyRow}>
-            <VerticalRuler heightPx={canvasHeightPx || 1} lengthMm={doc.heightMm} pxPerMm={scale} />
-            <View
-              collapsable={false}
-              style={{
-                width: canvasWidthPx || 1,
-                height: canvasHeightPx || 1,
-                overflow: 'hidden',
-              }}>
-              <ViewShot
-                ref={canvasShotRef}
-                options={{ format: 'png', quality: 1 }}
-                style={{ width: canvasWidthPx || 1, height: canvasHeightPx || 1 }}>
-                <ArtboardFrame document={doc} widthPx={canvasWidthPx || 1} heightPx={canvasHeightPx || 1}>
-                  <Pressable
-                    onPress={() => setSelectedIds([])}
-                    style={{
-                      width: canvasWidthPx || 1,
-                      height: canvasHeightPx || 1,
-                      overflow: 'hidden',
-                    }}>
-                    {doc.background?.type === 'image' ? (
-                      <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-                        <Image
-                          source={{ uri: doc.background.uri }}
-                          style={StyleSheet.absoluteFillObject}
-                          contentFit="cover"
-                        />
-                      </View>
-                    ) : null}
-                    {gridLines}
-                    {scale > 0
-                      ? sortLayers(doc.elements).map((element) => (
-                          <CanvasElement
-                            key={element.id}
-                            element={element}
-                            scale={scale}
-                            padZoom={padZoom}
-                            selected={selectedIds.includes(element.id)}
-                            selectionColor={selectionColor}
-                            liveDragX={liveDragX}
-                            liveDragY={liveDragY}
-                            liveDragActiveIds={liveDragActiveIds}
-                            onSelect={handleSelect}
-                            onOpenPanel={openPanelFor}
-                            onEditText={beginTextEdit}
-                            onDrag={handleDrag}
-                            onDragStart={handleDragStart}
-                            onDragEnd={handleDragEnd}
-                            onResize={handleResize}
-                            onRotate={handleRotateElement}
-                          />
-                        ))
-                      : null}
-                    {doc.elements.length === 0 ? (
-                      <View pointerEvents="none" style={styles.emptyHintWrap}>
-                        <Text style={styles.emptyHint}>Tap a tool below to add elements</Text>
-                      </View>
-                    ) : null}
-                  </Pressable>
-                </ArtboardFrame>
-              </ViewShot>
-            </View>
+            <VerticalRuler heightPx={canvasHeightPx || 1} lengthMm={doc.heightMm} pxPerMm={scaleY} />
+            <KonvaCanvas
+              ref={canvasShotRef}
+              document={doc}
+              canvasWidthPx={canvasWidthPx}
+              canvasHeightPx={canvasHeightPx}
+              scaleX={scaleX}
+              scaleY={scaleY}
+              padZoom={padZoom}
+              selectedIds={selectedIds}
+              selectionColor={selectionColor}
+              showGrid={Boolean(editorSettings.editorGrid)}
+              onSelect={handleSelect}
+              onDeselectAll={handleDeselectAll}
+              onOpenPanel={openPanelFor}
+              onEditText={beginTextEdit}
+              onTransformEnd={handleTransformEnd}
+              onQuickRotate={handleRotateElement}
+            />
           </View>
         </View>
       </ZoomableEditPad>
@@ -1950,45 +1523,71 @@ export default function EditScreen() {
         </Pressable>
 
         {doc.ups && doc.ups.columns > 1 ? (
-          <View style={styles.upsPager}>
-            <Pressable
-              disabled={doc.ups.activeIndex <= 0}
-              onPress={() => goToUpsPanel(doc.ups!.activeIndex - 1)}
-              hitSlop={10}
-              style={({ pressed }) => [
-                styles.upsPagerBtn,
-                doc.ups!.activeIndex <= 0 && styles.upsPagerBtnDisabled,
-                pressed && doc.ups!.activeIndex > 0 && styles.pressed,
-              ]}>
-              <Text
-                style={[
-                  styles.upsPagerChevron,
-                  doc.ups!.activeIndex <= 0 && styles.upsPagerChevronDisabled,
+          doc.ups.columns >= 3 ? (
+            /* Jewellery 3-up style: individual tab buttons */
+            <View style={styles.upsPager}>
+              {Array.from({ length: doc.ups.columns }, (_, i) => (
+                <Pressable
+                  key={i}
+                  onPress={() => goToUpsPanel(i)}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.upsTabBtn,
+                    doc.ups!.activeIndex === i && styles.upsTabBtnActive,
+                    pressed && styles.pressed,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.upsTabText,
+                      doc.ups!.activeIndex === i && styles.upsTabTextActive,
+                    ]}>
+                    Label {i + 1}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            /* Original 2-up chevron pager */
+            <View style={styles.upsPager}>
+              <Pressable
+                disabled={doc.ups.activeIndex <= 0}
+                onPress={() => goToUpsPanel(doc.ups!.activeIndex - 1)}
+                hitSlop={10}
+                style={({ pressed }) => [
+                  styles.upsPagerBtn,
+                  doc.ups!.activeIndex <= 0 && styles.upsPagerBtnDisabled,
+                  pressed && doc.ups!.activeIndex > 0 && styles.pressed,
                 ]}>
-                ‹
+                <Text
+                  style={[
+                    styles.upsPagerChevron,
+                    doc.ups!.activeIndex <= 0 && styles.upsPagerChevronDisabled,
+                  ]}>
+                  ‹
+                </Text>
+              </Pressable>
+              <Text style={styles.upsPagerText}>
+                {doc.ups.activeIndex + 1}/{doc.ups.columns}
               </Text>
-            </Pressable>
-            <Text style={styles.upsPagerText}>
-              {doc.ups.activeIndex + 1}/{doc.ups.columns}
-            </Text>
-            <Pressable
-              disabled={doc.ups.activeIndex >= doc.ups.columns - 1}
-              onPress={() => goToUpsPanel(doc.ups!.activeIndex + 1)}
-              hitSlop={10}
-              style={({ pressed }) => [
-                styles.upsPagerBtn,
-                doc.ups!.activeIndex >= doc.ups!.columns - 1 && styles.upsPagerBtnDisabled,
-                pressed && doc.ups!.activeIndex < doc.ups!.columns - 1 && styles.pressed,
-              ]}>
-              <Text
-                style={[
-                  styles.upsPagerChevron,
-                  doc.ups.activeIndex >= doc.ups.columns - 1 && styles.upsPagerChevronDisabled,
+              <Pressable
+                disabled={doc.ups.activeIndex >= doc.ups.columns - 1}
+                onPress={() => goToUpsPanel(doc.ups!.activeIndex + 1)}
+                hitSlop={10}
+                style={({ pressed }) => [
+                  styles.upsPagerBtn,
+                  doc.ups!.activeIndex >= doc.ups!.columns - 1 && styles.upsPagerBtnDisabled,
+                  pressed && doc.ups!.activeIndex < doc.ups!.columns - 1 && styles.pressed,
                 ]}>
-                ›
-              </Text>
-            </Pressable>
-          </View>
+                <Text
+                  style={[
+                    styles.upsPagerChevron,
+                    doc.ups.activeIndex >= doc.ups.columns - 1 && styles.upsPagerChevronDisabled,
+                  ]}>
+                  ›
+                </Text>
+              </Pressable>
+            </View>
+          )
         ) : null}
 
         {renderCanvas()}
@@ -2329,6 +1928,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     letterSpacing: 0.2,
+  },
+  upsTabBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+  },
+  upsTabBtnActive: {
+    backgroundColor: Palette.accent,
+  },
+  upsTabText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  upsTabTextActive: {
+    color: '#FFFFFF',
   },
   stage: {
     width: '100%',

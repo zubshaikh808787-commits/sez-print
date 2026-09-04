@@ -687,6 +687,56 @@ export function CustomizeIcon({ color = TEAL, size = 30 }: { color?: string; siz
   );
 }
 
+/**
+ * Diamond shape with a tag strap below for "Jewellery Label"
+ */
+export function JewelleryLabelIcon({ color = TEAL, size = 30 }: { color?: string; size?: number }) {
+  const scale = size / 30;
+  const diamondSize = 14 * scale;
+  const strapW = 3 * scale;
+  const strapH = 8 * scale;
+  const stroke = 2 * scale;
+
+  return (
+    <View style={[styles.iconBox, { width: size, height: size, alignItems: 'center', justifyContent: 'center' }]}>
+      {/* Diamond (rotated square) */}
+      <View
+        style={{
+          width: diamondSize,
+          height: diamondSize,
+          borderWidth: stroke,
+          borderColor: color,
+          borderRadius: 2.5 * scale,
+          transform: [{ rotate: '45deg' }],
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {/* Inner dot */}
+        <View
+          style={{
+            width: 3.5 * scale,
+            height: 3.5 * scale,
+            borderRadius: 2 * scale,
+            backgroundColor: color,
+          }}
+        />
+      </View>
+      {/* Tag strap below diamond */}
+      <View
+        style={{
+          width: strapW,
+          height: strapH,
+          borderWidth: stroke,
+          borderColor: color,
+          borderRadius: 1.5 * scale,
+          marginTop: -1 * scale,
+        }}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   iconBox: {
     position: 'relative',

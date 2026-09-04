@@ -1,0 +1,226 @@
+import React, { forwardRef, memo, useMemo } from 'react';
+import { Image } from 'expo-image';
+import { StyleSheet, Text, View } from 'react-native';
+import ViewShot from 'react-native-view-shot';
+import Svg, { Line } from 'react-native-svg';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
+
+import { KonvaTransformer, type TransformCommitPayload } from './konva-transformer';
+import { type LabelDocument, type LabelElement } from '@/lib/label-document';
+import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
+import { sortLayers } from '@/lib/template-schema';
+
+type KonvaCanvasProps = {
+  document: LabelDocument;
+  canvasWidthPx: number;
+  canvasHeightPx: number;
+  scaleX: number;
+  scaleY: number;
+  padZoom: number;
+  selectedIds: string[];
+  selectionColor: string;
+  showGrid?: boolean;
+  onSelect: (id: string) => void;
+  onDeselectAll: () => void;
+  onOpenPanel: (id: string) => void;
+  onEditText: (id: string) => void;
+  onTransformStart?: (id: string) => void;
+  onTransformEnd: (payload: TransformCommitPayload) => void;
+  onQuickRotate?: (id: string) => void;
+};
+
+export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function KonvaCanvas(
+  {
+    document: doc,
+    canvasWidthPx,
+    canvasHeightPx,
+    scaleX,
+    scaleY,
+    padZoom,
+    selectedIds,
+    selectionColor,
+    showGrid = false,
+    onSelect,
+    onDeselectAll,
+    onOpenPanel,
+    onEditText,
+    onTransformStart,
+    onTransformEnd,
+    onQuickRotate,
+  },
+  ref,
+) {
+  const w = Math.max(1, canvasWidthPx);
+  const h = Math.max(1, canvasHeightPx);
+
+  // Background color is always solid clean white by default
+  const backgroundColor =
+    doc.background?.type === 'color' ? doc.background.color : '#FFFFFF';
+
+  // Grid lines
+  const gridLines = useMemo(() => {
+    if (!showGrid || scaleX <= 0 || scaleY <= 0) return null;
+    const stepPxX = 5 * scaleX;
+    const stepPxY = 5 * scaleY;
+    const vertical: number[] = [];
+    const horizontal: number[] = [];
+    for (let x = stepPxX; x < w; x += stepPxX) vertical.push(x);
+    for (let y = stepPxY; y < h; y += stepPxY) horizontal.push(y);
+    return (
+      <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
+        {vertical.map((x) => (
+          <Line key={`v${x}`} x1={x} y1={0} x2={x} y2={h} stroke="#E2E8F0" strokeWidth={1} />
+        ))}
+        {horizontal.map((y) => (
+          <Line key={`h${y}`} x1={0} y1={y} x2={w} y2={y} stroke="#E2E8F0" strokeWidth={1} />
+        ))}
+      </Svg>
+    );
+  }, [showGrid, scaleX, scaleY, w, h]);
+
+  // Jewelry rat-tail guides (if applicable)
+  const jewelryGuides = useMemo(() => {
+    if (doc.templatePreviewType !== JEWELRY_DIECUT_PREVIEW_SINGLE) return null;
+    const { foldYMm, bodyHeightMm, tagWidthMm, tailWidthMm } = JEWELRY_DIECUT;
+    return (
+      <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+        <View
+          style={{
+            position: 'absolute',
+            top: foldYMm * scaleY,
+            left: 0,
+            right: 0,
+            borderBottomWidth: 1,
+            borderBottomColor: '#CBD5E1',
+            borderStyle: 'dashed',
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            top: bodyHeightMm * scaleY,
+            left: 0,
+            right: 0,
+            borderBottomWidth: 1,
+            borderBottomColor: '#E2E8F0',
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            top: bodyHeightMm * scaleY,
+            bottom: 0,
+            left: ((tagWidthMm - tailWidthMm) / 2) * scaleX,
+            width: tailWidthMm * scaleX,
+            borderWidth: 1,
+            borderColor: '#E2E8F0',
+            borderStyle: 'dashed',
+            borderRadius: 1.2 * scaleX,
+          }}
+        />
+      </View>
+    );
+  }, [doc.templatePreviewType, scaleX, scaleY]);
+
+  const deselectGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .maxDuration(2000)
+        .onEnd((_e, success) => {
+          if (success) runOnJS(onDeselectAll)();
+        }),
+    [onDeselectAll],
+  );
+
+  return (
+    <View
+      collapsable={false}
+      style={{
+        width: w,
+        height: h,
+        overflow: 'hidden',
+        backgroundColor: '#FFFFFF',
+      }}>
+      <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={{ width: w, height: h }}>
+        <View
+          collapsable={false}
+          style={[
+            styles.canvasPad,
+            {
+              width: w,
+              height: h,
+              backgroundColor,
+            },
+          ]}>
+          {doc.background?.type === 'image' ? (
+            <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+              <Image
+                source={{ uri: doc.background.uri }}
+                style={StyleSheet.absoluteFillObject}
+                contentFit="cover"
+              />
+            </View>
+          ) : null}
+
+          {jewelryGuides}
+          {gridLines}
+
+          <GestureDetector gesture={deselectGesture}>
+            <View style={StyleSheet.absoluteFillObject} collapsable={false} />
+          </GestureDetector>
+
+          {sortLayers(doc.elements).map((element: LabelElement) => (
+            <KonvaTransformer
+              key={element.id}
+              element={element}
+              scaleX={scaleX}
+              scaleY={scaleY}
+              padZoom={padZoom}
+              selected={selectedIds.includes(element.id)}
+              selectionColor={selectionColor}
+              canvasWidthMm={doc.widthMm}
+              canvasHeightMm={doc.heightMm}
+              onSelect={onSelect}
+              onOpenPanel={onOpenPanel}
+              onEditText={onEditText}
+              onTransformStart={onTransformStart}
+              onTransformEnd={onTransformEnd}
+              onQuickRotate={onQuickRotate}
+            />
+          ))}
+
+          {doc.elements.length === 0 ? (
+            <View pointerEvents="none" style={styles.emptyHintWrap}>
+              <Text style={styles.emptyHint}>Tap a tool below to add elements</Text>
+            </View>
+          ) : null}
+
+          <View pointerEvents="none" style={styles.artboardBorder} />
+        </View>
+      </ViewShot>
+    </View>
+  );
+});
+
+const styles = StyleSheet.create({
+  canvasPad: {
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  emptyHintWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyHint: {
+    fontSize: 13,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  artboardBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.25)',
+  },
+});

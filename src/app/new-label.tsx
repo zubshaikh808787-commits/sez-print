@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { AppIcon } from '@/components/app-icon';
 import { type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -66,6 +67,29 @@ export default function NewLabelModal() {
               </View>
             </CreationOption>
 
+            <CreationOption
+              label="Import Image"
+              color="#8B5CF6"
+              onPress={async () => {
+                const result = await ImagePicker.launchImageLibraryAsync({
+                  mediaTypes: ['images'],
+                  quality: 1,
+                  allowsEditing: true,
+                });
+                if (result.canceled || !result.assets?.[0]) return;
+                const asset = result.assets[0];
+                router.replace({
+                  pathname: '/new-label-setup',
+                  params: {
+                    importImageUri: asset.uri,
+                    importImageWidth: String(asset.width || 0),
+                    importImageHeight: String(asset.height || 0),
+                    isSingleCanvas: 'true',
+                  },
+                });
+              }}>
+              <AppIcon name="photo" tintColor="#FFFFFF" size={28} pointerEvents="none" />
+            </CreationOption>
             <CreationOption
               label="Scan Label"
               color="#F5A623"

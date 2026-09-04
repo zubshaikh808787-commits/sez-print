@@ -18,8 +18,10 @@ import { ShareNodeIcon } from '@/components/home-icons';
 import { LabelPreview, LABEL_PAD_STAGE_MIN_HEIGHT } from '@/components/label-preview';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette } from '@/constants/ui';
+import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
 import { useTabBarPadding } from '@/hooks/use-tab-bar-padding';
 import { createIndustryTemplateDocument } from '@/constants/template-documents';
+import { createUpsConfig } from '@/lib/label-document';
 import { useLabelStore } from '@/stores/label-store';
 import { useTranslation } from '@/lib/i18n';
 
@@ -38,7 +40,7 @@ const CATEGORY_GROUPS: CategoryGroup[] = [
   { header: 'Medicine', items: ['Laboratory'] },
 ];
 
-interface TemplateItem {
+export interface TemplateItem {
   id: string;
   name: string;
   nameLine2?: string;
@@ -139,9 +141,8 @@ interface TemplateItem {
     | 'jew-sample-50x19-tabs'
     | 'jew-sample-53x14-bar'
     | 'jew-rattail-143x635'
-    | 'jew-rattail-3row-14x100'
-    | 'jew-rattail-single-14x100'
-    | 'jew-rattail-3row-55x80'
+    | 'jew-rattail-3row-54x100'
+    | 'jew-rattail-single-12x100'
     | 'jew-rattail-vertical-15x80'
     | 'jew-rattail-horizontal-80x15'
     // --- SUPERMARKET ---
@@ -199,7 +200,7 @@ interface TemplateItem {
     | 'lab-pathology-508x19';
 }
 
-const TEMPLATES: TemplateItem[] = [
+export const TEMPLATES: TemplateItem[] = [
   // --- POPULAR ---
   {
     id: 'pop-1',
@@ -859,34 +860,24 @@ const TEMPLATES: TemplateItem[] = [
 
   // --- JEWELRY ---
   {
-    id: 'jwl-rattail-3row-14x100',
-    name: '3-Row Rat Tail Tag',
-    nameLine2: '14.3x100 mm (1.7mm gap)',
-    dimensions: '50 x 100',
+    id: 'jwl-diecut-3row-54x100',
+    name: '3-Up Jewellery Die Cut Sheet',
+    nameLine2: '54x96 mm (14mm tags, 3mm gap)',
+    dimensions: '54 x 96',
     category: 'Jewelry',
-    width: 50,
-    height: 100,
-    previewType: 'jew-rattail-3row-14x100',
+    width: JEWELRY_DIECUT.sheetWidthMm,
+    height: JEWELRY_DIECUT.sheetHeightMm,
+    previewType: 'jew-rattail-3row-54x100',
   },
   {
-    id: 'jwl-rattail-single-14x100',
-    name: 'Rat Tail Vertical Tag',
-    nameLine2: '14.3x100 mm (Single)',
-    dimensions: '14.3 x 100',
+    id: 'jwl-diecut-single-12x100',
+    name: 'Jewellery Die Cut Tag',
+    nameLine2: '14x96 mm (3-Up Sheet)',
+    dimensions: '14 x 96',
     category: 'Jewelry',
-    width: 14.3,
-    height: 100,
-    previewType: 'jew-rattail-single-14x100',
-  },
-  {
-    id: 'jwl-rattail-3row',
-    name: '3-Row Rat Tail Tag',
-    nameLine2: 'Label-55x80 (3-Across)',
-    dimensions: '55 x 80',
-    category: 'Jewelry',
-    width: 55,
-    height: 80,
-    previewType: 'jew-rattail-3row-55x80',
+    width: JEWELRY_DIECUT.tagWidthMm,
+    height: JEWELRY_DIECUT.tagHeightMm,
+    previewType: 'jew-rattail-single-12x100',
   },
   {
     id: 'jwl-rattail-vertical',
@@ -1621,6 +1612,16 @@ export default function TemplateScreen() {
       heightMm: template.height,
       previewType: template.previewType,
     });
+    if (template.previewType === JEWELRY_DIECUT_PREVIEW_SINGLE) {
+      doc.ups = createUpsConfig({
+        columns: JEWELRY_DIECUT.columns,
+        columnSpacingMm: JEWELRY_DIECUT.gapMm,
+        batchEdit: false,
+        seedElements: doc.elements,
+      });
+      doc.templatePreviewType = JEWELRY_DIECUT_PREVIEW_SINGLE;
+      doc.templateCategory = 'jewelry';
+    }
     upsertDocument(doc);
     router.push({
       pathname: '/edit',

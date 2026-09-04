@@ -24,6 +24,12 @@ import { LabelPreview } from '@/components/label-preview';
 import { PrintSizeSelector } from '@/components/print-size-selector';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette, Type } from '@/constants/ui';
+import {
+  JEWELRY_DIECUT,
+  JEWELRY_DIECUT_PRINT_PRESET_3UP,
+  isJewelryDieCutDocument,
+  refitJewelryDieCutDocument,
+} from '@/constants/jewelry-diecut';
 import { dataPageCount, resolveDocumentData } from '@/lib/data-binding';
 import {
   composeUpsDocument,
@@ -314,8 +320,8 @@ export default function PrintScreen() {
     return file ? file.sheets[file.activeSheetIndex] ?? file.sheets[0] ?? null : null;
   }, [params.excelFileId, activeExcelFileId, excelFiles]);
 
-  /** Base document (page-independent). Null for PDF documents, which show a card. */
-  const baseDocument = useMemo<LabelDocument | null>(() => {
+  /** Uncomposed store document — needed for jewellery 3-up detection (compose strips `ups`). */
+  const sourceDocument = useMemo<LabelDocument | null>(() => {
     let doc: LabelDocument | null = null;
     if (params.labelId) doc = getDocument(params.labelId) ?? null;
     else if (params.scanData) {
@@ -335,8 +341,7 @@ export default function PrintScreen() {
         defaults.labelHeight,
       );
     }
-    // N-up labels are edited panel-by-panel; flatten for preview/print.
-    return doc?.ups ? composeUpsDocument(doc) : doc;
+    return doc;
   }, [
     params.labelId,
     params.scanData,
@@ -350,33 +355,24 @@ export default function PrintScreen() {
     defaults.labelHeight,
   ]);
 
-  const isJewelryTag = useMemo(() => {
-    if (!baseDocument) return false;
-    const cat = baseDocument.templateCategory?.toLowerCase() ?? '';
-    const name = baseDocument.name?.toLowerCase() ?? '';
-    const prev = baseDocument.templatePreviewType?.toLowerCase() ?? '';
-    return (
-      cat.includes('jewel') ||
-      name.includes('jewel') ||
-      name.includes('rat tail') ||
-      name.includes('rattail') ||
-      prev.startsWith('jew-') ||
-      (baseDocument.widthMm <= 18 && baseDocument.heightMm >= 50)
-    );
-  }, [baseDocument]);
+  /** Base document (page-independent). Null for PDF documents, which show a card. */
+  const baseDocument = useMemo<LabelDocument | null>(() => {
+    if (!sourceDocument) return null;
+    return sourceDocument.ups ? composeUpsDocument(sourceDocument) : sourceDocument;
+  }, [sourceDocument]);
+
+  const jewelryDieCutJob = isJewelryDieCutDocument(sourceDocument);
+  const jewelryJobDpi = jewelryDieCutJob ? JEWELRY_DIECUT.printDpi : null;
 
   const defaultPreset = useMemo<PrintSizePreset | null>(() => {
-    if (!baseDocument) return null;
-    if (isJewelryTag && baseDocument.widthMm <= 18) {
-      return PRINT_SIZE_PRESETS.find((p) => p.id === 'jewellery-3up-14x100') ?? null;
-    }
-    return null;
-  }, [baseDocument, isJewelryTag]);
+    if (!jewelryDieCutJob) return null;
+    return PRINT_SIZE_PRESETS.find((p) => p.id === JEWELRY_DIECUT_PRINT_PRESET_3UP) ?? null;
+  }, [jewelryDieCutJob]);
 
   const defaultPrintSize = useMemo<LabelSizeMm>(() => {
     if (!baseDocument) return { widthMm: defaults.labelWidth, heightMm: defaults.labelHeight };
-    if (defaultPreset?.id === 'jewellery-3up-14x100') {
-      return { widthMm: 50, heightMm: 100 };
+    if (defaultPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP) {
+      return { widthMm: JEWELRY_DIECUT.sheetWidthMm, heightMm: JEWELRY_DIECUT.sheetHeightMm };
     }
     return printMediaSizeMm(baseDocument.widthMm, baseDocument.heightMm);
   }, [baseDocument, defaultPreset, defaults.labelWidth, defaults.labelHeight]);
@@ -438,15 +434,22 @@ export default function PrintScreen() {
 
   const displayDocument = useMemo(() => {
     if (!previewDocument || !printSize) return previewDocument;
-    return applyPrintSize(previewDocument, printPreset, printSize);
-  }, [previewDocument, printSize, printPreset]);
+    let next =
+      jewelryDieCutJob && printPreset?.id !== JEWELRY_DIECUT_PRINT_PRESET_3UP && sourceDocument
+        ? sourceDocument
+        : applyPrintSize(previewDocument, printPreset, printSize);
+    if (jewelryDieCutJob && next) next = refitJewelryDieCutDocument(next);
+    return next;
+  }, [previewDocument, printSize, printPreset, jewelryDieCutJob, sourceDocument]);
+
+  const jobDpi = jewelryJobDpi ?? getPrinterManager().getPrintDpi();
 
   /** Native printer-dot artboard for capture — true mm→dots (8-dot pad applied after). */
   const printCaptureSize = useMemo(() => {
     const doc = displayDocument ?? previewDocument;
     if (!doc) return { widthPx: 8, heightPx: 8 };
-    return printCaptureLayout(doc.widthMm, doc.heightMm, getPrinterManager().getPrintDpi()).content;
-  }, [displayDocument, previewDocument]);
+    return printCaptureLayout(doc.widthMm, doc.heightMm, jobDpi).content;
+  }, [displayDocument, previewDocument, jobDpi]);
 
   /** Live store ups config (compose strips it from the print document). */
   const upsSource = useMemo(() => {
@@ -454,12 +457,13 @@ export default function PrintScreen() {
     return getDocument(params.labelId)?.ups ?? null;
   }, [params.labelId, getDocument]);
 
-  // Stick 2-up media: default feed gap to 2 mm (user can go negative for calibration).
+  // Stick 2-up media: default feed gap to 2 mm. Jewellery 3-up keeps 3 mm.
   useEffect(() => {
     if (!upsSource || upsGapInitialized.current) return;
+    if (upsSource.columns === JEWELRY_DIECUT.columns || jewelryDieCutJob) return;
     upsGapInitialized.current = true;
     setGapLength(2);
-  }, [upsSource]);
+  }, [upsSource, jewelryDieCutJob]);
 
   // Sync print size if a different document ID is loaded
   const lastDocIdRef = useRef(baseDocument?.id);
@@ -556,11 +560,16 @@ export default function PrintScreen() {
     const timer = new PrintTimingLogger();
 
     try {
-      const dither = defaults.colorMode === 'Halftone';
-      const threshold = Math.min(
-        250,
-        Math.max(10, defaults.grayThreshold + (darkness != null ? (darkness - 8) * 10 : 0)),
-      );
+      const dither = jewelryDieCutJob ? false : defaults.colorMode === 'Halftone';
+      const threshold = jewelryDieCutJob
+        ? Math.min(
+            200,
+            Math.max(160, defaults.grayThreshold + (darkness != null ? (darkness - 8) * 8 : 40)),
+          )
+        : Math.min(
+            250,
+            Math.max(10, defaults.grayThreshold + (darkness != null ? (darkness - 8) * 10 : 0)),
+          );
 
       for (let page = 0; page < pageCount; page++) {
         const pageStart = Date.now();
@@ -575,7 +584,7 @@ export default function PrintScreen() {
         // When connection is healthy (common case), ensureConnected() returns in <1ms
         // while the expensive ViewShot capture runs concurrently.
         timer.start('capture+verify');
-        const captureTarget = printCaptureLayout(widthMm, heightMm, manager.getPrintDpi()).content;
+        const captureTarget = printCaptureLayout(widthMm, heightMm, jobDpi).content;
         const [connectionResult, base64] = await Promise.all([
           manager.ensureConnected().catch((err) => {
             // Let the error surface after capture is done.
@@ -630,7 +639,7 @@ export default function PrintScreen() {
           hOffsetMm: hOffset,
           media: wantsBline ? 'bline' : media,
           orientation: orientationDeg,
-          dpi: manager.getPrintDpi(),
+          dpi: jobDpi,
         });
         timer.end('sdkFastPrint');
 
@@ -643,6 +652,7 @@ export default function PrintScreen() {
             threshold,
             dither,
             hOffsetMm: hOffset,
+            dpi: jobDpi,
           });
           timer.end('rasterize');
 
@@ -657,6 +667,7 @@ export default function PrintScreen() {
             vOffsetMm: vOffset,
             hOffsetMm: hOffset,
             media: wantsBline ? 'bline' : media,
+            dpi: jobDpi,
           });
           timer.end('encode');
 
@@ -702,6 +713,7 @@ export default function PrintScreen() {
     params.docUri,
     previewDocument,
     displayDocument,
+    jobDpi,
     defaults.labelWidth,
     defaults.labelHeight,
     defaults.colorMode,
@@ -807,6 +819,7 @@ export default function PrintScreen() {
                   exactWidthPx={printCaptureSize.widthPx}
                   exactHeightPx={printCaptureSize.heightPx}
                   showArtboardBorder={false}
+                  hideNonPrinting
                 />
               </ViewShot>
             </View>
@@ -883,36 +896,39 @@ export default function PrintScreen() {
               bordered
             />
 
-            {isJewelryTag ? (
+            {jewelryDieCutJob ? (
               <View style={styles.cardSection}>
-                <Text style={styles.groupLabel}>Jewelry Row Mode</Text>
+                <Text style={styles.groupLabel}>Jewelry Print Mode</Text>
                 <ChipGroup
-                  options={['3-Across (All 3 Labels)', 'Single Label']}
+                  options={['3-Across (54×96 Sheet)', 'Single Label Tag']}
                   selected={
-                    printPreset?.id === 'jewellery-3up-14x100'
-                      ? '3-Across (All 3 Labels)'
-                      : 'Single Label'
+                    printPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP
+                      ? '3-Across (54×96 Sheet)'
+                      : 'Single Label Tag'
                   }
                   onSelect={(opt) => {
-                    if (opt === '3-Across (All 3 Labels)') {
+                    if (opt === '3-Across (54×96 Sheet)') {
                       const p =
-                        PRINT_SIZE_PRESETS.find((preset) => preset.id === 'jewellery-3up-14x100') ??
+                        PRINT_SIZE_PRESETS.find((preset) => preset.id === JEWELRY_DIECUT_PRINT_PRESET_3UP) ??
                         null;
                       setPrintPreset(p);
-                      setPrintSize({ widthMm: 50, heightMm: 100 });
+                      setPrintSize({
+                        widthMm: JEWELRY_DIECUT.sheetWidthMm,
+                        heightMm: JEWELRY_DIECUT.sheetHeightMm,
+                      });
                     } else {
                       setPrintPreset(null);
                       setPrintSize({
-                        widthMm: previewDocument?.widthMm ?? 14.3,
-                        heightMm: previewDocument?.heightMm ?? 100,
+                        widthMm: sourceDocument?.widthMm ?? JEWELRY_DIECUT.tagWidthMm,
+                        heightMm: sourceDocument?.heightMm ?? JEWELRY_DIECUT.tagHeightMm,
                       });
                     }
                   }}
                 />
                 <Text style={styles.helperText}>
-                  {printPreset?.id === 'jewellery-3up-14x100'
-                    ? 'Prints the design equally across all 3 labels on the 50 mm roll.'
-                    : 'Prints only 1 single label on the left.'}
+                  {printPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP
+                    ? 'Prints across all 3 labels on the 54 × 96 mm backing sheet.'
+                    : `Prints exact single tag dimensions (${sourceDocument?.widthMm ?? JEWELRY_DIECUT.tagWidthMm} × ${sourceDocument?.heightMm ?? JEWELRY_DIECUT.tagHeightMm} mm).`}
                 </Text>
               </View>
             ) : null}

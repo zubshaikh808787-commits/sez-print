@@ -119,9 +119,10 @@ export function finalizeGrayForPrint(
     threshold: number;
     dither: boolean;
     hOffsetMm: number;
+    dpi?: number;
   },
 ): BitRaster {
-  const dpi = getPrinterManager().getPrintDpi();
+  const dpi = options.dpi ?? getPrinterManager().getPrintDpi();
   const canvas = printRasterSize(options.widthMm, options.heightMm, dpi);
 
   console.info(
@@ -132,10 +133,12 @@ export function finalizeGrayForPrint(
     'threshold:', options.threshold, 'dither:', options.dither,
   );
 
+  const widthPadOnly =
+    gray.height === canvas.heightPx && Math.abs(gray.width - canvas.widthPx) <= 8;
   const fitted =
     gray.width === canvas.widthPx && gray.height === canvas.heightPx
       ? gray
-      : fitGrayToSize(gray, canvas.widthPx, canvas.heightPx, 'stretch');
+      : fitGrayToSize(gray, canvas.widthPx, canvas.heightPx, widthPadOnly ? 'contain' : 'stretch');
 
   let bits = grayToBits(fitted, { threshold: options.threshold, dither: options.dither });
 
@@ -158,6 +161,7 @@ export function rasterizePngForPrint(
     threshold: number;
     dither: boolean;
     hOffsetMm: number;
+    dpi?: number;
   },
 ): BitRaster {
   const t0 = Date.now();
@@ -184,6 +188,7 @@ export function rasterizePngForPrint(
     threshold: options.threshold,
     dither: options.dither,
     hOffsetMm: options.hOffsetMm,
+    dpi: options.dpi,
   });
   const tFinalize = Date.now();
 
@@ -211,10 +216,11 @@ export function encodeConnectedPrinterJob(
     hOffsetMm?: number;
     media?: 'gap' | 'bline' | 'continuous';
     forceLeftAligned?: boolean;
+    dpi?: number;
   },
 ): Uint8Array {
   const manager = getPrinterManager();
-  const dpi = manager.getPrintDpi();
+  const dpi = options.dpi ?? manager.getPrintDpi();
   const profile = manager.getActivePrinterProfile();
 
   const spec = createPrintSpec({

@@ -104,6 +104,10 @@ function AppRoot() {
           name="customize-template"
           options={{ presentation: 'transparentModal', animation: 'fade' }}
         />
+        <Stack.Screen
+          name="jewellery-label"
+          options={{ presentation: 'transparentModal', animation: 'fade' }}
+        />
       </Stack>
     </ThemeProvider>
   );

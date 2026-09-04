@@ -4,6 +4,12 @@ import {
   DEFAULT_LINE_STATE,
   DEFAULT_SHAPE_STATE,
 } from '@/components/editor/types';
+import {
+  JEWELRY_DIECUT,
+  JEWELRY_DIECUT_TYPE,
+  jewelryDieCutColumnX,
+  jewelryDieCutFieldTops,
+} from '@/constants/jewelry-diecut';
 import { clampElementToLabel, templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
 import { generateId, type LabelElement } from '@/lib/label-document';
 
@@ -54,7 +60,14 @@ function boxEl(
   top: number,
   width: number,
   height: number,
-  opts: { fill?: boolean; fillColor?: string; rounded?: boolean; radius?: number } = {},
+  opts: {
+    fill?: boolean;
+    fillColor?: string;
+    rounded?: boolean;
+    radius?: number;
+    needPrinting?: boolean;
+    lockMovement?: boolean;
+  } = {},
 ): LabelElement {
   const fill = opts.fill ?? true;
   return {
@@ -70,6 +83,8 @@ function boxEl(
     fill,
     fillColor: opts.fillColor ?? (fill ? '#FFFFFF' : undefined),
     roundRadius: opts.radius ?? 1.2,
+    needPrinting: opts.needPrinting ?? true,
+    lockMovement: opts.lockMovement ?? false,
   };
 }
 
@@ -101,6 +116,114 @@ function vLineEl(left: number, top: number, height: number): LabelElement {
     width: 0.35,
     height,
   };
+}
+
+type DieCutItemData = {
+  title: string;
+  karat: string;
+  grWt: string;
+  ntWt: string;
+  sku: string;
+  price: string;
+  barcode: string;
+  huid: string;
+};
+
+const DEFAULT_DIECUT_ITEM: DieCutItemData = {
+  title: 'GOLD RING',
+  karat: '22K (916) BIS',
+  grWt: '3.450g',
+  ntWt: '3.280g',
+  sku: 'RNG-450',
+  price: '₹ 24,950',
+  barcode: '91603450',
+  huid: 'HUID: B7810A',
+};
+
+const dieCutLine = {
+  align: 'center' as const,
+  autoWrapping: 'Close' as const,
+};
+
+/** One 14×96 mm die-cut tag: 64 mm printable body (fold at 32) + 32 mm tail. Chrome is non-printing. */
+function buildDieCutTagElements(colX: number, item: DieCutItemData = DEFAULT_DIECUT_ITEM): LabelElement[] {
+  const colW = JEWELRY_DIECUT.tagWidthMm;
+  const { bodyHeightMm, foldYMm, tailHeightMm, tailWidthMm } = JEWELRY_DIECUT;
+  const type = JEWELRY_DIECUT_TYPE;
+  const tailX = colX + (colW - tailWidthMm) / 2;
+  const innerW = colW - type.insetXMm * 2;
+  const left = colX + type.insetXMm;
+  const titleH = textBlockHeightMm(type.titlePt, 1);
+  const karatH = textBlockHeightMm(type.karatPt, 1);
+  const bodyH = textBlockHeightMm(type.bodyPt, 1);
+  const priceH = textBlockHeightMm(type.pricePt, 1);
+  const skuH = textBlockHeightMm(type.skuPt, 1);
+  const huidH = textBlockHeightMm(type.huidPt, 1);
+  const tops = jewelryDieCutFieldTops({
+    title: titleH,
+    karat: karatH,
+    gr: bodyH,
+    nt: bodyH,
+    price: priceH,
+    barcode: type.barcodeHeightMm,
+    sku: skuH,
+    huid: huidH,
+  });
+
+  const title = textEl({ left, top: tops.title, width: innerW }, item.title, type.titlePt, {
+    ...dieCutLine,
+    bold: true,
+  });
+  const karat = textEl({ left, top: tops.karat, width: innerW }, item.karat, type.karatPt, {
+    ...dieCutLine,
+    bold: true,
+  });
+  const gr = textEl({ left, top: tops.gr, width: innerW }, `Gr: ${item.grWt}`, type.bodyPt, {
+    ...dieCutLine,
+    bold: true,
+  });
+  const nt = textEl({ left, top: tops.nt, width: innerW }, `Nt: ${item.ntWt}`, type.bodyPt, {
+    ...dieCutLine,
+    bold: true,
+  });
+  const price = textEl({ left, top: tops.price, width: innerW }, item.price, type.pricePt, {
+    ...dieCutLine,
+    bold: true,
+  });
+
+  return [
+    boxEl(colX, 0, colW, bodyHeightMm, {
+      rounded: true,
+      radius: 2.0,
+      needPrinting: false,
+      lockMovement: true,
+    }),
+    lineEl(colX + 0.5, foldYMm, colW - 1.0, {
+      lineStyle: 'dashed',
+      needPrinting: false,
+      lockMovement: true,
+    }),
+    boxEl(tailX, bodyHeightMm, tailWidthMm, tailHeightMm, {
+      rounded: true,
+      radius: 1.2,
+      needPrinting: false,
+      lockMovement: true,
+    }),
+
+    title,
+    karat,
+    gr,
+    nt,
+    price,
+
+    barcodeEl(
+      { left, top: tops.barcode, width: innerW, height: type.barcodeHeightMm },
+      item.barcode,
+      { fontSize: type.bodyPt, textFlag: 'Hide' },
+    ),
+    textEl({ left, top: tops.sku, width: innerW }, item.sku, type.skuPt, { ...dieCutLine, bold: true }),
+    textEl({ left, top: tops.huid, width: innerW }, item.huid, type.huidPt, { ...dieCutLine, bold: true }),
+  ];
 }
 
 function jewFlagRight(w: number, h: number, smallPt: number, withText = true) {
@@ -615,6 +738,22 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
           align: 'center',
         }),
       ];
+    }
+
+    case 'jew-rattail-single-12x100': {
+      return buildDieCutTagElements(0);
+    }
+
+    case 'jew-rattail-3row-54x100': {
+      const allEls: LabelElement[] = [];
+      const itemData: DieCutItemData = {
+        ...DEFAULT_DIECUT_ITEM,
+        huid: 'HUID: A916B2',
+      };
+      for (let i = 0; i < JEWELRY_DIECUT.columns; i++) {
+        allEls.push(...buildDieCutTagElements(jewelryDieCutColumnX(i), itemData));
+      }
+      return allEls;
     }
 
     default:
