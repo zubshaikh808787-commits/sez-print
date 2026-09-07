@@ -9,7 +9,7 @@ import {
   divideTableRowHeights,
   formatInt,
   formatMm,
-  type Rotation,
+  normalizeRotation,
   type TableElementState,
   type TablePropertyTab,
 } from '@/components/editor/types';
@@ -332,10 +332,10 @@ export function TablePropertyPanel({
             <SectionGap />
             <GraySection>
               <SegmentRow
-                label="Rotation Angle"
+                label={`Rotation Angle (${normalizeRotation(state.rotation)}°)`}
                 options={['0°', '90°', '180°', '270°'] as const}
-                selected={`${state.rotation}°`}
-                onSelect={(value) => patch({ rotation: parseInt(value, 10) as Rotation })}
+                selected={`${normalizeRotation(state.rotation)}°`}
+                onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
               />
               <Divider />
               {dimensionSteppers}

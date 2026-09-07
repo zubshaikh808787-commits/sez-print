@@ -1,13 +1,14 @@
 /**
  * Authoritative WYSIWYG Print Geometry Engine.
- * Single source of truth for coordinate transformation from logical units (mm / %)
- * to screen DP and exact physical printer dots (203 / 300 DPI).
- *
- * @deprecated Prefer `createPrintSpec()` from `@/lib/printer/print-spec` for new code.
- * This module is retained for the shipping-editor and will be consolidated in a future cleanup.
+ * Delegates mm→dots to print-spec so 304 DPI stays 12 dots/mm (TSPL SIZE-safe).
  */
 
-import { MM_PER_INCH } from '@/lib/printer/print-spec';
+import {
+  createUniversalPrintLayout,
+  MM_PER_INCH,
+  mmToDots,
+  tsplPackedWidthDots,
+} from '@/lib/printer/print-spec';
 
 export type PrintGeometry = {
   /** Target physical label dimensions in mm */
@@ -46,39 +47,22 @@ export function calculatePrintGeometry(
 ): PrintGeometry {
   const safeWidthMm = Math.max(10, widthMm);
   const safeHeightMm = Math.max(10, heightMm);
-  const dotsPerMm = dpi / MM_PER_INCH;
+  const layout = createUniversalPrintLayout(safeWidthMm, safeHeightMm, dpi);
 
-  const widthDots = Math.round(safeWidthMm * dotsPerMm);
-  const heightDots = Math.round(safeHeightMm * dotsPerMm);
-
-  // TSPL / ESC-POS 1-bit packed raster requires byte-aligned rows (multiple of 8 dots)
-  const rasterWidthDots = Math.max(8, Math.ceil(widthDots / 8) * 8);
-  const bytesPerRow = rasterWidthDots / 8;
-
-  // Printhead hardware centering:
-  // TD-404 / Ninestar TSPL uses label-local coordinates (SIZE = label mm, BITMAP 0,0 =
-  // label top-left — vendor demo). Physical centering is done by the paper guides.
-  // Do not shift BITMAP x or content prints off the right edge of narrow labels.
-  const hardwareXOffsetDots = 0;
-
-  // User calibration offsets
-  const calibXDots = Math.round(calibrationOffsetMm.x * dotsPerMm);
-  const calibYDots = Math.round(calibrationOffsetMm.y * dotsPerMm);
-
-  const totalXOffsetDots = Math.max(0, hardwareXOffsetDots + calibXDots);
-  const totalYOffsetDots = Math.max(0, calibYDots);
+  const calibXDots = mmToDots(calibrationOffsetMm.x, dpi);
+  const calibYDots = mmToDots(calibrationOffsetMm.y, dpi);
 
   return {
     labelWidthMm: safeWidthMm,
     labelHeightMm: safeHeightMm,
     dpi,
-    widthDots,
-    heightDots,
-    rasterWidthDots,
-    bytesPerRow,
-    hardwareXOffsetDots: totalXOffsetDots,
-    hardwareYOffsetDots: totalYOffsetDots,
-    dotsPerMm,
+    widthDots: layout.sizeDotsW,
+    heightDots: layout.sizeDotsH,
+    rasterWidthDots: layout.bitmapDotsW,
+    bytesPerRow: layout.bytesPerRow,
+    hardwareXOffsetDots: Math.max(0, calibXDots),
+    hardwareYOffsetDots: Math.max(0, calibYDots),
+    dotsPerMm: layout.dotsPerMm,
   };
 }
 
@@ -112,7 +96,9 @@ Target DPI: ${geometry.dpi} DPI (${geometry.dotsPerMm.toFixed(3)} dots/mm)
 Printer Canvas: ${geometry.widthDots} × ${geometry.heightDots} dots
 Raster Allocation: ${geometry.rasterWidthDots} × ${geometry.heightDots} dots (${geometry.bytesPerRow} bytes/row, ${geometry.bytesPerRow * geometry.heightDots} bytes total)
 Hardware Centering Offset: X=${geometry.hardwareXOffsetDots} dots (${(geometry.hardwareXOffsetDots / geometry.dotsPerMm).toFixed(2)} mm), Y=${geometry.hardwareYOffsetDots} dots
-Printhead Width: ${THERMAL_PRINTHEAD_WIDTH_MM} mm (${Math.round(THERMAL_PRINTHEAD_WIDTH_MM * geometry.dotsPerMm)} dots)
+Printhead Width: ${THERMAL_PRINTHEAD_WIDTH_MM} mm (${mmToDots(THERMAL_PRINTHEAD_WIDTH_MM, geometry.dpi)} dots)
 ================================================
   `.trim();
 }
+
+export { tsplPackedWidthDots, MM_PER_INCH };

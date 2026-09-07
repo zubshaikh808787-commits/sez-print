@@ -11,7 +11,13 @@ export type QrCodeShape = 'Auto' | 'Square' | 'Rectangle';
 export type LineSpacing = '1.0' | '1.5' | '2.0' | 'Custom';
 export type AutoWrapping = 'Close' | 'Char' | 'Word';
 export type TextAlign = 'left' | 'center' | 'right' | 'justify' | 'spacing';
-export type Rotation = 0 | 90 | 180 | 270;
+/** Degrees on the artboard, 0–359. Cardinal chips still snap to 0/90/180/270. */
+export type Rotation = number;
+
+export function normalizeRotation(deg: number): number {
+  if (!Number.isFinite(deg)) return 0;
+  return ((Math.round(deg) % 360) + 360) % 360;
+}
 
 export type EditorElementState = {
   text: string;
@@ -374,6 +380,7 @@ export type ArcTextElementState = {
   contentType: ContentType;
   degreesOffset: number;
   columnNameContent: string;
+  text: string;
   lineWidth: number;
   fontFamily: string;
   fontSize: number;
@@ -396,6 +403,7 @@ export const DEFAULT_ARCTEXT_STATE: ArcTextElementState = {
   contentType: 'Manual',
   degreesOffset: 1,
   columnNameContent: '',
+  text: 'ARC TEXT',
   lineWidth: 0.5,
   fontFamily: 'Default',
   fontSize: 7.5,

@@ -1,16 +1,16 @@
 import { router } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { PositionControls } from '@/components/editor/position-controls';
 import {
   DRAWING_COLORS,
   formatMm,
   formatPt,
+  normalizeRotation,
   type BarcodeElementState,
   type BarcodePropertyTab,
   type ContentType,
-  type Rotation,
   type TextAlign,
   type TextFlag,
 } from '@/components/editor/types';
@@ -140,6 +140,42 @@ function NavRow({ label, value, onPress }: { label: string; value: string; onPre
         <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
       </View>
     </Pressable>
+  );
+}
+
+function BarcodeContentFields({
+  state,
+  patch,
+  onColumnNamePress,
+}: {
+  state: BarcodeElementState;
+  patch: (updates: Partial<BarcodeElementState>) => void;
+  onColumnNamePress?: () => void;
+}) {
+  if (state.contentType === 'Data Source') {
+    return <NavRow label="Content" value={state.columnNameContent} onPress={onColumnNamePress} />;
+  }
+  return (
+    <>
+      <View style={styles.contentRow}>
+        <Text style={styles.rowLabel}>Content</Text>
+        <Pressable
+          onPress={() => router.push({ pathname: '/scan', params: { from: 'edit' } })}
+          hitSlop={8}
+          style={({ pressed }) => [pressed && styles.pressed]}>
+          <AppIcon name="barcode.viewfinder" tintColor={ACCENT} size={22} />
+        </Pressable>
+      </View>
+      <TextInput
+        style={styles.contentInput}
+        value={state.content}
+        onChangeText={(content) => patch({ content })}
+        placeholder="Enter barcode value"
+        placeholderTextColor="#94A3B8"
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+    </>
   );
 }
 
@@ -309,6 +345,7 @@ type BarcodePropertyPanelProps = {
   onTabChange: (tab: BarcodePropertyTab) => void;
   state: BarcodeElementState;
   patch: (updates: Partial<BarcodeElementState>) => void;
+  onColumnNamePress?: () => void;
   labelWidthMm: number;
   labelHeightMm: number;
   elementHeightMm: number;
@@ -319,6 +356,7 @@ export function BarcodePropertyPanel({
   onTabChange,
   state,
   patch,
+  onColumnNamePress,
   labelWidthMm,
   labelHeightMm,
   elementHeightMm,
@@ -400,17 +438,7 @@ export function BarcodePropertyPanel({
               onSelect={(contentType: ContentType) => patch({ contentType })}
             />
             <Divider />
-            <View style={styles.contentRow}>
-              <Text style={styles.rowLabel}>Content</Text>
-              <View style={styles.contentRight}>
-                {state.content ? (
-                  <Text style={styles.contentValue} numberOfLines={1}>
-                    {state.content}
-                  </Text>
-                ) : null}
-                <AppIcon name="barcode.viewfinder" tintColor={ACCENT} size={22} />
-              </View>
-            </View>
+            <BarcodeContentFields state={state} patch={patch} onColumnNamePress={onColumnNamePress} />
             <Divider />
             <NavRow
               label="Encode Mode"
@@ -450,10 +478,10 @@ export function BarcodePropertyPanel({
             </View>
             <Divider />
             <SegmentRow
-              label="Rotation Angle"
+              label={`Rotation Angle (${normalizeRotation(state.rotation)}°)`}
               options={['0°', '90°', '180°', '270°'] as const}
-              selected={`${state.rotation}°`}
-              onSelect={(value) => patch({ rotation: parseInt(value, 10) as Rotation })}
+              selected={`${normalizeRotation(state.rotation)}°`}
+              onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
             />
             <Divider />
             <StepperRow
@@ -481,10 +509,10 @@ export function BarcodePropertyPanel({
             </View>
             <Divider />
             <SegmentRow
-              label="Rotation Angle"
+              label={`Rotation Angle (${normalizeRotation(state.rotation)}°)`}
               options={['0°', '90°', '180°', '270°'] as const}
-              selected={`${state.rotation}°`}
-              onSelect={(value) => patch({ rotation: parseInt(value, 10) as Rotation })}
+              selected={`${normalizeRotation(state.rotation)}°`}
+              onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
             />
             <SectionGap />
             {dimensionSteppers}
@@ -539,17 +567,7 @@ export function BarcodePropertyPanel({
               onSelect={(contentType: ContentType) => patch({ contentType })}
             />
             <Divider />
-            <View style={styles.contentRow}>
-              <Text style={styles.rowLabel}>Content</Text>
-              <View style={styles.contentRight}>
-                {state.content ? (
-                  <Text style={styles.contentValue} numberOfLines={1}>
-                    {state.content}
-                  </Text>
-                ) : null}
-                <AppIcon name="barcode.viewfinder" tintColor={ACCENT} size={22} />
-              </View>
-            </View>
+            <BarcodeContentFields state={state} patch={patch} onColumnNamePress={onColumnNamePress} />
           </>
         )}
 
@@ -645,6 +663,19 @@ const styles = StyleSheet.create({
   },
   contentRight: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '62%' },
   contentValue: { fontSize: 14, color: '#64748B', fontWeight: '500', flexShrink: 1 },
+  contentInput: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#1E293B',
+    backgroundColor: '#F8FAFC',
+  },
   navRow: {
     minHeight: 52,
     paddingHorizontal: 16,

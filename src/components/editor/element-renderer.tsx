@@ -573,7 +573,7 @@ function ArcTextContent({
   const text =
     element.contentType === 'Data Source' && element.columnNameContent
       ? element.columnNameContent
-      : 'ARC TEXT';
+      : element.text || 'ARC TEXT';
   const size = fontSizePx(element.fontSize, scale);
   const rx = widthPx / 2 - size / 2;
   const ry = heightPx / 2 - size / 2;

@@ -3,13 +3,15 @@
  *
  * Design / editor coordinates are millimetres.
  * Screen preview: contain-fit mm into available pixels (not CSS 96dpi).
- * Print raster: dots = round(mm × DPI / 25.4). TD-404 is 203 DPI.
+ * Print raster: dots = round(mm × DPI / 25.4). This printer is 304 DPI (12 dots/mm).
  */
 
 import { JEWELRY_DIECUT } from '@/constants/jewelry-diecut';
-import { dotsToMm, MM_PER_INCH, mmToDots } from '@/lib/printer/print-spec';
+import { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout } from '@/lib/printer/print-spec';
+import type { MediaShape } from '@/lib/label-document';
 
-export { dotsToMm, MM_PER_INCH, mmToDots };
+export { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout };
+export type { MediaShape };
 export const PRINT_DPI = 304;
 export const PRINT_DOTS_PER_MM = PRINT_DPI / MM_PER_INCH;
 export const MIN_LABEL_MM = 8;
@@ -137,36 +139,37 @@ export function fitLabelSize(
  * Use this for ViewShot capture so aspect matches the preview.
  */
 export function printContentSize(widthMm: number, heightMm: number, dpi = PRINT_DPI) {
-  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : PRINT_DPI;
+  const layout = createUniversalPrintLayout(widthMm, heightMm, dpi);
   return {
-    widthPx: Math.max(1, mmToDots(widthMm, d)),
-    heightPx: Math.max(1, mmToDots(heightMm, d)),
+    widthPx: layout.captureDotsW,
+    heightPx: layout.captureDotsH,
   };
 }
 
 /**
- * BITMAP canvas size: width rounded UP to a multiple of 8 (TSPL bytes×8).
- * Content is centered into this canvas so padding is even L/R (not left-biased).
+ * BITMAP canvas size: width packed DOWN to a multiple of 8 (TSPL bytes×8).
+ * Packing up past SIZE-in-dots is clipped by firmware (right edge cutoff).
  */
 export function printRasterSize(widthMm: number, heightMm: number, dpi = PRINT_DPI) {
-  const content = printContentSize(widthMm, heightMm, dpi);
+  const layout = createUniversalPrintLayout(widthMm, heightMm, dpi);
   return {
-    widthPx: Math.max(8, Math.ceil(content.widthPx / 8) * 8),
-    heightPx: content.heightPx,
+    widthPx: layout.bitmapDotsW,
+    heightPx: layout.bitmapDotsH,
   };
 }
 
 /**
- * ViewShot uses `content` (true mm→dots). TSPL BITMAP uses `canvas` (8-dot pad).
- * `scale` is uniform px/mm so capture aspect matches the preview.
+ * ViewShot captures `content` (SIZE-in-dots) so 1 px = 1 printer dot at the
+ * same mm scale as the editor. `canvas` is the packed BITMAP size (crop, never scale).
  */
 export function printCaptureLayout(widthMm: number, heightMm: number, dpi = PRINT_DPI) {
-  const content = printContentSize(widthMm, heightMm, dpi);
-  const canvas = printRasterSize(widthMm, heightMm, dpi);
+  const layout = createUniversalPrintLayout(widthMm, heightMm, dpi);
   const wMm = Math.max(widthMm, 0.01);
-  const hMm = Math.max(heightMm, 0.01);
-  const scale = Math.min(content.widthPx / wMm, content.heightPx / hMm);
-  return { content, canvas, scale };
+  return {
+    content: { widthPx: layout.captureDotsW, heightPx: layout.captureDotsH },
+    canvas: { widthPx: layout.bitmapDotsW, heightPx: layout.bitmapDotsH },
+    scale: layout.captureDotsW / wMm,
+  };
 }
 
 /**
@@ -188,4 +191,21 @@ export function printMediaSizeMm(widthMm: number, heightMm: number): LabelSizeMm
     widthMm: Math.max(0.1, Math.round(widthMm * 100) / 100),
     heightMm: Math.max(0.1, Math.round(heightMm * 100) / 100),
   };
+}
+
+/** Clip style so on-screen / capture artboard matches the physical stock outline. */
+export function mediaShapeClipStyle(
+  shape: MediaShape | undefined,
+  widthPx: number,
+  heightPx: number,
+): { overflow: 'hidden'; borderRadius?: number } {
+  const w = Math.max(1, widthPx);
+  const h = Math.max(1, heightPx);
+  if (shape === 'circle' || shape === 'ellipse') {
+    return { overflow: 'hidden', borderRadius: Math.min(w, h) / 2 };
+  }
+  if (shape === 'roundedRectangle') {
+    return { overflow: 'hidden', borderRadius: Math.min(w, h) * 0.1 };
+  }
+  return { overflow: 'hidden' };
 }

@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
 import type { ReactNode } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { PositionControls } from '@/components/editor/position-controls';
 import {
@@ -12,7 +12,7 @@ import {
   type ArcTextElementState,
   type ArcTextPropertyTab,
   type ContentType,
-  type Rotation,
+  normalizeRotation,
 } from '@/components/editor/types';
 
 const ACCENT = '#48C3C7';
@@ -261,10 +261,18 @@ function ContentSection({
       {state.contentType === 'Data Source' ? (
         <NavRow label="Content" value={state.columnNameContent} onPress={onColumnNamePress} />
       ) : (
-        <View style={styles.contentRow}>
-          <Text style={styles.rowLabel}>Content</Text>
-          <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
-        </View>
+        <>
+          <View style={styles.contentRow}>
+            <Text style={styles.rowLabel}>Content</Text>
+          </View>
+          <TextInput
+            style={styles.contentInput}
+            value={state.text}
+            onChangeText={(text) => patch({ text })}
+            placeholder="Enter arc text"
+            placeholderTextColor="#94A3B8"
+          />
+        </>
       )}
     </>
   );
@@ -398,10 +406,10 @@ export function ArcTextPropertyPanel({
             <SectionGap />
             <GraySection>
               <SegmentRow
-                label="Rotation Angle"
+                label={`Rotation Angle (${normalizeRotation(state.rotation)}°)`}
                 options={['0°', '90°', '180°', '270°'] as const}
-                selected={`${state.rotation}°`}
-                onSelect={(value) => patch({ rotation: parseInt(value, 10) as Rotation })}
+                selected={`${normalizeRotation(state.rotation)}°`}
+                onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
               />
               <Divider />
               {dimensionSteppers}
@@ -550,6 +558,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  contentInput: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#1E293B',
+    backgroundColor: '#F8FAFC',
   },
   styleRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   styleBtn: {

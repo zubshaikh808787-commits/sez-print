@@ -444,7 +444,7 @@ export default function PrintScreen() {
 
   const jobDpi = jewelryJobDpi ?? getPrinterManager().getPrintDpi();
 
-  /** Native printer-dot artboard for capture — true mm→dots (8-dot pad applied after). */
+  /** Native printer-dot artboard for capture — SIZE-in-dots (1 px = 1 printer dot). */
   const printCaptureSize = useMemo(() => {
     const doc = displayDocument ?? previewDocument;
     if (!doc) return { widthPx: 8, heightPx: 8 };
@@ -803,7 +803,7 @@ export default function PrintScreen() {
             )}
           </View>
 
-          {/* Dedicated 1:1 Hardware Dot Print Artboard (captured at true printer DPI) */}
+          {/* Dedicated 1:1 Hardware Dot Print Artboard (captured at SIZE dots, then cropped to BITMAP) */}
           {(displayDocument ?? previewDocument) ? (
             <View style={styles.printCaptureNative}>
               <ViewShot

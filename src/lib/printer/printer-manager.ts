@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { AppState, type AppStateStatus, NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
-import { PRINT_DPI, printMediaSizeMm } from '@/lib/label-geometry';
+import { PRINT_DPI, mmToDots, printMediaSizeMm } from '@/lib/label-geometry';
 import {
   connectWifiPrinter,
   wifiPrintRaw,
@@ -360,10 +360,10 @@ class PrinterManager {
     }
 
     // TSPL label printers — resolve from user settings (default 304 DPI / 12 dots/mm)
-    const dpi = settings.printerDpi ?? 304;
+    const dpi = settings.printerDpi ?? PRINT_DPI;
     const alignment = settings.printerAlignment ?? 'center';
     const headWidthMm = settings.printheadWidthMm ?? 108;
-    const headWidthDots = Math.round((headWidthMm * dpi) / 25.4);
+    const headWidthDots = mmToDots(headWidthMm, dpi);
 
     if (dpi === 304) {
       const base = headWidthMm >= 106 ? PRINTER_PROFILES['td404-304'] : PRINTER_PROFILES['generic-304-4in'];

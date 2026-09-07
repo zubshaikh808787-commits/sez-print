@@ -22,8 +22,8 @@ export const JEWELRY_DIECUT = {
   gapMm: 3,
   sideMarginMm: 3,
   columns: 3,
-  /** Capture and print at 300 DPI (54 mm → 638 dots, 96 mm → 1134 dots). */
-  printDpi: 300,
+  /** Capture and print at 304 DPI / 12 dots/mm (54 mm → 648 dots, 96 mm → 1152). */
+  printDpi: 304,
 } as const;
 
 /**
@@ -35,20 +35,20 @@ export const JEWELRY_DIECUT = {
  *   fold → SKU → HUID (packed against the midline) → empty space → tail
  */
 export const JEWELRY_DIECUT_TYPE = {
-  insetXMm: 0.55,
-  frontInsetMm: 2.5,
-  foldClearanceMm: 1.7,
-  lineGapMm: 1.15,
-  blockGapMm: 1.6,
-  backLineGapMm: 1.15,
+  insetXMm: 0.95,
+  frontInsetMm: 3.2,
+  foldClearanceMm: 2.1,
+  lineGapMm: 1.05,
+  blockGapMm: 1.45,
+  backLineGapMm: 1.05,
   contentBottomMm: 60,
-  titlePt: 7,
-  karatPt: 5.5,
-  bodyPt: 6,
-  pricePt: 7,
-  skuPt: 6.5,
-  huidPt: 6,
-  barcodeHeightMm: 8,
+  titlePt: 6.5,
+  karatPt: 5.25,
+  bodyPt: 5.75,
+  pricePt: 6.5,
+  skuPt: 6,
+  huidPt: 5.75,
+  barcodeHeightMm: 7.5,
 } as const;
 
 export type JewelryDieCutField =
@@ -165,7 +165,8 @@ export function jewelryDieCutFieldTops(heights: Record<JewelryDieCutField, numbe
 
 function textWidthMm(text: string, fontSizePt: number, bold?: boolean) {
   const emMm = ptToMm(fontSizePt);
-  const advance = bold ? 0.56 : 0.5;
+  // Android bold (700) is wider than 0.56em — underestimate caused edge glyphs to clip.
+  const advance = bold ? 0.64 : 0.55;
   return Math.max(1, text.replace(/\s/g, ' ').length) * emMm * advance;
 }
 
@@ -178,7 +179,7 @@ export function jewelryDieCutFontToFit(
   maxPt = 8,
   minPt = 5.5,
 ) {
-  const usable = Math.max(3, widthMm * 0.97);
+  const usable = Math.max(3, widthMm * 0.92);
   let pt = Math.min(maxPt, Math.max(minPt, currentPt));
   while (pt > 4 && textWidthMm(text, pt, bold) > usable) {
     pt -= 0.25;
@@ -244,8 +245,21 @@ export function refitJewelryDieCutDocument(doc: LabelDocument): LabelDocument {
     if (el.type === 'text' || el.type === 'degrees' || el.type === 'time') {
       const raw = elementText(el);
       const maxPt =
-        field === 'title' || field === 'price' ? t.titlePt : field === 'karat' ? t.karatPt + 0.25 : 7.5;
-      const fontSize = jewelryDieCutFontToFit(raw, box.width, true, Math.max(el.fontSize, t.bodyPt), maxPt);
+        field === 'title' || field === 'price'
+          ? t.titlePt
+          : field === 'karat'
+            ? t.karatPt
+            : field === 'huid'
+              ? t.huidPt
+              : 6.5;
+      const fontSize = jewelryDieCutFontToFit(
+        raw,
+        box.width,
+        true,
+        Math.min(el.fontSize || t.bodyPt, maxPt),
+        maxPt,
+        4,
+      );
       return {
         ...el,
         ...box,

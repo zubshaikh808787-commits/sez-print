@@ -8,6 +8,7 @@ import { runOnJS } from 'react-native-reanimated';
 
 import { KonvaTransformer, type TransformCommitPayload } from './konva-transformer';
 import { type LabelDocument, type LabelElement } from '@/lib/label-document';
+import { mediaShapeClipStyle } from '@/lib/label-geometry';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
 import { sortLayers } from '@/lib/template-schema';
 
@@ -53,6 +54,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 ) {
   const w = Math.max(1, canvasWidthPx);
   const h = Math.max(1, canvasHeightPx);
+  const shapeClip = mediaShapeClipStyle(doc.mediaShape, w, h);
 
   // Background color is always solid clean white by default
   const backgroundColor =
@@ -139,10 +141,10 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       style={{
         width: w,
         height: h,
-        overflow: 'hidden',
         backgroundColor: '#FFFFFF',
+        ...shapeClip,
       }}>
-      <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={{ width: w, height: h }}>
+      <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={{ width: w, height: h, ...shapeClip }}>
         <View
           collapsable={false}
           style={[
@@ -151,6 +153,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
               width: w,
               height: h,
               backgroundColor,
+              ...shapeClip,
             },
           ]}>
           {doc.background?.type === 'image' ? (

@@ -75,12 +75,12 @@ import {
   DEFAULT_SHAPE_STATE,
   DEFAULT_TIME_STATE,
   createTableState,
+  normalizeRotation,
   type ArcTextPropertyTab,
   type BarcodePropertyTab,
   type LinePropertyTab,
   type PropertyTab,
   type QrcodePropertyTab,
-  type Rotation,
   type ShapePropertyTab,
   type TablePropertyTab,
   type TimePropertyTab,
@@ -342,6 +342,7 @@ export default function EditScreen() {
 
   const toolbarRef = useRef<View>(null);
   const canvasShotRef = useRef<ViewShot>(null);
+  const clipartReplaceIdRef = useRef<string | null>(null);
   const [showLabelMenu, setShowLabelMenu] = useState(false);
   const [labelMenuTop, setLabelMenuTop] = useState(0);
   const [showTablePicker, setShowTablePicker] = useState(false);
@@ -741,6 +742,24 @@ export default function EditScreen() {
     setPanelOpen(false);
   }, [selectedIds, setElements]);
 
+  const duplicateSelected = useCallback(() => {
+    if (selectedIds.length === 0) return;
+    const bounds = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
+    const sources = docRef.current.elements.filter(
+      (el) => selectedIds.includes(el.id) && el.needPrinting !== false && el.type !== 'border',
+    );
+    if (sources.length === 0) return;
+    const clones = sources.map((el) => {
+      const clone = JSON.parse(JSON.stringify(el)) as LabelElement;
+      clone.id = generateId();
+      clone.left = el.left + 2;
+      clone.top = el.top + 2;
+      return clampElementToLabel(clone, bounds);
+    });
+    setElements((elements) => [...elements, ...clones], true);
+    setSelectedIds(clones.map((clone) => clone.id));
+  }, [selectedIds, setElements]);
+
   const handleDeselectAll = useCallback(() => {
     setSelectedIds([]);
     setPanelOpen(false);
@@ -768,7 +787,12 @@ export default function EditScreen() {
       setShowSignatureBoard(true);
       return;
     }
-    if (element.type === 'clipart' || element.type === 'border') {
+    if (element.type === 'border') {
+      return;
+    }
+    if (element.type === 'clipart') {
+      clipartReplaceIdRef.current = id;
+      router.push({ pathname: '/clipart', params: { from: 'edit' } });
       return;
     }
     if (element.type === 'image') {
@@ -836,7 +860,7 @@ export default function EditScreen() {
             left: payload.leftMm,
             top: payload.topMm,
             width: payload.widthMm,
-            rotation: (payload.rotation % 360) as Rotation,
+            rotation: normalizeRotation(payload.rotation),
           };
           if ('height' in next && typeof next.height === 'number') {
             (next as { height: number }).height = payload.heightMm;
@@ -922,8 +946,7 @@ export default function EditScreen() {
         (items) =>
           items.map((el) => {
             if (el.id !== id) return el;
-            const next = (((el.rotation ?? 0) + 90) % 360) as Rotation;
-            return { ...el, rotation: next };
+            return { ...el, rotation: normalizeRotation((el.rotation ?? 0) + 90) };
           }),
         true,
       );
@@ -1037,9 +1060,19 @@ export default function EditScreen() {
       if (editorBridge.clipartResult) {
         const clipart = editorBridge.clipartResult;
         editorBridge.clipartResult = null;
-        addElement('clipart', {
-          clipartId: clipart.id,
-        });
+        const replaceId = clipartReplaceIdRef.current;
+        clipartReplaceIdRef.current = null;
+        const existing =
+          replaceId != null
+            ? docRef.current.elements.find((el) => el.id === replaceId && el.type === 'clipart')
+            : undefined;
+        if (existing) {
+          patchElement(existing.id, { clipartId: clipart.id });
+        } else {
+          addElement('clipart', {
+            clipartId: clipart.id,
+          });
+        }
       }
 
       if (editorBridge.borderResult) {
@@ -1153,6 +1186,7 @@ export default function EditScreen() {
         void handlePickImage();
         break;
       case 'Clipart':
+        clipartReplaceIdRef.current = null;
         router.push({ pathname: '/clipart', params: { from: 'edit' } });
         break;
       case 'Border':
@@ -1263,6 +1297,12 @@ export default function EditScreen() {
         onPress={() => setLockOnSelection(false)}
       />
       <ToolbarItem
+        icon="square.on.square"
+        label="Duplicate"
+        disabled={selectedIds.length === 0}
+        onPress={duplicateSelected}
+      />
+      <ToolbarItem
         icon="trash"
         label="Delete"
         withDivider
@@ -1356,6 +1396,7 @@ export default function EditScreen() {
             onTabChange={setBarcodeTab}
             state={selectedElement}
             patch={patchSelected}
+            onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}

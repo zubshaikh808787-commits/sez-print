@@ -1,4 +1,5 @@
 import type { LabelOrientation } from '@/lib/label-document';
+import { tsplPackedWidthDots } from '@/lib/printer/print-spec';
 
 type FastPngDecode = typeof import('fast-png').decode;
 
@@ -321,6 +322,29 @@ export function grayToBits(
 }
 
 /**
+ * Copy the top-left destW×destH of a gray raster. Used to pack TSPL BITMAP
+ * width down by 0–7 dots without squeezing millimetres.
+ */
+export function cropGrayToSize(src: GrayRaster, destW: number, destH: number): GrayRaster {
+  const width = Math.max(1, Math.round(destW));
+  const height = Math.max(1, Math.round(destH));
+  if (src.width === width && src.height === height) return src;
+  const out = new Uint8Array(width * height);
+  out.fill(255);
+  const copyW = Math.min(src.width, width);
+  const copyH = Math.min(src.height, height);
+  const srcGray = src.gray;
+  for (let y = 0; y < copyH; y++) {
+    const srcRow = y * src.width;
+    const outRow = y * width;
+    for (let x = 0; x < copyW; x++) {
+      out[outRow + x] = srcGray[srcRow + x];
+    }
+  }
+  return { width, height, gray: out };
+}
+
+/**
  * Map a gray raster onto destW×destH.
  * `stretch` fills the label (same mm→dot mapping as the editor).
  * `contain` is only for 90°/270° when the rotated bitmap has a swapped aspect.
@@ -395,7 +419,7 @@ export function padBitsCentered(
   destWidth: number,
   destHeight: number,
 ): BitRaster {
-  const destW = Math.max(8, Math.ceil(Math.max(1, destWidth) / 8) * 8);
+  const destW = tsplPackedWidthDots(destWidth);
   const destH = Math.max(1, Math.round(destHeight));
   const srcW = raster.bytesPerRow * 8;
   const srcH = raster.height;

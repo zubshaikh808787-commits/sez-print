@@ -4,8 +4,8 @@ import { PositionControls } from '@/components/editor/position-controls';
 import {
   DRAWING_COLORS,
   formatMm,
+  normalizeRotation,
   type FigureShape,
-  type Rotation,
   type ShapeElementState,
   type ShapePropertyTab,
 } from '@/components/editor/types';
@@ -316,10 +316,10 @@ export function ShapePropertyPanel({
             <SectionGap />
             <GraySection>
               <SegmentRow
-                label="Rotation Angle"
+                label={`Rotation Angle (${normalizeRotation(state.rotation)}°)`}
                 options={['0°', '90°', '180°', '270°'] as const}
-                selected={`${state.rotation}°`}
-                onSelect={(value) => patch({ rotation: parseInt(value, 10) as Rotation })}
+                selected={`${normalizeRotation(state.rotation)}°`}
+                onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
               />
               <Divider />
               <DimensionSteppers state={state} patch={patch} />

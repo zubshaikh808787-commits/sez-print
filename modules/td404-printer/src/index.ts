@@ -218,7 +218,7 @@ export async function printTd404PngLabel(
     copies: options.copies ?? 1,
     media: options.media ?? 'gap',
     orientation: options.orientation ?? 0,
-    dpi: options.dpi ?? 203,
+    dpi: options.dpi ?? 304,
   });
 }
 

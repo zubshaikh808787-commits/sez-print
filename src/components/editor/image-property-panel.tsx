@@ -5,7 +5,7 @@ import { Image } from 'expo-image';
 
 import { AppIcon } from '@/components/app-icon';
 import { PositionControls } from '@/components/editor/position-controls';
-import { formatMm, type Rotation } from '@/components/editor/types';
+import { formatMm, normalizeRotation } from '@/components/editor/types';
 import type { ImageElementState } from '@/lib/label-document';
 
 const ACCENT = '#48C3C7';
@@ -126,13 +126,12 @@ export function ImagePropertyPanel({
   labelHeightMm,
   elementHeightMm,
 }: ImagePropertyPanelProps) {
-  const currentRotation = state.rotation ?? 0;
+  const currentRotation = normalizeRotation(state.rotation ?? 0);
   const isAspectLocked = state.aspectRatioLocked ?? true;
   const currentAspect = state.width > 0 && state.height > 0 ? state.width / state.height : 1;
 
   const handleRotate90 = useCallback(() => {
-    const next = ((currentRotation + 90) % 360) as Rotation;
-    patch({ rotation: next });
+    patch({ rotation: normalizeRotation(currentRotation + 90) });
   }, [currentRotation, patch]);
 
   const handleCropImage = useCallback(async () => {
@@ -419,22 +418,20 @@ export function ImagePropertyPanel({
         {activeTab === 'Rotate' && (
           <GraySection>
             <SegmentRow
-              label="Rotation Preset"
+              label={`Rotation Preset (${currentRotation}°)`}
               options={['0°', '90°', '180°', '270°'] as const}
               selected={`${currentRotation}°`}
-              onSelect={(value) => patch({ rotation: parseInt(value, 10) as Rotation })}
+              onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
             />
             <Divider />
             <StepperRow
               label="Adjust Angle (+/- 5°)"
               value={`${currentRotation}°`}
               onMinus={() => {
-                const next = ((currentRotation - 5 + 360) % 360) as Rotation;
-                patch({ rotation: next });
+                patch({ rotation: normalizeRotation(currentRotation - 5) });
               }}
               onPlus={() => {
-                const next = ((currentRotation + 5) % 360) as Rotation;
-                patch({ rotation: next });
+                patch({ rotation: normalizeRotation(currentRotation + 5) });
               }}
             />
             <Divider />

@@ -14,7 +14,7 @@ import {
   type EditorElementState,
   type LineSpacing,
   type PropertyTab,
-  type Rotation,
+  normalizeRotation,
   type TextAlign,
 } from '@/components/editor/types';
 import { Palette } from '@/constants/ui';
@@ -408,10 +408,10 @@ export function TextPropertyPanel({
             </View>
             <Divider />
             <SegmentRow
-              label="Rotation Angle"
+              label={`Rotation Angle (${normalizeRotation(state.rotation)}°)`}
               options={['0°', '90°', '180°', '270°'] as const}
-              selected={`${state.rotation}°`}
-              onSelect={(value) => patch({ rotation: parseInt(value, 10) as Rotation })}
+              selected={`${normalizeRotation(state.rotation)}°`}
+              onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
             />
             <Divider />
             {positionSteppers}

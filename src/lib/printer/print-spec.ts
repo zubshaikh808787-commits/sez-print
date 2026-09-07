@@ -100,20 +100,118 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
   },
 };
 
-export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-203'];
+export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-304'];
+
+/**
+ * Hardware dots per millimetre.
+ * 304 DPI heads are 12 dots/mm (304.8). Using 304/25.4 leaves 54 mm at 646 dots
+ * while TSPL SIZE 54 mm is 648, which clips the right edge.
+ */
+export function dotsPerMm(dpi = 203): number {
+  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : 203;
+  if (d === 304) return 12;
+  if (d === 203) return 8;
+  return d / MM_PER_INCH;
+}
 
 /** Authoritative conversion from physical millimetres to printer dots. */
 export function mmToDots(mm: number, dpi = 203): number {
-  if (!Number.isFinite(mm) || mm <= 0) return 0;
-  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : 203;
-  return Math.round((mm * d) / MM_PER_INCH);
+  if (!Number.isFinite(mm) || mm === 0) return 0;
+  return Math.round(mm * dotsPerMm(dpi));
+}
+
+/**
+ * Edge-based rectangle rounding. Round each edge independently so stacked
+ * elements on a long label do not accumulate width/height rounding drift.
+ */
+export type DotRect = {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  widthDots: number;
+  heightDots: number;
+};
+
+export function rectMmToDots(
+  xMm: number,
+  yMm: number,
+  widthMm: number,
+  heightMm: number,
+  dpi = 203,
+): DotRect {
+  const x0 = mmToDots(xMm, dpi);
+  const y0 = mmToDots(yMm, dpi);
+  const x1 = mmToDots(xMm + widthMm, dpi);
+  const y1 = mmToDots(yMm + heightMm, dpi);
+  return { x0, y0, x1, y1, widthDots: x1 - x0, heightDots: y1 - y0 };
+}
+
+/**
+ * TSPL BITMAP width is bytes×8. Firmware clips any columns past SIZE-in-dots,
+ * which reads as a left shift plus right-edge cutoff. Always pack DOWN.
+ */
+export function tsplPackedWidthDots(contentDots: number): number {
+  const dots = Math.max(1, Math.round(contentDots));
+  return Math.max(8, Math.floor(dots / 8) * 8);
+}
+
+/**
+ * One layout for preview capture and TSPL BITMAP.
+ *
+ * Capture at SIZE-in-dots (1 px = 1 printer dot, same mm scale as the editor).
+ * BITMAP width is packed DOWN; leftover 0–7 columns are cropped on the right —
+ * never scaled, or the label would print slightly narrower than the preview.
+ */
+export type UniversalPrintLayout = {
+  widthMm: number;
+  heightMm: number;
+  dpi: number;
+  /** Firmware SIZE in dots (left/top origin). */
+  sizeDotsW: number;
+  sizeDotsH: number;
+  /** ViewShot / editor capture — identical to SIZE so preview mm maps 1:1. */
+  captureDotsW: number;
+  captureDotsH: number;
+  /** TSPL BITMAP width (multiple of 8, never wider than SIZE). */
+  bitmapDotsW: number;
+  bitmapDotsH: number;
+  bytesPerRow: number;
+  /** Uniform px/mm used by capture layout (from SIZE, not packed width). */
+  dotsPerMm: number;
+};
+
+export function createUniversalPrintLayout(
+  widthMm: number,
+  heightMm: number,
+  dpi = 203,
+): UniversalPrintLayout {
+  const wMm = Math.max(0.1, widthMm);
+  const hMm = Math.max(0.1, heightMm);
+  const dpm = dotsPerMm(dpi);
+  const canvas = rectMmToDots(0, 0, wMm, hMm, dpi);
+  const sizeDotsW = Math.max(1, canvas.widthDots);
+  const sizeDotsH = Math.max(1, canvas.heightDots);
+  const bitmapDotsW = tsplPackedWidthDots(sizeDotsW);
+  return {
+    widthMm: wMm,
+    heightMm: hMm,
+    dpi,
+    sizeDotsW,
+    sizeDotsH,
+    captureDotsW: sizeDotsW,
+    captureDotsH: sizeDotsH,
+    bitmapDotsW,
+    bitmapDotsH: sizeDotsH,
+    bytesPerRow: bitmapDotsW / 8,
+    dotsPerMm: dpm,
+  };
 }
 
 /** Authoritative conversion from printer dots to physical millimetres. */
 export function dotsToMm(dots: number, dpi = 203): number {
   if (!Number.isFinite(dots) || dots <= 0) return 0;
-  const d = Number.isFinite(dpi) && dpi > 0 ? dpi : 203;
-  return Math.round(((dots * MM_PER_INCH) / d) * 100) / 100;
+  return Math.round((dots / dotsPerMm(dpi)) * 100) / 100;
 }
 
 export type PrintCalibration = {
@@ -136,7 +234,7 @@ export type PrintSpec = {
   widthDots: number;
   /** Exact label height in printer dots. */
   heightDots: number;
-  /** Raster canvas width in dots (rounded up to 8 for byte-alignment). */
+  /** Raster canvas width in dots (packed down to a multiple of 8). */
   rasterWidthDots: number;
   /** Bytes per row for 1-bit packed raster. */
   bytesPerRow: number;
@@ -193,20 +291,18 @@ export function createPrintSpec(options: CreatePrintSpecOptions): PrintSpec {
   const effectiveWidthMm = isLandscape ? options.heightMm : options.widthMm;
   const effectiveHeightMm = isLandscape ? options.widthMm : options.heightMm;
 
-  const widthDots = mmToDots(effectiveWidthMm, dpi);
-  const heightDots = mmToDots(effectiveHeightMm, dpi);
+  const layout = createUniversalPrintLayout(effectiveWidthMm, effectiveHeightMm, dpi);
+  const widthDots = layout.sizeDotsW;
+  const heightDots = layout.sizeDotsH;
+  const rasterWidthDots = layout.bitmapDotsW;
+  const bytesPerRow = layout.bytesPerRow;
 
-  // TSPL BITMAP requires byte-aligned width (multiple of 8 dots)
-  const rasterWidthDots = Math.max(8, Math.ceil(widthDots / 8) * 8);
-  const bytesPerRow = rasterWidthDots / 8;
-
-  // Printhead centering offset for center-fed printers (e.g. TD-404 108mm head).
-  // A 50mm label on a 108mm head → ~232 dots offset so content lands on the label.
+  // SIZE origin is the label top-left. BITMAP x/y are user calibration only.
+  // Do not shift for pack-down leftover (those 0–7 columns are cropped on the right).
   const forceLeft = options.calibration?.forceLeftAligned === true;
   const centeringProfile = forceLeft ? { ...profile, alignment: 'left' as PrinterAlignment } : profile;
   const centeringOffsetDots = computePrintheadCenteringOffset(widthDots, centeringProfile);
 
-  // User calibration offsets (additive to centering)
   const calibXOffsetDots = mmToDots(options.calibration?.horizontalOffsetMm ?? 0, dpi);
   const calibYOffsetDots = mmToDots(options.calibration?.verticalOffsetMm ?? 0, dpi);
 
@@ -285,8 +381,8 @@ export function formatPrintSpecDiagnostics(spec: PrintSpec): string {
     '========================================',
     `Physical Size   : ${spec.widthMm.toFixed(1)} × ${spec.heightMm.toFixed(1)} mm`,
     `Printer DPI     : ${spec.dpi} DPI`,
-    `Dots Dimension  : ${spec.widthDots} × ${spec.heightDots} dots`,
-    `Raster Canvas   : ${spec.rasterWidthDots} × ${spec.heightDots} dots (${spec.bytesPerRow} bytes/row)`,
+    `Dots Dimension  : ${spec.widthDots} × ${spec.heightDots} dots (SIZE)`,
+    `Raster Canvas   : ${spec.rasterWidthDots} × ${spec.heightDots} dots BITMAP (${spec.bytesPerRow} bytes/row, pack-down crop ${Math.max(0, spec.widthDots - spec.rasterWidthDots)} dots)`,
     `Orientation     : ${spec.orientation}°`,
     `Printer Profile : ${spec.profile.name} (${spec.profile.printheadWidthMm} mm / ${spec.profile.printheadWidthDots} dots)`,
     `Alignment Mode  : ${spec.profile.alignment} (xOffset: ${spec.xOffsetDots} dots, yOffset: ${spec.yOffsetDots} dots)`,

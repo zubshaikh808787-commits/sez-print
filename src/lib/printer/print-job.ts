@@ -11,20 +11,18 @@ import {
   encodeEscPosJob,
   fitGrayToSize,
   grayToBits,
+  cropGrayToSize,
   padBitsCentered,
   pngBase64ToGray,
   rotateGray,
-  shiftBits,
   type BitRaster,
   type GrayRaster,
 } from '@/lib/printer/escpos';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
 import {
   createPrintSpec,
-  DEFAULT_PRINTER_PROFILE,
   formatPrintSpecDiagnostics,
   validatePrintSpec,
-  type PrintSpec,
 } from '@/lib/printer/print-spec';
 import { encodeTscBitmapJob } from '@/lib/printer/tsc';
 
@@ -105,11 +103,10 @@ export function orientedPrintSize(
 }
 
 /**
- * Map captured PNG onto the full label bitmap.
+ * Map captured PNG onto the TSPL bitmap canvas.
  *
- * 1) Fit to exact content dots (selected mm × DPI) — no independent X/Y warp.
- * 2) Center-pad into the 8-dot TSPL canvas (0–7 columns split L/R).
- * Horizontal user offset is applied later as BITMAP x (not here) so native/JS stay in sync.
+ * Capture is SIZE-in-dots. Pack-down leftover (0–7 columns) is cropped on the
+ * right — never stretched. User H offset is BITMAP x only.
  */
 export function finalizeGrayForPrint(
   gray: GrayRaster,
@@ -123,22 +120,35 @@ export function finalizeGrayForPrint(
   },
 ): BitRaster {
   const dpi = options.dpi ?? getPrinterManager().getPrintDpi();
+  const size = printContentSize(options.widthMm, options.heightMm, dpi);
   const canvas = printRasterSize(options.widthMm, options.heightMm, dpi);
 
   console.info(
     '[print-job] finalizeGray:',
     options.widthMm.toFixed(1), '×', options.heightMm.toFixed(1), 'mm @', dpi, 'DPI →',
-    canvas.widthPx, '×', canvas.heightPx, 'px canvas |',
-    'src:', gray.width, '×', gray.height, '|',
-    'threshold:', options.threshold, 'dither:', options.dither,
+    'SIZE', size.widthPx, '×', size.heightPx, '| BITMAP', canvas.widthPx, '×', canvas.heightPx,
+    '| src:', gray.width, '×', gray.height,
+    '| threshold:', options.threshold, 'dither:', options.dither,
   );
 
-  const widthPadOnly =
-    gray.height === canvas.heightPx && Math.abs(gray.width - canvas.widthPx) <= 8;
-  const fitted =
-    gray.width === canvas.widthPx && gray.height === canvas.heightPx
-      ? gray
-      : fitGrayToSize(gray, canvas.widthPx, canvas.heightPx, widthPadOnly ? 'contain' : 'stretch');
+  const packDeltaW = gray.width - canvas.widthPx;
+  const packDeltaH = gray.height - canvas.heightPx;
+  const isSizeCapture =
+    Math.abs(gray.width - size.widthPx) <= 2 && Math.abs(gray.height - size.heightPx) <= 2;
+  const isPackCrop =
+    packDeltaW >= 0 &&
+    packDeltaW <= 8 &&
+    packDeltaH >= 0 &&
+    packDeltaH <= 2;
+
+  let fitted: GrayRaster;
+  if (gray.width === canvas.widthPx && gray.height === canvas.heightPx) {
+    fitted = gray;
+  } else if (isSizeCapture || isPackCrop) {
+    fitted = cropGrayToSize(gray, canvas.widthPx, canvas.heightPx);
+  } else {
+    fitted = fitGrayToSize(gray, canvas.widthPx, canvas.heightPx, 'stretch');
+  }
 
   let bits = grayToBits(fitted, { threshold: options.threshold, dither: options.dither });
 
@@ -146,8 +156,6 @@ export function finalizeGrayForPrint(
     bits = padBitsCentered(bits, canvas.widthPx, canvas.heightPx);
   }
 
-  const offsetDots = mmToDots(options.hOffsetMm, dpi);
-  if (offsetDots !== 0) bits = shiftBits(bits, offsetDots);
   return bits;
 }
 

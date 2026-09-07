@@ -4,7 +4,7 @@ import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelDocument } from '@/lib/label-document';
-import { fitLabelSize } from '@/lib/label-geometry';
+import { fitLabelSize, mediaShapeClipStyle } from '@/lib/label-geometry';
 import { canvasFillFromDocument, sortLayers } from '@/lib/template-schema';
 
 /** Workspace chrome around the artboard — not part of template content. */
@@ -71,6 +71,7 @@ export function ArtboardFrame({
   const w = Math.max(1, widthPx);
   const h = Math.max(1, heightPx);
   const bg = canvasFillFromDocument(document);
+  const shapeClip = mediaShapeClipStyle(document.mediaShape, w, h);
 
   return (
     <View
@@ -79,13 +80,13 @@ export function ArtboardFrame({
         {
           width: w,
           height: h,
-          overflow: 'hidden',
           backgroundColor: bg,
+          ...shapeClip,
         },
         style,
       ]}>
       {/* Nested clip — absolute + rotated children must stay inside the label border. */}
-      <View collapsable={false} style={{ width: w, height: h, overflow: 'hidden', backgroundColor: bg }}>
+      <View collapsable={false} style={{ width: w, height: h, backgroundColor: bg, ...shapeClip }}>
         {children}
       </View>
       {!showBorder ? null : (
@@ -96,6 +97,7 @@ export function ArtboardFrame({
             {
               borderWidth: ARTBOARD_BORDER_WIDTH,
               borderColor: ARTBOARD_BORDER_COLOR,
+              borderRadius: shapeClip.borderRadius,
             },
           ]}
         />

@@ -37,7 +37,7 @@ export type PrintingSettings = {
   recordHistory: boolean;
   autoPages: boolean;
   returnPrevious: boolean;
-  /** Printer resolution: 304 (12 dots/mm), 300, or 203 (8 dots/mm). Default is 304 DPI. */
+  /** Printer resolution: 304 (12 dots/mm), 300, or 203 (8 dots/mm). */
   printerDpi: number;
   /** Printhead alignment: 'center' (standard thermal desktop) or 'left'. */
   printerAlignment: 'center' | 'left';
@@ -78,7 +78,7 @@ export const DEFAULT_PRINTING_SETTINGS: PrintingSettings = {
   recordHistory: true,
   autoPages: true,
   returnPrevious: false,
-  printerDpi: 203,
+  printerDpi: 304,
   printerAlignment: 'left',
   printheadWidthMm: 108,
   customPaperWidthMm: 210,

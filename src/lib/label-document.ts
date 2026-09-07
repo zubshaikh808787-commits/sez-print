@@ -20,6 +20,8 @@ export type TemplateBackground =
 
 export type LabelOrientation = 0 | 90 | 180 | 270;
 export type PaperType = 'Receipt' | 'Label' | 'Cardstock' | 'Transparent' | 'Black mark';
+/** Physical stock outline. Printers still receive a rectangular BITMAP; this clips preview/capture ink. */
+export type MediaShape = 'rectangle' | 'roundedRectangle' | 'circle' | 'ellipse' | 'diecut';
 
 export type ImageElementState = {
   uri: string;
@@ -135,6 +137,8 @@ export type LabelDocument = {
   heightMm: number;
   orientation: LabelOrientation;
   paperType: PaperType;
+  /** Physical label outline. Absent means rectangle. */
+  mediaShape?: MediaShape;
   elements: LabelElement[];
   groupId: string | null;
   createdAt: number;
@@ -181,6 +185,7 @@ export function createLabelDocument(params: {
   heightMm: number;
   orientation?: LabelOrientation;
   paperType?: PaperType;
+  mediaShape?: MediaShape;
   elements?: LabelElement[];
   groupId?: string | null;
   background?: TemplateBackground;
@@ -194,6 +199,7 @@ export function createLabelDocument(params: {
     heightMm: params.heightMm,
     orientation: params.orientation ?? 0,
     paperType,
+    mediaShape: params.mediaShape,
     elements: params.elements ?? [],
     background:
       params.background ??
