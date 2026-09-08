@@ -19,6 +19,7 @@ import { LabelPreview, LABEL_PAD_STAGE_MIN_HEIGHT } from '@/components/label-pre
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette } from '@/constants/ui';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
+import { CABLE_FLAG_DIECUT, CABLE_FLAG_PREVIEW_SINGLE } from '@/constants/cable-flag-diecut';
 import { useTabBarPadding } from '@/hooks/use-tab-bar-padding';
 import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { createUpsConfig } from '@/lib/label-document';
@@ -90,6 +91,9 @@ export interface TemplateItem {
     | 'cable-pstyle-barcode'
     | 'cable-pstyle-panel23'
     | 'cable-tstyle-barcode'
+    | 'cable-flag-50x73'
+    | 'cable-flag-50x70'
+    | 'cable-flag-50x70-2up'
     // --- OTHER (29 items translated into clean English) ---
     | 'other-8x60-5rows'
     | 'other-15x25-rect'
@@ -468,6 +472,15 @@ export const TEMPLATES: TemplateItem[] = [
     width: 46,
     height: 70,
     previewType: 'cable-tall-dual-flag',
+  },
+  {
+    id: 'cab-16',
+    name: 'Cable Label-50x73',
+    dimensions: '50 x 73',
+    category: 'Cable',
+    width: CABLE_FLAG_DIECUT.widthMm,
+    height: CABLE_FLAG_DIECUT.heightMm,
+    previewType: CABLE_FLAG_PREVIEW_SINGLE,
   },
   {
     id: 'cab-6',
@@ -1616,7 +1629,7 @@ export default function TemplateScreen() {
       doc.ups = createUpsConfig({
         columns: JEWELRY_DIECUT.columns,
         columnSpacingMm: JEWELRY_DIECUT.gapMm,
-        batchEdit: false,
+        batchEdit: true,
         seedElements: doc.elements,
       });
       doc.templatePreviewType = JEWELRY_DIECUT_PREVIEW_SINGLE;

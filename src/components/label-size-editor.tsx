@@ -91,10 +91,10 @@ export function LabelSizeEditor({ widthMm, heightMm, onChange }: LabelSizeEditor
       showsVerticalScrollIndicator={false}
       bounces={false}>
       <Text style={styles.hint}>
-        Screen preview fits millimetres into the editor. Print uses the printer DPI
-        (TD-404 = 203 DPI): dots = mm × 203 ÷ 25.4. Inch sizes such as 2×1 in are
-        stored as millimetres (50.8×25.4) and sent to the printer in inches so the
-        media size is exact.
+        Screen preview fits millimetres into the editor. Print uses the connected
+        printer DPI from Printing Settings (dots = mm × dots-per-mm). 203 DPI is
+        8 dots/mm; 304 DPI is 12 dots/mm. Inch sizes such as 2×1 in are stored as
+        millimetres (50.8×25.4).
       </Text>
       <View style={styles.unitRow}>
         {UNITS.map((item) => (

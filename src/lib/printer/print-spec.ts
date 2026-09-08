@@ -102,6 +102,21 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
 
 export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-304'];
 
+/** Keep millimetres to 0.01. Never integer-round a typed size. */
+export function quantizeMm(mm: number): number {
+  if (!Number.isFinite(mm)) return 0.1;
+  return Math.max(0.1, Math.round(mm * 100) / 100);
+}
+
+export function formatTsplMm(mm: number): string {
+  return quantizeMm(mm).toFixed(2);
+}
+
+/** TSPL SIZE always includes hundredths: `SIZE 50.80 mm,70.00 mm`. */
+export function formatTsplSizeCommand(widthMm: number, heightMm: number): string {
+  return `SIZE ${formatTsplMm(widthMm)} mm,${formatTsplMm(heightMm)} mm`;
+}
+
 /**
  * Hardware dots per millimetre.
  * 304 DPI heads are 12 dots/mm (304.8). Using 304/25.4 leaves 54 mm at 646 dots
@@ -179,15 +194,20 @@ export type UniversalPrintLayout = {
   bytesPerRow: number;
   /** Uniform px/mm used by capture layout (from SIZE, not packed width). */
   dotsPerMm: number;
+  /** Exact TSPL SIZE command for this millimetre pair. */
+  sizeCommand: string;
 };
+
+/** Alias used by print/preview/encode — same millimetre → dot contract. */
+export type PrintGeometry = UniversalPrintLayout;
 
 export function createUniversalPrintLayout(
   widthMm: number,
   heightMm: number,
   dpi = 203,
 ): UniversalPrintLayout {
-  const wMm = Math.max(0.1, widthMm);
-  const hMm = Math.max(0.1, heightMm);
+  const wMm = quantizeMm(widthMm);
+  const hMm = quantizeMm(heightMm);
   const dpm = dotsPerMm(dpi);
   const canvas = rectMmToDots(0, 0, wMm, hMm, dpi);
   const sizeDotsW = Math.max(1, canvas.widthDots);
@@ -205,7 +225,16 @@ export function createUniversalPrintLayout(
     bitmapDotsH: sizeDotsH,
     bytesPerRow: bitmapDotsW / 8,
     dotsPerMm: dpm,
+    sizeCommand: formatTsplSizeCommand(wMm, hMm),
   };
+}
+
+export function createPrintGeometry(
+  widthMm: number,
+  heightMm: number,
+  dpi = 203,
+): PrintGeometry {
+  return createUniversalPrintLayout(widthMm, heightMm, dpi);
 }
 
 /** Authoritative conversion from printer dots to physical millimetres. */
@@ -355,7 +384,7 @@ export function validatePrintSpec(spec: PrintSpec): PrintSpecValidationResult {
   // Check against printhead physical maximum width
   if (spec.widthMm > spec.profile.printheadWidthMm + 0.5) {
     errors.push(
-      `Selected width (${spec.widthMm.toFixed(1)} mm) exceeds printer maximum width (${spec.profile.printheadWidthMm} mm).`,
+      `Selected width (${spec.widthMm.toFixed(2)} mm) exceeds printer maximum width (${spec.profile.printheadWidthMm} mm).`,
     );
   }
 
@@ -379,7 +408,7 @@ export function formatPrintSpecDiagnostics(spec: PrintSpec): string {
     '========================================',
     '             PRINT SPEC                 ',
     '========================================',
-    `Physical Size   : ${spec.widthMm.toFixed(1)} × ${spec.heightMm.toFixed(1)} mm`,
+    `Physical Size   : ${spec.widthMm.toFixed(2)} × ${spec.heightMm.toFixed(2)} mm`,
     `Printer DPI     : ${spec.dpi} DPI`,
     `Dots Dimension  : ${spec.widthDots} × ${spec.heightDots} dots (SIZE)`,
     `Raster Canvas   : ${spec.rasterWidthDots} × ${spec.heightDots} dots BITMAP (${spec.bytesPerRow} bytes/row, pack-down crop ${Math.max(0, spec.widthDots - spec.rasterWidthDots)} dots)`,

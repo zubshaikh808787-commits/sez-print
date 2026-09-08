@@ -11,6 +11,7 @@ import { buildIndustryPreviewElements } from '@/constants/industry-template-elem
 import { buildJewelryTemplateElements } from '@/constants/jewelry-template-elements';
 import { templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
 import { generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
+import { CABLE_FLAG_DIECUT, isCableFlagPreviewType } from '@/constants/cable-flag-diecut';
 import {
   colorBackground,
   emptyBackground,
@@ -387,5 +388,11 @@ export function createIndustryTemplateDocument(params: {
   heightMm: number;
   previewType: string;
 }): LabelDocument {
-  return instantiateTemplate(getTemplateDefinition(params));
+  const document = instantiateTemplate(getTemplateDefinition(params));
+  if (isCableFlagPreviewType(params.previewType)) {
+    document.mediaShape = 'diecut';
+    document.widthMm = CABLE_FLAG_DIECUT.widthMm;
+    document.heightMm = CABLE_FLAG_DIECUT.heightMm;
+  }
+  return document;
 }

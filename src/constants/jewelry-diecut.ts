@@ -26,6 +26,12 @@ export const JEWELRY_DIECUT = {
   printDpi: 304,
 } as const;
 
+/** 2-up sheet: 3 + 14 + 3 + 14 + 3 = 37 mm. */
+export const JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM =
+  JEWELRY_DIECUT.sideMarginMm * 2 +
+  JEWELRY_DIECUT.tagWidthMm * 2 +
+  JEWELRY_DIECUT.gapMm;
+
 /**
  * Type sized for the 14 mm tag — large enough to read, still one line per field.
  * Longest lines (karat / HUID) are slightly smaller than the title.
@@ -65,6 +71,7 @@ export const JEWELRY_DIECUT_PREVIEW_SINGLE = 'jew-rattail-single-12x100';
 export const JEWELRY_DIECUT_PREVIEW_SHEET = 'jew-rattail-3row-54x100';
 
 export const JEWELRY_DIECUT_PRINT_PRESET_3UP = 'jewellery-3up-diecut-54x100';
+export const JEWELRY_DIECUT_PRINT_PRESET_2UP = 'jewellery-2up-diecut-37x96';
 export const JEWELRY_DIECUT_PRINT_PRESET_SINGLE = 'jewellery-rattail-12x100';
 
 /** 3 tags + 2 gaps, before side margins (14×3 + 3×2 = 48 mm). */
@@ -77,6 +84,21 @@ export function jewelryDieCutComposedWidthMm(): number {
 export function jewelryDieCutColumnX(index: number): number {
   const { sideMarginMm, tagWidthMm, gapMm } = JEWELRY_DIECUT;
   return sideMarginMm + index * (tagWidthMm + gapMm);
+}
+
+/**
+ * True when the document is one 14 mm tag (or a 48 mm UPS compose that only
+ * filled the left panel). 3-up print must copy that tag to all three columns
+ * instead of left-padding a half-empty strip.
+ */
+export function jewelryDieCutContentIsSingleTag(doc: {
+  widthMm: number;
+  elements: { left: number; width: number }[];
+}): boolean {
+  if (isNearMm(doc.widthMm, JEWELRY_DIECUT.sheetWidthMm)) return false;
+  if (isNearMm(doc.widthMm, JEWELRY_DIECUT.tagWidthMm)) return true;
+  const maxRight = doc.elements.reduce((max, el) => Math.max(max, el.left + el.width), 0);
+  return maxRight <= JEWELRY_DIECUT.tagWidthMm + 1.5;
 }
 
 export function isJewelryDieCutPreviewType(previewType?: string | null): boolean {

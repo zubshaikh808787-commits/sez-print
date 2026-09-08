@@ -7,15 +7,35 @@ function bindElementContent(
   sheet: ExcelSheet,
   rowIndex: number,
 ) {
+  const row = sheet.rows[rowIndex];
+  if (!row) return;
+
   const columnName = 'columnNameContent' in element ? element.columnNameContent : '';
-  if (!columnName) return;
-  const columnIndex = sheet.columns.indexOf(columnName);
-  if (columnIndex < 0) return;
-  const value = sheet.rows[rowIndex]?.[columnIndex] ?? '';
+  if (columnName) {
+    const columnIndex = sheet.columns.indexOf(columnName);
+    if (columnIndex >= 0) {
+      const value = row[columnIndex] ?? '';
+      if (element.type === 'text') {
+        element.text = value;
+      } else if ('content' in element) {
+        element.content = value;
+      }
+    }
+  }
+
+  // Replace {{columnName}} tokens with corresponding row values
+  const replaceSheetTokens = (val: string) => {
+    if (!val || !val.includes('{{')) return val;
+    return val.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (match, key) => {
+      const idx = sheet.columns.indexOf(key);
+      return idx >= 0 && row[idx] !== undefined ? row[idx] : match;
+    });
+  };
+
   if (element.type === 'text') {
-    element.text = value;
-  } else if ('content' in element) {
-    element.content = value;
+    element.text = replaceSheetTokens(element.text);
+  } else if ('content' in element && typeof element.content === 'string') {
+    element.content = replaceSheetTokens(element.content);
   }
 }
 
@@ -44,7 +64,11 @@ export function resolveDocumentForPage(
   const resolved = cloneDocument(doc);
   if (sheet?.rows[pageIndex]) {
     for (const element of resolved.elements) {
-      if ('contentType' in element && element.contentType === 'Data Source') {
+      const isDataSource = 'contentType' in element && element.contentType === 'Data Source';
+      const hasToken =
+        (element.type === 'text' && element.text.includes('{{')) ||
+        ('content' in element && typeof element.content === 'string' && element.content.includes('{{'));
+      if (isDataSource || hasToken) {
         bindElementContent(element, sheet, pageIndex);
       }
     }
@@ -69,10 +93,12 @@ export function dataPageCount(doc: LabelDocument, sheet: ExcelSheet | null): num
   if (!sheet || sheet.rows.length === 0) return 1;
   const hasBinding = doc.elements.some(
     (el) =>
-      'contentType' in el &&
-      el.contentType === 'Data Source' &&
-      'columnNameContent' in el &&
-      el.columnNameContent,
+      ('contentType' in el &&
+        el.contentType === 'Data Source' &&
+        'columnNameContent' in el &&
+        Boolean(el.columnNameContent)) ||
+      (el.type === 'text' && el.text.includes('{{')) ||
+      ('content' in el && typeof el.content === 'string' && el.content.includes('{{')),
   );
   const hasSerial = doc.elements.some(
     (el) => 'contentType' in el && el.contentType === 'Degrees' && 'degreesOffset' in el && el.degreesOffset > 0,

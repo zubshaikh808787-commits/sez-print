@@ -1,3 +1,4 @@
+import { isCableFlagPreviewType } from '@/constants/cable-flag-diecut';
 import {
   cloneDocument,
   createLabelDocument,
@@ -43,6 +44,7 @@ export function canvasFillFromTemplate(background: TemplateBackground | undefine
 }
 
 export function canvasFillFromDocument(doc: Pick<LabelDocument, 'background' | 'paperType' | 'templatePreviewType'>): string {
+  if (isCableFlagPreviewType(doc.templatePreviewType)) return 'transparent';
   if (doc.background?.type === 'color') return doc.background.color;
   if (doc.background?.type === 'image') return 'transparent';
   if (doc.paperType === 'Transparent') return 'transparent';
@@ -110,5 +112,9 @@ export function cloneTemplateDocument(doc: LabelDocument): LabelDocument {
 
 /** Templates whose die-cut is the shape layers — no rectangular paper fill. */
 export function templateUsesDieCutBackground(previewType: string): boolean {
-  return previewType.startsWith('jew-') || previewType.startsWith('circle-');
+  return (
+    previewType.startsWith('jew-') ||
+    previewType.startsWith('circle-') ||
+    isCableFlagPreviewType(previewType)
+  );
 }

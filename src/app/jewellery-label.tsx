@@ -60,7 +60,7 @@ export default function JewelleryLabelScreen() {
       const ups = createUpsConfig({
         columns: UPS_COLUMNS,
         columnSpacingMm: UPS_GAP,
-        batchEdit: false,
+        batchEdit: true,
         seedElements,
       });
       const doc = createLabelDocument({

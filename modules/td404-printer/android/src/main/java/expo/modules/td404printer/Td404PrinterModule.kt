@@ -13,7 +13,10 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.ninestar.printer.command.LabelCommand
@@ -429,21 +432,24 @@ class Td404PrinterModule : Module() {
     val packedW = Math.max(8, (sizeDotsW / 8) * 8)
     val packedH = sizeDotsH
     // Capture is SIZE-in-dots. TSPL BITMAP is packed DOWN. Crop the right 0–7
-    // columns — never scale, or millimetres shrink vs the on-screen preview.
+    // columns or pad with white. Never scale — scaling changes millimetres.
     val srcW = bitmap.width
     val srcH = bitmap.height
     if (srcW != packedW || srcH != packedH) {
-      val packDeltaW = srcW - packedW
-      val packDeltaH = srcH - packedH
-      val canCrop =
-        packDeltaW >= 0 && packDeltaW <= 8 && packDeltaH >= 0 && packDeltaH <= 2 &&
-          srcW >= packedW && srcH >= packedH
-      val next =
-        if (canCrop) {
-          Bitmap.createBitmap(bitmap, 0, 0, packedW, packedH)
-        } else {
-          Bitmap.createScaledBitmap(bitmap, packedW, packedH, true)
-        }
+      android.util.Log.w(
+        "Td404Printer",
+        "PRINT-TRACE BITMAP_FIT src=${srcW}x${srcH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} (crop/pad, no scale)",
+      )
+      val next = Bitmap.createBitmap(packedW, packedH, Bitmap.Config.ARGB_8888)
+      next.eraseColor(Color.WHITE)
+      val copyW = minOf(srcW, packedW)
+      val copyH = minOf(srcH, packedH)
+      Canvas(next).drawBitmap(
+        bitmap,
+        Rect(0, 0, copyW, copyH),
+        Rect(0, 0, copyW, copyH),
+        null,
+      )
       if (next !== bitmap) {
         bitmap.recycle()
         bitmap = next
@@ -480,7 +486,7 @@ class Td404PrinterModule : Module() {
 
     val gapCmd = when (media) {
       "bline" -> "BLINE ${formatGap(gapMm)} mm,0 mm\r\n"
-      "continuous" -> "GAP 0 mm,0 mm\r\n"
+      "continuous" -> "GAP 0.00 mm,0 mm\r\n"
       else -> "GAP ${formatGap(gapMm)} mm,0 mm\r\n"
     }
 
@@ -512,10 +518,10 @@ class Td404PrinterModule : Module() {
 
     android.util.Log.i(
       "Td404Printer",
-      "SDK fast print: decode=${tDecode - t0}ms rotate=${tRotate - tDecode}ms " +
-        "encode=${tEncode - tRotate}ms write=${tWrite - tEncode}ms " +
-        "job=${job.size}B copies=$copies bmp=${bitmap.width}x${bitmap.height} " +
-        "packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} size=${formatMm(widthMm)}x${formatMm(heightMm)}mm",
+      "PRINT-TRACE SDK png=${srcW}x${srcH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} " +
+        "dpm=$dpm dpi=$dpi SIZE=${formatMm(widthMm)}x${formatMm(heightMm)}mm " +
+        "BITMAP=${bytesPerRow}x${contentH} job=${job.size}B copies=$copies " +
+        "decode=${tDecode - t0}ms rotate=${tRotate - tDecode}ms encode=${tEncode - tRotate}ms write=${tWrite - tEncode}ms",
     )
 
     if (!bitmap.isRecycled) bitmap.recycle()
@@ -532,22 +538,11 @@ class Td404PrinterModule : Module() {
   }
 
 
-  private fun formatGap(gapMm: Double): String {
-    val rounded = Math.round(gapMm * 100.0) / 100.0
-    return if (rounded == rounded.toLong().toDouble()) {
-      rounded.toLong().toString()
-    } else {
-      rounded.toString()
-    }
-  }
+  private fun formatGap(gapMm: Double): String = formatMm(gapMm)
 
   private fun formatMm(mm: Double): String {
     val rounded = Math.round(mm * 100.0) / 100.0
-    return if (rounded == rounded.toLong().toDouble()) {
-      rounded.toLong().toString()
-    } else {
-      rounded.toString()
-    }
+    return String.format(java.util.Locale.US, "%.2f", rounded)
   }
 
 

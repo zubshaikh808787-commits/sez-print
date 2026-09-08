@@ -7,9 +7,11 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
 import { KonvaTransformer, type TransformCommitPayload } from './konva-transformer';
+import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { mediaShapeClipStyle } from '@/lib/label-geometry';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
+import { isCableFlagDieCutDocument } from '@/constants/cable-flag-diecut';
 import { sortLayers } from '@/lib/template-schema';
 
 type KonvaCanvasProps = {
@@ -56,9 +58,12 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   const h = Math.max(1, canvasHeightPx);
   const shapeClip = mediaShapeClipStyle(doc.mediaShape, w, h);
 
-  // Background color is always solid clean white by default
-  const backgroundColor =
-    doc.background?.type === 'color' ? doc.background.color : '#FFFFFF';
+  const cableFlag = isCableFlagDieCutDocument(doc);
+  const backgroundColor = cableFlag
+    ? 'transparent'
+    : doc.background?.type === 'color'
+      ? doc.background.color
+      : '#FFFFFF';
 
   // Grid lines
   const gridLines = useMemo(() => {
@@ -125,6 +130,19 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     );
   }, [doc.templatePreviewType, scaleX, scaleY]);
 
+  const cableFlagOutline = useMemo(() => {
+    if (!isCableFlagDieCutDocument(doc)) return null;
+    return (
+      <CableFlagDieCutOverlay
+        document={doc}
+        scaleX={scaleX}
+        scaleY={scaleY}
+        widthPx={w}
+        heightPx={h}
+      />
+    );
+  }, [doc, scaleX, scaleY, w, h]);
+
   const deselectGesture = useMemo(
     () =>
       Gesture.Tap()
@@ -141,7 +159,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       style={{
         width: w,
         height: h,
-        backgroundColor: '#FFFFFF',
+        backgroundColor,
         ...shapeClip,
       }}>
       <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={{ width: w, height: h, ...shapeClip }}>
@@ -199,9 +217,12 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             </View>
           ) : null}
 
-          <View pointerEvents="none" style={styles.artboardBorder} />
+          {doc.mediaShape === 'diecut' || cableFlag ? null : (
+            <View pointerEvents="none" style={styles.artboardBorder} />
+          )}
         </View>
       </ViewShot>
+      {cableFlagOutline}
     </View>
   );
 });

@@ -179,7 +179,7 @@ export function ZoomableEditPad({
   const oneFingerPan = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(oneFingerPanEnabled)
+        .enabled(oneFingerPanEnabled && zoom > 1.05)
         .minPointers(1)
         .maxPointers(1)
         .minDistance(12)
@@ -197,7 +197,7 @@ export function ZoomableEditPad({
           panX.value = Math.min(limitX, Math.max(-limitX, panStartX.value + e.translationX));
           panY.value = Math.min(limitY, Math.max(-limitY, panStartY.value + e.translationY));
         }),
-    [oneFingerPanEnabled, panStartX, panStartY, panX, panY, viewH, viewW, zoomSv],
+    [oneFingerPanEnabled, zoom, panStartX, panStartY, panX, panY, viewH, viewW, zoomSv],
   );
 
   const composed = useMemo(

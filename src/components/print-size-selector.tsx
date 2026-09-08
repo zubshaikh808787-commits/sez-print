@@ -14,6 +14,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Palette } from '@/constants/ui';
 import {
+  JEWELRY_DIECUT_PRINT_PRESET_2UP,
+  JEWELRY_DIECUT_PRINT_PRESET_3UP,
+} from '@/constants/jewelry-diecut';
+import { CABLE_FLAG_PRINT_PRESET_SINGLE } from '@/constants/cable-flag-diecut';
+import {
+  clampLabelMm,
   fromMm,
   parseSizeInput,
   toMm,
@@ -33,20 +39,28 @@ type PrintSizeSelectorProps = {
   /** Current label content size — shown for context; custom entry is paper/page size. */
   initialWidthMm: number;
   initialHeightMm: number;
+  /**
+   * `artwork`: imported die-cut / template photo. Size is the physical stock
+   * millimetres; the photo is mapped onto that rectangle.
+   */
+  intent?: 'label' | 'artwork';
+  suggestedSize?: LabelSizeMm | null;
   onCancel: () => void;
   onSelect: (size: LabelSizeMm, preset: PrintSizePreset | null) => void;
 };
 
 function formatField(mm: number, unit: LabelUnit): string {
   const v = fromMm(mm, unit);
-  if (unit === 'in') return String(Math.round(v * 100) / 100);
-  return String(Math.round(v * 10) / 10);
+  if (unit === 'in') return (Math.round(v * 100) / 100).toFixed(2);
+  return (Math.round(v * 100) / 100).toFixed(2);
 }
 
 export function PrintSizeSelector({
   visible,
   initialWidthMm,
   initialHeightMm,
+  intent = 'label',
+  suggestedSize = null,
   onCancel,
   onSelect,
 }: PrintSizeSelectorProps) {
@@ -67,6 +81,21 @@ export function PrintSizeSelector({
     setWidthText(formatField(savedPaperW, unit));
     setHeightText(formatField(savedPaperH, unit));
   }, [visible, savedPaperW, savedPaperH, unit]);
+
+  const artworkPresets = useMemo(() => {
+    if (intent !== 'artwork') return PRINT_SIZE_PRESETS;
+    const pinnedIds = [
+      JEWELRY_DIECUT_PRINT_PRESET_2UP,
+      JEWELRY_DIECUT_PRINT_PRESET_3UP,
+      'jewellery-rattail-12x100',
+      CABLE_FLAG_PRINT_PRESET_SINGLE,
+    ];
+    const pinned = pinnedIds
+      .map((id) => PRINT_SIZE_PRESETS.find((p) => p.id === id))
+      .filter((p): p is PrintSizePreset => Boolean(p));
+    const rest = PRINT_SIZE_PRESETS.filter((p) => !pinnedIds.includes(p.id));
+    return [...pinned, ...rest];
+  }, [intent]);
 
   const customError = useMemo(() => {
     const w = parseSizeInput(widthText);
@@ -89,7 +118,7 @@ export function PrintSizeSelector({
     const w = parseSizeInput(widthText);
     const h = parseSizeInput(heightText);
     if (w == null || h == null || customError) return;
-    const size = { widthMm: toMm(w, unit), heightMm: toMm(h, unit) };
+    const size = clampLabelMm(toMm(w, unit), toMm(h, unit));
     patchPrinting({
       customPaperWidthMm: size.widthMm,
       customPaperHeightMm: size.heightMm,
@@ -107,36 +136,60 @@ export function PrintSizeSelector({
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
           <Text style={styles.title}>Select print size</Text>
           <Text style={styles.subtitle}>
-            Label content is {formatPrintSize(initialWidthMm, initialHeightMm)}. Choose This label
-            size to match the editor. Other presets scale the design uniformly to fit that paper.
-            Custom paper tiles when both sides are larger than the label.
+            {intent === 'artwork'
+              ? 'Pick the millimetre size of the roll in the printer — not the photo. 2-up jewellery is 37 × 96 mm; 3-up is 54 × 96 mm. The photo is mapped onto that rectangle so the outline sits on the die-cuts.'
+              : `Label content is ${formatPrintSize(initialWidthMm, initialHeightMm)}. Choose This label size to match the editor. Other presets scale the design uniformly to fit that paper. Custom paper tiles when both sides are larger than the label.`}
           </Text>
           <ScrollView
             style={styles.list}
             bounces={false}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
-            <Pressable
-              onPress={() =>
-                onSelect({ widthMm: initialWidthMm, heightMm: initialHeightMm }, null)
-              }
-              style={({ pressed }) => [styles.row, styles.currentRow, pressed && styles.pressed]}>
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>This label size</Text>
-                <Text style={styles.rowDetail}>Match the editor preview exactly (recommended)</Text>
-              </View>
-              <Text style={styles.rowMeta}>
-                {formatPrintSize(initialWidthMm, initialHeightMm)}
-              </Text>
-            </Pressable>
+            {intent === 'artwork' && suggestedSize ? (
+              <Pressable
+                onPress={() => onSelect(suggestedSize, null)}
+                style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>Closest jewellery size to this photo</Text>
+                  <Text style={styles.rowDetail}>
+                    Use only if it matches the roll in the printer
+                  </Text>
+                </View>
+                <Text style={styles.rowMeta}>
+                  {formatPrintSize(suggestedSize.widthMm, suggestedSize.heightMm)}
+                </Text>
+              </Pressable>
+            ) : intent !== 'artwork' ? (
+              <Pressable
+                onPress={() =>
+                  onSelect({ widthMm: initialWidthMm, heightMm: initialHeightMm }, null)
+                }
+                style={({ pressed }) => [styles.row, styles.currentRow, pressed && styles.pressed]}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>This label size</Text>
+                  <Text style={styles.rowDetail}>Match the editor preview exactly (recommended)</Text>
+                </View>
+                <Text style={styles.rowMeta}>
+                  {formatPrintSize(initialWidthMm, initialHeightMm)}
+                </Text>
+              </Pressable>
+            ) : null}
 
-            {PRINT_SIZE_PRESETS.map((preset) => (
+            {artworkPresets.map((preset) => (
               <Pressable
                 key={preset.id}
                 onPress={() =>
                   onSelect({ widthMm: preset.widthMm, heightMm: preset.heightMm }, preset)
                 }
-                style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+                style={({ pressed }) => [
+                  styles.row,
+                  intent === 'artwork' &&
+                    (preset.id === JEWELRY_DIECUT_PRINT_PRESET_2UP ||
+                      preset.id === JEWELRY_DIECUT_PRINT_PRESET_3UP ||
+                      preset.id === CABLE_FLAG_PRINT_PRESET_SINGLE) &&
+                    styles.currentRow,
+                  pressed && styles.pressed,
+                ]}>
                 <View style={styles.rowText}>
                   <Text style={styles.rowLabel}>{preset.label}</Text>
                   {preset.detail ? <Text style={styles.rowDetail}>{preset.detail}</Text> : null}

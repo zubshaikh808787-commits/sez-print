@@ -4,7 +4,7 @@
  */
 
 import type { BitRaster } from '@/lib/printer/escpos';
-import { formatTsplSizeCommand } from '@/lib/label-geometry';
+import { formatTsplMm, formatTsplSizeCommand } from '@/lib/printer/print-spec';
 
 export type TscJobOptions = {
   widthMm: number;
@@ -43,10 +43,9 @@ function ascii(s: string): Uint8Array {
 }
 
 function mediaCommand(media: TscJobOptions['media'], gapMm: number): string {
-  // Allow negative GAP for stick-label sensor calibration (We Print / TSC style).
-  const g = Math.round(gapMm * 100) / 100;
+  const g = formatTsplMm(gapMm);
   if (media === 'bline') return `BLINE ${g} mm,0 mm\r\n`;
-  if (media === 'continuous') return `GAP 0 mm,0 mm\r\n`;
+  if (media === 'continuous') return `GAP 0.00 mm,0 mm\r\n`;
   return `GAP ${g} mm,0 mm\r\n`;
 }
 
@@ -72,13 +71,16 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
   const sizeCmd = formatTsplSizeCommand(options.widthMm, options.heightMm);
   const mediaCmd = mediaCommand(options.media ?? 'gap', gap);
 
+  const bitmapCmd = `BITMAP ${x},${y},${bitmap.bytesPerRow},${bitmap.height},0`;
   console.info(
     '[tsc] TSPL job:',
     sizeCmd, '|',
     mediaCmd.trim(), '|',
-    'BITMAP', x + ',' + y + ',' + bitmap.bytesPerRow + ',' + bitmap.height + ',0 |',
+    bitmapCmd, '|',
     'SPEED', speed, '| DENSITY', density, '|',
     'payload:', bitmap.data.length, 'bytes',
+    '| BITMAP width is byte-width', bitmap.bytesPerRow,
+    'not pixel width', bitmap.bytesPerRow * 8,
   );
 
   const header =
@@ -86,9 +88,9 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
     `${sizeCmd}\r\n` +
     mediaCmd +
     `SPEED ${speed}\r\n` +
+    `DENSITY ${density}\r\n` +
     'DIRECTION 0,0\r\n' +
     'REFERENCE 0,0\r\n' +
-    `DENSITY ${density}\r\n` +
     'CLS\r\n' +
     `BITMAP ${x},${y},${bitmap.bytesPerRow},${bitmap.height},0,`;
 
@@ -115,6 +117,68 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
   return out;
 }
 
+export type TsplJobInspection = {
+  sizeCommand: string;
+  gapCommand: string;
+  directionCommand: string;
+  referenceCommand: string;
+  bitmapCommand: string;
+  bitmapX: number;
+  bitmapY: number;
+  bitmapWidthBytes: number;
+  bitmapHeightDots: number;
+  payloadBytes: number;
+  totalBytes: number;
+  header: string;
+};
+
+/** Parse the TSPL ASCII header that this encoder actually wrote. */
+export function inspectTsplJob(bytes: Uint8Array): TsplJobInspection {
+  const { text, payloadStart } = readTsplHeader(bytes);
+  const footerLen = '\r\nPRINT 1,1\r\n'.length;
+  const sizeCommand = matchLine(text, /^SIZE .+$/m) ?? '';
+  const gapCommand = matchLine(text, /^(GAP|BLINE) .+$/m) ?? '';
+  const directionCommand = matchLine(text, /^DIRECTION .+$/m) ?? '';
+  const referenceCommand = matchLine(text, /^REFERENCE .+$/m) ?? '';
+  const bitmapMatch = text.match(/BITMAP\s+(-?\d+),(-?\d+),(\d+),(\d+),(\d+)/);
+  const bitmapCommand = bitmapMatch ? bitmapMatch[0] : '';
+  return {
+    sizeCommand,
+    gapCommand,
+    directionCommand,
+    referenceCommand,
+    bitmapCommand,
+    bitmapX: Number(bitmapMatch?.[1] ?? 0),
+    bitmapY: Number(bitmapMatch?.[2] ?? 0),
+    bitmapWidthBytes: Number(bitmapMatch?.[3] ?? 0),
+    bitmapHeightDots: Number(bitmapMatch?.[4] ?? 0),
+    payloadBytes: Math.max(0, bytes.length - payloadStart - footerLen),
+    totalBytes: bytes.length,
+    header: text,
+  };
+}
+
+function matchLine(text: string, re: RegExp): string | undefined {
+  return text.match(re)?.[0]?.trim();
+}
+
+function readTsplHeader(bytes: Uint8Array): { text: string; payloadStart: number } {
+  let text = '';
+  const limit = Math.min(bytes.length, 800);
+  for (let i = 0; i < limit; i++) {
+    const c = bytes[i];
+    if (c < 9 || c > 126) {
+      return { text, payloadStart: i };
+    }
+    text += String.fromCharCode(c);
+    // BITMAP x,y,byteWidth,height,mode,  — do not stop at BITMAP x,y,
+    if (/BITMAP\s+-?\d+,-?\d+,\d+,\d+,\d+,$/.test(text)) {
+      return { text, payloadStart: i + 1 };
+    }
+  }
+  return { text, payloadStart: limit };
+}
+
 /** Simple text-only sample label (no bitmap) — good for connection smoke tests. */
 export function encodeTscTextSample(options: {
   widthMm?: number;
@@ -131,11 +195,11 @@ export function encodeTscTextSample(options: {
   const cmd =
     '\r\n' +
     `${formatTsplSizeCommand(widthMm, heightMm)}\r\n` +
-    `GAP ${gapMm} mm,0 mm\r\n` +
+    `GAP ${formatTsplMm(gapMm)} mm,0 mm\r\n` +
     'SPEED 5\r\n' +
+    `DENSITY ${density}\r\n` +
     'DIRECTION 0,0\r\n' +
     'REFERENCE 0,0\r\n' +
-    `DENSITY ${density}\r\n` +
     'CLS\r\n' +
     `TEXT 40,40,"0",0,1,1,"${text}"\r\n` +
     'PRINT 1,1\r\n';

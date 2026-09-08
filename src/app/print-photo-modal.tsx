@@ -17,8 +17,9 @@ export default function PrintPhotoModal() {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        quality: 0.95,
+        allowsEditing: false,
+        quality: 1,
+        exif: true,
       });
 
       if (!res.canceled && res.assets && res.assets.length > 0) {
@@ -28,6 +29,8 @@ export default function PrintPhotoModal() {
           params: {
             mode: 'direct',
             imageUri: asset.uri,
+            imageWidth: String(asset.width ?? ''),
+            imageHeight: String(asset.height ?? ''),
           },
         });
       }

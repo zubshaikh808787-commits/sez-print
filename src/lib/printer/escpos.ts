@@ -2,8 +2,10 @@ import type { LabelOrientation } from '@/lib/label-document';
 import { tsplPackedWidthDots } from '@/lib/printer/print-spec';
 
 type FastPngDecode = typeof import('fast-png').decode;
+type FastPngEncode = typeof import('fast-png').encode;
 
 let fastPngDecode: FastPngDecode | null = null;
+let fastPngEncode: FastPngEncode | null = null;
 
 /**
  * Load fast-png lazily behind a TextDecoder shim.
@@ -72,16 +74,25 @@ function loadFastPng(): FastPngDecode {
     g.TextDecoder = Latin1CapableTextDecoder as unknown as typeof TextDecoder;
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      fastPngDecode = (require('fast-png') as typeof import('fast-png')).decode;
+      const mod = require('fast-png') as typeof import('fast-png');
+      fastPngDecode = mod.decode;
+      fastPngEncode = mod.encode;
     } finally {
       g.TextDecoder = Original;
     }
   } else {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    fastPngDecode = (require('fast-png') as typeof import('fast-png')).decode;
+    const mod = require('fast-png') as typeof import('fast-png');
+    fastPngDecode = mod.decode;
+    fastPngEncode = mod.encode;
   }
 
   return fastPngDecode!;
+}
+
+function loadFastPngEncode(): FastPngEncode {
+  if (!fastPngEncode) loadFastPng();
+  return fastPngEncode!;
 }
 
 /** Luminance raster: one byte per pixel, 0 = black, 255 = white. */
@@ -148,6 +159,35 @@ export function base64ToBytes(base64: string): Uint8Array {
   }
 
   return bytes;
+}
+
+const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+export function bytesToBase64(bytes: Uint8Array): string {
+  let out = '';
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const a = bytes[i];
+    const b = i + 1 < len ? bytes[i + 1] : 0;
+    const c = i + 2 < len ? bytes[i + 2] : 0;
+    out += B64_CHARS[a >> 2];
+    out += B64_CHARS[((a & 3) << 4) | (b >> 4)];
+    out += i + 1 < len ? B64_CHARS[((b & 15) << 2) | (c >> 6)] : '=';
+    out += i + 2 < len ? B64_CHARS[c & 63] : '=';
+  }
+  return out;
+}
+
+/** Encode a luminance raster as a grayscale PNG (for Print-screen WYSIWYG). */
+export function grayToPngBase64(raster: GrayRaster): string {
+  const png = loadFastPngEncode()({
+    width: raster.width,
+    height: raster.height,
+    data: raster.gray,
+    depth: 8,
+    channels: 1,
+  });
+  return bytesToBase64(png);
 }
 
 /**
@@ -236,6 +276,22 @@ export function rotateGray(raster: GrayRaster, orientation: LabelOrientation): G
     }
   }
   return { width: height, height: width, gray: out };
+}
+
+/**
+ * Reverse only the feed axis (Y). TSPL DIRECTION 0 prints bitmap row 0 at the
+ * leading edge (exits first). The on-screen preview treats the top as toward
+ * the printer (exits last), so photo jobs need this flip to match the roll.
+ */
+export function flipGrayVertical(src: GrayRaster): GrayRaster {
+  const { width, height, gray } = src;
+  if (height <= 1) return src;
+  const out = new Uint8Array(gray.length);
+  for (let y = 0; y < height; y++) {
+    const srcRow = y * width;
+    out.set(gray.subarray(srcRow, srcRow + width), (height - 1 - y) * width);
+  }
+  return { width, height, gray: out };
 }
 
 /**
@@ -345,6 +401,179 @@ export function cropGrayToSize(src: GrayRaster, destW: number, destH: number): G
 }
 
 /**
+ * Same aspect on both axes (density inflation). Null if the PNG is a different
+ * shape than SIZE — do not crop or stretch in that case.
+ */
+export function uniformScaleFactor(
+  srcW: number,
+  srcH: number,
+  destW: number,
+  destH: number,
+): number | null {
+  if (destW < 1 || destH < 1 || srcW < 1 || srcH < 1) return null;
+  const srcAspect = srcW / srcH;
+  const destAspect = destW / destH;
+  const rel = Math.abs(srcAspect - destAspect) / Math.max(srcAspect, destAspect);
+  if (rel > 0.02) return null;
+  return (srcW / destW + srcH / destH) / 2;
+}
+
+/** Box-average resample onto destW×destH (fractional density, e.g. 2.75×). */
+export function downsampleGrayToSize(src: GrayRaster, destW: number, destH: number): GrayRaster {
+  const width = Math.max(1, Math.round(destW));
+  const height = Math.max(1, Math.round(destH));
+  if (src.width === width && src.height === height) return src;
+  const out = new Uint8Array(width * height);
+  const srcW = src.width;
+  const srcH = src.height;
+  const srcGray = src.gray;
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.floor((y * srcH) / height);
+    const y1 = Math.max(y0 + 1, Math.floor(((y + 1) * srcH) / height));
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.floor((x * srcW) / width);
+      const x1 = Math.max(x0 + 1, Math.floor(((x + 1) * srcW) / width));
+      let sum = 0;
+      let n = 0;
+      for (let sy = y0; sy < y1 && sy < srcH; sy++) {
+        const row = sy * srcW;
+        for (let sx = x0; sx < x1 && sx < srcW; sx++) {
+          sum += srcGray[row + sx];
+          n += 1;
+        }
+      }
+      out[y * width + x] = n > 0 ? Math.round(sum / n) : 255;
+    }
+  }
+  return { width, height, gray: out };
+}
+
+export class EditorRasterMismatchError extends Error {
+  constructor(
+    readonly pngW: number,
+    readonly pngH: number,
+    readonly sizeW: number,
+    readonly sizeH: number,
+  ) {
+    super(
+      `Print capture ${pngW}×${pngH} does not match SIZE ${sizeW}×${sizeH} dots. Axes differ — not cropping or stretching.`,
+    );
+    this.name = 'EditorRasterMismatchError';
+  }
+}
+
+/**
+ * Map a capture onto precomputed SIZE dots, then pack-down for BITMAP.
+ * Uniform density downsample (integer or fractional) is allowed. Different
+ * aspect is a hard error — never top-left crop as a silent fit.
+ */
+export function prepareEditorGrayForPrint(
+  gray: GrayRaster,
+  sizeW: number,
+  sizeH: number,
+  canvasW: number,
+  canvasH: number,
+): GrayRaster {
+  if (gray.width === canvasW && gray.height === canvasH) return gray;
+  const nearSize =
+    Math.abs(gray.width - sizeW) <= 2 && Math.abs(gray.height - sizeH) <= 2;
+  if (nearSize) return cropGrayToSize(gray, canvasW, canvasH);
+
+  const scale = uniformScaleFactor(gray.width, gray.height, sizeW, sizeH);
+  const largeEnough = gray.width >= sizeW - 2 && gray.height >= sizeH - 2;
+  if (scale != null && largeEnough && scale > 1.02) {
+    const sized = downsampleGrayToSize(gray, sizeW, sizeH);
+    return cropGrayToSize(sized, canvasW, canvasH);
+  }
+  if (scale != null && Math.abs(scale - 1) <= 0.02) {
+    return cropGrayToSize(gray, canvasW, canvasH);
+  }
+  throw new EditorRasterMismatchError(gray.width, gray.height, sizeW, sizeH);
+}
+
+/**
+ * Crop a gray raster to an axis-aligned rectangle.
+ */
+export function cropGrayRect(
+  src: GrayRaster,
+  x0: number,
+  y0: number,
+  width: number,
+  height: number,
+): GrayRaster {
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+  const sx = Math.max(0, Math.round(x0));
+  const sy = Math.max(0, Math.round(y0));
+  const out = new Uint8Array(w * h);
+  out.fill(255);
+  const copyW = Math.min(w, Math.max(0, src.width - sx));
+  const copyH = Math.min(h, Math.max(0, src.height - sy));
+  for (let y = 0; y < copyH; y++) {
+    const srcRow = (sy + y) * src.width + sx;
+    const outRow = y * w;
+    for (let x = 0; x < copyW; x++) out[outRow + x] = src.gray[srcRow + x];
+  }
+  return { width: w, height: h, gray: out };
+}
+
+/**
+ * Drop empty margin around a die-cut / line-art template so the imported
+ * shape fills the selected millimetre stock. WhatsApp / camera photos often
+ * have a light-gray backdrop, so "white" is estimated from the image instead
+ * of assuming 255.
+ */
+export function trimGrayInkBounds(src: GrayRaster, whiteMin = 236): GrayRaster {
+  const { width, height, gray } = src;
+  const n = gray.length;
+  if (n === 0) return src;
+
+  const sampleCount = Math.min(n, 4096);
+  const sample = new Uint8Array(sampleCount);
+  const step = Math.max(1, Math.floor(n / sampleCount));
+  let si = 0;
+  for (let i = 0; i < n && si < sampleCount; i += step) sample[si++] = gray[i];
+  sample.sort();
+  const p90 = sample[Math.min(si - 1, Math.floor(si * 0.9))] ?? 255;
+  // Include anti-aliased outline pixels so the outer border is the crop edge.
+  const inkMax = Math.min(whiteMin, Math.max(40, p90 - 12));
+
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (gray[row + x] < inkMax) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX) return src;
+  // No extra pad — padding was stretching white around the outline, so the
+  // printed border sat inside the physical label instead of on its edge.
+  const w = maxX - minX + 1;
+  const h = maxY - minY + 1;
+  if (w === width && h === height) return src;
+  return cropGrayRect(src, minX, minY, w, h);
+}
+
+/**
+ * Map an imported die-cut photo onto the selected millimetre stock.
+ *
+ * Trim empty photo margin, then fill the SIZE rectangle. Contain-centering
+ * letterboxed the outline so it printed between physical labels instead of
+ * on them. The user-picked mm is the stock; the photo is the shape on it.
+ */
+export function layoutImportedArtwork(src: GrayRaster, destW: number, destH: number): GrayRaster {
+  return fitGrayToSize(trimGrayInkBounds(src), destW, destH, 'stretch');
+}
+
+/**
  * Map a gray raster onto destW×destH.
  * `stretch` fills the label (same mm→dot mapping as the editor).
  * `contain` is only for 90°/270° when the rotated bitmap has a swapped aspect.
@@ -366,11 +595,13 @@ export function fitGrayToSize(
   // Precompute source row/col maps to avoid per-pixel division.
   const buildMap = (destSize: number, srcSize: number): Uint32Array => {
     const map = new Uint32Array(destSize);
-    const max = srcSize - 1;
+    const last = Math.max(0, srcSize - 1);
+    if (destSize <= 1) {
+      map[0] = 0;
+      return map;
+    }
     for (let i = 0; i < destSize; i++) {
-      map[i] = Math.min(max, ((2 * i + 1) * srcSize) >>> 1 / destSize | 0);
-      // More precise: use the original formula but compute once
-      map[i] = Math.min(max, Math.floor(((i + 0.5) * srcSize) / destSize));
+      map[i] = Math.round((i * last) / (destSize - 1));
     }
     return map;
   };

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Image as RNImage,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -23,21 +24,23 @@ import { getPhotoFrame } from '@/constants/photo-frames';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette } from '@/constants/ui';
 import { type LabelSizeMm } from '@/lib/label-geometry';
+import { decodeGalleryImage } from '@/lib/printer/gallery-decode';
 import { pngBase64ToGray, rotateGray } from '@/lib/printer/escpos';
+import { flipHorizontal } from '@/lib/printer/exif-orientation';
+import { formatPrintSize, suggestPrintSizeFromAspect } from '@/lib/print-sizes';
+import { createPrintGeometry } from '@/lib/printer/print-spec';
 import {
-    encodeConnectedPrinterJob,
-    finalizeGrayForPrint,
     formatPrintFailure,
     orientedPrintSize,
     PRINT_CAPTURE_OPTIONS,
     printCaptureLayout,
     printCaptureOptionsForSize,
     printJobSizeError,
-    sendIsolatedPrintCopies,
-    tryNativeSdkPngPrint,
     waitForNextPaint,
 } from '@/lib/printer/print-job';
+import { printArtworkJob } from '@/lib/printer/universal-bridge';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
+import { logPrintTrace } from '@/printing';
 import { usePrinterStore } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
@@ -141,6 +144,8 @@ export default function PrintPhotoScreen() {
     mode?: string;
     frameId?: string;
     imageUri?: string;
+    imageWidth?: string;
+    imageHeight?: string;
   }>();
 
   const defaults = useSettingsStore((s) => s.defaults);
@@ -161,10 +166,10 @@ export default function PrintPhotoScreen() {
     return Array.from({ length: frame?.slots.length ?? 1 }, () => null);
   });
 
-  const [colorMode, setColorMode] = useState<ColorMode>(
-    (defaults.colorMode as ColorMode) || 'Halftone',
+  const [colorMode, setColorMode] = useState<ColorMode>(isFrame ? 'Original' : 'B & W');
+  const [grayThreshold, setGrayThreshold] = useState(
+    isFrame ? (defaults.grayThreshold ?? 128) : 180,
   );
-  const [grayThreshold, setGrayThreshold] = useState(defaults.grayThreshold ?? 128);
   const [copies, setCopies] = useState(1);
   const [darkness, setDarkness] = useState<number | null>(null);
   const [speed, setSpeed] = useState<number | null>(null);
@@ -179,7 +184,18 @@ export default function PrintPhotoScreen() {
   const [footerHeight, setFooterHeight] = useState(72);
   const [sizeSheetOpen, setSizeSheetOpen] = useState(false);
   const [printSize, setPrintSize] = useState<LabelSizeMm | null>(null);
+  const [suggestedSize, setSuggestedSize] = useState<LabelSizeMm | null>(() => {
+    const w = Number(params.imageWidth);
+    const h = Number(params.imageHeight);
+    if (w > 0 && h > 0) return suggestPrintSizeFromAspect(w, h);
+    return null;
+  });
   const [photoRotation, setPhotoRotation] = useState<0 | 90 | 180 | 270>(0);
+  const [photoPixels, setPhotoPixels] = useState<{ width: number; height: number } | null>(() => {
+    const w = Number(params.imageWidth);
+    const h = Number(params.imageHeight);
+    return w > 0 && h > 0 ? { width: w, height: h } : null;
+  });
   const pendingPrintRef = useRef(false);
 
   const shotRef = useRef<ViewShot>(null);
@@ -188,15 +204,36 @@ export default function PrintPhotoScreen() {
 
   const primaryPhoto = photos.find((p) => !!p) ?? null;
 
+  useEffect(() => {
+    const uri = params.imageUri;
+    if (!uri || suggestedSize) return;
+    RNImage.getSize(
+      uri,
+      (w, h) => {
+        if (w > 0 && h > 0) {
+          setPhotoPixels({ width: w, height: h });
+          if (!suggestedSize) setSuggestedSize(suggestPrintSizeFromAspect(w, h));
+        }
+      },
+      () => undefined,
+    );
+  }, [params.imageUri, suggestedSize]);
+
   const pickPhoto = useCallback(async () => {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        quality: 0.95,
+        allowsEditing: false,
+        quality: 1,
+        exif: true,
       });
       if (res.canceled || !res.assets?.[0]) return;
-      const uri = res.assets[0].uri;
+      const asset = res.assets[0];
+      const uri = asset.uri;
+      if (asset.width && asset.height) {
+        setPhotoPixels({ width: asset.width, height: asset.height });
+        setSuggestedSize(suggestPrintSizeFromAspect(asset.width, asset.height));
+      }
       setPhotos((prev) => {
         const next = [...prev];
         const empty = next.findIndex((p) => !p);
@@ -236,10 +273,14 @@ export default function PrintPhotoScreen() {
       return;
     }
 
-    const widthMm = printSize?.widthMm ?? frame?.widthMm ?? defaults.labelWidth;
-    const heightMm = printSize?.heightMm ?? frame?.heightMm ?? defaults.labelHeight;
+    const widthMm = printSize?.widthMm ?? suggestedSize?.widthMm ?? frame?.widthMm ?? defaults.labelWidth;
+    const heightMm = printSize?.heightMm ?? suggestedSize?.heightMm ?? frame?.heightMm ?? defaults.labelHeight;
     const orientationDeg = parseInt(orientation.replace('°', ''), 10) as 0 | 90 | 180 | 270;
-    const paper = orientedPrintSize(widthMm, heightMm, orientationDeg);
+    // Die-cut photos print at the selected stock mm. Do not swap width/height for
+    // 90°/270° — that sends a landscape SIZE onto portrait jewellery rolls.
+    const paper = isFrame
+      ? orientedPrintSize(widthMm, heightMm, orientationDeg)
+      : { widthMm, heightMm };
     const sizeError = printJobSizeError(paper.widthMm, paper.heightMm);
     if (sizeError) {
       Alert.alert('Unsupported Size', sizeError);
@@ -249,30 +290,65 @@ export default function PrintPhotoScreen() {
     setPrinting(true);
     const timer = new PrintTimingLogger();
     try {
-      const dither = colorMode === 'Halftone';
       const threshold =
         colorMode === 'Original'
           ? 200
           : Math.min(250, Math.max(10, grayThreshold + (darkness != null ? (darkness - 8) * 10 : 0)));
 
-      timer.start('capture+verify');
-      // Force exact printer resolution — pixelRatio:1 alone still densifies on many Androids.
-      const captureTarget = printCaptureLayout(widthMm, heightMm).content;
-      const [connectionResult, base64] = await Promise.all([
-        manager.ensureConnected().catch((err) => ({ error: err })),
-        captureRef(
-          shotRef,
-          printCaptureOptionsForSize(captureTarget.widthPx, captureTarget.heightPx),
-        ),
-      ]);
-      timer.end('capture+verify');
+      timer.start('decode');
+      const jobDpi = manager.getPrintDpi();
+      logPrintTrace('PHOTO_USER_SIZE', {
+        widthMm: paper.widthMm,
+        heightMm: paper.heightMm,
+        printerDpi: jobDpi,
+        fit: 'stretch',
+      });
 
-      if (connectionResult && 'error' in connectionResult) {
-        throw connectionResult.error;
+      let gray;
+      let sourceWidth = 0;
+      let sourceHeight = 0;
+      let exifOrientation: number | null = null;
+      if (isFrame) {
+        const captureTarget = printCaptureLayout(widthMm, heightMm, jobDpi).content;
+        const [connectionResult, base64] = await Promise.all([
+          manager.ensureConnected().catch((err) => ({ error: err })),
+          captureRef(
+            shotRef,
+            printCaptureOptionsForSize(captureTarget.widthPx, captureTarget.heightPx),
+          ),
+        ]);
+        if (connectionResult && 'error' in connectionResult) {
+          throw connectionResult.error;
+        }
+        if (!base64) {
+          throw new Error('Could not capture the photo frame for printing.');
+        }
+        gray = pngBase64ToGray(base64);
+        sourceWidth = gray.width;
+        sourceHeight = gray.height;
+      } else {
+        await manager.ensureConnected();
+        if (!primaryPhoto) {
+          throw new Error('Add a photo before printing.');
+        }
+        const decoded = await decodeGalleryImage(primaryPhoto);
+        gray = decoded.gray;
+        sourceWidth = decoded.sourceWidth;
+        sourceHeight = decoded.sourceHeight;
+        exifOrientation = decoded.exifOrientation;
       }
-      if (!base64) {
-        throw new Error('Could not capture the photo for printing.');
-      }
+      logPrintTrace('PHOTO_SOURCE', {
+        sourceWidth,
+        sourceHeight,
+        exifOrientation: exifOrientation ?? 1,
+        normalizedWidth: gray.width,
+        normalizedHeight: gray.height,
+        userRotateDeg: photoRotation,
+        paperOrientationDeg: isFrame ? orientationDeg : 0,
+        flipY: 0,
+        trim: 0,
+      });
+      timer.end('decode');
 
       const media =
         paperType === 'Receipt'
@@ -281,74 +357,72 @@ export default function PrintPhotoScreen() {
             ? 'bline'
             : 'gap';
 
-      // Native SDK path when no JS-only photo transforms are needed.
-      let usedNative = false;
-      if (!flipH && !antiColor) {
-        timer.start('sdkFastPrint');
-        usedNative = await tryNativeSdkPngPrint({
-          pngBase64: base64,
-          widthMm: paper.widthMm,
-          heightMm: paper.heightMm,
-          gapMm: gapLength,
-          copies,
-          density: darkness,
-          speed: speed ?? 6,
-          vOffsetMm: vOffset,
-          hOffsetMm: hOffset,
-          media,
-          orientation: orientationDeg,
-          dpi: manager.getPrintDpi(),
-        });
-        timer.end('sdkFastPrint');
+      timer.start('rasterize');
+      if (flipH) {
+        gray = flipHorizontal(gray);
+      }
+      if (antiColor) {
+        const inverted = new Uint8Array(gray.gray.length);
+        for (let i = 0; i < gray.gray.length; i += 1) inverted[i] = 255 - gray.gray[i];
+        gray = { ...gray, gray: inverted };
       }
 
-      if (!usedNative) {
-        timer.start('rasterize');
-        let gray = pngBase64ToGray(base64);
-        if (flipH) {
-          const { width: gw, height: gh, gray: data } = gray;
-          const flipped = new Uint8Array(data.length);
-          for (let y = 0; y < gh; y += 1) {
-            for (let x = 0; x < gw; x += 1) {
-              flipped[y * gw + (gw - 1 - x)] = data[y * gw + x];
-            }
-          }
-          gray = { width: gw, height: gh, gray: flipped };
-        }
-        if (antiColor) {
-          const inverted = new Uint8Array(gray.gray.length);
-          for (let i = 0; i < gray.gray.length; i += 1) inverted[i] = 255 - gray.gray[i];
-          gray = { ...gray, gray: inverted };
-        }
-
+      if (photoRotation) {
+        gray = rotateGray(gray, photoRotation);
+      }
+      if (isFrame && orientationDeg) {
         gray = rotateGray(gray, orientationDeg);
-        const bits = finalizeGrayForPrint(gray, {
-          widthMm: paper.widthMm,
-          heightMm: paper.heightMm,
-          threshold,
-          dither: dither || colorMode === 'B & W',
-          hOffsetMm: hOffset,
-        });
-        timer.end('rasterize');
-
-        timer.start('encode');
-        const bytes = encodeConnectedPrinterJob(bits, {
-          widthMm: paper.widthMm,
-          heightMm: paper.heightMm,
-          gapMm: gapLength,
-          copies: 1,
-          density: darkness,
-          speed: speed ?? 6,
-          vOffsetMm: vOffset,
-          hOffsetMm: hOffset,
-          media,
-        });
-        timer.end('encode');
-
-        timer.start('transmit');
-        await sendIsolatedPrintCopies(bytes, copies);
-        timer.end('transmit');
       }
+      timer.end('rasterize');
+
+      timer.start('encode+send');
+      const geometry = createPrintGeometry(paper.widthMm, paper.heightMm, jobDpi);
+      logPrintTrace('PHOTO_SIZE_DOTS', {
+        widthMm: geometry.widthMm,
+        heightMm: geometry.heightMm,
+        sizeCommand: geometry.sizeCommand,
+        sizeDotsW: geometry.sizeDotsW,
+        sizeDotsH: geometry.sizeDotsH,
+        bitmapDotsW: geometry.bitmapDotsW,
+        bitmapDotsH: geometry.bitmapDotsH,
+        bytesPerRow: geometry.bytesPerRow,
+        dpm: geometry.dotsPerMm,
+        dpi: jobDpi,
+        sourceGrayW: gray.width,
+        sourceGrayH: gray.height,
+        fit: 'stretch',
+      });
+      const printed = await printArtworkJob({
+        widthMm: geometry.widthMm,
+        heightMm: geometry.heightMm,
+        gray,
+        fit: 'stretch',
+        dither: colorMode === 'Halftone',
+        threshold,
+        flipY: false,
+        copies,
+        gapMm: gapLength,
+        mediaType: media,
+        density: darkness,
+        speed: speed ?? 6,
+        offsetXmm: hOffset,
+        offsetYmm: vOffset,
+      });
+      logPrintTrace('PHOTO_BITMAP_VS_SIZE', {
+        expectedW: geometry.sizeDotsW,
+        expectedH: geometry.sizeDotsH,
+        packedW: geometry.bitmapDotsW,
+        actualW: printed.widthDots,
+        actualH: printed.heightDots,
+        bytesPerRow: printed.bitmap.bytesPerRow ?? Math.ceil(printed.widthDots / 8),
+        sizeCommand: geometry.sizeCommand,
+        match:
+          printed.widthDots === geometry.sizeDotsW &&
+          printed.heightDots === geometry.sizeDotsH
+            ? 1
+            : 0,
+      });
+      timer.end('encode+send');
 
       timer.dump('PHOTO PRINT');
       manager.setLastPrintTiming(timer.getEntries());
@@ -392,6 +466,8 @@ export default function PrintPhotoScreen() {
     addHistoryEntry,
     deviceName,
     printSize,
+    suggestedSize,
+    photoRotation,
   ]);
 
   useEffect(() => {
@@ -406,11 +482,12 @@ export default function PrintPhotoScreen() {
     };
   }, [printSize, handlePrint]);
 
-  const jobWidthMm = printSize?.widthMm ?? frame?.widthMm ?? defaults.labelWidth;
-  const jobHeightMm = printSize?.heightMm ?? frame?.heightMm ?? defaults.labelHeight;
+  const jobWidthMm = printSize?.widthMm ?? suggestedSize?.widthMm ?? frame?.widthMm ?? defaults.labelWidth;
+  const jobHeightMm = printSize?.heightMm ?? suggestedSize?.heightMm ?? frame?.heightMm ?? defaults.labelHeight;
+  const jobDpi = getPrinterManager().getPrintDpi();
   const printCaptureSize = useMemo(
-    () => printCaptureLayout(jobWidthMm, jobHeightMm).content,
-    [jobWidthMm, jobHeightMm],
+    () => printCaptureLayout(jobWidthMm, jobHeightMm, jobDpi).content,
+    [jobWidthMm, jobHeightMm, jobDpi],
   );
   const frameCaptureWidth =
     isFrame && frame
@@ -476,7 +553,7 @@ export default function PrintPhotoScreen() {
                     StyleSheet.absoluteFillObject,
                     { transform: [{ rotate: `${photoRotation}deg` }] },
                   ]}
-                  contentFit="contain"
+                  contentFit="fill"
                 />
               </View>
             ) : (
@@ -485,43 +562,6 @@ export default function PrintPhotoScreen() {
               </View>
             )}
           </View>
-
-          <ViewShot
-            ref={shotRef}
-            options={PRINT_CAPTURE_OPTIONS}
-            style={[
-              styles.printCaptureNative,
-              { width: printCaptureSize.widthPx, height: printCaptureSize.heightPx },
-            ]}>
-            {isFrame && frame ? (
-              <View
-                style={{
-                  width: printCaptureSize.widthPx,
-                  height: printCaptureSize.heightPx,
-                  backgroundColor: '#FFFFFF',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                <PhotoFramePreview frame={frame} photos={photos} width={frameCaptureWidth} />
-              </View>
-            ) : primaryPhoto ? (
-              <View
-                style={{
-                  width: printCaptureSize.widthPx,
-                  height: printCaptureSize.heightPx,
-                  backgroundColor: '#FFFFFF',
-                }}>
-                <Image
-                  source={{ uri: primaryPhoto }}
-                  style={[
-                    StyleSheet.absoluteFillObject,
-                    { transform: [{ rotate: `${photoRotation}deg` }] },
-                  ]}
-                  contentFit="contain"
-                />
-              </View>
-            ) : null}
-          </ViewShot>
         </View>
 
         {primaryPhoto ? (
@@ -560,7 +600,16 @@ export default function PrintPhotoScreen() {
             To use a photo frame, you must use the specified label supplies to print the corresponding
             effect.
           </Text>
-        ) : null}
+        ) : (
+          <Text style={styles.hint}>
+            The print uses the photo file, not a screenshot of this preview. Selected size
+            {' '}
+            {formatPrintSize(jobWidthMm, jobHeightMm)}
+            {' '}
+            is the physical label. Orientation matches the original image
+            {photoRotation ? ` plus your ${photoRotation}° rotate` : ''}.
+          </Text>
+        )}
 
         <View style={[styles.card, { width: contentWidth - 24 }]}>
           <Text style={styles.groupLabel}>Color Mode</Text>
@@ -681,6 +730,27 @@ export default function PrintPhotoScreen() {
         ) : null}
       </ScrollView>
 
+      {isFrame && frame ? (
+      <ViewShot
+        ref={shotRef}
+        options={PRINT_CAPTURE_OPTIONS}
+        style={[
+          styles.printCaptureNative,
+          { width: printCaptureSize.widthPx, height: printCaptureSize.heightPx },
+        ]}>
+          <View
+            style={{
+              width: printCaptureSize.widthPx,
+              height: printCaptureSize.heightPx,
+              backgroundColor: '#FFFFFF',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+            <PhotoFramePreview frame={frame} photos={photos} width={frameCaptureWidth} />
+          </View>
+      </ViewShot>
+      ) : null}
+
       <View
         style={[styles.footer, { paddingBottom: insets.bottom + Spacing.two }]}
         onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
@@ -703,6 +773,8 @@ export default function PrintPhotoScreen() {
 
       <PrintSizeSelector
         visible={sizeSheetOpen}
+        intent={isFrame ? 'label' : 'artwork'}
+        suggestedSize={isFrame ? null : suggestedSize}
         initialWidthMm={jobWidthMm}
         initialHeightMm={jobHeightMm}
         onCancel={() => setSizeSheetOpen(false)}
@@ -752,11 +824,8 @@ const styles = StyleSheet.create({
   printCaptureNative: {
     position: 'absolute',
     left: 0,
-    top: 0,
-    zIndex: -999,
-    opacity: 1,
+    top: -10000,
     backgroundColor: '#FFFFFF',
-    overflow: 'hidden',
     pointerEvents: 'none',
   },
   printCapture: {

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  PixelRatio,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -26,10 +27,17 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette, Type } from '@/constants/ui';
 import {
   JEWELRY_DIECUT,
+  JEWELRY_DIECUT_PRINT_PRESET_2UP,
   JEWELRY_DIECUT_PRINT_PRESET_3UP,
   isJewelryDieCutDocument,
   refitJewelryDieCutDocument,
 } from '@/constants/jewelry-diecut';
+import {
+  CABLE_FLAG_DIECUT,
+  CABLE_FLAG_PRINT_PRESET_SINGLE,
+  cableFlagPrintDocument,
+  isCableFlagDieCutDocument,
+} from '@/constants/cable-flag-diecut';
 import { dataPageCount, resolveDocumentData } from '@/lib/data-binding';
 import {
   composeUpsDocument,
@@ -44,16 +52,16 @@ import {
   PRINT_CAPTURE_OPTIONS,
   encodeConnectedPrinterJob,
   formatPrintFailure,
+  mapCapturePngToPackedPng,
   orientedPrintSize,
   printCaptureLayout,
-  printCaptureOptionsForSize,
   printJobSizeError,
   rasterizePngForPrint,
   sendIsolatedPrintCopies,
-  tryNativeSdkPngPrint,
   waitForNextPaint,
 } from '@/lib/printer/print-job';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
+import { logPrintTrace } from '@/printing';
 import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
@@ -64,6 +72,8 @@ import {
   applyPrintSize,
   formatPrintSize,
   PRINT_SIZE_PRESETS,
+  tileDocumentThreeUpDieCut54,
+  tileDocumentTwoUpDieCut37,
   type PrintSizePreset,
 } from '@/lib/print-sizes';
 
@@ -231,7 +241,7 @@ function StepperRow({
         <Pressable
           disabled={minusDisabled}
           onPress={onMinus}
-          hitSlop={6}
+          hitSlop={10}
           style={({ pressed }) => [
             styles.stepperCircle,
             minusDisabled && styles.stepperCircleDisabled,
@@ -243,7 +253,7 @@ function StepperRow({
         <Pressable
           disabled={plusDisabled}
           onPress={onPlus}
-          hitSlop={6}
+          hitSlop={10}
           style={({ pressed }) => [
             styles.stepperCircle,
             plusDisabled && styles.stepperCircleDisabled,
@@ -273,6 +283,7 @@ function ChipGroup<T extends string>({
           <Pressable
             key={option}
             onPress={() => onSelect(option)}
+            hitSlop={8}
             style={({ pressed }) => [
               styles.chip,
               active && styles.chipActive,
@@ -356,26 +367,37 @@ export default function PrintScreen() {
   ]);
 
   /** Base document (page-independent). Null for PDF documents, which show a card. */
+  const jewelryDieCutJob = isJewelryDieCutDocument(sourceDocument);
+  const cableFlagJob = isCableFlagDieCutDocument(sourceDocument);
   const baseDocument = useMemo<LabelDocument | null>(() => {
     if (!sourceDocument) return null;
+    // Jewellery 3-up: keep the 14 mm tag. Composing UPS first makes a 48 mm
+    // strip with empty side panels, then print lands on the left of the sheet.
+    // Cable pair is already the 50 × 73 mm canvas — do not compose/tile to 100 mm.
+    if (jewelryDieCutJob || cableFlagJob) return sourceDocument;
     return sourceDocument.ups ? composeUpsDocument(sourceDocument) : sourceDocument;
-  }, [sourceDocument]);
-
-  const jewelryDieCutJob = isJewelryDieCutDocument(sourceDocument);
+  }, [sourceDocument, jewelryDieCutJob, cableFlagJob]);
   const jewelryJobDpi = jewelryDieCutJob ? JEWELRY_DIECUT.printDpi : null;
+  const cableJobDpi = cableFlagJob ? CABLE_FLAG_DIECUT.printDpi : null;
 
   const defaultPreset = useMemo<PrintSizePreset | null>(() => {
+    if (cableFlagJob) {
+      return PRINT_SIZE_PRESETS.find((p) => p.id === CABLE_FLAG_PRINT_PRESET_SINGLE) ?? null;
+    }
     if (!jewelryDieCutJob) return null;
     return PRINT_SIZE_PRESETS.find((p) => p.id === JEWELRY_DIECUT_PRINT_PRESET_3UP) ?? null;
-  }, [jewelryDieCutJob]);
+  }, [cableFlagJob, jewelryDieCutJob]);
 
   const defaultPrintSize = useMemo<LabelSizeMm>(() => {
     if (!baseDocument) return { widthMm: defaults.labelWidth, heightMm: defaults.labelHeight };
+    if (cableFlagJob) {
+      return { widthMm: CABLE_FLAG_DIECUT.widthMm, heightMm: CABLE_FLAG_DIECUT.heightMm };
+    }
     if (defaultPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP) {
       return { widthMm: JEWELRY_DIECUT.sheetWidthMm, heightMm: JEWELRY_DIECUT.sheetHeightMm };
     }
     return printMediaSizeMm(baseDocument.widthMm, baseDocument.heightMm);
-  }, [baseDocument, defaultPreset, defaults.labelWidth, defaults.labelHeight]);
+  }, [baseDocument, defaultPreset, defaults.labelWidth, defaults.labelHeight, cableFlagJob]);
 
   const [copies, setCopies] = useState(1);
   const [darkness, setDarkness] = useState<number | null>(null);
@@ -396,6 +418,7 @@ export default function PrintScreen() {
   const upsGapInitialized = useRef(false);
 
   const shotRef = useRef<ViewShot>(null);
+  const printRasterRef = useRef<{ key: string; base64: string } | null>(null);
 
   const isExcelJob = params.docType === 'Excel' && excelSheet !== null;
   const isPdfJob = params.docType === 'PDF';
@@ -434,15 +457,22 @@ export default function PrintScreen() {
 
   const displayDocument = useMemo(() => {
     if (!previewDocument || !printSize) return previewDocument;
-    let next =
-      jewelryDieCutJob && printPreset?.id !== JEWELRY_DIECUT_PRINT_PRESET_3UP && sourceDocument
-        ? sourceDocument
-        : applyPrintSize(previewDocument, printPreset, printSize);
-    if (jewelryDieCutJob && next) next = refitJewelryDieCutDocument(next);
-    return next;
-  }, [previewDocument, printSize, printPreset, jewelryDieCutJob, sourceDocument]);
+    if (cableFlagJob && previewDocument) {
+      return cableFlagPrintDocument(previewDocument);
+    }
+    if (jewelryDieCutJob && sourceDocument) {
+      const tiled =
+        printPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP
+          ? tileDocumentThreeUpDieCut54(sourceDocument)
+          : printPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_2UP
+            ? tileDocumentTwoUpDieCut37(sourceDocument)
+            : sourceDocument;
+      return refitJewelryDieCutDocument(tiled);
+    }
+    return applyPrintSize(previewDocument, printPreset, printSize);
+  }, [previewDocument, printSize, printPreset, jewelryDieCutJob, cableFlagJob, sourceDocument]);
 
-  const jobDpi = jewelryJobDpi ?? getPrinterManager().getPrintDpi();
+  const jobDpi = jewelryJobDpi ?? cableJobDpi ?? getPrinterManager().getPrintDpi();
 
   /** Native printer-dot artboard for capture — SIZE-in-dots (1 px = 1 printer dot). */
   const printCaptureSize = useMemo(() => {
@@ -450,6 +480,21 @@ export default function PrintScreen() {
     if (!doc) return { widthPx: 8, heightPx: 8 };
     return printCaptureLayout(doc.widthMm, doc.heightMm, jobDpi).content;
   }, [displayDocument, previewDocument, jobDpi]);
+
+  const printRasterKey = useMemo(() => {
+    const doc = displayDocument ?? previewDocument;
+    if (!doc) return '';
+    return [
+      doc.id,
+      doc.updatedAt,
+      doc.widthMm,
+      doc.heightMm,
+      printCaptureSize.widthPx,
+      printCaptureSize.heightPx,
+      pageIndex,
+      jobDpi,
+    ].join(':');
+  }, [displayDocument, previewDocument, printCaptureSize.widthPx, printCaptureSize.heightPx, pageIndex, jobDpi]);
 
   /** Live store ups config (compose strips it from the print document). */
   const upsSource = useMemo(() => {
@@ -460,21 +505,26 @@ export default function PrintScreen() {
   // Stick 2-up media: default feed gap to 2 mm. Jewellery 3-up keeps 3 mm.
   useEffect(() => {
     if (!upsSource || upsGapInitialized.current) return;
-    if (upsSource.columns === JEWELRY_DIECUT.columns || jewelryDieCutJob) return;
+    if (upsSource.columns === JEWELRY_DIECUT.columns || jewelryDieCutJob || cableFlagJob) return;
     upsGapInitialized.current = true;
     setGapLength(2);
-  }, [upsSource, jewelryDieCutJob]);
+  }, [upsSource, jewelryDieCutJob, cableFlagJob]);
 
-  // Sync print size if a different document ID is loaded
-  const lastDocIdRef = useRef(baseDocument?.id);
+  // Sync print size if a different document ID or dimension is loaded
+  const lastDocKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (baseDocument && baseDocument.id !== lastDocIdRef.current) {
-      lastDocIdRef.current = baseDocument.id;
+    if (!baseDocument) return;
+    const docKey = `${baseDocument.id}_${baseDocument.widthMm}_${baseDocument.heightMm}`;
+    if (docKey !== lastDocKeyRef.current) {
+      lastDocKeyRef.current = docKey;
       setPrintPreset(defaultPreset);
       setPrintSize(defaultPrintSize);
+      if (cableFlagJob) setOrientation('0°');
     }
-  }, [baseDocument, defaultPreset, defaultPrintSize]);
+  }, [baseDocument, defaultPreset, defaultPrintSize, cableFlagJob]);
 
+  // The Print preview renders the live vector document model via LabelPreview.
+  // Hardware rasterization is executed on-demand during actual print dispatch.
   const connected = status === 'connected';
   const footerHeight = 72 + insets.bottom;
 
@@ -560,8 +610,9 @@ export default function PrintScreen() {
     const timer = new PrintTimingLogger();
 
     try {
-      const dither = jewelryDieCutJob ? false : defaults.colorMode === 'Halftone';
-      const threshold = jewelryDieCutJob
+      const dieCutJob = jewelryDieCutJob || cableFlagJob;
+      const dither = dieCutJob ? false : defaults.colorMode === 'Halftone';
+      const threshold = dieCutJob
         ? Math.min(
             200,
             Math.max(160, defaults.grayThreshold + (darkness != null ? (darkness - 8) * 8 : 40)),
@@ -585,15 +636,24 @@ export default function PrintScreen() {
         // while the expensive ViewShot capture runs concurrently.
         timer.start('capture+verify');
         const captureTarget = printCaptureLayout(widthMm, heightMm, jobDpi).content;
+        const cached =
+          pageCount === 1 && printRasterRef.current?.key === printRasterKey
+            ? printRasterRef.current.base64
+            : null;
+        const capturePacked = async () => {
+          const raw = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
+          return mapCapturePngToPackedPng(raw, widthMm, heightMm, jobDpi).pngBase64;
+        };
         const [connectionResult, base64] = await Promise.all([
           manager.ensureConnected().catch((err) => {
-            // Let the error surface after capture is done.
             return { error: err };
           }),
-          captureRef(shotRef, printCaptureOptionsForSize(
-            captureTarget.widthPx,
-            captureTarget.heightPx,
-          )),
+          cached
+            ? Promise.resolve(cached)
+            : capturePacked().catch(async () => {
+                await waitForNextPaint();
+                return capturePacked();
+              }),
         ]);
         timer.end('capture+verify');
 
@@ -607,6 +667,18 @@ export default function PrintScreen() {
         if (!base64) {
           throw new Error('Could not capture the label for printing.');
         }
+        logPrintTrace('EDITOR_CAPTURE', {
+          userWidthMm: widthMm,
+          userHeightMm: heightMm,
+          paperWidthMm: paper.widthMm,
+          paperHeightMm: paper.heightMm,
+          captureTargetW: captureTarget.widthPx,
+          captureTargetH: captureTarget.heightPx,
+          pixelRatio: PixelRatio.get(),
+          pngBase64Chars: base64.length,
+          jobDpi,
+          note: 'Packed BITMAP PNG is encoded to TSPL. ViewShot is ink only; millimetres come from PrintGeometry.',
+        });
 
         const media =
           paperType === 'Receipt'
@@ -625,23 +697,11 @@ export default function PrintScreen() {
               ),
           );
 
-        // SDK fast path: native LabelCommand (same as Ninestar demo) — skips JS rasterize.
-        timer.start('sdkFastPrint');
-        const usedNative = await tryNativeSdkPngPrint({
-          pngBase64: base64,
-          widthMm: paper.widthMm,
-          heightMm: paper.heightMm,
-          gapMm: gapLength,
-          copies,
-          density: darkness,
-          speed: speed ?? 6,
-          vOffsetMm: vOffset,
-          hOffsetMm: hOffset,
-          media: wantsBline ? 'bline' : media,
-          orientation: orientationDeg,
-          dpi: jobDpi,
-        });
-        timer.end('sdkFastPrint');
+        const artworkPhoto = Boolean(params.imageUri) && !params.labelId;
+
+        // Native PNG print used Bitmap.createScaledBitmap when capture ≠ packed
+        // size, which changed millimetres. JS encode crops/pads only.
+        const usedNative = false;
 
         if (!usedNative) {
           timer.start('rasterize');
@@ -653,6 +713,7 @@ export default function PrintScreen() {
             dither,
             hOffsetMm: hOffset,
             dpi: jobDpi,
+            fitArtwork: artworkPhoto,
           });
           timer.end('rasterize');
 
@@ -732,8 +793,12 @@ export default function PrintScreen() {
     addHistoryEntry,
     jobName,
     params.labelId,
+    params.imageUri,
     historySource,
     deviceName,
+    printRasterKey,
+    jewelryDieCutJob,
+    cableFlagJob,
   ]);
 
   return (
@@ -818,6 +883,7 @@ export default function PrintScreen() {
                   document={(displayDocument ?? previewDocument)!}
                   exactWidthPx={printCaptureSize.widthPx}
                   exactHeightPx={printCaptureSize.heightPx}
+                  printDpi={jobDpi}
                   showArtboardBorder={false}
                   hideNonPrinting
                 />
@@ -933,6 +999,16 @@ export default function PrintScreen() {
               </View>
             ) : null}
 
+            {cableFlagJob ? (
+              <View style={styles.cardSection}>
+                <Text style={styles.groupLabel}>Cable Label</Text>
+                <Text style={styles.helperText}>
+                  Prints both P-style flags on one 50 × 73 mm piece (SIZE 50.00 mm,73.00 mm). Each
+                  head is 25 mm wide with a left wrap tab. This is not a 100 × 70 mm sheet.
+                </Text>
+              </View>
+            ) : null}
+
             <View style={styles.cardSection}>
               <Text style={styles.groupLabel}>Paper Type</Text>
               <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
@@ -1017,6 +1093,7 @@ export default function PrintScreen() {
       <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.two }]}>
         <Pressable
           onPress={() => router.push('/printing-settings')}
+          hitSlop={8}
           style={({ pressed }) => [styles.gearBtn, pressed && styles.pressed]}>
           <AppIcon name="gearshape.fill" tintColor="#FFFFFF" size={24} />
         </Pressable>
@@ -1024,17 +1101,19 @@ export default function PrintScreen() {
         <Pressable
           disabled={printing || isPdfJob}
           onPress={() => setSizeSheetOpen(true)}
+          hitSlop={8}
           style={({ pressed }) => [styles.sizeBtn, (pressed || isPdfJob) && styles.pressed]}>
           <AppIcon name="rectangle.dashed" tintColor="#FFFFFF" size={18} />
           <Text style={styles.sizeBtnText} numberOfLines={1}>
             {activeDoc
-              ? `${Math.round(activeDoc.widthMm)}×${Math.round(activeDoc.heightMm)}mm`
+              ? `${(Math.round(activeDoc.widthMm * 100) / 100).toFixed(2)}×${(Math.round(activeDoc.heightMm * 100) / 100).toFixed(2)}mm`
               : 'Size'}
           </Text>
         </Pressable>
         {/* Print button — prints the active label at its selected/previewed dimensions */}
         <Pressable
           disabled={printing}
+          hitSlop={6}
           style={({ pressed }) => [styles.printBtn, (pressed || printing) && styles.pressed]}
           onPress={() => {
             void handlePrint();

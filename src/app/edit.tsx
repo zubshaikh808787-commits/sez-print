@@ -103,7 +103,7 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
-import { clampLabelMm } from '@/lib/label-geometry';
+import { clampLabelMm, fitLabelSize } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { textBlockHeightMm } from '@/lib/element-sizing';
@@ -148,7 +148,7 @@ function HeaderAction({
   return (
     <Pressable
       onPress={onPress}
-      hitSlop={8}
+      hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
       android_ripple={androidRipple}
       style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}>
       <AppIcon name={icon} tintColor="#FFFFFF" size={20} />
@@ -179,6 +179,7 @@ function ToolbarItem({
     <Pressable
       disabled={disabled}
       onPress={onPress}
+      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
       android_ripple={androidRipple}
       style={({ pressed }) => [
         styles.toolbarItem,
@@ -205,6 +206,7 @@ function ToolItem({
   return (
     <Pressable
       onPress={onPress}
+      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
       android_ripple={androidRipple}
       style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}>
       <AppIcon name={icon} tintColor={Palette.accent} size={26} />
@@ -383,18 +385,20 @@ export default function EditScreen() {
   );
   // Stage width is contain-fit into (stage − rulers) and stays permanent and stable
   const layoutWidth = stageWidth > 0 ? stageWidth : initialStageWidth;
-  // Fixed, big, normal editing area on the screen
-  const canvasWidthPx = useMemo(() => {
-    return Math.max(280, Math.min(layoutWidth - RULER_SIZE - 20, 340));
-  }, [layoutWidth]);
-
-  const canvasHeightPx = useMemo(() => {
-    return Math.max(180, Math.min(stageMaxHeight - RULER_SIZE - 20, 220));
-  }, [stageMaxHeight]);
-
-  const scaleX = canvasWidthPx / Math.max(doc.widthMm, 0.1);
-  const scaleY = canvasHeightPx / Math.max(doc.heightMm, 0.1);
-  const scale = Math.min(scaleX, scaleY);
+  // True aspect-ratio editing area: uniform scale ensures 1mm width == 1mm height on screen,
+  // precisely matching preview and physical output with zero geometry distortion.
+  const { canvasWidthPx, canvasHeightPx, scaleX, scaleY, scale } = useMemo(() => {
+    const maxW = Math.max(160, layoutWidth - RULER_SIZE - 24);
+    const maxH = Math.max(140, stageMaxHeight - RULER_SIZE - 24);
+    const fitted = fitLabelSize(doc.widthMm, doc.heightMm, maxW, maxH);
+    return {
+      canvasWidthPx: Math.max(1, Math.round(fitted.widthPx)),
+      canvasHeightPx: Math.max(1, Math.round(fitted.heightPx)),
+      scaleX: fitted.scale,
+      scaleY: fitted.scale,
+      scale: fitted.scale,
+    };
+  }, [layoutWidth, stageMaxHeight, doc.widthMm, doc.heightMm]);
 
   // Reset pad zoom when the label size changes so fit stays correct.
   useEffect(() => {
@@ -1334,7 +1338,7 @@ export default function EditScreen() {
         style={styles.stageZoom}
         zoom={padZoom}
         onZoomChange={setPadZoom}
-        oneFingerPanEnabled={selectedIds.length === 0}>
+        oneFingerPanEnabled={false}>
         <View
           style={[
             styles.rulerBoard,

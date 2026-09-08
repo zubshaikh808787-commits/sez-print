@@ -2,9 +2,11 @@ import { Image } from 'expo-image';
 import { type ReactNode, useState } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
+import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelDocument } from '@/lib/label-document';
 import { fitLabelSize, mediaShapeClipStyle } from '@/lib/label-geometry';
+import { dotsPerMm, rectMmToDots } from '@/lib/printer/print-spec';
 import { canvasFillFromDocument, sortLayers } from '@/lib/template-schema';
 
 /** Workspace chrome around the artboard — not part of template content. */
@@ -72,6 +74,7 @@ export function ArtboardFrame({
   const h = Math.max(1, heightPx);
   const bg = canvasFillFromDocument(document);
   const shapeClip = mediaShapeClipStyle(document.mediaShape, w, h);
+  const showRectBorder = showBorder && document.mediaShape !== 'diecut';
 
   return (
     <View
@@ -89,7 +92,7 @@ export function ArtboardFrame({
       <View collapsable={false} style={{ width: w, height: h, backgroundColor: bg, ...shapeClip }}>
         {children}
       </View>
-      {!showBorder ? null : (
+      {!showRectBorder ? null : (
         <View
           pointerEvents="none"
           style={[
@@ -113,6 +116,8 @@ type LabelPreviewProps = {
   /** Force exact pixel dimensions (print capture at printer dots for selected mm). */
   exactWidthPx?: number;
   exactHeightPx?: number;
+  /** When set with exactWidthPx, element boxes use the same edge rounding as TSPL. */
+  printDpi?: number;
   showStage?: boolean;
   style?: StyleProp<ViewStyle>;
   showArtboardBorder?: boolean;
@@ -124,26 +129,45 @@ function LabelElements({
   document,
   scale,
   hideNonPrinting = false,
+  printDpi,
 }: {
   document: LabelDocument;
   scale: number;
   hideNonPrinting?: boolean;
+  printDpi?: number;
 }) {
+  const dpm = printDpi != null ? dotsPerMm(printDpi) : null;
   return (
     <>
       {sortLayers(document.elements)
         .filter((element) => !hideNonPrinting || element.needPrinting !== false)
         .map((element) => {
         const size = elementSizeMm(element);
-        const widthPx = Math.max(1, size.width * scale);
-        const heightPx = Math.max(1, size.height * scale);
+        let leftPx: number;
+        let topPx: number;
+        let widthPx: number;
+        let heightPx: number;
+        let contentScale = scale;
+        if (printDpi != null && dpm != null) {
+          const box = rectMmToDots(element.left, element.top, size.width, size.height, printDpi);
+          leftPx = box.x0;
+          topPx = box.y0;
+          widthPx = Math.max(1, box.widthDots);
+          heightPx = Math.max(1, box.heightDots);
+          contentScale = dpm;
+        } else {
+          widthPx = Math.max(1, size.width * scale);
+          heightPx = Math.max(1, size.height * scale);
+          leftPx = element.left * scale;
+          topPx = element.top * scale;
+        }
         return (
           <View
             key={element.id}
             style={{
               position: 'absolute',
-              left: element.left * scale,
-              top: element.top * scale,
+              left: leftPx,
+              top: topPx,
               width: widthPx,
               height: heightPx,
               overflow: 'hidden',
@@ -155,7 +179,7 @@ function LabelElements({
               element={element}
               widthPx={widthPx}
               heightPx={heightPx}
-              scale={scale}
+              scale={contentScale}
             />
           </View>
         );
@@ -181,12 +205,14 @@ function LabelCanvas({
   style,
   showBorder = true,
   hideNonPrinting = false,
+  printDpi,
 }: {
   document: LabelDocument;
   fitted: { widthPx: number; heightPx: number; scale: number };
   style?: StyleProp<ViewStyle>;
   showBorder?: boolean;
   hideNonPrinting?: boolean;
+  printDpi?: number;
 }) {
   return (
     <ArtboardFrame
@@ -197,7 +223,23 @@ function LabelCanvas({
       showBorder={showBorder}>
       <TemplateBackgroundImage document={document} />
       {fitted.scale > 0 ? (
-        <LabelElements document={document} scale={fitted.scale} hideNonPrinting={hideNonPrinting} />
+        <>
+          {hideNonPrinting || printDpi != null ? null : (
+            <CableFlagDieCutOverlay
+              document={document}
+              scale={fitted.scale}
+              printDpi={printDpi}
+              widthPx={fitted.widthPx || 1}
+              heightPx={fitted.heightPx || 1}
+            />
+          )}
+          <LabelElements
+            document={document}
+            scale={fitted.scale}
+            hideNonPrinting={hideNonPrinting}
+            printDpi={printDpi}
+          />
+        </>
       ) : null}
     </ArtboardFrame>
   );
@@ -209,6 +251,7 @@ export function LabelPreview({
   maxHeight,
   exactWidthPx,
   exactHeightPx,
+  printDpi,
   showStage = false,
   style,
   showArtboardBorder = true,
@@ -231,7 +274,7 @@ export function LabelPreview({
             width: w,
             height: h,
             overflow: 'hidden',
-            backgroundColor: canvasFillFromDocument(document),
+            backgroundColor: '#FFFFFF',
           },
           style,
         ]}>
@@ -240,6 +283,7 @@ export function LabelPreview({
           fitted={{ widthPx: w, heightPx: h, scale }}
           showBorder={showArtboardBorder}
           hideNonPrinting={hideNonPrinting}
+          printDpi={printDpi}
         />
       </View>
     );

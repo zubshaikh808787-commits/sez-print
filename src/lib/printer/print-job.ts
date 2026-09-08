@@ -8,23 +8,26 @@ import {
   validateLabelSize,
 } from '@/lib/label-geometry';
 import {
-  encodeEscPosJob,
-  fitGrayToSize,
-  grayToBits,
-  cropGrayToSize,
-  padBitsCentered,
-  pngBase64ToGray,
-  rotateGray,
-  type BitRaster,
-  type GrayRaster,
-} from '@/lib/printer/escpos';
-import { getPrinterManager } from '@/lib/printer/printer-manager';
-import {
+  createPrintGeometry,
   createPrintSpec,
   formatPrintSpecDiagnostics,
   validatePrintSpec,
 } from '@/lib/printer/print-spec';
-import { encodeTscBitmapJob } from '@/lib/printer/tsc';
+import {
+  encodeEscPosJob,
+  grayToBits,
+  grayToPngBase64,
+  cropGrayToSize,
+  layoutImportedArtwork,
+  pngBase64ToGray,
+  prepareEditorGrayForPrint,
+  rotateGray,
+  type BitRaster,
+  type GrayRaster,
+} from '@/lib/printer/escpos';
+import { encodeTscBitmapJob, inspectTsplJob } from '@/lib/printer/tsc';
+import { getPrinterManager } from '@/lib/printer/printer-manager';
+import { logPrintTrace } from '@/printing';
 
 /** TD-404 / 203 DPI desktop thermal: ~4.25 in printable width. */
 export const TD404_MAX_WIDTH_MM = 108;
@@ -38,20 +41,12 @@ export const PRINT_CAPTURE_OPTIONS = {
 };
 
 /**
- * Build ViewShot capture options that force the output to exact printer resolution.
- *
- * `pixelRatio: 1` alone doesn't reliably prevent density inflation on all Android
- * devices (a 3× screen still captures 3600×5400 instead of 1216×1824). Passing
- * explicit `width`/`height` makes ViewShot resize natively (fast) so the PNG is
- * exactly the size the printer needs — eliminates the 30+ second JS-side PNG decode
- * of an over-sized image.
+ * ViewShot options for a view already laid out at SIZE-in-dots.
+ * Do not pass width/height — that second resize is the dp→dots mismatch.
+ * Density-inflated captures (2×/3× SIZE) are integer-downsampled later.
  */
-export function printCaptureOptionsForSize(widthPx: number, heightPx: number) {
-  return {
-    ...PRINT_CAPTURE_OPTIONS,
-    width: widthPx,
-    height: heightPx,
-  };
+export function printCaptureOptionsForSize(_widthPx?: number, _heightPx?: number) {
+  return PRINT_CAPTURE_OPTIONS;
 }
 
 export function waitForNextPaint(): Promise<void> {
@@ -66,7 +61,7 @@ export function printJobSizeError(widthMm: number, heightMm: number): string | n
   const range = validateLabelSize(widthMm, heightMm);
   if (range) return range;
   if (widthMm > TD404_MAX_WIDTH_MM) {
-    return `This printer supports labels up to ${TD404_MAX_WIDTH_MM} mm wide. Selected width is ${Math.round(widthMm * 10) / 10} mm.`;
+    return `This printer supports labels up to ${TD404_MAX_WIDTH_MM} mm wide. Selected width is ${Math.round(widthMm * 100) / 100} mm.`;
   }
   return null;
 }
@@ -117,46 +112,108 @@ export function finalizeGrayForPrint(
     dither: boolean;
     hOffsetMm: number;
     dpi?: number;
+    /**
+     * Imported photo / die-cut template: trim empty margin then fill the
+     * selected millimetre stock (SIZE-in-dots).
+     */
+    fitArtwork?: boolean;
   },
 ): BitRaster {
   const dpi = options.dpi ?? getPrinterManager().getPrintDpi();
-  const size = printContentSize(options.widthMm, options.heightMm, dpi);
-  const canvas = printRasterSize(options.widthMm, options.heightMm, dpi);
+  const geometry = createPrintGeometry(options.widthMm, options.heightMm, dpi);
 
   console.info(
     '[print-job] finalizeGray:',
-    options.widthMm.toFixed(1), '×', options.heightMm.toFixed(1), 'mm @', dpi, 'DPI →',
-    'SIZE', size.widthPx, '×', size.heightPx, '| BITMAP', canvas.widthPx, '×', canvas.heightPx,
+    geometry.widthMm.toFixed(2), '×', geometry.heightMm.toFixed(2), 'mm @', dpi, 'DPI →',
+    geometry.sizeCommand, '| SIZE dots', geometry.sizeDotsW, '×', geometry.sizeDotsH,
+    '| BITMAP', geometry.bitmapDotsW, '×', geometry.bitmapDotsH, '|', geometry.bytesPerRow, 'bytes/row',
     '| src:', gray.width, '×', gray.height,
+    '| artwork:', Boolean(options.fitArtwork),
     '| threshold:', options.threshold, 'dither:', options.dither,
   );
 
-  const packDeltaW = gray.width - canvas.widthPx;
-  const packDeltaH = gray.height - canvas.heightPx;
-  const isSizeCapture =
-    Math.abs(gray.width - size.widthPx) <= 2 && Math.abs(gray.height - size.heightPx) <= 2;
-  const isPackCrop =
-    packDeltaW >= 0 &&
-    packDeltaW <= 8 &&
-    packDeltaH >= 0 &&
-    packDeltaH <= 2;
-
   let fitted: GrayRaster;
-  if (gray.width === canvas.widthPx && gray.height === canvas.heightPx) {
-    fitted = gray;
-  } else if (isSizeCapture || isPackCrop) {
-    fitted = cropGrayToSize(gray, canvas.widthPx, canvas.heightPx);
+  if (options.fitArtwork) {
+    fitted = layoutImportedArtwork(gray, geometry.sizeDotsW, geometry.sizeDotsH);
+    if (fitted.width !== geometry.bitmapDotsW || fitted.height !== geometry.bitmapDotsH) {
+      fitted = cropGrayToSize(fitted, geometry.bitmapDotsW, geometry.bitmapDotsH);
+    }
   } else {
-    fitted = fitGrayToSize(gray, canvas.widthPx, canvas.heightPx, 'stretch');
+    fitted = prepareEditorGrayForPrint(
+      gray,
+      geometry.sizeDotsW,
+      geometry.sizeDotsH,
+      geometry.bitmapDotsW,
+      geometry.bitmapDotsH,
+    );
   }
 
-  let bits = grayToBits(fitted, { threshold: options.threshold, dither: options.dither });
+  logPrintTrace('PRINT_GEOMETRY', {
+    widthMm: geometry.widthMm,
+    heightMm: geometry.heightMm,
+    sizeCommand: geometry.sizeCommand,
+    sizeDotsW: geometry.sizeDotsW,
+    sizeDotsH: geometry.sizeDotsH,
+    bitmapDotsW: geometry.bitmapDotsW,
+    bitmapDotsH: geometry.bitmapDotsH,
+    bytesPerRow: geometry.bytesPerRow,
+    pngW: gray.width,
+    pngH: gray.height,
+    fittedW: fitted.width,
+    fittedH: fitted.height,
+    dpi,
+    dpm: geometry.dotsPerMm,
+  });
 
-  if (bits.bytesPerRow * 8 !== canvas.widthPx || bits.height !== canvas.heightPx) {
-    bits = padBitsCentered(bits, canvas.widthPx, canvas.heightPx);
+  const bits = grayToBits(fitted, { threshold: options.threshold, dither: options.dither });
+
+  if (bits.bytesPerRow * 8 !== geometry.bitmapDotsW || bits.height !== geometry.bitmapDotsH) {
+    logPrintTrace('BITMAP_PACK_MISMATCH', {
+      bitW: bits.bytesPerRow * 8,
+      bitH: bits.height,
+      canvasW: geometry.bitmapDotsW,
+      canvasH: geometry.bitmapDotsH,
+      note: 'Not letterboxing. BITMAP uses cropped packed width.',
+    });
   }
 
   return bits;
+}
+
+/** ViewShot PNG → packed BITMAP PNG (same raster encoded to TSPL). */
+export function mapCapturePngToPackedPng(
+  base64: string,
+  widthMm: number,
+  heightMm: number,
+  dpi: number,
+): { pngBase64: string; geometry: ReturnType<typeof createPrintGeometry>; pngW: number; pngH: number } {
+  const geometry = createPrintGeometry(widthMm, heightMm, dpi);
+  const gray = pngBase64ToGray(base64);
+  const packed = prepareEditorGrayForPrint(
+    gray,
+    geometry.sizeDotsW,
+    geometry.sizeDotsH,
+    geometry.bitmapDotsW,
+    geometry.bitmapDotsH,
+  );
+  logPrintTrace('PACKED_PREVIEW', {
+    sizeCommand: geometry.sizeCommand,
+    pngW: gray.width,
+    pngH: gray.height,
+    packedW: packed.width,
+    packedH: packed.height,
+    sizeDotsW: geometry.sizeDotsW,
+    sizeDotsH: geometry.sizeDotsH,
+    bitmapDotsW: geometry.bitmapDotsW,
+    bytesPerRow: geometry.bytesPerRow,
+    dpi,
+  });
+  return {
+    pngBase64: grayToPngBase64(packed),
+    geometry,
+    pngW: gray.width,
+    pngH: gray.height,
+  };
 }
 
 
@@ -170,6 +227,7 @@ export function rasterizePngForPrint(
     dither: boolean;
     hOffsetMm: number;
     dpi?: number;
+    fitArtwork?: boolean;
   },
 ): BitRaster {
   const t0 = Date.now();
@@ -177,12 +235,26 @@ export function rasterizePngForPrint(
 
   let gray = pngBase64ToGray(base64);
   const tDecode = Date.now();
+  const dpi = options.dpi ?? getPrinterManager().getPrintDpi();
+  const expected = printContentSize(options.widthMm, options.heightMm, dpi);
+
+  logPrintTrace('EDITOR_PNG_SIZE', {
+    pngW: gray.width,
+    pngH: gray.height,
+    sizeW: expected.widthPx,
+    sizeH: expected.heightPx,
+    match: gray.width === expected.widthPx && gray.height === expected.heightPx ? 1 : 0,
+    dpi,
+    widthMm: options.widthMm,
+    heightMm: options.heightMm,
+  });
 
   console.info(
     '[print-job] rasterize: PNG decoded →', gray.width, '×', gray.height,
+    '| expected SIZE', expected.widthPx, '×', expected.heightPx,
     '| base64:', Math.round(inputLen / 1024), 'KB',
     '| decode:', tDecode - t0, 'ms',
-    '| label:', options.widthMm.toFixed(1), '×', options.heightMm.toFixed(1), 'mm',
+    '| label:', options.widthMm.toFixed(2), '×', options.heightMm.toFixed(2), 'mm',
     '| orient:', options.orientation + '°',
   );
 
@@ -196,7 +268,8 @@ export function rasterizePngForPrint(
     threshold: options.threshold,
     dither: options.dither,
     hOffsetMm: options.hOffsetMm,
-    dpi: options.dpi,
+    dpi,
+    fitArtwork: options.fitArtwork,
   });
   const tFinalize = Date.now();
 
@@ -267,6 +340,18 @@ export function encodeConnectedPrinterJob(
       media: spec.mediaType,
       x: spec.xOffsetDots,
       y: spec.yOffsetDots,
+    });
+    const tspl = inspectTsplJob(job);
+    logPrintTrace('TSPL_COMMAND', {
+      size: tspl.sizeCommand,
+      gap: tspl.gapCommand,
+      direction: tspl.directionCommand,
+      reference: tspl.referenceCommand,
+      bitmap: tspl.bitmapCommand,
+      bitmapWidthBytes: tspl.bitmapWidthBytes,
+      bitmapHeightDots: tspl.bitmapHeightDots,
+      payloadBytes: tspl.payloadBytes,
+      rawByteLength: tspl.totalBytes,
     });
     console.info(
       '[print-job] TSPL job:', job.length, 'bytes total |',

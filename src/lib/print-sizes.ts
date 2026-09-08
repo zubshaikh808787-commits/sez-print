@@ -1,9 +1,17 @@
-import { fitDocumentCenteredOnPage } from '@/lib/element-sizing';
+import { scaleDocumentToSize } from '@/lib/element-sizing';
+import {
+  CABLE_FLAG_DIECUT,
+  cableFlagPrintDocument,
+  isCableFlagPrintPresetId,
+} from '@/constants/cable-flag-diecut';
 import {
   JEWELRY_DIECUT,
+  JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM,
+  JEWELRY_DIECUT_PRINT_PRESET_2UP,
   JEWELRY_DIECUT_PRINT_PRESET_3UP,
   jewelryDieCutColumnX,
   jewelryDieCutComposedWidthMm,
+  jewelryDieCutContentIsSingleTag,
   isNearMm,
 } from '@/constants/jewelry-diecut';
 import { generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
@@ -121,6 +129,14 @@ export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
   },
 
   {
+    id: 'jewellery-2up-diecut-37x96',
+    label: 'Jewellery 2-Up — 37 × 96 mm',
+    detail: '2 labels (14 mm × 96 mm), 3 mm gap, 3 mm margins',
+    widthMm: JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM,
+    heightMm: JEWELRY_DIECUT.sheetHeightMm,
+    labelsPerRow: 2,
+  },
+  {
     id: 'jewellery-3up-diecut-54x100',
     label: 'Jewellery 3-Up — 54 × 96 mm',
     detail: '3 labels (14 mm × 96 mm), 3 mm gaps, 3 mm margins',
@@ -136,6 +152,14 @@ export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
     heightMm: JEWELRY_DIECUT.tagHeightMm,
   },
   { id: 'cable', label: 'Cable Tag — 50 × 15 mm', widthMm: 50, heightMm: 15 },
+  {
+    id: 'cable-flag-50x73',
+    label: 'Cable Label — 50 × 73 mm',
+    detail: 'Two 25 mm P-style flags on one 50 × 73 mm piece',
+    widthMm: CABLE_FLAG_DIECUT.widthMm,
+    heightMm: CABLE_FLAG_DIECUT.heightMm,
+    labelsPerRow: CABLE_FLAG_DIECUT.columns,
+  },
   {
     id: '2ups',
     label: '2-UPS — 50 × 15 mm',
@@ -329,12 +353,31 @@ export function tileDocumentThreeUpRatTail(source: LabelDocument): LabelDocument
 export function tileDocumentThreeUpDieCut54(source: LabelDocument): LabelDocument {
   const { sheetWidthMm, sheetHeightMm, sideMarginMm, columns } = JEWELRY_DIECUT;
   const composedW = jewelryDieCutComposedWidthMm();
+  const singleTag = jewelryDieCutContentIsSingleTag(source);
 
-  if (isNearMm(source.widthMm, sheetWidthMm)) {
+  if (isNearMm(source.widthMm, sheetWidthMm) && !singleTag) {
     if (isNearMm(source.heightMm, sheetHeightMm)) return source;
     return {
       ...source,
       heightMm: sheetHeightMm,
+      ups: undefined,
+      updatedAt: Date.now(),
+    };
+  }
+
+  if (singleTag) {
+    const elements: LabelElement[] = [];
+    for (let i = 0; i < columns; i++) {
+      elements.push(...offsetElements(source.elements, jewelryDieCutColumnX(i), 0));
+    }
+    return {
+      ...source,
+      id: generateId('label'),
+      name: `${source.name} · 3-UPS`,
+      widthMm: sheetWidthMm,
+      heightMm: sheetHeightMm,
+      ups: undefined,
+      elements,
       updatedAt: Date.now(),
     };
   }
@@ -346,6 +389,7 @@ export function tileDocumentThreeUpDieCut54(source: LabelDocument): LabelDocumen
       name: `${source.name} · 3-UPS`,
       widthMm: sheetWidthMm,
       heightMm: sheetHeightMm,
+      ups: undefined,
       elements: offsetElements(source.elements, sideMarginMm, 0),
       updatedAt: Date.now(),
     };
@@ -361,9 +405,82 @@ export function tileDocumentThreeUpDieCut54(source: LabelDocument): LabelDocumen
     name: `${source.name} · 3-UPS`,
     widthMm: sheetWidthMm,
     heightMm: sheetHeightMm,
+    ups: undefined,
     elements,
     updatedAt: Date.now(),
   };
+}
+
+/**
+ * Place jewellery die-cut content onto the 37 × 96 mm 2-up sheet without
+ * center-letterboxing a single tag.
+ */
+export function tileDocumentTwoUpDieCut37(source: LabelDocument): LabelDocument {
+  const sheetWidthMm = JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM;
+  const { sheetHeightMm, sideMarginMm, tagWidthMm, gapMm } = JEWELRY_DIECUT;
+  const columns = 2;
+  const composedW = tagWidthMm * columns + gapMm * (columns - 1);
+  const singleTag = jewelryDieCutContentIsSingleTag(source);
+
+  if (isNearMm(source.widthMm, sheetWidthMm) && !singleTag) {
+    if (isNearMm(source.heightMm, sheetHeightMm)) return source;
+    return {
+      ...source,
+      heightMm: sheetHeightMm,
+      ups: undefined,
+      updatedAt: Date.now(),
+    };
+  }
+
+  if (singleTag) {
+    const elements: LabelElement[] = [];
+    for (let i = 0; i < columns; i++) {
+      elements.push(...offsetElements(source.elements, jewelryDieCutColumnX(i), 0));
+    }
+    return {
+      ...source,
+      id: generateId('label'),
+      name: `${source.name} · 2-UPS`,
+      widthMm: sheetWidthMm,
+      heightMm: sheetHeightMm,
+      ups: undefined,
+      elements,
+      updatedAt: Date.now(),
+    };
+  }
+
+  if (isNearMm(source.widthMm, composedW)) {
+    return {
+      ...source,
+      id: generateId('label'),
+      name: `${source.name} · 2-UPS`,
+      widthMm: sheetWidthMm,
+      heightMm: sheetHeightMm,
+      ups: undefined,
+      elements: offsetElements(source.elements, sideMarginMm, 0),
+      updatedAt: Date.now(),
+    };
+  }
+
+  const elements: LabelElement[] = [];
+  for (let i = 0; i < columns; i++) {
+    elements.push(...offsetElements(source.elements, jewelryDieCutColumnX(i), 0));
+  }
+  return {
+    ...source,
+    id: generateId('label'),
+    name: `${source.name} · 2-UPS`,
+    widthMm: sheetWidthMm,
+    heightMm: sheetHeightMm,
+    ups: undefined,
+    elements,
+    updatedAt: Date.now(),
+  };
+}
+
+/** Force the cable pair onto 50 × 73 mm. Do not tile to 100 mm. */
+export function tileDocumentTwoUpCableFlag(source: LabelDocument): LabelDocument {
+  return cableFlagPrintDocument(source);
 }
 
 export function applyPrintSize(
@@ -375,6 +492,8 @@ export function applyPrintSize(
   if (preset?.id === '2ups') return tileDocumentTwoUp(source);
   if (preset?.id === 'jewellery-3up-14x100') return tileDocumentThreeUpRatTail(source);
   if (preset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP) return tileDocumentThreeUpDieCut54(source);
+  if (preset?.id === JEWELRY_DIECUT_PRINT_PRESET_2UP) return tileDocumentTwoUpDieCut37(source);
+  if (isCableFlagPrintPresetId(preset?.id)) return cableFlagPrintDocument(source);
   const page = clampLabelMm(custom.widthMm, custom.heightMm);
   // Same size as the design — keep element positions (preview == print).
   if (
@@ -383,15 +502,42 @@ export function applyPrintSize(
   ) {
     return source;
   }
-  // Uniform scale, centered — fills as much of the paper as the preview aspect allows.
-  return fitDocumentCenteredOnPage(source, page.widthMm, page.heightMm);
+  // Fill the chosen millimetre stock. Center-letterbox is a false border.
+  return scaleDocumentToSize(source, page.widthMm, page.heightMm);
+}
+
+/** Closest stock preset to an imported template's pixel aspect (no stretching). */
+export function suggestPrintSizeFromAspect(imageWidthPx: number, imageHeightPx: number): LabelSizeMm {
+  const iw = Math.max(1, imageWidthPx);
+  const ih = Math.max(1, imageHeightPx);
+  const aspect = iw / ih;
+  const jewellery = PRINT_SIZE_PRESETS.filter(
+    (p) =>
+      p.id === JEWELRY_DIECUT_PRINT_PRESET_2UP ||
+      p.id === JEWELRY_DIECUT_PRINT_PRESET_3UP ||
+      p.id === 'jewellery-rattail-12x100',
+  );
+  const pool = jewellery.length > 0 ? jewellery : PRINT_SIZE_PRESETS;
+  let best: PrintSizePreset = pool[0] ?? PRINT_SIZE_PRESETS[0];
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const preset of pool) {
+    if (!(preset.widthMm > 0) || !(preset.heightMm > 0) || preset.sheet) continue;
+    const score = Math.abs(Math.log(aspect / (preset.widthMm / preset.heightMm)));
+    if (score < bestScore) {
+      bestScore = score;
+      best = preset;
+    }
+  }
+  return { widthMm: best.widthMm, heightMm: best.heightMm };
 }
 
 export function formatPrintSize(widthMm: number, heightMm: number, unit: LabelUnit = 'mm'): string {
   if (unit === 'in') {
     const w = Math.round((widthMm / MM_PER_INCH) * 100) / 100;
     const h = Math.round((heightMm / MM_PER_INCH) * 100) / 100;
-    return `${w} × ${h} in`;
+    return `${w.toFixed(2)} × ${h.toFixed(2)} in`;
   }
-  return `${Math.round(widthMm * 10) / 10} × ${Math.round(heightMm * 10) / 10} mm`;
+  const w = Math.round(widthMm * 100) / 100;
+  const h = Math.round(heightMm * 100) / 100;
+  return `${w.toFixed(2)} × ${h.toFixed(2)} mm`;
 }

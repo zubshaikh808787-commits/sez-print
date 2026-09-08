@@ -3,17 +3,19 @@
  *
  * Design / editor coordinates are millimetres.
  * Screen preview: contain-fit mm into available pixels (not CSS 96dpi).
- * Print raster: dots = round(mm × DPI / 25.4). This printer is 304 DPI (12 dots/mm).
+ * Print raster: dots = round(mm × 12) at 304 DPI. This printer is 12 dots/mm.
  */
 
-import { JEWELRY_DIECUT } from '@/constants/jewelry-diecut';
-import { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout } from '@/lib/printer/print-spec';
+import { JEWELRY_DIECUT, JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM } from '@/constants/jewelry-diecut';
+import { CABLE_FLAG_DIECUT } from '@/constants/cable-flag-diecut';
+import { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout, formatTsplSizeCommand } from '@/lib/printer/print-spec';
 import type { MediaShape } from '@/lib/label-document';
 
-export { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout };
+export { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout, formatTsplSizeCommand };
 export type { MediaShape };
 export const PRINT_DPI = 304;
-export const PRINT_DOTS_PER_MM = PRINT_DPI / MM_PER_INCH;
+/** 304 DPI thermal heads are 12 dots/mm (304.8), not 304/25.4. */
+export const PRINT_DOTS_PER_MM = 12;
 export const MIN_LABEL_MM = 8;
 export const MAX_LABEL_MM = 310;
 
@@ -48,7 +50,9 @@ export const LABEL_SIZE_PRESETS: LabelSizePreset[] = [
   { id: '20x15', label: '20×15 mm Tiny', widthMm: 20, heightMm: 15 },
   { id: '50x15', label: '50×15 mm Jewelry', widthMm: 50, heightMm: 15 },
   { id: '14x96', label: '14×96 mm Jewellery Tag', widthMm: JEWELRY_DIECUT.tagWidthMm, heightMm: JEWELRY_DIECUT.tagHeightMm },
+  { id: '37x96-2up', label: '37×96 mm 2-Up Jewellery Sheet', widthMm: JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM, heightMm: JEWELRY_DIECUT.sheetHeightMm },
   { id: '54x96-3up', label: '54×96 mm 3-Up Jewellery Sheet', widthMm: JEWELRY_DIECUT.sheetWidthMm, heightMm: JEWELRY_DIECUT.sheetHeightMm },
+  { id: '50x73-cable-label', label: '50×73 mm Cable Label', widthMm: CABLE_FLAG_DIECUT.widthMm, heightMm: CABLE_FLAG_DIECUT.heightMm },
   { id: '80x15', label: '80×15 mm Rat Tail Tag', widthMm: 80, heightMm: 15 },
   { id: '85x13', label: '85×13 mm Barbell', widthMm: 85, heightMm: 13 },
   { id: '85x15', label: '85×15 mm Barbell', widthMm: 85, heightMm: 15 },
@@ -170,16 +174,6 @@ export function printCaptureLayout(widthMm: number, heightMm: number, dpi = PRIN
     canvas: { widthPx: layout.bitmapDotsW, heightPx: layout.bitmapDotsH },
     scale: layout.captureDotsW / wMm,
   };
-}
-
-/**
- * TSPL SIZE command with accurate physical millimetres.
- * Cleanly formats integers (50 mm) or decimals (101.6 mm).
- */
-export function formatTsplSizeCommand(widthMm: number, heightMm: number): string {
-  const w = Number((Math.round(widthMm * 100) / 100).toFixed(2));
-  const h = Number((Math.round(heightMm * 100) / 100).toFixed(2));
-  return `SIZE ${w} mm,${h} mm`;
 }
 
 /**

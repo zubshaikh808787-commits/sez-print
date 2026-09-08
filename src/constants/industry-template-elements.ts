@@ -384,6 +384,11 @@ export function buildIndustryPreviewElements(
         text({ left: pad + 1, top: h * 0.2, width: innerW }, 'PPL 15.3.01.AT.OUT8', smallPt),
         barcode({ left: pad + 1, top: h * 0.36, width: innerW, height: h * 0.16 }, 'B03F09R11'),
       ]);
+    case 'cable-flag-50x73':
+    case 'cable-flag-50x70':
+    case 'cable-flag-50x70-2up':
+      // Die-cut outline is an editor/gallery guide only — the printer gets content, not cut lines.
+      return [];
 
     case 'other-8x60-5rows':
       return [table({ left: pad, top: pad, width: innerW, height: h - pad * 2 }, 5, 1)];

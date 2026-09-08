@@ -149,7 +149,6 @@ function TextContent({
       ]}>
       <Text
         allowFontScaling={false}
-        includeFontPadding={false}
         ellipsizeMode="clip"
         style={[
           style,
@@ -197,7 +196,6 @@ function DegreesContent({
       ]}>
       <Text
         allowFontScaling={false}
-        includeFontPadding={false}
         style={[style, { width: widthPx, textAlign: align }]}>
         {text}
       </Text>
@@ -231,7 +229,6 @@ function TimeContent({
       ]}>
       <Text
         allowFontScaling={false}
-        includeFontPadding={false}
         style={[style, { width: widthPx, textAlign: align }]}>
         {`${formatLiveDate(adjusted)} ${formatLiveTime(adjusted)}`}
       </Text>
@@ -267,7 +264,6 @@ function BarcodeContent({
     <Text
       numberOfLines={1}
       allowFontScaling={false}
-      includeFontPadding={false}
       style={{
         fontSize: labelSize,
         lineHeight: labelSize * 1.2,
@@ -275,6 +271,7 @@ function BarcodeContent({
         textAlign: 'center',
         fontFamily: resolveFontFamily(element.fontFamily),
         fontWeight: element.bold ? '700' : '400',
+        includeFontPadding: false,
       }}>
       {content}
     </Text>

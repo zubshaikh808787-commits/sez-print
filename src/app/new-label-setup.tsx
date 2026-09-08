@@ -20,6 +20,7 @@ import { LabelSizeEditor } from '@/components/label-size-editor';
 import { Spacing } from '@/constants/theme';
 import { Palette } from '@/constants/ui';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
+import { CABLE_FLAG_DIECUT } from '@/constants/cable-flag-diecut';
 import { useTranslation } from '@/lib/i18n';
 import {
   createLabelDocument,
@@ -34,6 +35,7 @@ import { useSettingsStore } from '@/stores/settings-store';
 const SETUP_PRESETS = [
   { label: '14 × 96 mm (Jewellery Tag)', width: JEWELRY_DIECUT.tagWidthMm, height: JEWELRY_DIECUT.tagHeightMm },
   { label: '54 × 96 mm (3-Up Sheet)', width: JEWELRY_DIECUT.sheetWidthMm, height: JEWELRY_DIECUT.sheetHeightMm },
+  { label: '50 × 73 mm (Cable Label)', width: CABLE_FLAG_DIECUT.widthMm, height: CABLE_FLAG_DIECUT.heightMm },
   { label: '50 × 30 mm (Retail)', width: 50, height: 30 },
   { label: '40 × 30 mm (Price Tag)', width: 40, height: 30 },
   { label: '57 × 30 mm (Receipt)', width: 57, height: 30 },

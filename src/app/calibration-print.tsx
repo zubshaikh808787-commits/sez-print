@@ -1,10 +1,9 @@
 /**
  * Calibration Print Screen.
- * Prints a test label with ruler marks at known mm intervals so users can
- * physically verify DPI correctness and printhead centering with a real ruler.
+ * Prints a millimetre-true proof (no screenshot) so physical size can be measured.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useState } from 'react';
 import { router } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
 import {
@@ -17,35 +16,22 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import ViewShot, { captureRef } from 'react-native-view-shot';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 
 import { Palette } from '@/constants/ui';
 import { Spacing } from '@/constants/theme';
 import { fitLabelSize } from '@/lib/label-geometry';
-import {
-  encodeConnectedPrinterJob,
-  PRINT_CAPTURE_OPTIONS,
-  printCaptureLayout,
-  printCaptureOptionsForSize,
-  rasterizePngForPrint,
-  sendIsolatedPrintCopies,
-  tryNativeSdkPngPrint,
-  waitForNextPaint,
-  formatPrintFailure,
-} from '@/lib/printer/print-job';
-import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
+import { formatPrintFailure } from '@/lib/printer/print-job';
+import { printPhysicalProofJob } from '@/lib/printer/universal-bridge';
+import { getPrinterManager } from '@/lib/printer/printer-manager';
 import {
   computePrintheadCenteringOffset,
-  formatPrintSpecDiagnostics,
   createPrintSpec,
   mmToDots,
 } from '@/lib/printer/print-spec';
 import { usePrinterStore } from '@/stores/printer-store';
 
 const GRID_STEP_MM = 5;
-const DEFAULT_WIDTH_MM = 50;
-const DEFAULT_HEIGHT_MM = 30;
 
 function CalibrationGrid({
   widthMm,
@@ -86,7 +72,7 @@ function CalibrationGrid({
         const isMajor = mm % 10 === 0;
         const len = isMajor ? tickLength * 1.5 : tickLength;
         return (
-          <React.Fragment key={`h${mm}`}>
+          <Fragment key={`h${mm}`}>
             <Line x1={x} y1={0} x2={x} y2={len} stroke="#000" strokeWidth={1} />
             <Line x1={x} y1={heightPx} x2={x} y2={heightPx - len} stroke="#000" strokeWidth={1} />
             {isMajor && mm > 0 && mm < widthMm ? (
@@ -99,7 +85,7 @@ function CalibrationGrid({
                 {mm}
               </SvgText>
             ) : null}
-          </React.Fragment>
+          </Fragment>
         );
       })}
 
@@ -109,7 +95,7 @@ function CalibrationGrid({
         const isMajor = mm % 10 === 0;
         const len = isMajor ? tickLength * 1.5 : tickLength;
         return (
-          <React.Fragment key={`v${mm}`}>
+          <Fragment key={`v${mm}`}>
             <Line x1={0} y1={y} x2={len} y2={y} stroke="#000" strokeWidth={1} />
             <Line x1={widthPx} y1={y} x2={widthPx - len} y2={y} stroke="#000" strokeWidth={1} />
             {isMajor && mm > 0 && mm < heightMm ? (
@@ -121,7 +107,7 @@ function CalibrationGrid({
                 {mm}
               </SvgText>
             ) : null}
-          </React.Fragment>
+          </Fragment>
         );
       })}
 
@@ -166,14 +152,14 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 const CALIBRATION_SIZES = [
-  { label: '4×6 in (101.6×152.4 mm)', widthMm: 101.6, heightMm: 152.4 },
-  { label: '50×50 mm', widthMm: 50, heightMm: 50 },
+  { label: '50×25 mm (geometry proof)', widthMm: 50, heightMm: 25 },
   { label: '50×30 mm', widthMm: 50, heightMm: 30 },
+  { label: '50×50 mm', widthMm: 50, heightMm: 50 },
+  { label: '4×6 in (101.6×152.4 mm)', widthMm: 101.6, heightMm: 152.4 },
   { label: '100×150 mm', widthMm: 100, heightMm: 150 },
   { label: '100×100 mm', widthMm: 100, heightMm: 100 },
   { label: '76×130 mm', widthMm: 76, heightMm: 130 },
   { label: '57×30 mm', widthMm: 57, heightMm: 30 },
-  { label: '100×155 mm', widthMm: 100, heightMm: 155 },
 ];
 
 export default function CalibrationPrintScreen() {
@@ -184,7 +170,7 @@ export default function CalibrationPrintScreen() {
 
   const [printing, setPrinting] = useState(false);
   const [selectedSizeIndex, setSelectedSizeIndex] = useState(0);
-  const shotRef = useRef<ViewShot>(null);
+  const [lastReport, setLastReport] = useState<string | null>(null);
 
   const activeSize = CALIBRATION_SIZES[selectedSizeIndex] ?? CALIBRATION_SIZES[0];
   const widthMm = activeSize.widthMm;
@@ -193,11 +179,6 @@ export default function CalibrationPrintScreen() {
   const manager = getPrinterManager();
   const profile = manager.getActivePrinterProfile();
   const dpi = profile.dpi;
-
-  const captureSize = useMemo(
-    () => printCaptureLayout(widthMm, heightMm, dpi).content,
-    [widthMm, heightMm, dpi],
-  );
 
   const previewFit = fitLabelSize(widthMm, heightMm, 280, 180);
   const labelWidthDots = mmToDots(widthMm, dpi);
@@ -219,89 +200,34 @@ export default function CalibrationPrintScreen() {
     }
 
     setPrinting(true);
-    const timer = new PrintTimingLogger();
     try {
-      timer.start('capture+verify');
-      const [connectionResult, base64] = await Promise.all([
-        manager.ensureConnected().catch((err) => ({ error: err })),
-        captureRef(shotRef, printCaptureOptionsForSize(
-          captureSize.widthPx,
-          captureSize.heightPx,
-        )),
-      ]);
-      timer.end('capture+verify');
-
-      if (connectionResult && 'error' in connectionResult) {
-        throw connectionResult.error;
-      }
-      if (!base64) throw new Error('Could not capture calibration grid.');
-
-      console.info(formatPrintSpecDiagnostics(spec));
-
-      timer.start('sdkFastPrint');
-      const usedNative = await tryNativeSdkPngPrint({
-        pngBase64: base64,
-        widthMm,
-        heightMm,
-        gapMm: 2,
-        copies: 1,
-        density: 8,
-        speed: 6,
-        vOffsetMm: 0,
-        hOffsetMm: 0,
-        media: 'gap',
-        orientation: 0,
-        dpi: manager.getPrintDpi(),
-      });
-      timer.end('sdkFastPrint');
-
-      if (!usedNative) {
-        timer.start('rasterize');
-        const bits = rasterizePngForPrint(base64, {
-          widthMm,
-          heightMm,
-          orientation: 0,
-          threshold: 128,
-          dither: false,
-          hOffsetMm: 0,
-        });
-        timer.end('rasterize');
-
-        timer.start('encode');
-        const bytes = encodeConnectedPrinterJob(bits, {
-          widthMm,
-          heightMm,
-          gapMm: 2,
-          copies: 1,
-          density: null,
-          speed: 6,
-          vOffsetMm: 0,
-        });
-        timer.end('encode');
-
-        timer.start('transmit');
-        await sendIsolatedPrintCopies(bytes, 1);
-        timer.end('transmit');
-      }
-
-      timer.dump('CALIBRATION PRINT');
-      manager.setLastPrintTiming(timer.getEntries());
-
-      Alert.alert(
-        'Calibration Printed',
-        `Printed ${widthMm}×${heightMm}mm calibration grid.\n\n` +
-          '• Measure ruler ticks with a physical ruler.\n' +
-          '• Each tick = 5mm, bold ticks = 10mm.\n' +
-          '• If marks are consistently off, DPI setting is wrong.\n' +
-          '• If content is shifted to one side, centering offset needs adjustment.',
-      );
+      await manager.ensureConnected();
+      const report = await printPhysicalProofJob(widthMm, heightMm);
+      const summary = [
+        `Requested: ${report.requestedWidthMm} × ${report.requestedHeightMm} mm`,
+        `Printer: ${report.printerModel}`,
+        `DPI: ${report.dpiX} × ${report.dpiY} (${report.dotsPerMmX} dpm)`,
+        `Expected dots: ${report.expectedWidthDots} × ${report.expectedHeightDots}`,
+        `Actual bitmap: ${report.actualWidthDots} × ${report.actualHeightDots}`,
+        `Bytes per row: ${report.bytesPerRow}`,
+        `Bitmap bytes: ${report.bitmapByteCount}`,
+        `Encoded: ${report.sizeCommand}`,
+        `${report.bitmapCommand}`,
+        `Raw print data: ${report.rawByteLength} bytes`,
+        '',
+        'Physical measurement: measure this print with a ruler.',
+        'Software success is not physical success.',
+      ].join('\n');
+      setLastReport(summary);
+      console.info('[PRINT-TRACE] PROOF_REPORT\n' + summary);
+      Alert.alert('Proof sent — measure it', summary);
     } catch (error) {
       const message = formatPrintFailure(error);
       if (message) Alert.alert('Print Failed', message);
     } finally {
       setPrinting(false);
     }
-  }, [manager, spec, widthMm, heightMm, captureSize]);
+  }, [manager, widthMm, heightMm]);
 
   return (
     <View style={styles.root}>
@@ -353,22 +279,6 @@ export default function CalibrationPrintScreen() {
           </View>
         </View>
 
-        {/* Off-screen print artboard at exact printer dots */}
-        <View style={styles.offscreen}>
-          <ViewShot ref={shotRef} options={PRINT_CAPTURE_OPTIONS} style={{
-            width: captureSize.widthPx,
-            height: captureSize.heightPx,
-            backgroundColor: '#FFFFFF',
-          }}>
-            <CalibrationGrid
-              widthMm={widthMm}
-              heightMm={heightMm}
-              widthPx={captureSize.widthPx}
-              heightPx={captureSize.heightPx}
-            />
-          </ViewShot>
-        </View>
-
         {/* Diagnostics card */}
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>Active Printer Profile</Text>
@@ -384,12 +294,20 @@ export default function CalibrationPrintScreen() {
           <InfoRow label="BITMAP Offset" value={`x=${spec.xOffsetDots}, y=${spec.yOffsetDots}`} />
         </View>
 
+        {lastReport ? (
+          <View style={styles.infoCard}>
+            <Text style={styles.infoTitle}>Last proof (software values)</Text>
+            <Text style={styles.reportText}>{lastReport}</Text>
+          </View>
+        ) : null}
+
         <Text style={styles.helpText}>
-          Print this calibration grid and measure the ruler marks with a physical ruler.{'\n\n'}
-          Each small tick = 5mm. Bold ticks = 10mm. Numbers show mm from the edge.{'\n\n'}
-          If marks are consistently off by a fixed ratio, the DPI value for this printer model
-          is wrong \u2014 adjust it in the printer profile.{'\n\n'}
-          If content is shifted to one side, the printhead centering offset needs tuning.
+          This print is rasterized from millimetres at the printer DPI. It is not a screenshot.{'\n\n'}
+          On 50×25 mm: outer border, 10 mm square, 20 mm line, center cross.{'\n\n'}
+          Measure those marks with a ruler. If software dots match the formula but the
+          ruler disagrees, the printer DPI setting or media is wrong — not the document.{'\n\n'}
+          Confirm Printer Resolution in Printing Settings matches the physical head
+          (203 = 8 dots/mm, 304 = 12 dots/mm).
         </Text>
 
         {/* Connection status */}
@@ -408,7 +326,7 @@ export default function CalibrationPrintScreen() {
           {printing ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.printBtnText}>Print Calibration Grid</Text>
+            <Text style={styles.printBtnText}>Print {widthMm}×{heightMm} mm Proof</Text>
           )}
         </Pressable>
       </View>
@@ -497,6 +415,12 @@ const styles = StyleSheet.create({
   },
   infoLabel: { fontSize: 13, color: '#6B7280' },
   infoValue: { fontSize: 13, color: '#111827', fontWeight: '500', fontVariant: ['tabular-nums'] },
+  reportText: {
+    fontSize: 12,
+    color: '#111827',
+    lineHeight: 18,
+    fontVariant: ['tabular-nums'],
+  },
   helpText: {
     fontSize: 13,
     color: '#6B7280',
