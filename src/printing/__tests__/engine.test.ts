@@ -1,5 +1,15 @@
 import assert from 'node:assert/strict';
 import { createArtworkDocument, createPhysicalProofDocument, createPrintDocument, mediaFromSize, pageSizeDots, rectMmToDots, renderPrintDocument, validatePrintRequest, MEDIA_PROFILES, convertLabelToPrintDocument } from '../index';
+import { generateCalibrationTspl, PRINTER_DPI, DOTS_PER_MM } from '../calibration';
+import { TsplBuilder } from '../tspl-builder';
+import { runCanvasExportTests } from './canvas-export.test';
+import { runBackgroundReferenceTests } from './background-reference.test';
+import { runTextElementTests } from './text-elements.test';
+import { runBarcodeQrElementTests } from './barcode-qr-elements.test';
+import { runElementManipulationTests } from './element-manipulation.test';
+import { runPipelineTests } from './pipeline.test';
+import { runShapeDetectionTests } from './shape-detection.test';
+import { runRobustnessTests } from './robustness.test';
 import { createTestPrinterAdapter } from '../adapters/test/TestPrinterAdapter';
 import { encodeTscBitmapJob, inspectTsplJob } from '../../lib/printer/tsc';
 import { applyExifOrientation } from '../../lib/printer/exif-orientation';
@@ -751,6 +761,66 @@ function testDataBindingSheetPlaceholders() {
   console.log('ok data binding sheet placeholders resolved');
 }
 
+function testPhase0CalibrationCalculations() {
+  assert.equal(PRINTER_DPI, 304, 'PRINTER_DPI must be 304');
+  assert(Math.abs(DOTS_PER_MM - (304 / 25.4)) < 0.00001, 'DOTS_PER_MM must be unrounded 304 / 25.4');
+
+  // Test 1: 40x20mm box on 50x30mm label
+  const test1 = generateCalibrationTspl({
+    labelWidthMm: 50,
+    labelHeightMm: 30,
+    boxWidthMm: 40,
+    boxHeightMm: 20,
+    gapMm: 2,
+    thicknessMm: 0.35,
+  });
+  assert(test1.tspl.includes('SIZE 50 mm, 30 mm'), 'TSPL must have exact SIZE command');
+  assert(test1.tspl.includes('GAP 2 mm, 0 mm'), 'TSPL must have exact GAP command');
+  assert(test1.tspl.includes('BOX 60,60,539,299,4'), 'TSPL must contain exact computed box dots');
+  assert.equal(test1.dots.boxWidthDots, 479);
+  assert.equal(test1.dots.boxHeightDots, 239);
+
+  // Test 2: 80x15mm box on 100x30mm label
+  const test2 = generateCalibrationTspl({
+    labelWidthMm: 100,
+    labelHeightMm: 30,
+    boxWidthMm: 80,
+    boxHeightMm: 15,
+    gapMm: 2,
+    thicknessMm: 0.35,
+  });
+  assert(test2.tspl.includes('SIZE 100 mm, 30 mm'), 'TSPL must have exact SIZE command');
+  assert(test2.tspl.includes('BOX 120,90,1077,269,4'), 'TSPL must contain exact computed box dots');
+  assert.equal(test2.dots.boxWidthDots, 957);
+  assert.equal(test2.dots.boxHeightDots, 179);
+
+  console.log('ok phase 0 calibration calculations (304 DPI, 40x20mm and 80x15mm)');
+}
+
+function testPhase1TsplBuilder() {
+  const tspl = new TsplBuilder()
+    .setSize(50, 30)
+    .setGap(2)
+    .clear()
+    .drawBox(5, 5, 40, 20, 0.35)
+    .drawText(8, 7, 'PHASE 1 OK', 12)
+    .drawBarcode(8, 14, 'BAR-12345', '128', { heightMm: 8, readable: 1 })
+    .drawQrCode(35, 14, 'QR-DATA', { cellWidthDots: 4 })
+    .print(1)
+    .build();
+
+  assert(tspl.includes('SIZE 50 mm, 30 mm'));
+  assert(tspl.includes('GAP 2 mm, 0 mm'));
+  assert(tspl.includes('CLS'));
+  assert(tspl.includes('BOX 60,60,539,299,4'));
+  assert(tspl.includes('TEXT 96,84,"3",0,1,1,"PHASE 1 OK"'));
+  assert(tspl.includes('BARCODE 96,168,"128",96,1,0,2,2,"BAR-12345"'));
+  assert(tspl.includes('QRCODE 419,168,M,4,A,0,M2,S7,"QR-DATA"'));
+  assert(tspl.includes('PRINT 1'));
+
+  console.log('ok phase 1 tspl builder end-to-end');
+}
+
 async function main() {
   testMultiDpiSamePhysicalSize();
   testEdgeRounding();
@@ -774,6 +844,16 @@ async function main() {
   testExpandedMediaProfilesCatalog();
   await testConvertWithPlaceholderSubstitution();
   testDataBindingSheetPlaceholders();
+  testPhase0CalibrationCalculations();
+  testPhase1TsplBuilder();
+  runCanvasExportTests();
+  runBackgroundReferenceTests();
+  runTextElementTests();
+  runBarcodeQrElementTests();
+  runElementManipulationTests();
+  runPipelineTests();
+  runShapeDetectionTests();
+  runRobustnessTests();
   console.log('ALL PRINT ENGINE TESTS PASSED');
 }
 

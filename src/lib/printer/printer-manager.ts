@@ -1033,6 +1033,12 @@ class PrinterManager {
     }
   }
 
+  async printRawTspl(tspl: string | Uint8Array): Promise<void> {
+    if (!this.isConnected) throw new Error('No printer connected. Connect to printer before printing.');
+    const bytes = typeof tspl === 'string' ? new TextEncoder().encode(tspl) : tspl;
+    await this.print(bytes);
+  }
+
   async printTestLabel(text = 'Sez Print OK'): Promise<void> {
     if (!this.isConnected) throw new Error('No printer connected.');
 

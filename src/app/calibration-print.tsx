@@ -30,6 +30,7 @@ import {
   mmToDots,
 } from '@/lib/printer/print-spec';
 import { usePrinterStore } from '@/stores/printer-store';
+import { generateCalibrationTspl, PRINTER_DPI, DOTS_PER_MM } from '@/printing/calibration';
 
 const GRID_STEP_MM = 5;
 
@@ -229,6 +230,49 @@ export default function CalibrationPrintScreen() {
     }
   }, [manager, widthMm, heightMm]);
 
+  const handlePrintPhase0RawBox = useCallback(async () => {
+    if (!manager.isConnected) {
+      Alert.alert('Printer Not Connected', 'Please connect to your printer in Settings → Printers first.');
+      return;
+    }
+
+    const boxW = widthMm >= 80 ? 80 : 40;
+    const boxH = widthMm >= 80 ? 15 : 20;
+
+    setPrinting(true);
+    try {
+      await manager.ensureConnected();
+      const res = generateCalibrationTspl({
+        labelWidthMm: widthMm,
+        labelHeightMm: heightMm,
+        boxWidthMm: boxW,
+        boxHeightMm: boxH,
+        gapMm: 2,
+        thicknessMm: 0.35,
+      });
+      await manager.printRawTspl(res.tspl);
+      const summary = [
+        'Phase 0 Raw TSPL Sent:',
+        res.tspl.trim(),
+        '',
+        `Target Box: ${boxW} × ${boxH} mm`,
+        `DPI: ${PRINTER_DPI} (DOTS_PER_MM: ${DOTS_PER_MM.toFixed(4)})`,
+        `Box Dots: ${res.dots.boxWidthDots} × ${res.dots.boxHeightDots}`,
+        '',
+        'Physical Verification Step:',
+        `Measure the printed box with calipers/ruler.`,
+        `Target: ${boxW}mm × ${boxH}mm (Must be within ±0.5mm).`,
+      ].join('\n');
+      setLastReport(summary);
+      Alert.alert('Phase 0 Box Sent — Measure It', summary);
+    } catch (error) {
+      const message = formatPrintFailure(error);
+      if (message) Alert.alert('Print Failed', message);
+    } finally {
+      setPrinting(false);
+    }
+  }, [manager, widthMm, heightMm]);
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.two }]}>
@@ -320,13 +364,74 @@ export default function CalibrationPrintScreen() {
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.two }]}>
         <Pressable
+          onPress={() => router.push('/phase9-robustness')}
+          style={({ pressed }) => [styles.phase9Btn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Open Phase 9 Robustness & Batch Engine</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/phase8-shape-detect')}
+          style={({ pressed }) => [styles.phase8Btn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Open Phase 8 Shape & Contour Detection</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/phase7-pipeline')}
+          style={({ pressed }) => [styles.phase7Btn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Open Phase 7 End-to-End Pipeline</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/phase6-editor')}
+          style={({ pressed }) => [styles.phase6Btn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Open Phase 6 Interactive Editor</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/phase5-barcode-qr')}
+          style={({ pressed }) => [styles.phase5Btn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Open Phase 5 Barcode & QR Screen</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/phase4-text')}
+          style={({ pressed }) => [styles.phase4Btn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Open Phase 4 Text Elements Playground</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/phase3-image-import')}
+          style={({ pressed }) => [styles.phase3Btn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Open Phase 3 Image Reference</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/phase2-canvas')}
+          style={({ pressed }) => [styles.phase2Btn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Open Phase 2 Canvas Playground</Text>
+        </Pressable>
+
+        <Pressable
+          disabled={printing}
+          onPress={handlePrintPhase0RawBox}
+          style={({ pressed }) => [styles.phase0Btn, (pressed || printing) && styles.pressed]}>
+          {printing ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.printBtnText}>
+              Print Phase 0 Raw TSPL Box ({widthMm >= 80 ? '80×15' : '40×20'} mm)
+            </Text>
+          )}
+        </Pressable>
+
+        <Pressable
           disabled={printing}
           onPress={handlePrint}
           style={({ pressed }) => [styles.printBtn, (pressed || printing) && styles.pressed]}>
           {printing ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.printBtnText}>Print {widthMm}×{heightMm} mm Proof</Text>
+            <Text style={styles.printSecondaryBtnText}>Print Full Ruler Proof</Text>
           )}
         </Pressable>
       </View>
@@ -447,13 +552,95 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: 'center',
   },
+  phase9Btn: {
+    backgroundColor: '#059669',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  phase8Btn: {
+    backgroundColor: '#9333EA',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  phase7Btn: {
+    backgroundColor: '#2563EB',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  phase6Btn: {
+    backgroundColor: '#4F46E5',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  phase5Btn: {
+    backgroundColor: '#059669',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  phase4Btn: {
+    backgroundColor: '#D97706',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  phase3Btn: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  phase2Btn: {
+    backgroundColor: '#0F766E',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  phase0Btn: {
+    backgroundColor: '#2563EB',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   printBtn: {
     backgroundColor: Palette.accent,
     borderRadius: 24,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    minWidth: 220,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    width: '100%',
     alignItems: 'center',
   },
-  printBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  printBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  printSecondaryBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
 });

@@ -95,6 +95,14 @@ function AppRoot() {
         <Stack.Screen name="printer-connect" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="printer-diagnostics" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="calibration-print" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="phase2-canvas" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="phase3-image-import" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="phase4-text" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="phase5-barcode-qr" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="phase6-editor" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="phase7-pipeline" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="phase8-shape-detect" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="phase9-robustness" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="new-label-setup" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen
           name="shipping-label"
