@@ -164,6 +164,17 @@ export function ImagePropertyPanel({
     patch({ flipV: !state.flipV });
   }, [state.flipV, patch]);
 
+  const handleFitToCanvasPad = useCallback(() => {
+    patch({
+      left: 0,
+      top: 0,
+      width: labelWidthMm,
+      height: labelHeightMm,
+      contentFit: 'fill',
+      aspectRatioLocked: false,
+    });
+  }, [labelWidthMm, labelHeightMm, patch]);
+
   const handleFitToWidth = useCallback(() => {
     const newW = labelWidthMm;
     const newH = isAspectLocked ? Math.round((newW / currentAspect) * 10) / 10 : state.height;
@@ -321,16 +332,22 @@ export function ImagePropertyPanel({
               <Divider />
               <View style={styles.quickFitRow}>
                 <Pressable
+                  onPress={handleFitToCanvasPad}
+                  style={({ pressed }) => [styles.toolChip, styles.toolChipPrimary, pressed && styles.pressed]}>
+                  <AppIcon name="aspectratio" tintColor="#FFFFFF" size={15} />
+                  <Text style={styles.toolChipTextPrimary}>Fit Canvas Pad</Text>
+                </Pressable>
+                <Pressable
                   onPress={handleFitToWidth}
                   style={({ pressed }) => [styles.toolChip, pressed && styles.pressed]}>
                   <AppIcon name="arrow.left.and.right" tintColor={ACCENT} size={15} />
-                  <Text style={styles.toolChipText}>Fit Label Width</Text>
+                  <Text style={styles.toolChipText}>Fit Width</Text>
                 </Pressable>
                 <Pressable
                   onPress={handleCenter}
                   style={({ pressed }) => [styles.toolChip, pressed && styles.pressed]}>
                   <AppIcon name="align.horizontal.center" tintColor={ACCENT} size={15} />
-                  <Text style={styles.toolChipText}>Center on Tag</Text>
+                  <Text style={styles.toolChipText}>Center</Text>
                 </Pressable>
               </View>
               <Divider />
@@ -637,10 +654,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#CCFBF1',
   },
+  toolChipPrimary: {
+    backgroundColor: ACCENT,
+    borderColor: ACCENT,
+  },
   toolChipText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#0D9488',
+  },
+  toolChipTextPrimary: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   stepperRow: {
     flexDirection: 'row',

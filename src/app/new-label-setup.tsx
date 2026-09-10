@@ -1,41 +1,42 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Image } from 'expo-image';
 import { LabelSizeEditor } from '@/components/label-size-editor';
+import { CABLE_FLAG_DIECUT } from '@/constants/cable-flag-diecut';
+import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
 import { Spacing } from '@/constants/theme';
 import { Palette } from '@/constants/ui';
-import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
-import { CABLE_FLAG_DIECUT } from '@/constants/cable-flag-diecut';
 import { useTranslation } from '@/lib/i18n';
 import {
-  createLabelDocument,
-  createUpsConfig,
-  generateId,
-  type LabelElement,
+    createLabelDocument,
+    createUpsConfig,
+    generateId,
+    type LabelElement,
 } from '@/lib/label-document';
 import { clampLabelMm, validateLabelSize } from '@/lib/label-geometry';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { Image } from 'expo-image';
 
 const SETUP_PRESETS = [
   { label: '14 × 96 mm (Jewellery Tag)', width: JEWELRY_DIECUT.tagWidthMm, height: JEWELRY_DIECUT.tagHeightMm },
   { label: '54 × 96 mm (3-Up Sheet)', width: JEWELRY_DIECUT.sheetWidthMm, height: JEWELRY_DIECUT.sheetHeightMm },
-  { label: '50 × 73 mm (Cable Label)', width: CABLE_FLAG_DIECUT.widthMm, height: CABLE_FLAG_DIECUT.heightMm },
+  { label: '50 × 70 mm (Cable Flag)', width: CABLE_FLAG_DIECUT.tagWidthMm, height: CABLE_FLAG_DIECUT.tagHeightMm },
+  { label: '100 × 70 mm (Cable Flag 2-Up)', width: CABLE_FLAG_DIECUT.sheetWidthMm, height: CABLE_FLAG_DIECUT.sheetHeightMm },
   { label: '50 × 30 mm (Retail)', width: 50, height: 30 },
   { label: '40 × 30 mm (Price Tag)', width: 40, height: 30 },
   { label: '57 × 30 mm (Receipt)', width: 57, height: 30 },

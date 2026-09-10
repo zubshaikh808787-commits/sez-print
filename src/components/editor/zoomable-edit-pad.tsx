@@ -6,6 +6,7 @@
  */
 
 import { Palette } from '@/constants/ui';
+import { formatViewZoomLabel } from '@/lib/label-geometry';
 import { ReactNode, useCallback, useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -26,6 +27,7 @@ type ZoomableEditPadProps = {
   style?: StyleProp<ViewStyle>;
   zoom: number;
   onZoomChange: (zoom: number) => void;
+  onViewportLayout?: (size: { width: number; height: number }) => void;
   minZoom?: number;
   maxZoom?: number;
   oneFingerPanEnabled?: boolean;
@@ -36,6 +38,7 @@ export function ZoomableEditPad({
   style,
   zoom,
   onZoomChange,
+  onViewportLayout,
   minZoom = MIN_ZOOM,
   maxZoom = MAX_ZOOM,
   oneFingerPanEnabled = false,
@@ -231,7 +234,7 @@ export function ZoomableEditPad({
   const zoomOut = () => setZoomAnimated(zoom / ZOOM_STEP);
   const zoomFit = () => setZoomAnimated(1);
 
-  const zoomLabel = `${Math.round(zoom * 100)}%`;
+  const zoomLabel = formatViewZoomLabel(zoom);
 
   return (
     <View
@@ -241,6 +244,7 @@ export function ZoomableEditPad({
         if (width > 0 && height > 0) {
           viewW.value = width;
           viewH.value = height;
+          onViewportLayout?.({ width, height });
         }
       }}>
       <GestureDetector gesture={composed}>
@@ -286,11 +290,12 @@ export function ZoomableEditPad({
 const styles = StyleSheet.create({
   root: {
     width: '100%',
+    flex: 1,
+    minHeight: 0,
     overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   viewport: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -332,16 +337,16 @@ const styles = StyleSheet.create({
     marginTop: -1,
   },
   zoomBadge: {
-    minWidth: 48,
-    paddingHorizontal: 6,
+    minWidth: 56,
+    paddingHorizontal: 8,
     paddingVertical: 6,
     alignItems: 'center',
   },
   zoomText: {
     color: Palette.ink,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.2,
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   pressed: {
     opacity: 0.75,

@@ -1,7 +1,14 @@
 import { mmToPt, ptToMm, type LabelDocument, type LabelElement } from '@/lib/label-document';
+import { isRatTailGeometry, ratTailBodyRectMm, scaleMediaGeometry } from '@/lib/media-geometry';
 
 const PAD_RATIO = 0.05;
 const MIN_PAD_MM = 0.5;
+
+function finiteSize(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return n;
+}
 
 function padMm(widthMm: number, heightMm: number) {
   // Keep a usable content inset on tiny stick labels (25×15) without eating the pad.
@@ -209,8 +216,11 @@ export function textBlockHeightMm(fontSizePt: number, lines: number) {
   return Math.max(2.4, ptToMm(fontSizePt) * 1.25 * Math.max(1, lines));
 }
 
-/** Clamp element position/size so it stays inside the label. */
-export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocument, 'widthMm' | 'heightMm'>): LabelElement {
+/** Clamp element position/size so it stays inside the label (paddle only on rat-tail). */
+export function clampElementToLabel(
+  element: LabelElement,
+  doc: Pick<LabelDocument, 'widthMm' | 'heightMm' | 'mediaGeometry'>,
+): LabelElement {
   if (element.type === 'border') {
     return {
       ...element,
@@ -223,23 +233,38 @@ export function clampElementToLabel(element: LabelElement, doc: Pick<LabelDocume
     };
   }
 
-  const maxW = doc.widthMm;
-  const maxH = doc.heightMm;
+  const maxW = finiteSize(doc.widthMm, 50);
+  const maxH = finiteSize(doc.heightMm, 30);
+  const bounds = isRatTailGeometry(doc.mediaGeometry)
+    ? ratTailBodyRectMm(doc.mediaGeometry)
+    : { left: 0, top: 0, width: maxW, height: maxH };
   const minW = element.type === 'line' ? 0.1 : 0.5;
   const minH = element.type === 'line' ? 0.1 : 0.5;
 
-  const width = Math.min(Math.max(minW, element.width), maxW);
-  const height =
+  const rawW = finiteSize(element.width, minW);
+  const rawH =
     'height' in element && typeof element.height === 'number'
-      ? Math.min(Math.max(minH, element.height), maxH)
+      ? finiteSize(element.height, minH)
       : 0;
 
-  const left = Math.min(Math.max(0, element.left), Math.max(0, maxW - width));
-  const top = Math.min(Math.max(0, element.top), Math.max(0, maxH - (height || minH)));
+  const width = Math.min(Math.max(minW, rawW), bounds.width);
+  const height =
+    'height' in element && typeof element.height === 'number'
+      ? Math.min(Math.max(minH, rawH), bounds.height)
+      : 0;
+
+  const left = Math.min(
+    Math.max(bounds.left, finiteSize(element.left, 0)),
+    Math.max(bounds.left, bounds.left + bounds.width - width),
+  );
+  const top = Math.min(
+    Math.max(bounds.top, finiteSize(element.top, 0)),
+    Math.max(bounds.top, bounds.top + bounds.height - (height || minH)),
+  );
 
   const patch: Record<string, unknown> = { left, top, width };
 
-  if ('height' in element && typeof element.height === 'number' && element.type !== 'line') {
+  if ('height' in element && typeof element.height === 'number') {
     patch.height = height;
   }
 
@@ -259,7 +284,12 @@ export function scaleDocumentToSize(
   const sx = widthMm / Math.max(doc.widthMm, 0.01);
   const sy = heightMm / Math.max(doc.heightMm, 0.01);
   const fontScale = Math.min(sx, sy);
-  const nextDoc = { ...doc, widthMm, heightMm };
+  const nextDoc: LabelDocument = {
+    ...doc,
+    widthMm,
+    heightMm,
+    mediaGeometry: scaleMediaGeometry(doc.mediaGeometry, sx, sy),
+  };
 
   const scaleElements = (source: LabelElement[]): LabelElement[] =>
     source.map((el) => {
@@ -277,6 +307,10 @@ export function scaleDocumentToSize(
       };
       if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
         (scaled as { height: number }).height *= sy;
+      }
+      if (scaled.type === 'line' && typeof scaled.height === 'number') {
+        const vertical = scaled.height >= scaled.width * 2;
+        (scaled as { height: number }).height *= vertical ? sy : Math.min(sx, sy);
       }
       if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
         (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * fontScale);

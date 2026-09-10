@@ -157,18 +157,62 @@ export default function Phase3ImageImportScreen() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        setBgImage({
-          uri: asset.uri,
-          imageWidthPx: asset.width || 800,
-          imageHeightPx: asset.height || 600,
-          leftMm: 0,
-          topMm: 0,
-          widthMm: labelWidthMm,
-          heightMm: labelHeightMm,
-          opacity: referenceOpacity,
-          visible: true,
-        });
-        setHasConfirmedPlacement(false); // require user to confirm placement
+        const imgW = asset.width || 800;
+        const imgH = asset.height || 600;
+
+        Alert.alert(
+          'Fit Image to Canvas Pad?',
+          `Do you want to stretch the overall image to fit the entire canvas pad (${labelWidthMm} × ${labelHeightMm} mm), or keep its natural aspect ratio?`,
+          [
+            {
+              text: 'Fit to Canvas Pad (Stretch)',
+              onPress: () => {
+                setBgImage({
+                  uri: asset.uri,
+                  imageWidthPx: imgW,
+                  imageHeightPx: imgH,
+                  leftMm: 0,
+                  topMm: 0,
+                  widthMm: labelWidthMm,
+                  heightMm: labelHeightMm,
+                  opacity: referenceOpacity,
+                  visible: true,
+                });
+                setHasConfirmedPlacement(false);
+              },
+            },
+            {
+              text: 'Keep Natural Ratio',
+              onPress: () => {
+                const imgAspect = imgW / imgH;
+                const canvasAspect = labelWidthMm / labelHeightMm;
+                let w = labelWidthMm;
+                let h = labelHeightMm;
+                if (imgAspect > canvasAspect) {
+                  h = Math.round((labelWidthMm / imgAspect) * 10) / 10;
+                } else {
+                  w = Math.round((labelHeightMm * imgAspect) * 10) / 10;
+                }
+                setBgImage({
+                  uri: asset.uri,
+                  imageWidthPx: imgW,
+                  imageHeightPx: imgH,
+                  leftMm: Math.round(((labelWidthMm - w) / 2) * 10) / 10,
+                  topMm: Math.round(((labelHeightMm - h) / 2) * 10) / 10,
+                  widthMm: w,
+                  heightMm: h,
+                  opacity: referenceOpacity,
+                  visible: true,
+                });
+                setHasConfirmedPlacement(false);
+              },
+            },
+            {
+              text: 'Cancel',
+              style: 'cancel',
+            },
+          ],
+        );
       }
     } catch (err: unknown) {
       Alert.alert('Image Picker Error', err instanceof Error ? err.message : String(err));
@@ -181,18 +225,60 @@ export default function Phase3ImageImportScreen() {
       Alert.alert('Size Required', 'Please confirm your physical label dimensions first.');
       return;
     }
-    setBgImage({
-      uri: SAMPLE_IMAGE_URI,
-      imageWidthPx: 800,
-      imageHeightPx: 480,
-      leftMm: 0,
-      topMm: 0,
-      widthMm: labelWidthMm,
-      heightMm: labelHeightMm,
-      opacity: referenceOpacity,
-      visible: true,
-    });
-    setHasConfirmedPlacement(false);
+
+    Alert.alert(
+      'Fit Image to Canvas Pad?',
+      `Do you want to stretch the overall sample image to fit the canvas pad (${labelWidthMm} × ${labelHeightMm} mm), or keep its natural aspect ratio?`,
+      [
+        {
+          text: 'Fit to Canvas Pad (Stretch)',
+          onPress: () => {
+            setBgImage({
+              uri: SAMPLE_IMAGE_URI,
+              imageWidthPx: 800,
+              imageHeightPx: 480,
+              leftMm: 0,
+              topMm: 0,
+              widthMm: labelWidthMm,
+              heightMm: labelHeightMm,
+              opacity: referenceOpacity,
+              visible: true,
+            });
+            setHasConfirmedPlacement(false);
+          },
+        },
+        {
+          text: 'Keep Natural Ratio',
+          onPress: () => {
+            const imgAspect = 800 / 480;
+            const canvasAspect = labelWidthMm / labelHeightMm;
+            let w = labelWidthMm;
+            let h = labelHeightMm;
+            if (imgAspect > canvasAspect) {
+              h = Math.round((labelWidthMm / imgAspect) * 10) / 10;
+            } else {
+              w = Math.round((labelHeightMm * imgAspect) * 10) / 10;
+            }
+            setBgImage({
+              uri: SAMPLE_IMAGE_URI,
+              imageWidthPx: 800,
+              imageHeightPx: 480,
+              leftMm: Math.round(((labelWidthMm - w) / 2) * 10) / 10,
+              topMm: Math.round(((labelHeightMm - h) / 2) * 10) / 10,
+              widthMm: w,
+              heightMm: h,
+              opacity: referenceOpacity,
+              visible: true,
+            });
+            setHasConfirmedPlacement(false);
+          },
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ],
+    );
   };
 
   // Remove Reference Image

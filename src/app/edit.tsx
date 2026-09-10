@@ -6,6 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  AppState,
   Dimensions,
   KeyboardAvoidingView,
   Modal,
@@ -43,10 +44,12 @@ import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel
 import { ImagePropertyPanel, type ImagePropertyTab } from '@/components/editor/image-property-panel';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { ZoomableEditPad } from '@/components/editor/zoomable-edit-pad';
+import { EditingPad } from '@/components/editor/editing-pad';
 import { KonvaCanvas } from '@/components/editor/konva-canvas';
 import type { TransformCommitPayload } from '@/components/editor/konva-transformer';
 import {
   ArtboardFrame,
+  CATALOG_STOCK_LINER,
   fitLabelCanvas,
   LABEL_PAD_STAGE_COLOR,
   LABEL_PAD_STAGE_MIN_HEIGHT,
@@ -103,13 +106,30 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
-import { clampLabelMm, fitLabelSize } from '@/lib/label-geometry';
+import { clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { textBlockHeightMm } from '@/lib/element-sizing';
 import { isJewelryDieCutDocument, refitJewelryDieCutDocument } from '@/constants/jewelry-diecut';
+import { isRatTail143Document, refitRatTail143Document } from '@/constants/rat-tail-143';
+import { hasStockSilhouette } from '@/lib/stock-silhouette';
+import { isRatTailGeometry } from '@/lib/media-geometry';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import {
+  EditorHistory,
+  alignBox,
+  boxOf,
+  clipboardHasContent,
+  copyElementsToClipboard,
+  duplicateElements,
+  isEditorVisible,
+  nudgeBox,
+  pasteElementsFromClipboard,
+  reorderElements,
+  sanitizeTransform,
+  snapBoxToGuides,
+} from '@/lib/editor/engine';
 
 type IconName = AppIconName;
 
@@ -270,9 +290,9 @@ export default function EditScreen() {
       if (existing) {
         const copy = JSON.parse(JSON.stringify(existing)) as LabelDocument;
         const normalized = { ...copy, elements: normalizeDocumentElements(copy) };
-        return isJewelryDieCutDocument(normalized)
-          ? refitJewelryDieCutDocument(normalized)
-          : normalized;
+        if (isJewelryDieCutDocument(normalized)) return refitJewelryDieCutDocument(normalized);
+        if (isRatTail143Document(normalized)) return refitRatTail143Document(normalized);
+        return normalized;
       }
     }
 
@@ -339,8 +359,13 @@ export default function EditScreen() {
     Boolean(params.autoOpenPanel === 'true' && params.selectedElementId)
   );
 
-  const [past, setPast] = useState<LabelElement[][]>([]);
-  const [future, setFuture] = useState<LabelElement[][]>([]);
+  const historyRef = useRef(new EditorHistory(MAX_HISTORY));
+  const [historyRev, setHistoryRev] = useState(0);
+  const transformingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const dirtyRef = useRef(false);
+  const patchBurstTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bumpHistory = useCallback(() => setHistoryRev((n) => n + 1), []);
 
   const toolbarRef = useRef<View>(null);
   const canvasShotRef = useRef<ViewShot>(null);
@@ -354,9 +379,14 @@ export default function EditScreen() {
   const [saveAsName, setSaveAsName] = useState('');
   const [pickerRows, setPickerRows] = useState(2);
   const [pickerColumns, setPickerColumns] = useState(3);
-  const { width: windowWidth } = useWindowDimensions();
-  const initialStageWidth = useMemo(() => Math.min(Dimensions.get('window').width, MaxContentWidth), []);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const [screenSize, setScreenSize] = useState(() => Dimensions.get('screen'));
+  const initialStageWidth = useMemo(
+    () => Math.min(windowWidth || Dimensions.get('window').width, MaxContentWidth),
+    [windowWidth],
+  );
   const [stageWidth, setStageWidth] = useState(initialStageWidth);
+  const [padInner, setPadInner] = useState({ width: 0, height: 0 });
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
   const [padZoom, setPadZoom] = useState(1);
 
@@ -377,33 +407,40 @@ export default function EditScreen() {
   const textEditInputRef = useRef<TextInput>(null);
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
 
-  // Stable stage height based on screen height so pad size never shrinks or jumps when soft keyboard opens
-  const screenHeight = useRef(Dimensions.get('screen').height).current;
-  const stageMaxHeight = useMemo(
-    () => Math.max(240, Math.min(Math.round(screenHeight * 0.35), 360)),
-    [screenHeight],
-  );
-  // Stage width is contain-fit into (stage − rulers) and stays permanent and stable
-  const layoutWidth = stageWidth > 0 ? stageWidth : initialStageWidth;
-  // True aspect-ratio editing area: uniform scale ensures 1mm width == 1mm height on screen,
-  // precisely matching preview and physical output with zero geometry distortion.
-  const { canvasWidthPx, canvasHeightPx, scaleX, scaleY, scale } = useMemo(() => {
-    const maxW = Math.max(160, layoutWidth - RULER_SIZE - 24);
-    const maxH = Math.max(140, stageMaxHeight - RULER_SIZE - 24);
-    const fitted = fitLabelSize(doc.widthMm, doc.heightMm, maxW, maxH);
-    return {
-      canvasWidthPx: Math.max(1, Math.round(fitted.widthPx)),
-      canvasHeightPx: Math.max(1, Math.round(fitted.heightPx)),
-      scaleX: fitted.scale,
-      scaleY: fitted.scale,
-      scale: fitted.scale,
-    };
-  }, [layoutWidth, stageMaxHeight, doc.widthMm, doc.heightMm]);
+  useEffect(() => {
+    const sub = Dimensions.addEventListener('change', ({ screen }) => {
+      setScreenSize(screen);
+    });
+    return () => sub.remove();
+  }, []);
 
-  // Reset pad zoom when the label size changes so fit stays correct.
+  // Screen height (not window) so the pad does not jump when the keyboard opens.
+  // Recalculate on rotation so landscape still contain-fits.
+  const stageMaxHeight = useMemo(() => {
+    const tall = Math.max(screenSize.height || 0, windowHeight || 0);
+    return Math.max(220, Math.min(Math.round(tall * 0.35), 360));
+  }, [screenSize.height, windowHeight]);
+  const layoutWidth = stageWidth > 0 ? stageWidth : initialStageWidth;
+  // Physical mm stay on the document. Pad pixels come from the measured ZoomableEditPad.
+  const { canvasWidthPx, canvasHeightPx, pxPerMM } = useMemo(() => {
+    const padW = padInner.width > 1 ? padInner.width : Math.max(120, layoutWidth - 16);
+    const padH = padInner.height > 1 ? padInner.height : Math.max(100, stageMaxHeight - 16);
+    const fitted = fitEditorPadBoard(doc.widthMm, doc.heightMm, padW, padH, RULER_SIZE);
+    return {
+      canvasWidthPx: Math.max(1, fitted.widthPx),
+      canvasHeightPx: Math.max(1, fitted.heightPx),
+      pxPerMM: fitted.scale,
+    };
+  }, [padInner.width, padInner.height, layoutWidth, stageMaxHeight, doc.widthMm, doc.heightMm]);
+
+  const stageBg = hasStockSilhouette(doc.templatePreviewType) || isRatTailGeometry(doc.mediaGeometry)
+    ? CATALOG_STOCK_LINER
+    : LABEL_PAD_STAGE_COLOR;
+
+  // Always reopen at Fit. View zoom is optional; it must not change physical mm.
   useEffect(() => {
     setPadZoom(1);
-  }, [doc.widthMm, doc.heightMm]);
+  }, [doc.widthMm, doc.heightMm, doc.templatePreviewType]);
   const selectionColor =
     ['#FCA5A5', '#EF4444', '#991B1B'][editorSettings.borderColorIndex] ?? Palette.accent;
 
@@ -414,15 +451,28 @@ export default function EditScreen() {
 
   const docRef = useRef(doc);
   docRef.current = doc;
+  dirtyRef.current = dirty;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (patchBurstTimer.current) clearTimeout(patchBurstTimer.current);
+    };
+  }, []);
+
+  const scheduleHistoryCommit = useCallback(() => {
+    if (patchBurstTimer.current) clearTimeout(patchBurstTimer.current);
+    patchBurstTimer.current = setTimeout(() => {
+      historyRef.current.commit();
+      bumpHistory();
+    }, 400);
+  }, [bumpHistory]);
 
   const pushHistory = useCallback(() => {
-    setPast((prev) => {
-      const snapshot = JSON.parse(JSON.stringify(docRef.current.elements)) as LabelElement[];
-      const next = [...prev, snapshot];
-      return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next;
-    });
-    setFuture([]);
-  }, []);
+    historyRef.current.pushUndo(docRef.current.elements);
+    bumpHistory();
+  }, [bumpHistory]);
 
   const setElements = useCallback(
     (updater: (elements: LabelElement[]) => LabelElement[], recordHistory = false) => {
@@ -452,59 +502,47 @@ export default function EditScreen() {
     });
     setSelectedIds([]);
     setPanelOpen(false);
-    setPast([]);
-    setFuture([]);
+    historyRef.current.clear();
+    bumpHistory();
     setTextEditId(null);
     setDirty(true);
-  }, []);
+  }, [bumpHistory]);
 
   const undo = useCallback(() => {
-    setPast((prev) => {
-      if (prev.length === 0) return prev;
-      const snapshot = prev[prev.length - 1];
-      setFuture((f) => [
-        JSON.parse(JSON.stringify(docRef.current.elements)) as LabelElement[],
-        ...f,
-      ]);
-      setDoc((d) => {
-        let next: LabelDocument = { ...d, elements: snapshot };
-        if (next.ups) next = syncUpsActivePanel(next);
-        return next;
-      });
-      setDirty(true);
-      return prev.slice(0, -1);
+    const snapshot = historyRef.current.undo(docRef.current.elements);
+    if (!snapshot) return;
+    setDoc((d) => {
+      let next: LabelDocument = { ...d, elements: snapshot };
+      if (next.ups) next = syncUpsActivePanel(next);
+      return next;
     });
-    setSelectedIds([]);
-    setPanelOpen(false);
-  }, []);
+    setDirty(true);
+    bumpHistory();
+    setSelectedIds((ids) => ids.filter((id) => snapshot.some((el) => el.id === id)));
+  }, [bumpHistory]);
 
   const redo = useCallback(() => {
-    setFuture((prev) => {
-      if (prev.length === 0) return prev;
-      const [snapshot, ...rest] = prev;
-      setPast((p) => [
-        ...p,
-        JSON.parse(JSON.stringify(docRef.current.elements)) as LabelElement[],
-      ]);
-      setDoc((d) => {
-        let next: LabelDocument = { ...d, elements: snapshot };
-        if (next.ups) next = syncUpsActivePanel(next);
-        return next;
-      });
-      setDirty(true);
-      return rest;
+    const snapshot = historyRef.current.redo(docRef.current.elements);
+    if (!snapshot) return;
+    setDoc((d) => {
+      let next: LabelDocument = { ...d, elements: snapshot };
+      if (next.ups) next = syncUpsActivePanel(next);
+      return next;
     });
-    setSelectedIds([]);
-    setPanelOpen(false);
-  }, []);
+    setDirty(true);
+    bumpHistory();
+    setSelectedIds((ids) => ids.filter((id) => snapshot.some((el) => el.id === id)));
+  }, [bumpHistory]);
 
   const patchElement = useCallback(
     (id: string, updates: Record<string, unknown>) => {
+      historyRef.current.begin(docRef.current.elements);
       setElements((elements) =>
         elements.map((el) => (el.id === id ? ({ ...el, ...updates } as LabelElement) : el)),
       );
+      scheduleHistoryCommit();
     },
-    [setElements],
+    [setElements, scheduleHistoryCommit],
   );
 
   const patchSelected = useCallback(
@@ -749,19 +787,10 @@ export default function EditScreen() {
   const duplicateSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     const bounds = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
-    const sources = docRef.current.elements.filter(
-      (el) => selectedIds.includes(el.id) && el.needPrinting !== false && el.type !== 'border',
-    );
-    if (sources.length === 0) return;
-    const clones = sources.map((el) => {
-      const clone = JSON.parse(JSON.stringify(el)) as LabelElement;
-      clone.id = generateId();
-      clone.left = el.left + 2;
-      clone.top = el.top + 2;
-      return clampElementToLabel(clone, bounds);
-    });
-    setElements((elements) => [...elements, ...clones], true);
-    setSelectedIds(clones.map((clone) => clone.id));
+    const result = duplicateElements(docRef.current.elements, selectedIds, bounds);
+    if (result.newIds.length === 0) return;
+    setElements(() => result.elements, true);
+    setSelectedIds(result.newIds);
   }, [selectedIds, setElements]);
 
   const handleDeselectAll = useCallback(() => {
@@ -854,30 +883,55 @@ export default function EditScreen() {
     [doc.widthMm, doc.heightMm],
   );
 
+  const handleTransformStart = useCallback((_id: string) => {
+    transformingRef.current = true;
+    historyRef.current.begin(docRef.current.elements);
+  }, []);
+
   const handleTransformEnd = useCallback(
     (payload: TransformCommitPayload) => {
-      setElements((elements) =>
-        elements.map((el) => {
-          if (el.id !== payload.id) return el;
-          const next: LabelElement = {
-            ...el,
-            left: payload.leftMm,
-            top: payload.topMm,
-            width: payload.widthMm,
-            rotation: normalizeRotation(payload.rotation),
-          };
-          if ('height' in next && typeof next.height === 'number') {
-            (next as { height: number }).height = payload.heightMm;
-          }
-          if (payload.fontSize !== undefined && 'fontSize' in next) {
-            (next as { fontSize: number }).fontSize = payload.fontSize;
-          }
-          return next;
-        }),
-        true,
+      const clean = sanitizeTransform(payload);
+      const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
+      const others = docRef.current.elements
+        .filter((el) => el.id !== payload.id && el.type !== 'border' && el.needPrinting !== false)
+        .map((el) => boxOf(el));
+      const snapped = snapBoxToGuides(
+        clean.leftMm,
+        clean.topMm,
+        clean.widthMm,
+        clean.heightMm,
+        others,
+        canvas,
+      );
+      const recordHistory = !transformingRef.current;
+      if (transformingRef.current) {
+        historyRef.current.commit();
+        transformingRef.current = false;
+        bumpHistory();
+      }
+      setElements(
+        (elements) =>
+          elements.map((el) => {
+            if (el.id !== payload.id) return el;
+            const next: LabelElement = {
+              ...el,
+              left: snapped.left,
+              top: snapped.top,
+              width: clean.widthMm,
+              rotation: clean.rotation,
+            };
+            if ('height' in next && typeof next.height === 'number') {
+              (next as { height: number }).height = clean.heightMm;
+            }
+            if (clean.fontSize !== undefined && 'fontSize' in next) {
+              (next as { fontSize: number }).fontSize = clean.fontSize;
+            }
+            return next;
+          }),
+        recordHistory,
       );
     },
-    [setElements],
+    [setElements, bumpHistory],
   );
 
 
@@ -895,6 +949,102 @@ export default function EditScreen() {
     [selectedIds, setElements],
   );
 
+  const canvasMm = useMemo(
+    () => ({ widthMm: doc.widthMm, heightMm: doc.heightMm }),
+    [doc.widthMm, doc.heightMm],
+  );
+
+  const nudgeSelected = useCallback(
+    (dxMm: number, dyMm: number) => {
+      if (selectedIds.length === 0) return;
+      historyRef.current.begin(docRef.current.elements);
+      setElements((elements) =>
+        elements.map((el) => {
+          if (!selectedIds.includes(el.id) || el.lockMovement || el.type === 'border') return el;
+          const box = boxOf(el);
+          const next = nudgeBox(box.left, box.top, box.width, box.height, dxMm, dyMm, canvasMm);
+          return { ...el, left: next.left, top: next.top };
+        }),
+      );
+      scheduleHistoryCommit();
+    },
+    [selectedIds, setElements, canvasMm, scheduleHistoryCommit],
+  );
+
+  const rotateSelectedBy = useCallback(
+    (deltaDeg: number) => {
+      if (selectedIds.length === 0) return;
+      setElements(
+        (elements) =>
+          elements.map((el) =>
+            selectedIds.includes(el.id) && !el.lockMovement
+              ? { ...el, rotation: normalizeRotation((el.rotation ?? 0) + deltaDeg) }
+              : el,
+          ),
+        true,
+      );
+    },
+    [selectedIds, setElements],
+  );
+
+  const alignSelected = useCallback(
+    (kind: 'left' | 'right' | 'top' | 'bottom' | 'center') => {
+      if (selectedIds.length === 0) return;
+      setElements(
+        (elements) =>
+          elements.map((el) => {
+            if (!selectedIds.includes(el.id) || el.lockMovement || el.type === 'border') return el;
+            const box = boxOf(el);
+            const patch = alignBox(box.width, box.height, canvasMm, kind);
+            return { ...el, ...patch };
+          }),
+        true,
+      );
+    },
+    [selectedIds, setElements, canvasMm],
+  );
+
+  const copySelected = useCallback(() => {
+    copyElementsToClipboard(docRef.current.elements, selectedIds);
+    bumpHistory();
+  }, [selectedIds, bumpHistory]);
+
+  const pasteClipboard = useCallback(() => {
+    const result = pasteElementsFromClipboard(docRef.current.elements, canvasMm);
+    if (result.newIds.length === 0) return;
+    setElements(() => result.elements, true);
+    setSelectedIds(result.newIds);
+  }, [canvasMm, setElements]);
+
+  const reorderSelected = useCallback(
+    (kind: 'front' | 'back') => {
+      if (selectedIds.length === 0) return;
+      setElements((elements) => reorderElements(elements, selectedIds, kind), true);
+    },
+    [selectedIds, setElements],
+  );
+
+  const toggleHideSelected = useCallback(() => {
+    if (selectedIds.length === 0) return;
+    const anyHidden = docRef.current.elements.some(
+      (el) => selectedIds.includes(el.id) && !isEditorVisible(el),
+    );
+    setElements(
+      (elements) =>
+        elements.map((el) =>
+          selectedIds.includes(el.id) ? { ...el, visible: anyHidden ? true : false } : el,
+        ),
+      true,
+    );
+  }, [selectedIds, setElements]);
+
+  const zoomInPad = useCallback(() => {
+    setPadZoom((z) => Math.min(5, Math.round(z * 1.25 * 100) / 100));
+  }, []);
+  const zoomOutPad = useCallback(() => {
+    setPadZoom((z) => Math.max(0.55, Math.round((z / 1.25) * 100) / 100));
+  }, []);
+
   const saveDocument = useCallback(
     (showToast = true) => {
       const synced = syncUpsActivePanel(docRef.current);
@@ -909,6 +1059,27 @@ export default function EditScreen() {
     },
     [upsertDocument],
   );
+
+  useEffect(() => {
+    if (!dirty) return;
+    const timer = setTimeout(() => {
+      if (!mountedRef.current || !dirtyRef.current) return;
+      const synced = syncUpsActivePanel(docRef.current);
+      upsertDocument(synced);
+      setSavedToStore(true);
+      setDirty(false);
+    }, 1600);
+    return () => clearTimeout(timer);
+  }, [dirty, doc.elements, doc.widthMm, doc.heightMm, doc.name, upsertDocument]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'background' && state !== 'inactive') return;
+      if (!dirtyRef.current) return;
+      upsertDocument(syncUpsActivePanel(docRef.current));
+    });
+    return () => sub.remove();
+  }, [upsertDocument]);
 
   const handleSaveAs = useCallback(() => {
     setSaveAsName(doc.name);
@@ -939,10 +1110,10 @@ export default function EditScreen() {
     setDirty(false);
     setSelectedIds([]);
     setPanelOpen(false);
-    setPast([]);
-    setFuture([]);
+    historyRef.current.clear();
+    bumpHistory();
     setShowOpenModal(false);
-  }, []);
+  }, [bumpHistory]);
 
   const handleRotateElement = useCallback(
     (id: string) => {
@@ -958,12 +1129,22 @@ export default function EditScreen() {
     [setElements],
   );
 
+  const handlePadLayout = useCallback((size: { width: number; height: number }) => {
+    setPadInner((prev) => {
+      const width = Math.round(size.width);
+      const height = Math.round(size.height);
+      if (Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1) return prev;
+      return { width, height };
+    });
+  }, []);
+
   const handlePrint = useCallback(() => {
     saveDocument(false);
     router.push({ pathname: '/print', params: { labelId: docRef.current.id } });
   }, [saveDocument]);
 
   const applyLabelSize = useCallback((widthMm: number, heightMm: number) => {
+    if (isRatTail143Document(docRef.current)) return;
     setDoc((prev) => {
       if (Math.abs(prev.widthMm - widthMm) < 0.001 && Math.abs(prev.heightMm - heightMm) < 0.001) {
         return prev;
@@ -975,22 +1156,65 @@ export default function EditScreen() {
 
   const handlePickImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images',
-      quality: 1,
+      mediaTypes: ['images'],
+      quality: 0.75,
+      allowsEditing: false,
     });
+    if (!mountedRef.current) return;
     if (result.canceled || result.assets.length === 0) return;
     const asset = result.assets[0];
-    const maxW = docRef.current.widthMm * 0.5;
+    if (!asset.uri) return;
+    const docW = docRef.current.widthMm;
+    const docH = docRef.current.heightMm;
+    const maxW = docW * 0.5;
     const ratio = asset.width && asset.height ? asset.height / asset.width : 1;
-    const el = addElement('image', {
-      uri: asset.uri,
-      width: maxW,
-      height: Math.min(maxW * ratio, docRef.current.heightMm - 2),
-    });
-    if (el) {
-      setImageTab('Regular');
-      setPanelOpen(true);
-    }
+
+    Alert.alert(
+      'Fit Image to Canvas Pad?',
+      `Do you want to stretch the overall image to fit the entire canvas pad (${docW} × ${docH} mm), or keep its original aspect ratio?`,
+      [
+        {
+          text: 'Fit to Canvas Pad (Stretch)',
+          onPress: () => {
+            if (!mountedRef.current) return;
+            const el = addElement('image', {
+              uri: asset.uri,
+              left: 0,
+              top: 0,
+              width: docW,
+              height: docH,
+              contentFit: 'fill',
+              aspectRatioLocked: false,
+            });
+            if (el) {
+              setImageTab('Regular');
+              setPanelOpen(true);
+            }
+          },
+        },
+        {
+          text: 'Keep Aspect Ratio',
+          onPress: () => {
+            if (!mountedRef.current) return;
+            const el = addElement('image', {
+              uri: asset.uri,
+              width: maxW,
+              height: Math.min(maxW * ratio, docH - 2),
+              contentFit: 'contain',
+              aspectRatioLocked: true,
+            });
+            if (el) {
+              setImageTab('Regular');
+              setPanelOpen(true);
+            }
+          },
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ],
+    );
   }, [addElement]);
 
   useFocusEffect(
@@ -1259,6 +1483,9 @@ export default function EditScreen() {
     setPanelOpen(false);
   };
 
+  const canUndo = historyRev >= 0 && historyRef.current.canUndo;
+  const canRedo = historyRev >= 0 && historyRef.current.canRedo;
+
   const renderToolbar = () => (
     <View ref={toolbarRef} collapsable={false} style={styles.toolbarRow}>
       <ToolbarItem
@@ -1279,13 +1506,13 @@ export default function EditScreen() {
       <ToolbarItem
         icon="arrow.uturn.backward"
         label="Undo"
-        disabled={past.length === 0}
+        disabled={!canUndo}
         onPress={undo}
       />
       <ToolbarItem
         icon="arrow.uturn.forward"
         label="Redo"
-        disabled={future.length === 0}
+        disabled={!canRedo}
         onPress={redo}
       />
       <ToolbarItem
@@ -1327,10 +1554,10 @@ export default function EditScreen() {
     </View>
   );  const renderCanvas = () => (
     <View
-      style={[styles.stage, { height: stageMaxHeight }]}
+      style={[styles.stage, { height: stageMaxHeight, backgroundColor: stageBg }]}
       onLayout={(event) => {
         const next = Math.round(event.nativeEvent.layout.width);
-        if (next > 0 && Math.abs(next - stageWidth) > 8) {
+        if (next > 0 && Math.abs(next - stageWidth) > 1) {
           setStageWidth(next);
         }
       }}>
@@ -1338,6 +1565,7 @@ export default function EditScreen() {
         style={styles.stageZoom}
         zoom={padZoom}
         onZoomChange={setPadZoom}
+        onViewportLayout={handlePadLayout}
         oneFingerPanEnabled={false}>
         <View
           style={[
@@ -1345,21 +1573,21 @@ export default function EditScreen() {
             {
               width: RULER_SIZE + (canvasWidthPx || 1),
               height: RULER_SIZE + (canvasHeightPx || 1),
+              backgroundColor: stageBg,
             },
           ]}>
           <View style={styles.rulerTopRow}>
             <View style={styles.rulerCorner} />
-            <HorizontalRuler widthPx={canvasWidthPx || 1} lengthMm={doc.widthMm} pxPerMm={scaleX} />
+            <HorizontalRuler widthPx={canvasWidthPx || 1} lengthMm={doc.widthMm} pxPerMm={pxPerMM} />
           </View>
           <View style={styles.rulerBodyRow}>
-            <VerticalRuler heightPx={canvasHeightPx || 1} lengthMm={doc.heightMm} pxPerMm={scaleY} />
+            <VerticalRuler heightPx={canvasHeightPx || 1} lengthMm={doc.heightMm} pxPerMm={pxPerMM} />
             <KonvaCanvas
               ref={canvasShotRef}
               document={doc}
               canvasWidthPx={canvasWidthPx}
               canvasHeightPx={canvasHeightPx}
-              scaleX={scaleX}
-              scaleY={scaleY}
+              pxPerMM={pxPerMM}
               padZoom={padZoom}
               selectedIds={selectedIds}
               selectionColor={selectionColor}
@@ -1368,6 +1596,7 @@ export default function EditScreen() {
               onDeselectAll={handleDeselectAll}
               onOpenPanel={openPanelFor}
               onEditText={beginTextEdit}
+              onTransformStart={handleTransformStart}
               onTransformEnd={handleTransformEnd}
               onQuickRotate={handleRotateElement}
             />
@@ -1557,14 +1786,21 @@ export default function EditScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.body, { maxWidth: MaxContentWidth }]}>
         <Pressable
-          onPress={() => setSizeModalVisible(true)}
+          onPress={() => {
+            if (isRatTail143Document(doc)) return;
+            setSizeModalVisible(true);
+          }}
           style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
           <Text style={styles.dimText}>
             {doc.widthMm.toFixed(1)} × {doc.heightMm.toFixed(1)} mm · {doc.paperType}
             {doc.orientation ? ` · ${doc.orientation}°` : ''}
             {doc.ups ? ` · ${doc.ups.columns}ups` : ''}
           </Text>
-          <Text style={styles.sizeHint}>Tap to customize size</Text>
+          <Text style={styles.sizeHint}>
+            {isRatTail143Document(doc)
+              ? 'Prints 14.3 × 101.6 mm wrap stock · content locked on the paddle'
+              : 'Tap to customize size'}
+          </Text>
         </Pressable>
 
         {doc.ups && doc.ups.columns > 1 ? (
@@ -1636,6 +1872,32 @@ export default function EditScreen() {
         ) : null}
 
         {renderCanvas()}
+
+        {editorSettings.showNudgePad ? (
+          <EditingPad
+            enabled={selectedIds.length > 0}
+            locked={Boolean(selectedElement?.lockMovement) || (selectedIds.length > 0 && doc.elements.filter((el) => selectedIds.includes(el.id)).every((el) => el.lockMovement))}
+            hidden={selectedIds.some((id) => {
+              const el = doc.elements.find((item) => item.id === id);
+              return el != null && !isEditorVisible(el);
+            })}
+            canPaste={clipboardHasContent()}
+            viewZoom={padZoom}
+            onNudge={nudgeSelected}
+            onRotate={rotateSelectedBy}
+            onAlign={alignSelected}
+            onDuplicate={duplicateSelected}
+            onDelete={deleteSelected}
+            onLock={() => setLockOnSelection(!(selectedElement?.lockMovement ?? false))}
+            onHide={toggleHideSelected}
+            onCopy={copySelected}
+            onPaste={pasteClipboard}
+            onFront={() => reorderSelected('front')}
+            onBack={() => reorderSelected('back')}
+            onZoomIn={zoomInPad}
+            onZoomOut={zoomOutPad}
+          />
+        ) : null}
 
         <View style={styles.sheet}>
           {propertyMode ? (
@@ -2004,10 +2266,13 @@ const styles = StyleSheet.create({
   stageZoom: {
     width: '100%',
     flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
   },
   rulerBoard: {
     flexDirection: 'column',
     overflow: 'hidden',
+    alignSelf: 'center',
     backgroundColor: LABEL_PAD_STAGE_COLOR,
   },
   rulerTopRow: {

@@ -12,6 +12,7 @@ import type {
 } from '@/components/editor/types';
 import type { SignatureStroke } from '@/components/editor/signature-drawing-board';
 import type { BorderStyleId } from '@/constants/border-library';
+import type { MediaGeometry } from '@/lib/media-geometry';
 
 export type TemplateBackground =
   | { type: 'none' }
@@ -99,6 +100,8 @@ export type ElementType =
 type LayerMeta = {
   opacity?: number;
   zIndex?: number;
+  /** Editor-only. Print still uses `needPrinting`. */
+  visible?: boolean;
 };
 
 export type LabelElement = (
@@ -139,6 +142,11 @@ export type LabelDocument = {
   paperType: PaperType;
   /** Physical label outline. Absent means rectangle. */
   mediaShape?: MediaShape;
+  /**
+   * Structured stock (body + tail, etc.). Canvas `widthMm`/`heightMm` remain the
+   * print bounding box. Overlay chrome reads this so the pad is not a fake rectangle.
+   */
+  mediaGeometry?: MediaGeometry;
   elements: LabelElement[];
   groupId: string | null;
   createdAt: number;
@@ -186,6 +194,7 @@ export function createLabelDocument(params: {
   orientation?: LabelOrientation;
   paperType?: PaperType;
   mediaShape?: MediaShape;
+  mediaGeometry?: MediaGeometry;
   elements?: LabelElement[];
   groupId?: string | null;
   background?: TemplateBackground;
@@ -200,6 +209,7 @@ export function createLabelDocument(params: {
     orientation: params.orientation ?? 0,
     paperType,
     mediaShape: params.mediaShape,
+    mediaGeometry: params.mediaGeometry,
     elements: params.elements ?? [],
     background:
       params.background ??

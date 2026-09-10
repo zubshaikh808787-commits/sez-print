@@ -8,6 +8,12 @@
       ],
       "@/assets/*": [
         "./assets/*"
+      ],
+      "josh-printer": [
+        "./modules/josh-printer/src/index.ts"
+      ],
+      "td404-printer": [
+        "./modules/td404-printer/src/index.ts"
       ]
     }
   },

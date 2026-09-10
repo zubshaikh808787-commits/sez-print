@@ -21,7 +21,7 @@ import { createTd404Adapter, createTd404Capabilities } from '@/printing/adapters
 import { defaultPrintQueue } from '@/printing/printer/PrintQueue';
 import { encodeTscBitmapJob, inspectTsplJob } from '@/lib/printer/tsc';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
-import type { BitRaster } from '@/lib/printer/escpos';
+import { grayToPngBase64, type BitRaster } from '@/lib/printer/escpos';
 
 export type ArtworkPrintInput = {
   widthMm: number;
@@ -152,8 +152,30 @@ export function renderArtworkToJob(input: ArtworkPrintInput): RenderedPrintJob {
 }
 
 export async function printArtworkJob(input: ArtworkPrintInput): Promise<RenderedPrintJob> {
-  const adapter = adapterFromManager();
+  const manager = getPrinterManager();
   const job = renderArtworkToJob(input);
+
+  if (manager.isJosh) {
+    const pngBase64 = grayToPngBase64({
+      width: input.gray.width,
+      height: input.gray.height,
+      gray: input.gray.gray,
+    });
+    await defaultPrintQueue.enqueue(async () => {
+      await manager.printJoshPngLabelFast({
+        pngBase64,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        gapMm: input.gapMm,
+        copies: input.copies ?? 1,
+        density: input.density,
+        speed: input.speed,
+      });
+    });
+    return job;
+  }
+
+  const adapter = adapterFromManager();
   const bytes = await adapter.encode(job, {
     gapMm: input.gapMm,
     mediaType: input.mediaType,

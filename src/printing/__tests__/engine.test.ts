@@ -13,8 +13,13 @@ import { runRobustnessTests } from './robustness.test';
 import { createTestPrinterAdapter } from '../adapters/test/TestPrinterAdapter';
 import { encodeTscBitmapJob, inspectTsplJob } from '../../lib/printer/tsc';
 import { applyExifOrientation } from '../../lib/printer/exif-orientation';
-import { prepareEditorGrayForPrint, EditorRasterMismatchError } from '../../lib/printer/escpos';
+import {
+  EditorRasterMismatchError,
+  prepareEditorGrayForPrint,
+  rotateGray,
+} from '../../lib/printer/escpos';
 import { createPrintGeometry } from '../../lib/printer/print-spec';
+import { RAT_TAIL_143_PRINT } from '../../constants/rat-tail-143';
 import {
   CABLE_FLAG_DIECUT,
   cableFlagColumnX,
@@ -461,6 +466,29 @@ function testDecimalMmPrintGeometry() {
   console.log('ok 101.60 mm geometry', ship.sizeCommand, ship.sizeDotsW, '×', ship.sizeDotsH);
 }
 
+function testRatTail143PrintPaperOrientation() {
+  assert.equal(RAT_TAIL_143_PRINT.widthMm, 14.3);
+  assert.equal(RAT_TAIL_143_PRINT.heightMm, 101.6);
+  assert.equal(RAT_TAIL_143_PRINT.captureOrientation, 90);
+  const paper = createPrintGeometry(
+    RAT_TAIL_143_PRINT.widthMm,
+    RAT_TAIL_143_PRINT.heightMm,
+    RAT_TAIL_143_PRINT.printDpi,
+  );
+  assert.equal(paper.sizeCommand, 'SIZE 14.30 mm,101.60 mm');
+  assert.equal(paper.dotsPerMm, 12);
+
+  const w = 4;
+  const h = 2;
+  const gray = new Uint8Array(w * h).fill(255);
+  gray[0] = 0;
+  const rotated = rotateGray({ width: w, height: h, gray }, 90);
+  assert.equal(rotated.width, h);
+  assert.equal(rotated.height, w);
+  assert.equal(rotated.gray[h - 1], 0);
+  console.log('ok rat-tail wrap prints 14.3×101.6 after 90° capture rotate');
+}
+
 function testCableFlag50x73DieCut() {
   const {
     widthMm,
@@ -838,6 +866,7 @@ async function main() {
   testEditorFinalizeIntegerDownsample();
   testEditorFinalizeFractionalDownsample();
   testDecimalMmPrintGeometry();
+  testRatTail143PrintPaperOrientation();
   testCableFlag50x73DieCut();
   testJewelry3UpTilesAllThreeColumns();
   await testValidationStopsOversized();

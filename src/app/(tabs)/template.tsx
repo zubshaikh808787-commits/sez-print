@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, memo, type ReactNode } from 'react';
 import {
   Modal,
   Pressable,
@@ -13,9 +13,10 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Rect as SvgRect, Stop } from 'react-native-svg';
 
 import { ShareNodeIcon } from '@/components/home-icons';
-import { LabelPreview, LABEL_PAD_STAGE_MIN_HEIGHT } from '@/components/label-preview';
+import { LabelPreview } from '@/components/label-preview';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette } from '@/constants/ui';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
@@ -40,6 +41,16 @@ const CATEGORY_GROUPS: CategoryGroup[] = [
   { header: 'Warehouse', items: ['Material', 'Racking'] },
   { header: 'Medicine', items: ['Laboratory'] },
 ];
+
+function formatCatalogMm(n: number): string {
+  const rounded = Math.round(n * 10) / 10;
+  if (Math.abs(rounded - Math.round(rounded)) < 0.05) return String(Math.round(rounded));
+  return rounded.toFixed(1);
+}
+
+function catalogDimensions(widthMm: number, heightMm: number): string {
+  return `${formatCatalogMm(widthMm)} x ${formatCatalogMm(heightMm)}`;
+}
 
 export interface TemplateItem {
   id: string;
@@ -78,6 +89,7 @@ export interface TemplateItem {
     // --- CABLE ---
     | 'cable-yellow-4col'
     | 'cable-12.5x74'
+    | 'cable-rattail-143x635'
     | 'cable-301-pstyle'
     | 'cable-428-inspected'
     | 'cable-tall-dual-flag'
@@ -145,6 +157,7 @@ export interface TemplateItem {
     | 'jew-sample-50x19-tabs'
     | 'jew-sample-53x14-bar'
     | 'jew-rattail-143x635'
+    | 'jew-label-46x100'
     | 'jew-rattail-3row-54x100'
     | 'jew-rattail-single-12x100'
     | 'jew-rattail-vertical-15x80'
@@ -425,7 +438,7 @@ export const TEMPLATES: TemplateItem[] = [
     previewType: 'four-ups-20x15',
   },
 
-  // --- CABLE (15 items in exact order as screenshots) ---
+  // --- CABLE ---
   {
     id: 'cab-1',
     name: '10x20-Yellow-4-column',
@@ -443,6 +456,16 @@ export const TEMPLATES: TemplateItem[] = [
     width: 109,
     height: 12.5,
     previewType: 'cable-12.5x74',
+  },
+  {
+    id: 'cab-rattail-143',
+    name: 'Rat Tail Label',
+    nameLine2: '14.3 × 63.5 + 38.1',
+    dimensions: '101.6 x 14.3',
+    category: 'Cable',
+    width: 101.6,
+    height: 14.3,
+    previewType: 'cable-rattail-143x635',
   },
   {
     id: 'cab-3',
@@ -871,73 +894,84 @@ export const TEMPLATES: TemplateItem[] = [
     previewType: 'circle-50',
   },
 
-  // --- JEWELRY ---
+  // --- JEWELRY (catalog order matches the print-app screenshots) ---
   {
-    id: 'jwl-diecut-3row-54x100',
-    name: '3-Up Jewellery Die Cut Sheet',
-    nameLine2: '54x96 mm (14mm tags, 3mm gap)',
-    dimensions: '54 x 96',
+    id: 'jwl-12',
+    name: 'Jewelry',
+    nameLine2: 'Sample-50x19+8',
+    dimensions: '50 x 27',
     category: 'Jewelry',
-    width: JEWELRY_DIECUT.sheetWidthMm,
-    height: JEWELRY_DIECUT.sheetHeightMm,
-    previewType: 'jew-rattail-3row-54x100',
+    width: 50,
+    height: 27,
+    previewType: 'jew-sample-50x19-tabs',
   },
   {
-    id: 'jwl-diecut-single-12x100',
-    name: 'Jewellery Die Cut Tag',
-    nameLine2: '14x96 mm (3-Up Sheet)',
-    dimensions: '14 x 96',
+    id: 'jwl-13',
+    name: 'Jewelry Sample-53x14',
+    dimensions: '53 x 14',
     category: 'Jewelry',
-    width: JEWELRY_DIECUT.tagWidthMm,
-    height: JEWELRY_DIECUT.tagHeightMm,
-    previewType: 'jew-rattail-single-12x100',
+    width: 53,
+    height: 14,
+    previewType: 'jew-sample-53x14-bar',
   },
   {
-    id: 'jwl-rattail-vertical',
-    name: 'Rat Tail Vertical Tag',
-    nameLine2: 'Label-15x80 (Foldable)',
-    dimensions: '15 x 80',
+    id: 'jwl-14',
+    name: 'Rat Tail',
+    nameLine2: 'Label-14.3x63.5+38.1',
+    dimensions: '101.6 x 14.3',
     category: 'Jewelry',
-    width: 15,
-    height: 80,
-    previewType: 'jew-rattail-vertical-15x80',
+    width: 101.6,
+    height: 14.3,
+    previewType: 'jew-rattail-143x635',
   },
   {
-    id: 'jwl-rattail-horizontal',
-    name: 'Rat Tail Horizontal Tag',
-    nameLine2: 'Label-80x15 (Landscape)',
-    dimensions: '80 x 15',
+    id: 'jwl-9',
+    name: 'Jewelry',
+    nameLine2: 'Sample-30x25+45',
+    dimensions: '70 x 30',
+    category: 'Jewelry',
+    width: 70,
+    height: 30,
+    previewType: 'jew-sample-30x25-stacked',
+  },
+  {
+    id: 'jwl-11',
+    name: 'Jewelry Sample-50x15',
+    dimensions: '50 x 15',
+    category: 'Jewelry',
+    width: 50,
+    height: 15,
+    previewType: 'jew-sample-50x15-holes',
+  },
+  {
+    id: 'jwl-7',
+    name: 'Jewelry',
+    nameLine2: 'Label-50x13+30-Y',
+    dimensions: '80 x 13',
     category: 'Jewelry',
     width: 80,
-    height: 15,
-    previewType: 'jew-rattail-horizontal-80x15',
-  },
-  {
-    id: 'jwl-1',
-    name: 'Dumbell Label-13x85',
-    dimensions: '85 x 13',
-    category: 'Jewelry',
-    width: 85,
     height: 13,
-    previewType: 'jew-dumbell-13x85',
+    previewType: 'jew-label-50x13-yellow',
   },
   {
-    id: 'jwl-2',
-    name: 'Dumbell Label-15x85',
-    dimensions: '85 x 15',
+    id: 'jwl-8',
+    name: 'Jewelry',
+    nameLine2: 'Sample-25x30+45',
+    dimensions: '75 x 25',
     category: 'Jewelry',
-    width: 85,
-    height: 15,
-    previewType: 'jew-dumbell-15x85',
+    width: 75,
+    height: 25,
+    previewType: 'jew-sample-25x30-flower',
   },
   {
-    id: 'jwl-3',
-    name: 'Hangtag-15.9x41.3',
-    dimensions: '41.3 x 15.9',
+    id: 'jwl-10',
+    name: 'Jewelry',
+    nameLine2: 'Sample-30x25+45',
+    dimensions: '70 x 30',
     category: 'Jewelry',
-    width: 41.3,
-    height: 15.9,
-    previewType: 'jew-hangtag-159x413',
+    width: 70,
+    height: 30,
+    previewType: 'jew-sample-30x25-pattern',
   },
   {
     id: 'jwl-4',
@@ -970,82 +1004,81 @@ export const TEMPLATES: TemplateItem[] = [
     previewType: 'jew-label-50x13-horizontal',
   },
   {
-    id: 'jwl-7',
+    id: 'jwl-diecut-46x100',
     name: 'Jewelry',
-    nameLine2: 'Label-50x13+30-Y',
-    dimensions: '80 x 13',
+    nameLine2: 'Label 46x100',
+    dimensions: '46 x 100',
+    category: 'Jewelry',
+    width: 46,
+    height: 100,
+    previewType: 'jew-label-46x100',
+  },
+  {
+    id: 'jwl-1',
+    name: 'Dumbell Label-13x85',
+    dimensions: '85 x 13',
+    category: 'Jewelry',
+    width: 85,
+    height: 13,
+    previewType: 'jew-dumbell-13x85',
+  },
+  {
+    id: 'jwl-2',
+    name: 'Dumbell Label-15x85',
+    dimensions: '85 x 15',
+    category: 'Jewelry',
+    width: 85,
+    height: 15,
+    previewType: 'jew-dumbell-15x85',
+  },
+  {
+    id: 'jwl-3',
+    name: 'Hangtag-15.9x41.3',
+    dimensions: '41.3 x 15.9',
+    category: 'Jewelry',
+    width: 41.3,
+    height: 15.9,
+    previewType: 'jew-hangtag-159x413',
+  },
+  {
+    id: 'jwl-diecut-3row-54x100',
+    name: '3-Up Jewellery Die Cut Sheet',
+    nameLine2: '54×96 mm sheet',
+    dimensions: '54 x 96',
+    category: 'Jewelry',
+    width: JEWELRY_DIECUT.sheetWidthMm,
+    height: JEWELRY_DIECUT.sheetHeightMm,
+    previewType: 'jew-rattail-3row-54x100',
+  },
+  {
+    id: 'jwl-diecut-single-12x100',
+    name: 'Jewellery Die Cut Tag',
+    nameLine2: '14×96 mm',
+    dimensions: '14 x 96',
+    category: 'Jewelry',
+    width: JEWELRY_DIECUT.tagWidthMm,
+    height: JEWELRY_DIECUT.tagHeightMm,
+    previewType: 'jew-rattail-single-12x100',
+  },
+  {
+    id: 'jwl-rattail-vertical',
+    name: 'Rat Tail Vertical Tag',
+    nameLine2: 'Label-15x80 (Foldable)',
+    dimensions: '15 x 80',
+    category: 'Jewelry',
+    width: 15,
+    height: 80,
+    previewType: 'jew-rattail-vertical-15x80',
+  },
+  {
+    id: 'jwl-rattail-horizontal',
+    name: 'Rat Tail Horizontal Tag',
+    nameLine2: 'Label-80x15 (Landscape)',
+    dimensions: '80 x 15',
     category: 'Jewelry',
     width: 80,
-    height: 13,
-    previewType: 'jew-label-50x13-yellow',
-  },
-  {
-    id: 'jwl-8',
-    name: 'Jewelry',
-    nameLine2: 'Sample-25x30+45',
-    dimensions: '75 x 25',
-    category: 'Jewelry',
-    width: 75,
-    height: 25,
-    previewType: 'jew-sample-25x30-flower',
-  },
-  {
-    id: 'jwl-9',
-    name: 'Jewelry',
-    nameLine2: 'Sample-30x25+45',
-    dimensions: '70 x 30',
-    category: 'Jewelry',
-    width: 70,
-    height: 30,
-    previewType: 'jew-sample-30x25-stacked',
-  },
-  {
-    id: 'jwl-10',
-    name: 'Jewelry',
-    nameLine2: 'Sample-30x25+45',
-    dimensions: '70 x 30',
-    category: 'Jewelry',
-    width: 70,
-    height: 30,
-    previewType: 'jew-sample-30x25-pattern',
-  },
-  {
-    id: 'jwl-11',
-    name: 'Jewelry Sample-50x15',
-    dimensions: '50 x 15',
-    category: 'Jewelry',
-    width: 50,
     height: 15,
-    previewType: 'jew-sample-50x15-holes',
-  },
-  {
-    id: 'jwl-12',
-    name: 'Jewelry',
-    nameLine2: 'Sample-50x19+8',
-    dimensions: '50 x 27',
-    category: 'Jewelry',
-    width: 50,
-    height: 27,
-    previewType: 'jew-sample-50x19-tabs',
-  },
-  {
-    id: 'jwl-13',
-    name: 'Jewelry Sample-53x14',
-    dimensions: '53 x 14',
-    category: 'Jewelry',
-    width: 53,
-    height: 14,
-    previewType: 'jew-sample-53x14-bar',
-  },
-  {
-    id: 'jwl-14',
-    name: 'Rat Tail',
-    nameLine2: 'Label-14.3x63.5+38.1',
-    dimensions: '101.6 x 14.3',
-    category: 'Jewelry',
-    width: 101.6,
-    height: 14.3,
-    previewType: 'jew-rattail-143x635',
+    previewType: 'jew-rattail-horizontal-80x15',
   },
 
   // --- SUPERMARKET (14 items, all prices in Indian Rupees â‚¹) ---
@@ -1486,8 +1519,71 @@ export const TEMPLATES: TemplateItem[] = [
   },
 ];
 
-/** Same document and pad chrome as the editor editing pad. */
-function TemplatePreview({ item }: { item: TemplateItem }) {
+const CatalogCardBanner = memo(function CatalogCardBanner({
+  id,
+  name,
+  nameLine2,
+  widthMm,
+  heightMm,
+  category,
+  showCategory,
+}: {
+  id: string;
+  name: string;
+  nameLine2?: string;
+  widthMm: number;
+  heightMm: number;
+  category: string;
+  showCategory: boolean;
+}) {
+  const [bannerSize, setBannerSize] = useState({ w: 0, h: 38 });
+  const gradientId = `catalog-hdr-${id}`;
+  return (
+    <View
+      style={styles.cardHeaderBanner}
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        if (Math.abs(width - bannerSize.w) > 1 || Math.abs(height - bannerSize.h) > 1) {
+          setBannerSize({ w: width, h: height });
+        }
+      }}>
+      {bannerSize.w > 0 ? (
+        <Svg
+          pointerEvents="none"
+          width={bannerSize.w}
+          height={bannerSize.h}
+          style={StyleSheet.absoluteFillObject}>
+          <Defs>
+            <LinearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
+              <Stop offset="0" stopColor="#1EB8C8" />
+              <Stop offset="1" stopColor="#2E78B8" />
+            </LinearGradient>
+          </Defs>
+          <SvgRect width={bannerSize.w} height={bannerSize.h} fill={`url(#${gradientId})`} />
+        </Svg>
+      ) : null}
+      <View style={styles.bannerLeft}>
+        {showCategory ? (
+          <Text numberOfLines={1} style={styles.bannerCategory}>
+            {category}
+          </Text>
+        ) : null}
+        <Text numberOfLines={1} style={styles.bannerTitle}>
+          {name}
+        </Text>
+        {nameLine2 ? (
+          <Text numberOfLines={1} style={styles.bannerSubtitle}>
+            {nameLine2}
+          </Text>
+        ) : null}
+      </View>
+      <Text style={styles.bannerDimensions}>{catalogDimensions(widthMm, heightMm)}</Text>
+    </View>
+  );
+});
+
+/** Physical stock thumbnail — not the editor canvas. Tap the card to open the editor. */
+const TemplatePreview = memo(function TemplatePreview({ item }: { item: TemplateItem }) {
   const document = useMemo(
     () =>
       createIndustryTemplateDocument({
@@ -1500,10 +1596,47 @@ function TemplatePreview({ item }: { item: TemplateItem }) {
     [item],
   );
 
+  return <LabelPreview document={document} catalogStock />;
+});
+
+const IndustryTemplateCard = memo(function IndustryTemplateCard({
+  item,
+  showCategory,
+  cardMaxWidth,
+  onPress,
+}: {
+  item: TemplateItem;
+  showCategory: boolean;
+  cardMaxWidth: number;
+  onPress: (item: TemplateItem) => void;
+}) {
   return (
-    <LabelPreview document={document} maxHeight={LABEL_PAD_STAGE_MIN_HEIGHT} showStage />
+    <Pressable
+      onPress={() => onPress(item)}
+      style={({ pressed }) => [
+        styles.templateCard,
+        { maxWidth: cardMaxWidth, width: '100%' },
+        pressed && styles.cardPressed,
+      ]}>
+      <CatalogCardBanner
+        id={item.id}
+        name={item.name}
+        nameLine2={item.nameLine2}
+        widthMm={item.width}
+        heightMm={item.height}
+        category={item.category}
+        showCategory={showCategory}
+      />
+      <TemplatePreview item={item} />
+      <View style={styles.cardFooter}>
+        <View style={styles.footerClock}>
+          <AppIcon name="clock" tintColor="#17A6B8" size={17} />
+        </View>
+        <ShareNodeIcon color="#17A6B8" size={20} />
+      </View>
+    </Pressable>
   );
-}
+});
 
 function TemplateLocalEmptyIllustration() {
   return (
@@ -1603,44 +1736,47 @@ export default function TemplateScreen() {
 
   // Filter templates by selected category or search query
   const filteredTemplates = useMemo(() => {
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      return TEMPLATES.filter(
-        (t) =>
-          t.name.toLowerCase().includes(q) ||
-          t.dimensions.toLowerCase().includes(q) ||
-          (t.nameLine2 && t.nameLine2.toLowerCase().includes(q)) ||
-          t.category.toLowerCase().includes(q)
-      );
-    }
-    return TEMPLATES.filter((t) => t.category.toLowerCase() === selectedCategory.toLowerCase());
+    const q = searchQuery.toLowerCase().trim();
+    const list = q
+      ? TEMPLATES.filter(
+          (t) =>
+            t.name.toLowerCase().includes(q) ||
+            t.dimensions.toLowerCase().includes(q) ||
+            (t.nameLine2 && t.nameLine2.toLowerCase().includes(q)) ||
+            t.category.toLowerCase().includes(q),
+        )
+      : TEMPLATES.filter((t) => t.category.toLowerCase() === selectedCategory.toLowerCase());
+    return list;
   }, [searchQuery, selectedCategory]);
 
-  const handleSelectTemplate = (template: TemplateItem) => {
-    const name = template.nameLine2 ? `${template.name} ${template.nameLine2}` : template.name;
-    const doc = createIndustryTemplateDocument({
-      name,
-      category: template.category,
-      widthMm: template.width,
-      heightMm: template.height,
-      previewType: template.previewType,
-    });
-    if (template.previewType === JEWELRY_DIECUT_PREVIEW_SINGLE) {
-      doc.ups = createUpsConfig({
-        columns: JEWELRY_DIECUT.columns,
-        columnSpacingMm: JEWELRY_DIECUT.gapMm,
-        batchEdit: true,
-        seedElements: doc.elements,
+  const handleSelectTemplate = useCallback(
+    (template: TemplateItem) => {
+      const name = template.nameLine2 ? `${template.name} ${template.nameLine2}` : template.name;
+      const doc = createIndustryTemplateDocument({
+        name,
+        category: template.category,
+        widthMm: template.width,
+        heightMm: template.height,
+        previewType: template.previewType,
       });
-      doc.templatePreviewType = JEWELRY_DIECUT_PREVIEW_SINGLE;
-      doc.templateCategory = 'jewelry';
-    }
-    upsertDocument(doc);
-    router.push({
-      pathname: '/edit',
-      params: { labelId: doc.id },
-    });
-  };
+      if (template.previewType === JEWELRY_DIECUT_PREVIEW_SINGLE) {
+        doc.ups = createUpsConfig({
+          columns: JEWELRY_DIECUT.columns,
+          columnSpacingMm: JEWELRY_DIECUT.gapMm,
+          batchEdit: true,
+          seedElements: doc.elements,
+        });
+        doc.templatePreviewType = JEWELRY_DIECUT_PREVIEW_SINGLE;
+        doc.templateCategory = 'jewelry';
+      }
+      upsertDocument(doc);
+      router.push({
+        pathname: '/edit',
+        params: { labelId: doc.id },
+      });
+    },
+    [router, upsertDocument],
+  );
 
   const handleCreateGroup = () => {
     const name = newGroupName.trim();
@@ -1789,14 +1925,10 @@ export default function TemplateScreen() {
                       </Text>
                     </View>
                     <Text style={styles.bannerDimensions}>
-                      {tpl.widthMm.toFixed(0)} x {tpl.heightMm.toFixed(0)}
+                      {catalogDimensions(tpl.widthMm, tpl.heightMm)}
                     </Text>
                   </View>
-                  <LabelPreview
-                    document={tpl}
-                    maxHeight={LABEL_PAD_STAGE_MIN_HEIGHT}
-                    showStage
-                  />
+                  <LabelPreview document={tpl} catalogStock />
                   <View style={styles.cardFooter}>
                     <Pressable hitSlop={10} onPress={() => handleEditCloudTemplate(tpl)}>
                       <AppIcon name="square.and.pencil" tintColor={Palette.accent} size={19} />
@@ -1971,14 +2103,10 @@ export default function TemplateScreen() {
                         </Text>
                       </View>
                       <Text style={styles.bannerDimensions}>
-                        {docItem.widthMm.toFixed(0)} x {docItem.heightMm.toFixed(0)}
+                        {catalogDimensions(docItem.widthMm, docItem.heightMm)}
                       </Text>
                     </View>
-                    <LabelPreview
-                      document={docItem}
-                      maxHeight={LABEL_PAD_STAGE_MIN_HEIGHT}
-                      showStage
-                    />
+                    <LabelPreview document={docItem} catalogStock />
                     <View style={styles.cardFooter}>
                       <Pressable
                         hitSlop={8}
@@ -2010,43 +2138,13 @@ export default function TemplateScreen() {
             ]}
             showsVerticalScrollIndicator={false}>
             {filteredTemplates.map((item) => (
-              <Pressable
+              <IndustryTemplateCard
                 key={item.id}
-                onPress={() => handleSelectTemplate(item)}
-                style={({ pressed }) => [
-                  styles.templateCard,
-                  { maxWidth: templateCardMaxWidth, width: '100%' },
-                  pressed && styles.cardPressed,
-                ]}>
-                {/* Cyan Header Banner */}
-                <View style={styles.cardHeaderBanner}>
-                  <View style={styles.bannerLeft}>
-                    <Text numberOfLines={1} style={styles.bannerTitle}>
-                      {item.name}
-                    </Text>
-                    {item.nameLine2 ? (
-                      <Text numberOfLines={1} style={styles.bannerSubtitle}>
-                        {item.nameLine2}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Text style={styles.bannerDimensions}>{item.dimensions}</Text>
-                </View>
-
-                {/* Visual Label Canvas Preview */}
-                <TemplatePreview item={item} />
-
-                {/* Bottom Action Footer: Clock + Share */}
-                <View style={styles.cardFooter}>
-                  {/* Circular clock history icon */}
-                  <View style={styles.footerClock}>
-                    <AppIcon name="clock" tintColor="#606F7B" size={17} />
-                  </View>
-
-                  {/* Share node icon */}
-                  <ShareNodeIcon color={Palette.accent} size={20} />
-                </View>
-              </Pressable>
+                item={item}
+                showCategory={!!searchQuery.trim()}
+                cardMaxWidth={templateCardMaxWidth}
+                onPress={handleSelectTemplate}
+              />
             ))}
 
             {filteredTemplates.length === 0 && (
@@ -2290,7 +2388,9 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   cardHeaderBanner: {
-    backgroundColor: '#20A4B8',
+    backgroundColor: '#1EB8C8',
+    overflow: 'hidden',
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -2306,6 +2406,14 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '500',
+  },
+  bannerCategory: {
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    marginBottom: 1,
   },
   bannerSubtitle: {
     color: '#FFFFFF',

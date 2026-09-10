@@ -21,9 +21,10 @@ export type DiscoveredPrinter = {
   id: string;
   name: string | null;
   rssi: number | null;
-  transport?: 'bluetooth-spp' | 'bluetooth-ble' | 'wifi';
-  sdkId?: 'td404' | 'generic';
+  transport?: 'bluetooth-spp' | 'bluetooth-ble' | 'wifi' | 'josh-lpapi';
+  sdkId?: 'td404' | 'josh' | 'generic';
   likelyTd404?: boolean;
+  likelyJosh?: boolean;
   bonded?: boolean;
 };
 
@@ -33,6 +34,7 @@ export type BluetoothCapabilities = {
   isWeb: boolean;
   classicSppAvailable: boolean;
   bleAvailable: boolean;
+  joshAvailable: boolean;
   canScan: boolean;
   reason: string | null;
 };
@@ -165,8 +167,11 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 export function isLikelyTd404Name(name: string | null | undefined): boolean {
   if (!name) return false;
-  const n = name.toLowerCase();
+  const n = name.toLowerCase().trim();
   return (
+    n.includes('tejas') ||
+    n.includes('rudra') ||
+    n.includes('sez') ||
     n.includes('td-404') ||
     n.includes('td404') ||
     n.includes('td 404') ||
@@ -183,12 +188,54 @@ export function isLikelyTd404Name(name: string | null | undefined): boolean {
     n.includes('label') ||
     n.includes('sticker') ||
     n.includes('barcode') ||
-    n.includes('niimbot') ||
     n.includes('phomemo') ||
     n.includes('marklife') ||
     n.includes('zebra') ||
     n.includes('godex') ||
-    n.includes('tsc')
+    n.includes('tsc') ||
+    n.includes('tspl') ||
+    n.includes('gprinter') ||
+    n.includes('xprinter') ||
+    n.includes('hprt') ||
+    n.includes('peripage') ||
+    n.includes('munbyn') ||
+    n.includes('beeprt') ||
+    n.includes('jadens') ||
+    n.includes('clover') ||
+    n.includes('star') ||
+    n.includes('bixolon') ||
+    n.includes('citizen') ||
+    n.includes('epson') ||
+    n.includes('spp') ||
+    n.includes('bt-') ||
+    n.includes('bt_') ||
+    n.includes('mpt') ||
+    n.includes('mtp') ||
+    n.includes('rpp') ||
+    n.includes('qs-') ||
+    n.includes('innerprinter')
+  );
+}
+
+export function isLikelyJoshName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  // If the device matches TD-404 / Tejas / Rudra, it is NEVER a Josh printer
+  if (isLikelyTd404Name(name)) return false;
+  const n = name.toLowerCase().trim();
+  return (
+    n.includes('josh') ||
+    n.includes('lpapi') ||
+    n.includes('dothan') ||
+    n.includes('dzprinter') ||
+    n.startsWith('ld08') ||
+    n.startsWith('ld-') ||
+    n.startsWith('lp08') ||
+    n.startsWith('lp12') ||
+    n.startsWith('dt-') ||
+    n.startsWith('dt_') ||
+    n.startsWith('dp-') ||
+    n.startsWith('dp_') ||
+    n.startsWith('jc')
   );
 }
 
@@ -227,7 +274,7 @@ type WritableTarget = {
   withResponse: boolean;
 };
 
-type ActiveTransport = 'td404-spp' | 'ble' | 'wifi' | null;
+type ActiveTransport = 'td404-spp' | 'ble' | 'wifi' | 'josh-lpapi' | null;
 
 class PrinterManager {
   private ble: any = null;
@@ -239,6 +286,7 @@ class PrinterManager {
   private scanAbort: (() => void) | null = null;
   private activeTransport: ActiveTransport = null;
   private td404ScanStop: (() => Promise<void>) | null = null;
+  private joshScanStop: (() => Promise<void>) | null = null;
   private backendPrinterId: string | null = null;
   private lastScanError: string | null = null;
   /** Negotiated BLE ATT MTU. Payload = mtu - 3. */
@@ -258,6 +306,29 @@ class PrinterManager {
   private lastRetryCount: number = 0;
   /** Number of pending jobs in the serial print chain. */
   private printQueueDepth: number = 0;
+
+  get transport(): ActiveTransport {
+    return this.activeTransport;
+  }
+
+  get isJosh(): boolean {
+    if (this.activeTransport === 'td404-spp') return false;
+    if (this.activeTransport === 'josh-lpapi') return true;
+    const store = usePrinterStore.getState();
+    if (store.transport === 'bluetooth-spp' || store.sdkId === 'td404') return false;
+    const name = store.deviceName ?? store.lastDeviceName;
+    if (isLikelyTd404Name(name)) return false;
+    if (store.sdkId === 'josh' || store.transport === 'josh-lpapi') {
+      return true;
+    }
+    if (this.activeTransport === null && Boolean(this.getJosh()?.isJoshConnected?.())) {
+      return true;
+    }
+    if (isLikelyJoshName(name)) {
+      return true;
+    }
+    return false;
+  }
 
   private getBle(): any {
     if (!this.bleLoadTried) {
@@ -296,11 +367,22 @@ class PrinterManager {
     }
   }
 
+  private getJosh() {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require('josh-printer') as typeof import('josh-printer');
+    } catch {
+      return null;
+    }
+  }
+
   getCapabilities(): BluetoothCapabilities {
     const isWeb = Platform.OS === 'web';
     const expoGo = isExpoGoRuntime();
     const td404 = this.getTd404();
     const classicSppAvailable = Boolean(td404?.isTd404NativeAvailable());
+    const josh = this.getJosh();
+    const joshAvailable = Boolean(josh?.isJoshNativeAvailable());
     // Probe BLE (lazy).
     const bleAvailable = this.getBle() !== null;
 
@@ -308,10 +390,10 @@ class PrinterManager {
     if (isWeb) {
       reason =
         'Bluetooth scan is not available in the browser. Use an Android development build, or connect the printer over Wi‑Fi below.';
-    } else if (expoGo && !classicSppAvailable && !bleAvailable) {
+    } else if (expoGo && !classicSppAvailable && !bleAvailable && !joshAvailable) {
       reason =
-        'You are running Expo Go. TD-404 classic Bluetooth needs a development build. Run: npx expo run:android';
-    } else if (!classicSppAvailable && !bleAvailable) {
+        'You are running Expo Go. Bluetooth printer modules need a development build. Run: npx expo run:android';
+    } else if (!classicSppAvailable && !bleAvailable && !joshAvailable) {
       reason =
         this.bleLoadError ||
         'No Bluetooth native modules are linked. Rebuild the app with npx expo run:android.';
@@ -323,7 +405,8 @@ class PrinterManager {
       isWeb,
       classicSppAvailable,
       bleAvailable,
-      canScan: classicSppAvailable || bleAvailable,
+      joshAvailable,
+      canScan: classicSppAvailable || bleAvailable || joshAvailable,
       reason,
     };
   }
@@ -334,6 +417,9 @@ class PrinterManager {
 
   get usesTd404CommandSet(): boolean {
     const store = usePrinterStore.getState();
+    if (store.sdkId === 'josh' || this.activeTransport === 'josh-lpapi') {
+      return true;
+    }
     return shouldUseTsplCommandSet({
       activeTransport: this.activeTransport,
       storeTransport: store.transport,
@@ -350,6 +436,24 @@ class PrinterManager {
     const store = usePrinterStore.getState();
     const settings = useSettingsStore.getState().printing;
     const name = (store.deviceName ?? store.lastDeviceName ?? '').toLowerCase();
+
+    // JOSH / LPAPI printer
+    if (store.sdkId === 'josh' || this.activeTransport === 'josh-lpapi') {
+      const dpi = settings.printerDpi ?? 203;
+      const alignment = settings.printerAlignment ?? 'center';
+      const headWidthMm = settings.printheadWidthMm ?? 108;
+      const headWidthDots = mmToDots(headWidthMm, dpi);
+      return {
+        id: 'josh-lpapi',
+        name: store.deviceName ?? 'JOSH Label Printer',
+        dpi,
+        printheadWidthMm: headWidthMm,
+        printheadWidthDots: headWidthDots,
+        maxHeightMm: 1000,
+        alignment,
+        commandLanguage: 'tspl',
+      };
+    }
 
     // Receipt printers (ESC/POS, left-aligned)
     if (!this.usesTd404CommandSet) {
@@ -497,6 +601,8 @@ class PrinterManager {
 
     const td404 = this.getTd404();
     const hasNative = Boolean(td404?.isTd404NativeAvailable());
+    const josh = this.getJosh();
+    const hasJoshNative = Boolean(josh?.isJoshNativeAvailable());
     const ble = this.getBle();
     const errors: string[] = [];
     const seen = new Set<string>();
@@ -522,13 +628,16 @@ class PrinterManager {
         await this.ensurePermissions('connect-only');
         const bonded = await td404.getTd404BondedDevices();
         for (const d of bonded) {
+          const isTd = isLikelyTd404Name(d.name);
+          const isJosh = !isTd && isLikelyJoshName(d.name);
           emit({
             id: d.id,
             name: d.name,
             rssi: null,
-            transport: 'bluetooth-spp',
-            sdkId: 'td404',
-            likelyTd404: d.likelyTd404 ?? isLikelyTd404Name(d.name),
+            transport: isJosh ? 'josh-lpapi' : 'bluetooth-spp',
+            sdkId: isJosh ? 'josh' : 'td404',
+            likelyTd404: isTd || !isJosh,
+            likelyJosh: isJosh,
             bonded: true,
           });
         }
@@ -544,6 +653,11 @@ class PrinterManager {
       hasNative && td404
         ? this.startTd404Scan(td404, emit).catch((err) => {
             errors.push(err instanceof Error ? err.message : 'Classic BT scan failed.');
+          })
+        : Promise.resolve(),
+      hasJoshNative && josh
+        ? this.startJoshScan(josh, emit).catch((err) => {
+            errors.push(err instanceof Error ? err.message : 'JOSH scan failed.');
           })
         : Promise.resolve(),
       !hasNative && ble
@@ -563,6 +677,59 @@ class PrinterManager {
     }
 
     return { paired, nearby, errors };
+  }
+
+  private startJoshScan(
+    josh: NonNullable<ReturnType<PrinterManager['getJosh']>>,
+    onDevice: (device: DiscoveredPrinter) => void,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        void this.joshScanStop?.().catch(() => {});
+        this.joshScanStop = null;
+        if (error) reject(error);
+        else resolve();
+      };
+
+      try {
+        const handle = josh.startJoshDiscovery(
+          (device) => {
+            const isTd = isLikelyTd404Name(device.name);
+            if (isTd) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'bluetooth-spp',
+                sdkId: 'td404',
+                likelyTd404: true,
+                likelyJosh: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
+            onDevice({
+              id: device.id,
+              name: device.name,
+              rssi: null,
+              transport: 'josh-lpapi',
+              sdkId: 'josh',
+              likelyJosh: true,
+              likelyTd404: false,
+              bonded: device.bonded ?? false,
+            });
+          },
+          () => finish(),
+        );
+        this.joshScanStop = handle.stop;
+        setTimeout(() => finish(), SCAN_TIMEOUT_MS);
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error('JOSH scan failed to start.'));
+      }
+    });
   }
 
   private startTd404Scan(
@@ -662,6 +829,8 @@ class PrinterManager {
     }
     void this.td404ScanStop?.().catch(() => {});
     this.td404ScanStop = null;
+    void this.joshScanStop?.().catch(() => {});
+    this.joshScanStop = null;
     try {
       this.ble?.stopDeviceScan();
     } catch {
@@ -718,6 +887,104 @@ class PrinterManager {
     usePrinterStore.getState().setStatus('connecting');
     const connectStart = Date.now();
 
+    // ── Routing diagnostics ──────────────────────────────────────────
+    console.info(
+      `[CONN-ROUTE] connectInner called: id=${deviceId}, name=${deviceName ?? 'null'}, transport=${transport ?? 'undefined'}`,
+    );
+
+    const isExplicitTd404 =
+      transport === 'bluetooth-spp' ||
+      isLikelyTd404Name(deviceName);
+
+    const isTargetJosh =
+      !isExplicitTd404 &&
+      (transport === 'josh-lpapi' || (Boolean(deviceName) && isLikelyJoshName(deviceName)));
+
+    console.info(
+      `[CONN-ROUTE] isExplicitTd404=${isExplicitTd404}, isTargetJosh=${isTargetJosh}, ` +
+      `td404NameMatch=${isLikelyTd404Name(deviceName)}, joshNameMatch=${isLikelyJoshName(deviceName)}`,
+    );
+
+    if (isTargetJosh) {
+      const josh = this.getJosh();
+      const diag = josh?.getJoshNativeDiagnostic?.() ?? {
+        isLinked: false,
+        isAvailable: false,
+        reason: 'JOSH module failed to load (require error)',
+      };
+      console.info(
+        `[CONN-ROUTE] JOSH path: isLinked=${diag.isLinked}, isAvailable=${diag.isAvailable}, reason=${diag.reason ?? 'OK'}`,
+      );
+
+      if (!josh || !diag.isAvailable) {
+        // JOSH native module is not available — do NOT silently fall through to SPP.
+        // JOSH printers cannot process TSPL/ESCPOS over raw SPP.
+        const reason = diag.reason ?? 'JOSH native module is not available in running APK. Install the newly built app-debug.apk.';
+        console.error(`[CONN-ROUTE] JOSH path BLOCKED: ${reason}`);
+        usePrinterStore.getState().clearConnection();
+        throw new Error(`JOSH printer cannot connect: ${reason}`);
+      }
+
+      try {
+        await this.ensurePermissions('connect-only');
+        console.info(
+          `[JOSH-CONN-P1:IDENTIFY] Initiating JOSH connection: mac=${deviceId}, name=${deviceName ?? 'unknown'}, transport=${transport ?? 'auto'}`,
+        );
+
+        // PHASE 2: Clean up any active connections before LPAPI opens RFCOMM
+        // Pre-disconnect any lingering JOSH SDK session
+        if (josh.isJoshConnected()) {
+          console.info('[JOSH-CONN-P2:PREPARE] Closing lingering JOSH SDK session');
+          await josh.disconnectJosh().catch(() => {});
+        }
+        const td404 = this.getTd404();
+        if (td404?.isTd404Connected()) {
+          console.info('[JOSH-CONN-P2:PREPARE] Closing active TD-404 SPP socket to free Bluetooth channel for JOSH');
+          await td404.disconnectTd404().catch(() => {});
+        }
+        if (this.connectedDevice) {
+          console.info('[JOSH-CONN-P2:PREPARE] Closing active BLE peripheral connection');
+          await this.connectedDevice.cancelConnection().catch(() => {});
+          this.connectedDevice = null;
+          this.writableTarget = null;
+        }
+
+        console.info(`[JOSH-CONN-P3:OPEN] Submitting LPAPI connection request → ${deviceId} (${deviceName ?? 'JOSH'})`);
+        const result = await josh.connectJosh(deviceId, deviceName);
+        this.activeTransport = 'josh-lpapi';
+        this.connectedDevice = null;
+        this.writableTarget = null;
+        this.backendPrinterId = null;
+        this.bleNegotiatedMtu = 0;
+        this.lastErrorMessage = null;
+        console.info(
+          `[JOSH-CONN-P4:CONFIRMED] JOSH connected in ${Date.now() - connectStart} ms → ${result.id} (${result.name ?? deviceName})`,
+        );
+        usePrinterStore.getState().setConnectedDevice(result.id, result.name ?? deviceName ?? deviceId, {
+          transport: 'josh-lpapi',
+          sdkId: 'josh',
+          backendPrinterId: null,
+        });
+        return;
+      } catch (error) {
+        console.warn(
+          `[JOSH-CONN-P4:FAILED] JOSH connect failed after ${Date.now() - connectStart} ms:`,
+          error,
+        );
+        this.lastErrorMessage = error instanceof Error ? error.message : String(error);
+        // JOSH printers do NOT support raw SPP — never fall back to classic SPP.
+        usePrinterStore.getState().clearConnection();
+        throw error instanceof Error ? error : new Error('Failed to connect to JOSH printer.');
+      }
+    }
+
+    // ── Guard: if transport was explicitly josh-lpapi but we reached here, block SPP ──
+    if (transport === 'josh-lpapi') {
+      console.error('[CONN-ROUTE] transport=josh-lpapi but JOSH path was not taken — blocking SPP fallback');
+      usePrinterStore.getState().clearConnection();
+      throw new Error('JOSH printer routing failed. The device was identified as JOSH but the JOSH connection path was not entered.');
+    }
+
     const preferSpp =
       transport === 'bluetooth-spp' ||
       (transport !== 'bluetooth-ble' && transport !== 'wifi' && Platform.OS === 'android');
@@ -726,6 +993,11 @@ class PrinterManager {
     if (preferSpp && td404?.isTd404NativeAvailable()) {
       try {
         await this.ensurePermissions('connect-only');
+        const josh = this.getJosh();
+        if (josh?.isJoshConnected()) {
+          console.info('[printer] Closing active JOSH LPAPI session before opening SPP');
+          await josh.disconnectJosh().catch(() => {});
+        }
         console.info('[printer] SPP connect →', deviceId, deviceName);
         // Native Kotlin module handles its own timeout with proper socket cleanup.
         // A JS-side Promise.race would leave a zombie socket if it fires first.
@@ -773,6 +1045,21 @@ class PrinterManager {
       );
     }
     await this.connect(mac, name ?? mac, 'bluetooth-spp');
+  }
+
+  /** Connect specifically to JOSH LPAPI printer by MAC address. */
+  async connectJoshByMac(macAddress: string, name?: string): Promise<void> {
+    const mac = macAddress.trim().toUpperCase();
+    if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) {
+      throw new Error('Enter a MAC like AA:BB:CC:DD:EE:FF (from Android Bluetooth settings).');
+    }
+    const josh = this.getJosh();
+    if (!josh?.isJoshNativeAvailable()) {
+      throw new Error(
+        'JOSH LPAPI Bluetooth connect needs a development build (`npx expo run:android`).',
+      );
+    }
+    await this.connect(mac, name ?? 'JOSH', 'josh-lpapi');
   }
 
   async connectWifi(ip: string, port = 9100, name?: string): Promise<void> {
@@ -893,6 +1180,9 @@ class PrinterManager {
     if (this.activeTransport === 'td404-spp') {
       await this.getTd404()?.disconnectTd404();
     }
+    if (this.activeTransport === 'josh-lpapi') {
+      await this.getJosh()?.disconnectJosh();
+    }
     if (this.activeTransport === 'wifi' && this.backendPrinterId) {
       try {
         const { getBackendBaseUrl } = await import('@/lib/printer/backend-api');
@@ -919,6 +1209,9 @@ class PrinterManager {
     if (this.activeTransport === 'td404-spp') {
       return Boolean(this.getTd404()?.isTd404Connected());
     }
+    if (this.activeTransport === 'josh-lpapi') {
+      return Boolean(this.getJosh()?.isJoshConnected());
+    }
     if (this.activeTransport === 'wifi') {
       return Boolean(this.backendPrinterId);
     }
@@ -939,6 +1232,9 @@ class PrinterManager {
   isConnectionHealthy(): boolean {
     if (this.activeTransport === 'td404-spp') {
       return Boolean(this.getTd404()?.isTd404Connected());
+    }
+    if (this.activeTransport === 'josh-lpapi') {
+      return Boolean(this.getJosh()?.isJoshConnected());
     }
     if (this.activeTransport === 'wifi') {
       return Boolean(this.backendPrinterId);
@@ -1016,8 +1312,22 @@ class PrinterManager {
     const store = usePrinterStore.getState();
     if (!store.lastDeviceId) return false;
     try {
-      console.info('[printer] auto-reconnect →', store.lastDeviceId, store.lastDeviceName);
-      const transport = store.transport ?? undefined;
+      const isTd = isLikelyTd404Name(store.lastDeviceName);
+      const isTargetJosh =
+        !isTd &&
+        (store.sdkId === 'josh' ||
+          store.transport === 'josh-lpapi' ||
+          (Boolean(store.lastDeviceName) && isLikelyJoshName(store.lastDeviceName)));
+
+      console.info(
+        `[printer] auto-reconnect → ${store.lastDeviceId} ${store.lastDeviceName ?? ''} (isTargetJosh=${isTargetJosh})`,
+      );
+      if (isTargetJosh) {
+        console.info(
+          `[JOSH-CONN-P1:IDENTIFY] Auto-reconnect identified JOSH printer: ${store.lastDeviceId} (${store.lastDeviceName ?? 'JOSH'})`,
+        );
+      }
+      const transport = isTargetJosh ? 'josh-lpapi' : (store.transport ?? 'bluetooth-spp');
       // For Wi-Fi, skip — requires explicit IP entry.
       if (transport === 'wifi') return false;
       await this.connect(
@@ -1041,6 +1351,21 @@ class PrinterManager {
 
   async printTestLabel(text = 'Sez Print OK'): Promise<void> {
     if (!this.isConnected) throw new Error('No printer connected.');
+
+    if (this.activeTransport === 'josh-lpapi') {
+      console.info(`[JOSH-PRINT-P1:PREFLIGHT] Test print dispatching via JOSH LPAPI SDK: "${text}"`);
+      const josh = this.getJosh();
+      if (!josh) throw new Error('JOSH module not available.');
+      if (!josh.isJoshConnected()) {
+        console.info('[JOSH-CONN-P2:PREPARE] Printer identified as JOSH but LPAPI session not active. Reconnecting...');
+        const store = usePrinterStore.getState();
+        await this.connect(store.deviceId ?? store.lastDeviceId!, store.deviceName ?? store.lastDeviceName, 'josh-lpapi');
+      }
+      console.info('[JOSH-PRINT-P3:SUBMIT] Submitting test text to LPAPI hardware...');
+      await josh.printJoshTestText(text);
+      console.info('[JOSH-PRINT-P5:FINALIZE] JOSH test print completed successfully');
+      return;
+    }
 
     if (this.activeTransport === 'wifi' && this.backendPrinterId) {
       await wifiPrintSample(this.backendPrinterId, { text });
@@ -1080,6 +1405,9 @@ class PrinterManager {
     orientation?: number;
     dpi?: number;
   }): Promise<boolean> {
+    if (this.activeTransport === 'josh-lpapi') {
+      return this.printJoshPngLabelFast(options);
+    }
     if (this.activeTransport !== 'td404-spp' || !this.usesTd404CommandSet) {
       return false;
     }
@@ -1166,6 +1494,83 @@ class PrinterManager {
     }
   }
 
+  /**
+   * JOSH SDK fast print: PNG → LPAPI printBitmap (handled by native module).
+   * Direct bitmap print, bypasses TSPL rasterization completely.
+   */
+  async printJoshPngLabelFast(options: {
+    pngBase64: string;
+    widthMm: number;
+    heightMm: number;
+    gapMm?: number;
+    copies?: number;
+    density?: number | null;
+    speed?: number | null;
+    orientation?: number;
+    dpi?: number;
+  }): Promise<boolean> {
+    if (!this.isJosh) {
+      return false;
+    }
+    this.activeTransport = 'josh-lpapi';
+    const josh = this.getJosh();
+    if (!josh || typeof josh.printJoshPngLabel !== 'function') {
+      return false;
+    }
+
+    this.printQueueDepth++;
+    const run = this.printChain.then(async () => {
+      const store = usePrinterStore.getState();
+      store.setStatus('printing');
+      this.connectionState = 'printing';
+      try {
+        console.info(
+          `[JOSH-PRINT-P1:PREFLIGHT] Preparing fast PNG print: ${options.widthMm}x${options.heightMm}mm, copies=${options.copies ?? 1}, dpi=${options.dpi ?? 203}`,
+        );
+        await this.ensureConnected();
+        const t0 = Date.now();
+        console.info('[JOSH-PRINT-P3:SUBMIT] Submitting label bitmap to LPAPI hardware...');
+        const result = await josh.printJoshPngLabel({
+          pngBase64: options.pngBase64,
+          widthMm: options.widthMm,
+          heightMm: options.heightMm,
+          copies: Math.max(1, Math.round(options.copies ?? 1)),
+          density: options.density != null ? options.density : -1,
+          speed: options.speed != null ? options.speed : -1,
+          orientation: options.orientation ?? 0,
+          gapType: -1,
+          gapLength: options.gapMm != null && options.gapMm > 0 ? options.gapMm : -1,
+          dpi: options.dpi ?? 203,
+        });
+        console.info(
+          `[JOSH-PRINT-P5:FINALIZE] JOSH fast print completed in ${Date.now() - t0} ms |`,
+          result,
+        );
+      } finally {
+        const currentStore = usePrinterStore.getState();
+        if (currentStore.status === 'printing') {
+          currentStore.setStatus(this.isConnected ? 'connected' : 'disconnected');
+        }
+        this.connectionState = this.isConnected ? 'connected' : 'disconnected';
+      }
+    });
+    this.printChain = run.then(
+      () => {
+        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+      },
+      () => {
+        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+      },
+    );
+    try {
+      await run;
+      return true;
+    } catch (error) {
+      console.error('[JOSH-PRINT-P5:FAILED] JOSH print failed:', error);
+      throw error;
+    }
+  }
+
   async print(bytes: Uint8Array): Promise<void> {
     // Serialize all transports so a second job cannot start while SPP/BLE is
     // still writing — overlapping writes were a source of intermittent garbage
@@ -1233,6 +1638,10 @@ class PrinterManager {
 
   private async printUnlocked(bytes: Uint8Array): Promise<void> {
     const writeStart = Date.now();
+
+    if (this.activeTransport === 'josh-lpapi') {
+      throw new Error('JOSH printers require bitmap printing via LPAPI SDK. Please print from the label editor.');
+    }
 
     if (this.activeTransport === 'wifi' && this.backendPrinterId) {
       console.info('[printer] Wi-Fi write:', bytes.length, 'bytes');

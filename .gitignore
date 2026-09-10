@@ -49,3 +49,7 @@ modules/**/android/.gradle/
 # local EAS log dumps
 eas-build-log*
 eas-log-raw.bin
+
+# build artifacts
+*.apk
+JOSH SDK/

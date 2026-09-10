@@ -37,13 +37,16 @@ import { applySerialOffset, lineSpacingMultiplier } from '@/lib/serial-content';
 import { useSettingsStore } from '@/stores/settings-store';
 import { ptToMm, type LabelElement } from '@/lib/label-document';
 
+/** Design-space black (gallery/editor). Print still flattens to 1-bit in the raster pipeline. */
+export const DESIGN_INK = '#111111';
+
 export function inkColor(drawingColorIndex: number) {
-  const color = DRAWING_COLORS[drawingColorIndex] ?? '#111827';
-  return drawingColorIndex === 0 || color === '#FFFFFF' ? '#111827' : color;
+  const color = DRAWING_COLORS[drawingColorIndex] ?? DESIGN_INK;
+  return drawingColorIndex === 0 || color === '#FFFFFF' ? DESIGN_INK : color;
 }
 
 function paletteColor(drawingColorIndex: number) {
-  return DRAWING_COLORS[drawingColorIndex] ?? '#111827';
+  return DRAWING_COLORS[drawingColorIndex] ?? DESIGN_INK;
 }
 
 function shapeFillColor(element: ShapeElementState) {
@@ -60,6 +63,16 @@ export function resolveFontFamily(name: string): string | undefined {
 
 function fontSizePx(fontSizePt: number, scale: number) {
   return Math.max(1, ptToMm(fontSizePt) * scale);
+}
+
+/** Human-readable barcode text. Encoding still uses the raw digit string. */
+function formatBarcodeHri(mode: string, content: string): string {
+  if (mode !== 'UPC-A') return content;
+  const digits = content.replace(/\D/g, '');
+  if (digits.length === 12) {
+    return `${digits[0]} ${digits.slice(1, 6)} ${digits.slice(6, 11)} ${digits[11]}`;
+  }
+  return content;
 }
 
 function useClock(enabled: boolean) {
@@ -104,7 +117,7 @@ function textStyleFor(
     lineHeight: size * lineMult,
     includeFontPadding: false,
     fontFamily: resolveFontFamily(state.fontFamily),
-    fontWeight: state.bold ? ('700' as const) : ('400' as const),
+    fontWeight: state.bold ? ('600' as const) : ('400' as const),
     fontStyle: state.italic ? ('italic' as const) : ('normal' as const),
     textDecorationLine: (decorations.join(' ') || 'none') as
       | 'none'
@@ -259,6 +272,7 @@ function BarcodeContent({
   const bgColor = element.antiColor ? inkColor(element.drawingColorIndex) : 'transparent';
   const labelSize = fontSizePx(element.fontSize, scale);
   const showLabel = element.textFlag !== 'Hide';
+  const hri = formatBarcodeHri(element.encodeMode, content);
   const barsHeight = showLabel ? Math.max(2, heightPx - labelSize * 1.3) : heightPx;
   const label = showLabel ? (
     <Text
@@ -270,10 +284,10 @@ function BarcodeContent({
         color,
         textAlign: 'center',
         fontFamily: resolveFontFamily(element.fontFamily),
-        fontWeight: element.bold ? '700' : '400',
+        fontWeight: element.bold ? '600' : '400',
         includeFontPadding: false,
       }}>
-      {content}
+      {hri}
     </Text>
   ) : null;
 
@@ -287,7 +301,7 @@ function BarcodeContent({
               key={i}
               x={bar.x * widthPx}
               y={0}
-              width={Math.max(1, bar.width * widthPx)}
+              width={Math.max(0.35, bar.width * widthPx)}
               height={Math.max(2, barsHeight)}
               fill={color}
             />
@@ -387,8 +401,13 @@ function LineContent({
   scale: number;
 }) {
   const color = inkColor(element.drawingColorIndex);
-  const strokeWidth = Math.max(1, element.height * scale);
+  const vertical = heightPx >= widthPx * 2;
+  const strokeWidth = Math.max(1, (vertical ? element.width : element.height) * scale);
   const midY = heightPx / 2;
+  const dash =
+    element.lineStyle === 'dashed'
+      ? [Math.max(3, element.virtualInterval * scale), Math.max(3, element.virtualInterval * scale)]
+      : undefined;
 
   if (element.lineStyle === 'slash' || element.lineStyle === 'backslash') {
     const gap = Math.max(4, element.virtualInterval * scale * 2);
@@ -415,6 +434,23 @@ function LineContent({
     );
   }
 
+  if (vertical) {
+    const midX = widthPx / 2;
+    return (
+      <Svg width={widthPx} height={heightPx}>
+        <Line
+          x1={midX}
+          y1={0}
+          x2={midX}
+          y2={heightPx}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={dash}
+        />
+      </Svg>
+    );
+  }
+
   return (
     <Svg width={widthPx} height={heightPx}>
       <Line
@@ -424,11 +460,7 @@ function LineContent({
         y2={midY}
         stroke={color}
         strokeWidth={strokeWidth}
-        strokeDasharray={
-          element.lineStyle === 'dashed'
-            ? [Math.max(3, element.virtualInterval * scale), Math.max(3, element.virtualInterval * scale)]
-            : undefined
-        }
+        strokeDasharray={dash}
       />
     </Svg>
   );

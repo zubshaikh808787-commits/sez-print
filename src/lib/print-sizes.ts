@@ -4,6 +4,7 @@ import {
   cableFlagPrintDocument,
   isCableFlagPrintPresetId,
 } from '@/constants/cable-flag-diecut';
+import { isRatTail143Document } from '@/constants/rat-tail-143';
 import {
   JEWELRY_DIECUT,
   JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM,
@@ -494,6 +495,7 @@ export function applyPrintSize(
   if (preset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP) return tileDocumentThreeUpDieCut54(source);
   if (preset?.id === JEWELRY_DIECUT_PRINT_PRESET_2UP) return tileDocumentTwoUpDieCut37(source);
   if (isCableFlagPrintPresetId(preset?.id)) return cableFlagPrintDocument(source);
+  if (isRatTail143Document(source)) return source;
   const page = clampLabelMm(custom.widthMm, custom.heightMm);
   // Same size as the design — keep element positions (preview == print).
   if (

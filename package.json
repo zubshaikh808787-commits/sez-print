@@ -46,6 +46,7 @@
     "expo-web-browser": "~15.0.11",
     "fast-png": "^8.0.0",
     "jpeg-js": "^0.4.4",
+    "josh-printer": "file:./modules/josh-printer",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -79,6 +80,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test:print": "npx --yes tsx --tsconfig tsconfig.json src/printing/__tests__/engine.test.ts",
+    "test:editor": "npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/engine.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/__tests__/label-geometry.test.ts",
+    "test:templates": "npx --yes tsx --tsconfig tsconfig.json src/lib/__tests__/template-schema.test.ts",
     "print:calibration": "npx --yes tsx --tsconfig tsconfig.json scripts/print-calibration-box.ts",
     "print:phase1": "npx --yes tsx --tsconfig tsconfig.json scripts/print-phase1-demo.ts",
     "print:phase2": "npx --yes tsx --tsconfig tsconfig.json scripts/print-phase2-demo.ts",
@@ -97,7 +100,8 @@
       "reactNativeDirectoryCheck": {
         "exclude": [
           "@react-native-ml-kit/text-recognition",
-          "td404-printer"
+          "td404-printer",
+          "josh-printer"
         ],
         "listUnknownPackages": false
       }

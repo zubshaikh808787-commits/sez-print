@@ -22,6 +22,7 @@ import { backendHealth, getBackendBaseUrl } from '@/lib/printer/backend-api';
 import {
   getPrinterManager,
   isLikelyTd404Name,
+  isLikelyJoshName,
   type BluetoothCapabilities,
   type DiscoveredPrinter,
 } from '@/lib/printer/printer-manager';
@@ -152,7 +153,13 @@ export default function PrinterConnectScreen() {
     () =>
       devices
         .filter((d) => d.bonded)
-        .sort((a, b) => Number(isLikelyTd404Name(b.name)) - Number(isLikelyTd404Name(a.name))),
+        .sort((a, b) => {
+          const aTd = a.likelyTd404 || isLikelyTd404Name(a.name);
+          const bTd = b.likelyTd404 || isLikelyTd404Name(b.name);
+          const aMatch = aTd || a.likelyJosh || isLikelyJoshName(a.name);
+          const bMatch = bTd || b.likelyJosh || isLikelyJoshName(b.name);
+          return Number(bMatch) - Number(aMatch);
+        }),
     [devices],
   );
   const nearby = useMemo(
@@ -160,8 +167,12 @@ export default function PrinterConnectScreen() {
       devices
         .filter((d) => !d.bonded)
         .sort((a, b) => {
-          const aScore = (a.likelyTd404 || isLikelyTd404Name(a.name) ? 2 : 0) + (a.rssi ?? -999);
-          const bScore = (b.likelyTd404 || isLikelyTd404Name(b.name) ? 2 : 0) + (b.rssi ?? -999);
+          const aTd = a.likelyTd404 || isLikelyTd404Name(a.name);
+          const bTd = b.likelyTd404 || isLikelyTd404Name(b.name);
+          const aMatch = aTd || a.likelyJosh || isLikelyJoshName(a.name);
+          const bMatch = bTd || b.likelyJosh || isLikelyJoshName(b.name);
+          const aScore = (aMatch ? 2 : 0) + (a.rssi ?? -999);
+          const bScore = (bMatch ? 2 : 0) + (b.rssi ?? -999);
           return bScore - aScore;
         }),
     [devices],
@@ -170,7 +181,22 @@ export default function PrinterConnectScreen() {
   const handleConnect = async (device: DiscoveredPrinter) => {
     setConnectingId(device.id);
     try {
-      await getPrinterManager().connect(device.id, device.name, device.transport);
+      const isTd404 = device.likelyTd404 || isLikelyTd404Name(device.name);
+      const isJosh = !isTd404 && (device.transport === 'josh-lpapi' || device.likelyJosh || isLikelyJoshName(device.name));
+      const transport = isJosh
+        ? 'josh-lpapi'
+        : (device.transport === 'wifi' ? 'wifi' : 'bluetooth-spp');
+
+      console.info(
+        isJosh
+          ? `[JOSH-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to JOSH LPAPI`
+          : `[CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to classic BT SPP`,
+      );
+      await getPrinterManager().connect(
+        device.id,
+        device.name,
+        transport,
+      );
     } catch (error) {
       if (mountedRef.current) {
         Alert.alert(
@@ -198,11 +224,34 @@ export default function PrinterConnectScreen() {
     }
   };
 
+  const handleJoshMacConnect = async () => {
+    setConnectingId('mac-josh');
+    try {
+      console.info(`[JOSH-CONN-P1:IDENTIFY] Manual MAC connect entered: ${macInput}`);
+      await getPrinterManager().connectJoshByMac(macInput, 'JOSH');
+      Alert.alert('Connected', 'JOSH printer linked over LPAPI.');
+    } catch (error) {
+      Alert.alert(
+        'JOSH Connect Failed',
+        error instanceof Error ? error.message : 'Could not connect to JOSH printer.',
+      );
+    } finally {
+      if (mountedRef.current) setConnectingId(null);
+    }
+  };
+
   const handleReconnectLast = async () => {
     if (!lastDeviceId) return;
     setConnectingId(lastDeviceId);
     try {
-      await getPrinterManager().connect(lastDeviceId, lastDeviceName, 'bluetooth-spp');
+      const isTd = isLikelyTd404Name(lastDeviceName);
+      const isJosh = !isTd && (transport === 'josh-lpapi' || isLikelyJoshName(lastDeviceName));
+      if (isJosh) {
+        const ok = await getPrinterManager().reconnectLastDevice();
+        if (!ok) throw new Error('Could not reconnect to printer.');
+      } else {
+        await getPrinterManager().connect(lastDeviceId, lastDeviceName, 'bluetooth-spp');
+      }
     } catch (error) {
       Alert.alert(
         'Connection Failed',
@@ -214,13 +263,27 @@ export default function PrinterConnectScreen() {
   };
 
   const handleDisconnect = async () => {
-    await getPrinterManager().disconnect();
+    try {
+      await getPrinterManager().disconnect();
+    } catch (error) {
+      Alert.alert(
+        'Disconnect Failed',
+        error instanceof Error ? error.message : 'Could not disconnect.',
+      );
+    }
   };
 
   const handleTestPrint = async () => {
     setTesting(true);
     try {
-      await getPrinterManager().printTestLabel('Sez Print TD-404');
+      const isJosh = getPrinterManager().isJosh;
+      console.info(
+        isJosh
+          ? '[JOSH-PRINT-P1:PREFLIGHT] Test print button tapped (routing: JOSH LPAPI)'
+          : '[PRINT-P1:PREFLIGHT] Test print button tapped (routing: TD-404 / ESCPOS)',
+      );
+      const testName = isJosh ? 'Sez Print JOSH' : 'Sez Print TD-404';
+      await getPrinterManager().printTestLabel(testName);
       Alert.alert('Test Print Sent', 'Check the printer for a sample label.');
     } catch (error) {
       Alert.alert(
@@ -264,6 +327,7 @@ export default function PrinterConnectScreen() {
 
   const renderDevice = (device: DiscoveredPrinter, index: number, total: number) => {
     const td404 = device.likelyTd404 || isLikelyTd404Name(device.name);
+    const isJosh = !td404 && (device.likelyJosh || isLikelyJoshName(device.name) || device.transport === 'josh-lpapi');
     return (
       <Pressable
         key={device.id}
@@ -274,13 +338,23 @@ export default function PrinterConnectScreen() {
           index < total - 1 && styles.deviceRowBorder,
           pressed && styles.pressed,
         ]}>
-        <AppIcon name="printer" tintColor={td404 ? Palette.accent : Palette.ink} size={20} />
+        <AppIcon name="printer" tintColor={isJosh ? '#10B981' : td404 ? Palette.accent : Palette.ink} size={20} />
         <View style={styles.deviceInfo}>
           <View style={styles.nameRow}>
             <Text style={styles.deviceName}>{device.name ?? 'Unknown device'}</Text>
-            {td404 ? (
+            {isJosh ? (
+              <View style={[styles.badge, { backgroundColor: '#10B981' }]}>
+                <Text style={styles.badgeText}>JOSH</Text>
+              </View>
+            ) : td404 ? (
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>TD-404</Text>
+                <Text style={styles.badgeText}>
+                  {device.name?.toLowerCase().includes('tejas')
+                    ? 'TEJAS'
+                    : device.name?.toLowerCase().includes('rudra')
+                      ? 'RUDRA'
+                      : 'TD-404'}
+                </Text>
               </View>
             ) : null}
             {device.bonded ? (
@@ -290,11 +364,13 @@ export default function PrinterConnectScreen() {
             ) : null}
           </View>
           <Text style={styles.deviceMeta}>
-            {device.transport === 'bluetooth-spp'
-              ? 'Classic BT'
-              : device.transport === 'wifi'
-                ? 'Wi‑Fi'
-                : 'BLE'}
+            {device.transport === 'josh-lpapi'
+              ? 'JOSH LPAPI'
+              : device.transport === 'bluetooth-spp'
+                ? 'Classic BT'
+                : device.transport === 'wifi'
+                  ? 'Wi‑Fi'
+                  : 'BLE'}
             {' · '}
             {device.id}
             {device.rssi != null ? ` · ${device.rssi} dBm` : ''}
@@ -502,20 +578,38 @@ export default function PrinterConnectScreen() {
               autoCorrect={false}
               style={styles.input}
             />
-            <Pressable
-              onPress={() => void handleMacConnect()}
-              disabled={connectingId !== null}
-              style={({ pressed }) => [
-                styles.wifiBtn,
-                connectingId !== null && styles.connectBtnDisabled,
-                pressed && styles.pressed,
-              ]}>
-              {connectingId === 'mac' ? (
-                <ActivityIndicator color={Palette.accent} />
-              ) : (
-                <Text style={styles.wifiBtnText}>Connect MAC (Classic SPP)</Text>
-              )}
-            </Pressable>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Pressable
+                onPress={() => void handleMacConnect()}
+                disabled={connectingId !== null}
+                style={({ pressed }) => [
+                  styles.wifiBtn,
+                  { flex: 1 },
+                  connectingId !== null && styles.connectBtnDisabled,
+                  pressed && styles.pressed,
+                ]}>
+                {connectingId === 'mac' ? (
+                  <ActivityIndicator color={Palette.accent} />
+                ) : (
+                  <Text style={styles.wifiBtnText}>TD-404 SPP</Text>
+                )}
+              </Pressable>
+              <Pressable
+                onPress={() => void handleJoshMacConnect()}
+                disabled={connectingId !== null}
+                style={({ pressed }) => [
+                  styles.wifiBtn,
+                  { flex: 1, backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
+                  connectingId !== null && styles.connectBtnDisabled,
+                  pressed && styles.pressed,
+                ]}>
+                {connectingId === 'mac-josh' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>JOSH LPAPI</Text>
+                )}
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.card}>

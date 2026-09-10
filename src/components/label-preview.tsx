@@ -1,13 +1,14 @@
 import { Image } from 'expo-image';
 import { type ReactNode, useState } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { PixelRatio, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
+import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelDocument } from '@/lib/label-document';
 import { fitLabelSize, mediaShapeClipStyle } from '@/lib/label-geometry';
 import { dotsPerMm, rectMmToDots } from '@/lib/printer/print-spec';
-import { canvasFillFromDocument, sortLayers } from '@/lib/template-schema';
+import { canvasFillFromDocument, sortLayers, templateUsesDieCutBackground } from '@/lib/template-schema';
 
 /** Workspace chrome around the artboard — not part of template content. */
 export const LABEL_PAD_STAGE_COLOR = '#C5CDD6';
@@ -75,6 +76,7 @@ export function ArtboardFrame({
   const bg = canvasFillFromDocument(document);
   const shapeClip = mediaShapeClipStyle(document.mediaShape, w, h);
   const showRectBorder = showBorder && document.mediaShape !== 'diecut';
+  const clip = document.mediaShape === 'diecut' ? { overflow: 'visible' as const } : shapeClip;
 
   return (
     <View
@@ -84,12 +86,12 @@ export function ArtboardFrame({
           width: w,
           height: h,
           backgroundColor: bg,
-          ...shapeClip,
+          ...clip,
         },
         style,
       ]}>
       {/* Nested clip — absolute + rotated children must stay inside the label border. */}
-      <View collapsable={false} style={{ width: w, height: h, backgroundColor: bg, ...shapeClip }}>
+      <View collapsable={false} style={{ width: w, height: h, backgroundColor: bg, ...clip }}>
         {children}
       </View>
       {!showRectBorder ? null : (
@@ -109,6 +111,22 @@ export function ArtboardFrame({
   );
 }
 
+/** Catalog card interior — liner behind die-cut stock. */
+export const CATALOG_STOCK_LINER = '#EEF1F6';
+export const CATALOG_STOCK_SLOT_HEIGHT = 176;
+
+export function catalogSlotHeight(widthMm: number, heightMm: number): number {
+  const aspect = heightMm / Math.max(widthMm, 0.01);
+  if (aspect >= 1.35) return 248;
+  if (aspect <= 0.22) return 112;
+  return CATALOG_STOCK_SLOT_HEIGHT;
+}
+
+/** Paint catalog cards denser than the display slot, then scale down. Stored fontSize stays mm. */
+export function catalogPaintDensity(): number {
+  return Math.min(3, Math.max(2, PixelRatio.get() || 2));
+}
+
 type LabelPreviewProps = {
   document: LabelDocument;
   width?: number;
@@ -119,6 +137,8 @@ type LabelPreviewProps = {
   /** When set with exactWidthPx, element boxes use the same edge rounding as TSPL. */
   printDpi?: number;
   showStage?: boolean;
+  /** Template gallery: physical stock on a liner, not editor canvas chrome. */
+  catalogStock?: boolean;
   style?: StyleProp<ViewStyle>;
   showArtboardBorder?: boolean;
   /** Omit elements with needPrinting === false (print capture only). */
@@ -225,13 +245,21 @@ function LabelCanvas({
       {fitted.scale > 0 ? (
         <>
           {hideNonPrinting || printDpi != null ? null : (
-            <CableFlagDieCutOverlay
-              document={document}
-              scale={fitted.scale}
-              printDpi={printDpi}
-              widthPx={fitted.widthPx || 1}
-              heightPx={fitted.heightPx || 1}
-            />
+            <>
+              <StockSilhouetteOverlay
+                document={document}
+                scale={fitted.scale}
+                widthPx={fitted.widthPx || 1}
+                heightPx={fitted.heightPx || 1}
+              />
+              <CableFlagDieCutOverlay
+                document={document}
+                scale={fitted.scale}
+                printDpi={printDpi}
+                widthPx={fitted.widthPx || 1}
+                heightPx={fitted.heightPx || 1}
+              />
+            </>
           )}
           <LabelElements
             document={document}
@@ -245,6 +273,72 @@ function LabelCanvas({
   );
 }
 
+function HiFiCatalogCanvas({
+  document,
+  fitted,
+}: {
+  document: LabelDocument;
+  fitted: { widthPx: number; heightPx: number; scale: number };
+}) {
+  const density = catalogPaintDensity();
+  const diecut =
+    document.mediaShape === 'diecut' ||
+    templateUsesDieCutBackground(document.templatePreviewType ?? '');
+  if (density <= 1.01) {
+    return <LabelCanvas document={document} fitted={fitted} showBorder={!diecut} />;
+  }
+  const hiFi = {
+    widthPx: fitted.widthPx * density,
+    heightPx: fitted.heightPx * density,
+    scale: fitted.scale * density,
+  };
+  return (
+    <View style={{ width: fitted.widthPx, height: fitted.heightPx, overflow: 'hidden' }}>
+      <View
+        style={{
+          width: hiFi.widthPx,
+          height: hiFi.heightPx,
+          transformOrigin: 'top left',
+          transform: [{ scale: 1 / density }],
+        }}>
+        <LabelCanvas document={document} fitted={hiFi} showBorder={!diecut} />
+      </View>
+    </View>
+  );
+}
+
+function CatalogStockPreview({
+  document,
+  slotHeight,
+  style,
+}: {
+  document: LabelDocument;
+  slotHeight?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const [slotWidth, setSlotWidth] = useState(0);
+  const height = slotHeight ?? catalogSlotHeight(document.widthMm, document.heightMm);
+  const padX = 10;
+  const padY = 14;
+  const innerW = Math.max(0, slotWidth - padX * 2);
+  const innerH = Math.max(0, height - padY * 2);
+  const fitted = fitLabelSize(document.widthMm, document.heightMm, innerW, innerH);
+
+  return (
+    <View
+      style={[styles.catalogSlot, { height }, style]}
+      pointerEvents="none"
+      onLayout={(event) => {
+        const next = event.nativeEvent.layout.width;
+        if (Math.abs(next - slotWidth) > 1) setSlotWidth(next);
+      }}>
+      {slotWidth > 0 && fitted.scale > 0 ? (
+        <HiFiCatalogCanvas document={document} fitted={fitted} />
+      ) : null}
+    </View>
+  );
+}
+
 export function LabelPreview({
   document,
   width = 0,
@@ -253,11 +347,22 @@ export function LabelPreview({
   exactHeightPx,
   printDpi,
   showStage = false,
+  catalogStock = false,
   style,
   showArtboardBorder = true,
   hideNonPrinting = false,
 }: LabelPreviewProps) {
   const [stageWidth, setStageWidth] = useState(0);
+
+  if (catalogStock) {
+    return (
+      <CatalogStockPreview
+        document={document}
+        slotHeight={maxHeight}
+        style={style}
+      />
+    );
+  }
 
   if (exactWidthPx != null && exactHeightPx != null) {
     const w = Math.max(1, Math.round(exactWidthPx));
@@ -335,6 +440,13 @@ const styles = StyleSheet.create({
     backgroundColor: LABEL_PAD_STAGE_COLOR,
     paddingVertical: LABEL_PAD_INSET,
     paddingHorizontal: LABEL_PAD_INSET,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  catalogSlot: {
+    width: '100%',
+    backgroundColor: CATALOG_STOCK_LINER,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',

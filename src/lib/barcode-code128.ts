@@ -204,6 +204,55 @@ function encodeItf(input: string): number[] | null {
   return modules;
 }
 
+const UPC_A_LEFT = [
+  '0001101',
+  '0011001',
+  '0010011',
+  '0111101',
+  '0100011',
+  '0110001',
+  '0101111',
+  '0111011',
+  '0110111',
+  '0001011',
+];
+const UPC_A_RIGHT = [
+  '1110010',
+  '1100110',
+  '1101100',
+  '1000010',
+  '1011100',
+  '1001110',
+  '1010000',
+  '1000100',
+  '1001000',
+  '1110100',
+];
+
+function bitsToModules(bits: string): number[] {
+  const modules: number[] = [];
+  let i = 0;
+  while (i < bits.length) {
+    let j = i;
+    while (j < bits.length && bits[j] === bits[i]) j += 1;
+    modules.push(j - i);
+    i = j;
+  }
+  return modules;
+}
+
+function encodeUpcA(input: string): number[] | null {
+  const digits = input.replace(/\D/g, '');
+  if (digits.length !== 11 && digits.length !== 12) return null;
+  const payload = digits.length === 11 ? `${digits}0` : digits;
+  let bits = '101';
+  for (let i = 0; i < 6; i += 1) bits += UPC_A_LEFT[Number(payload[i])];
+  bits += '01010';
+  for (let i = 6; i < 12; i += 1) bits += UPC_A_RIGHT[Number(payload[i])];
+  bits += '101';
+  return bitsToModules(bits);
+}
+
 export const BARCODE_MODES = ['CODE-128', 'CODE-39', 'ITF', 'EAN-13', 'EAN-8', 'UPC-A'] as const;
 
 /** Encode barcode content for the selected mode into normalized bar rectangles. */
@@ -213,7 +262,11 @@ export function barcodeBarsForMode(mode: string, input: string): BarcodeBar[] | 
     const modules = encodeCode39(content);
     return modules ? modulesToBars(modules) : null;
   }
-  if (mode === 'ITF' || mode === 'EAN-13' || mode === 'EAN-8' || mode === 'UPC-A') {
+  if (mode === 'UPC-A') {
+    const modules = encodeUpcA(content);
+    return modules ? modulesToBars(modules) : null;
+  }
+  if (mode === 'ITF' || mode === 'EAN-13' || mode === 'EAN-8') {
     const modules = encodeItf(content);
     return modules ? modulesToBars(modules) : null;
   }

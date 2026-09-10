@@ -12,6 +12,8 @@ export type EditorSettings = {
   highlightColumnName: boolean;
   pictureAdsorption: boolean;
   editorGrid: boolean;
+  /** Extra D-pad under the canvas. Off by default — use Editor Settings to show it. */
+  showNudgePad: boolean;
   borderColorIndex: number;
   tableColorIndex: number;
 };
@@ -53,6 +55,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   highlightColumnName: false,
   pictureAdsorption: true,
   editorGrid: false,
+  showNudgePad: false,
   borderColorIndex: 1,
   tableColorIndex: 1,
 };

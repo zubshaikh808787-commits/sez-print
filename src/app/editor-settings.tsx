@@ -19,6 +19,7 @@ export default function EditorSettingsScreen() {
     highlightColumnName,
     pictureAdsorption,
     editorGrid,
+    showNudgePad,
     borderColorIndex,
     tableColorIndex,
   } = useSettingsStore((s) => s.editor);
@@ -29,6 +30,7 @@ export default function EditorSettingsScreen() {
   const setHighlightColumnName = (v: boolean) => patchEditor({ highlightColumnName: v });
   const setPictureAdsorption = (v: boolean) => patchEditor({ pictureAdsorption: v });
   const setEditorGrid = (v: boolean) => patchEditor({ editorGrid: v });
+  const setShowNudgePad = (v: boolean) => patchEditor({ showNudgePad: v });
   const setBorderColorIndex = (v: number) => patchEditor({ borderColorIndex: v });
   const setTableColorIndex = (v: number) => patchEditor({ tableColorIndex: v });
 
@@ -65,6 +67,12 @@ export default function EditorSettingsScreen() {
           label="Editor Grid"
           value={editorGrid}
           onValueChange={setEditorGrid}
+          showDivider
+        />
+        <SettingsToggleRow
+          label="Touch Control Pad"
+          value={showNudgePad}
+          onValueChange={setShowNudgePad}
         />
       </SettingsCard>
 

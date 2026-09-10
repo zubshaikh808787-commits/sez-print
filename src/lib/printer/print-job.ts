@@ -97,6 +97,12 @@ export function orientedPrintSize(
   return { widthMm, heightMm };
 }
 
+/** Rotate a captured PNG so JOSH SIZE millimetres match the bitmap aspect. */
+export function rotatePngBase64(base64: string, orientation: LabelOrientation): string {
+  if (orientation === 0) return base64;
+  return grayToPngBase64(rotateGray(pngBase64ToGray(base64), orientation));
+}
+
 /**
  * Map captured PNG onto the TSPL bitmap canvas.
  *

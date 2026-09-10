@@ -8,8 +8,19 @@
 
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM } from '@/constants/jewelry-diecut';
 import { CABLE_FLAG_DIECUT } from '@/constants/cable-flag-diecut';
+import { containFitLabel } from '@/lib/label-coordinate-system';
 import { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout, formatTsplSizeCommand } from '@/lib/printer/print-spec';
 import type { MediaShape } from '@/lib/label-document';
+
+export {
+  computeScale,
+  containFitLabel,
+  mmToPx,
+  pxToMm,
+  rectMmToPx,
+  rectPxToMm,
+  printDotsPerMm,
+} from '@/lib/label-coordinate-system';
 
 export { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout, formatTsplSizeCommand };
 export type { MediaShape };
@@ -109,8 +120,7 @@ export function matchingPresetId(widthMm: number, heightMm: number): string {
 
 /** Uniform contain-fit from mm into a pixel box.
  * `scale` (px per mm) is the single source of truth for canvas + element layout.
- * Both axes share one scale so width/height aspect always matches widthMm/heightMm
- * (required for ViewShot → printer-dot scaling without stretching past borders).
+ * Both axes share one scale so width/height aspect always matches widthMm/heightMm.
  */
 export function fitLabelSize(
   widthMm: number,
@@ -118,23 +128,11 @@ export function fitLabelSize(
   maxWidthPx: number,
   maxHeightPx: number,
 ): { widthPx: number; heightPx: number; scale: number } {
-  const w = Math.max(widthMm, 0.01);
-  const h = Math.max(heightMm, 0.01);
-  if (maxWidthPx <= 0 || maxHeightPx <= 0) {
-    return { widthPx: 1, heightPx: 1, scale: 0 };
-  }
-  const rawScale = Math.min(maxWidthPx / w, maxHeightPx / h);
-  let widthPx = Math.max(1, Math.floor(w * rawScale));
-  let heightPx = Math.max(1, Math.round(h * (widthPx / w)));
-  if (heightPx > maxHeightPx) {
-    heightPx = Math.max(1, Math.floor(maxHeightPx));
-    widthPx = Math.max(1, Math.round(w * (heightPx / h)));
-  }
-  if (widthPx > maxWidthPx) {
-    widthPx = Math.max(1, Math.floor(maxWidthPx));
-    heightPx = Math.max(1, Math.round(h * (widthPx / w)));
-  }
-  return { widthPx, heightPx, scale: widthPx / w };
+  const fit = containFitLabel(
+    { widthPx: maxWidthPx, heightPx: maxHeightPx },
+    { widthMm, heightMm },
+  );
+  return { widthPx: fit.canvasWidthPx, heightPx: fit.canvasHeightPx, scale: fit.pxPerMM };
 }
 
 
@@ -185,6 +183,104 @@ export function printMediaSizeMm(widthMm: number, heightMm: number): LabelSizeMm
     widthMm: Math.max(0.1, Math.round(widthMm * 100) / 100),
     heightMm: Math.max(0.1, Math.round(heightMm * 100) / 100),
   };
+}
+
+/**
+ * Catalog thumbnails keep true mm aspect, but cap px/mm so a 15 mm tag does not
+ * fill the same slot as a 90 mm label. Oversized stock still contain-fits.
+ */
+export const CATALOG_REF_WIDTH_MM = 90;
+export const CATALOG_REF_HEIGHT_MM = 52;
+
+/** Typical editor pad reference — 80×50 mm nearly fills the pad; smaller stock stays smaller. */
+export const EDITOR_REF_WIDTH_MM = 80;
+export const EDITOR_REF_HEIGHT_MM = 50;
+
+function fitLabelSizeCapped(
+  widthMm: number,
+  heightMm: number,
+  maxWidthPx: number,
+  maxHeightPx: number,
+  refWidthMm: number,
+  refHeightMm: number,
+): { widthPx: number; heightPx: number; scale: number } {
+  const contain = fitLabelSize(widthMm, heightMm, maxWidthPx, maxHeightPx);
+  if (maxWidthPx <= 0 || maxHeightPx <= 0) return contain;
+  const maxScale = Math.min(maxWidthPx / refWidthMm, maxHeightPx / refHeightMm);
+  if (contain.scale <= maxScale + 1e-9) return contain;
+  const w = Math.max(widthMm, 0.01);
+  const h = Math.max(heightMm, 0.01);
+  const widthPx = Math.max(1, Math.round(w * maxScale));
+  const heightPx = Math.max(1, Math.round(h * maxScale));
+  if (widthPx > maxWidthPx || heightPx > maxHeightPx) return contain;
+  return { widthPx, heightPx, scale: widthPx / w };
+}
+
+export function fitCatalogLabel(
+  widthMm: number,
+  heightMm: number,
+  maxWidthPx: number,
+  maxHeightPx: number,
+): { widthPx: number; heightPx: number; scale: number } {
+  return fitLabelSizeCapped(
+    widthMm,
+    heightMm,
+    maxWidthPx,
+    maxHeightPx,
+    CATALOG_REF_WIDTH_MM,
+    CATALOG_REF_HEIGHT_MM,
+  );
+}
+
+/**
+ * Editor artboard: contain-fit into the pad, never overflow, never stretch.
+ * One pxPerMM for both axes (Canva pad). Catalog thumbnails still use the ref cap.
+ */
+export function fitEditorLabel(
+  widthMm: number,
+  heightMm: number,
+  maxWidthPx: number,
+  maxHeightPx: number,
+): { widthPx: number; heightPx: number; scale: number } {
+  return fitLabelSize(widthMm, heightMm, maxWidthPx, maxHeightPx);
+}
+
+/** Space reserved at the bottom of the pad for the Fit / + / − chip. */
+export const EDITOR_PAD_ZOOM_CHROME_PX = 48;
+
+/**
+ * Fit the canvas so the ruler board (rulers + artboard) stays inside the pad.
+ * Use the measured ZoomableEditPad size, not the phone window width.
+ */
+export function fitEditorPadBoard(
+  widthMm: number,
+  heightMm: number,
+  padWidthPx: number,
+  padHeightPx: number,
+  rulerSizePx: number,
+): { widthPx: number; heightPx: number; scale: number; boardWidthPx: number; boardHeightPx: number } {
+  const padInset = 6;
+  const maxBoardW = Math.max(64, padWidthPx - padInset);
+  const maxBoardH = Math.max(64, padHeightPx - padInset - EDITOR_PAD_ZOOM_CHROME_PX);
+  const maxCanvasW = Math.max(48, maxBoardW - rulerSizePx);
+  const maxCanvasH = Math.max(48, maxBoardH - rulerSizePx);
+  const fitted = containFitLabel(
+    { widthPx: maxCanvasW, heightPx: maxCanvasH },
+    { widthMm, heightMm },
+  );
+  return {
+    widthPx: fitted.canvasWidthPx,
+    heightPx: fitted.canvasHeightPx,
+    scale: fitted.pxPerMM,
+    boardWidthPx: rulerSizePx + fitted.canvasWidthPx,
+    boardHeightPx: rulerSizePx + fitted.canvasHeightPx,
+  };
+}
+
+/** View zoom is on top of the fit scale. 1 = letterboxed fit, not a physical 1:1 print preview. */
+export function formatViewZoomLabel(zoom: number): string {
+  if (!Number.isFinite(zoom) || Math.abs(zoom - 1) <= 0.02) return 'Fit';
+  return `${Math.round(zoom * 100)}%`;
 }
 
 /** Clip style so on-screen / capture artboard matches the physical stock outline. */

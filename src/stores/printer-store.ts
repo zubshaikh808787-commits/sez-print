@@ -11,7 +11,7 @@ export type PrinterConnectionStatus =
   | 'connected'
   | 'printing';
 
-export type PrinterTransport = 'bluetooth-spp' | 'bluetooth-ble' | 'wifi';
+export type PrinterTransport = 'bluetooth-spp' | 'bluetooth-ble' | 'wifi' | 'josh-lpapi';
 
 export type PrintHistoryEntry = {
   id: string;
@@ -27,7 +27,7 @@ type PrinterStoreState = {
   deviceId: string | null;
   deviceName: string | null;
   transport: PrinterTransport | null;
-  sdkId: 'td404' | 'generic' | null;
+  sdkId: 'td404' | 'josh' | 'generic' | null;
   /** Backend Wi‑Fi session id when transport === 'wifi' */
   backendPrinterId: string | null;
   lastDeviceId: string | null;
@@ -39,7 +39,7 @@ type PrinterStoreState = {
     deviceName: string,
     meta?: {
       transport?: PrinterTransport;
-      sdkId?: 'td404' | 'generic';
+      sdkId?: 'td404' | 'josh' | 'generic';
       backendPrinterId?: string | null;
     },
   ) => void;

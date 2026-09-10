@@ -1,11 +1,14 @@
 import { isCableFlagPreviewType } from '@/constants/cable-flag-diecut';
+import { isRatTail143PreviewType } from '@/constants/rat-tail-143';
 import {
   cloneDocument,
   createLabelDocument,
+  elementSizeMm,
   type LabelDocument,
   type LabelElement,
   type TemplateBackground,
 } from '@/lib/label-document';
+import { computeScale } from '@/lib/label-coordinate-system';
 import { normalizeDocumentElements } from '@/lib/element-sizing';
 
 export type { TemplateBackground } from '@/lib/label-document';
@@ -36,6 +39,16 @@ export function colorBackground(color: string): TemplateBackground {
   return { type: 'color', color };
 }
 
+/** Templates whose die-cut is the shape layers — no rectangular paper fill. */
+export function templateUsesDieCutBackground(previewType: string): boolean {
+  return (
+    previewType.startsWith('jew-') ||
+    previewType.startsWith('circle-') ||
+    previewType.startsWith('cable-') ||
+    isCableFlagPreviewType(previewType)
+  );
+}
+
 /** Fill applied to the artboard surface — never a hardcoded editor default. */
 export function canvasFillFromTemplate(background: TemplateBackground | undefined): string {
   if (!background || background.type === 'none') return 'transparent';
@@ -44,9 +57,10 @@ export function canvasFillFromTemplate(background: TemplateBackground | undefine
 }
 
 export function canvasFillFromDocument(doc: Pick<LabelDocument, 'background' | 'paperType' | 'templatePreviewType'>): string {
-  if (isCableFlagPreviewType(doc.templatePreviewType)) return 'transparent';
-  if (doc.background?.type === 'color') return doc.background.color;
-  if (doc.background?.type === 'image') return 'transparent';
+  if (templateUsesDieCutBackground(doc.templatePreviewType ?? '')) return 'transparent';
+  if (!doc.background || doc.background.type === 'none') return 'transparent';
+  if (doc.background.type === 'color') return doc.background.color;
+  if (doc.background.type === 'image') return 'transparent';
   if (doc.paperType === 'Transparent') return 'transparent';
   return '#FFFFFF';
 }
@@ -62,10 +76,10 @@ export function templateScaleFactor(
   deviceCanvasWidth: number,
   deviceCanvasHeight: number,
 ): number {
-  const w = Math.max(designWidth, 0.01);
-  const h = Math.max(designHeight, 0.01);
-  if (deviceCanvasWidth <= 0 || deviceCanvasHeight <= 0) return 0;
-  return Math.min(deviceCanvasWidth / w, deviceCanvasHeight / h);
+  return computeScale(
+    { widthPx: deviceCanvasWidth, heightPx: deviceCanvasHeight },
+    { widthMm: designWidth, heightMm: designHeight },
+  );
 }
 
 export function sortLayers(layers: LabelElement[]): LabelElement[] {
@@ -78,12 +92,70 @@ export function sortLayers(layers: LabelElement[]): LabelElement[] {
 
 /** Stamp stable ids / zIndex so preview and editor share one schema instance. */
 export function freezeTemplateLayers(previewType: string, layers: LabelElement[]): LabelElement[] {
-  return layers.map((layer, index) => ({
-    ...layer,
-    id: `${previewType}__${index}`,
-    zIndex: index,
-    opacity: layer.opacity ?? 1,
-  }));
+  const lockContent = isRatTail143PreviewType(previewType);
+  return layers.map((layer, index) => {
+    const chrome = layer.needPrinting === false || layer.type === 'border';
+    return {
+      ...layer,
+      id: `${previewType}__${index}`,
+      zIndex: index,
+      opacity: layer.opacity ?? 1,
+      lockMovement: chrome || lockContent ? true : layer.lockMovement,
+    };
+  });
+}
+
+export type TemplateDocumentValidation = {
+  ok: boolean;
+  errors: string[];
+};
+
+const CANVAS_SLACK_MM = 0.4;
+
+function isFinitePositive(n: number): boolean {
+  return Number.isFinite(n) && n > 0;
+}
+
+function isFiniteNumber(n: number): boolean {
+  return typeof n === 'number' && Number.isFinite(n);
+}
+
+/** Fail loud on NaN / empty canvas. Elements must sit on the millimetre pad. */
+export function validateTemplateDocument(doc: LabelDocument): TemplateDocumentValidation {
+  const errors: string[] = [];
+  if (!isFinitePositive(doc.widthMm)) errors.push('widthMm must be a finite number > 0');
+  if (!isFinitePositive(doc.heightMm)) errors.push('heightMm must be a finite number > 0');
+
+  for (const el of doc.elements) {
+    const id = el.id || el.type;
+    if (!isFiniteNumber(el.left) || !isFiniteNumber(el.top)) {
+      errors.push(`${id}: NaN origin`);
+      continue;
+    }
+    const size = elementSizeMm(el);
+    if (!isFiniteNumber(size.width) || !isFiniteNumber(size.height)) {
+      errors.push(`${id}: NaN size`);
+      continue;
+    }
+    if (size.width < 0 || size.height < 0) {
+      errors.push(`${id}: negative size`);
+    }
+    if (el.left < -0.05 || el.top < -0.05) {
+      errors.push(`${id}: origin outside canvas`);
+    }
+    if (isFinitePositive(doc.widthMm) && el.left + size.width > doc.widthMm + CANVAS_SLACK_MM) {
+      errors.push(`${id}: extends past widthMm`);
+    }
+    if (isFinitePositive(doc.heightMm) && el.top + size.height > doc.heightMm + CANVAS_SLACK_MM) {
+      errors.push(`${id}: extends past heightMm`);
+    }
+    if (el.type === 'barcode') {
+      const content = (el.content ?? '').trim();
+      if (!content) errors.push(`${id}: barcode content missing`);
+    }
+  }
+
+  return { ok: errors.length === 0, errors };
 }
 
 export function instantiateTemplate(definition: TemplateDefinition): LabelDocument {
@@ -100,21 +172,27 @@ export function instantiateTemplate(definition: TemplateDefinition): LabelDocume
     templatePreviewType: definition.id,
     templateCategory: definition.category,
   };
-  return {
+  const next: LabelDocument = {
     ...document,
     elements: normalizeDocumentElements(document),
   };
+
+  if (!isFinitePositive(next.widthMm) || !isFinitePositive(next.heightMm)) {
+    throw new Error(
+      `Invalid template "${definition.id}": canvas mm must be finite and > 0 (got ${next.widthMm}×${next.heightMm})`,
+    );
+  }
+  const nanEl = next.elements.find((el) => {
+    const size = elementSizeMm(el);
+    return ![el.left, el.top, size.width, size.height].every(isFiniteNumber);
+  });
+  if (nanEl) {
+    throw new Error(`Invalid template "${definition.id}": element ${nanEl.id} has NaN geometry`);
+  }
+
+  return next;
 }
 
 export function cloneTemplateDocument(doc: LabelDocument): LabelDocument {
   return cloneDocument(doc);
-}
-
-/** Templates whose die-cut is the shape layers — no rectangular paper fill. */
-export function templateUsesDieCutBackground(previewType: string): boolean {
-  return (
-    previewType.startsWith('jew-') ||
-    previewType.startsWith('circle-') ||
-    isCableFlagPreviewType(previewType)
-  );
 }

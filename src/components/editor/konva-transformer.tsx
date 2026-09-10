@@ -15,6 +15,8 @@ import { AppIcon } from '@/components/app-icon';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelElement } from '@/lib/label-document';
 import { mmToPt } from '@/lib/label-document';
+import { finiteMm } from '@/lib/editor/engine';
+import { mmToPx, pxToMm } from '@/lib/label-coordinate-system';
 
 export type TransformCommitPayload = {
   id: string;
@@ -28,8 +30,7 @@ export type TransformCommitPayload = {
 
 type KonvaTransformerProps = {
   element: LabelElement;
-  scaleX: number;
-  scaleY: number;
+  pxPerMM: number;
   padZoom: number;
   selected: boolean;
   selectionColor: string;
@@ -47,7 +48,8 @@ const HANDLE_SIZE = 18;
 const HANDLE_RADIUS = 3;
 const ROTATE_HANDLE_SIZE = 24;
 const ROTATE_STEM = 28;
-const MIN_SIZE_PX = 18;
+/** Handle chrome and tap targets stay ≥18px. Content paints at true mm × scale. */
+const MIN_HANDLE_PX = 18;
 const DOUBLE_TAP_MS = 350;
 const TOOLTIP_MS = 80;
 
@@ -55,8 +57,7 @@ type HandlePosition = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
 export const KonvaTransformer = memo(function KonvaTransformer({
   element,
-  scaleX,
-  scaleY,
+  pxPerMM,
   padZoom,
   selected,
   selectionColor,
@@ -69,17 +70,18 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   onTransformEnd,
   onQuickRotate,
 }: KonvaTransformerProps) {
-  const sx = scaleX > 0 ? scaleX : 1;
-  const sy = scaleY > 0 ? scaleY : 1;
+  const pxPerMMSafe = pxPerMM > 0 && Number.isFinite(pxPerMM) ? pxPerMM : 1;
+  const sx = pxPerMMSafe;
+  const sy = pxPerMMSafe;
   const sizeMm = elementSizeMm(element);
+  const hidden = element.visible === false;
 
-  const baseLeftPx = element.left * sx;
-  const baseTopPx = element.top * sy;
-  const baseWidthPx = Math.max(MIN_SIZE_PX, sizeMm.width * sx);
-  const baseHeightPx = Math.max(
-    element.type === 'line' ? 2 : MIN_SIZE_PX,
-    sizeMm.height * sy,
-  );
+  const baseLeftPx = mmToPx(finiteMm(element.left), pxPerMMSafe);
+  const baseTopPx = mmToPx(finiteMm(element.top), pxPerMMSafe);
+  const baseWidthPx = Math.max(1, mmToPx(sizeMm.width, pxPerMMSafe));
+  const baseHeightPx = Math.max(element.type === 'line' ? 2 : 1, mmToPx(sizeMm.height, pxPerMMSafe));
+  /** Resize floor in px ≈ 2 mm so handles never rewrite a 18px-inflated millimetre size. */
+  const minResizePx = Math.max(4, 2 * pxPerMMSafe);
   const baseRotation = element.rotation ?? 0;
 
   const transX = useSharedValue(0);
@@ -174,8 +176,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       // Keep element strictly within canvas boundaries
       const maxLeft = Math.max(0, canvasWidthMm - widthMm);
       const maxTop = Math.max(0, canvasHeightMm - heightMm);
-      const leftMm = Math.max(0, Math.min(maxLeft, nextLeftPx / sx));
-      const topMm = Math.max(0, Math.min(maxTop, nextTopPx / sy));
+      const leftMm = Math.max(0, Math.min(maxLeft, pxToMm(nextLeftPx, pxPerMMSafe)));
+      const topMm = Math.max(0, Math.min(maxTop, pxToMm(nextTopPx, pxPerMMSafe)));
 
       const roundedLeft = Math.round(leftMm * 10) / 10;
       const roundedTop = Math.round(topMm * 10) / 10;
@@ -212,17 +214,17 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
       });
     },
-    [sx, sy, sizeMm.width, sizeMm.height, canvasWidthMm, canvasHeightMm, element.id, element.left, element.top, baseRotation, transX, transY, isInteracting, pendingCommit],
+    [pxPerMMSafe, sizeMm.width, sizeMm.height, canvasWidthMm, canvasHeightMm, element.id, element.left, element.top, baseRotation, transX, transY, isInteracting, pendingCommit],
   );
 
   /** Committed resize: alters width & height via resize handles. */
   const dispatchResizeCommit = useCallback(
     (nextLeftPx: number, nextTopPx: number, nextWPx: number, nextHPx: number, rot: number) => {
       setTooltipText(null);
-      let leftMm = Math.max(0, nextLeftPx / sx);
-      let topMm = Math.max(0, nextTopPx / sy);
-      let widthMm = Math.max(2, nextWPx / sx);
-      let heightMm = Math.max(element.type === 'line' ? 0.5 : 2, nextHPx / sy);
+      let leftMm = Math.max(0, pxToMm(nextLeftPx, pxPerMMSafe));
+      let topMm = Math.max(0, pxToMm(nextTopPx, pxPerMMSafe));
+      let widthMm = Math.max(2, pxToMm(nextWPx, pxPerMMSafe));
+      let heightMm = Math.max(element.type === 'line' ? 0.5 : 2, pxToMm(nextHPx, pxPerMMSafe));
 
       if (leftMm + widthMm > canvasWidthMm) {
         widthMm = Math.max(2, canvasWidthMm - leftMm);
@@ -254,7 +256,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         fontSize,
       });
     },
-    [sx, sy, canvasWidthMm, canvasHeightMm, element, sizeMm.height],
+    [pxPerMMSafe, canvasWidthMm, canvasHeightMm, element, sizeMm.height],
   );
 
   /** Committed rotate: alters rotation angle only. */
@@ -278,11 +280,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       const now = Date.now();
       if (now - lastTooltipAt.current < TOOLTIP_MS) return;
       lastTooltipAt.current = now;
-      const wMm = (wPx / sx).toFixed(1);
-      const hMm = (hPx / sy).toFixed(1);
+      const wMm = pxToMm(wPx, pxPerMMSafe).toFixed(1);
+      const hMm = pxToMm(hPx, pxPerMMSafe).toFixed(1);
       setTooltipText(`${wMm} × ${hMm} mm`);
     },
-    [sx, sy],
+    [pxPerMMSafe],
   );
 
   const startTX = useSharedValue(0);
@@ -302,10 +304,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         .maxPointers(1)
         .shouldCancelWhenOutside(false)
         .hitSlop({
-          top: Math.max(0, (42 - baseHeightPx) / 2),
-          bottom: Math.max(0, (42 - baseHeightPx) / 2),
-          left: Math.max(0, (42 - baseWidthPx) / 2),
-          right: Math.max(0, (42 - baseWidthPx) / 2),
+          top: Math.max(0, (42 - Math.max(MIN_HANDLE_PX, baseHeightPx)) / 2),
+          bottom: Math.max(0, (42 - Math.max(MIN_HANDLE_PX, baseHeightPx)) / 2),
+          left: Math.max(0, (42 - Math.max(MIN_HANDLE_PX, baseWidthPx)) / 2),
+          right: Math.max(0, (42 - Math.max(MIN_HANDLE_PX, baseWidthPx)) / 2),
         })
         .onStart(() => {
           'worklet';
@@ -454,25 +456,25 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           let nw = startW.value;
           let nh = startH.value;
           if (handle === 'se') {
-            nw = Math.max(MIN_SIZE_PX, startW.value + dx);
-            nh = Math.max(MIN_SIZE_PX, startH.value + dy);
+            nw = Math.max(minResizePx, startW.value + dx);
+            nh = Math.max(minResizePx, startH.value + dy);
           } else if (handle === 'e') {
-            nw = Math.max(MIN_SIZE_PX, startW.value + dx);
+            nw = Math.max(minResizePx, startW.value + dx);
           } else if (handle === 's') {
-            nh = Math.max(MIN_SIZE_PX, startH.value + dy);
+            nh = Math.max(minResizePx, startH.value + dy);
           } else if (handle === 'ne') {
-            nw = Math.max(MIN_SIZE_PX, startW.value + dx);
-            nh = Math.max(MIN_SIZE_PX, startH.value - dy);
+            nw = Math.max(minResizePx, startW.value + dx);
+            nh = Math.max(minResizePx, startH.value - dy);
           } else if (handle === 'n') {
-            nh = Math.max(MIN_SIZE_PX, startH.value - dy);
+            nh = Math.max(minResizePx, startH.value - dy);
           } else if (handle === 'nw') {
-            nw = Math.max(MIN_SIZE_PX, startW.value - dx);
-            nh = Math.max(MIN_SIZE_PX, startH.value - dy);
+            nw = Math.max(minResizePx, startW.value - dx);
+            nh = Math.max(minResizePx, startH.value - dy);
           } else if (handle === 'w') {
-            nw = Math.max(MIN_SIZE_PX, startW.value - dx);
+            nw = Math.max(minResizePx, startW.value - dx);
           } else {
-            nw = Math.max(MIN_SIZE_PX, startW.value - dx);
-            nh = Math.max(MIN_SIZE_PX, startH.value + dy);
+            nw = Math.max(minResizePx, startW.value - dx);
+            nh = Math.max(minResizePx, startH.value + dy);
           }
 
           let ax = 0;
@@ -546,6 +548,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       element.id,
       dispatchResizeCommit,
       updateTooltipJS,
+      minResizePx,
     ],
   );
 
@@ -637,7 +640,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     height: animH.value,
     transform: [{ rotate: `${animRot.value}deg` }],
     zIndex: selected ? 99 : element.zIndex ?? 1,
-    opacity: element.opacity ?? 1,
+    opacity: hidden ? 0.28 : element.opacity ?? 1,
     overflow: 'visible' as const,
   }));
 
@@ -673,7 +676,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           element={element}
           widthPx={baseWidthPx}
           heightPx={baseHeightPx}
-          scale={Math.min(sx, sy)}
+          scale={pxPerMMSafe}
         />
       </View>
     );
@@ -690,7 +693,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               element={element}
               widthPx={baseWidthPx}
               heightPx={baseHeightPx}
-              scale={Math.min(sx, sy)}
+              scale={pxPerMMSafe}
             />
           </View>
         </Animated.View>
@@ -712,70 +715,74 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             </View>
           ) : null}
 
-          <View pointerEvents="box-none" style={styles.rotateWrap}>
-            <View style={[styles.rotateStem, { backgroundColor: borderStrokeColor }]} />
-            <GestureDetector gesture={combinedRotateGesture}>
-              <View
-                hitSlop={{ top: 14, left: 14, right: 14, bottom: 0 }}
-                style={[styles.rotateAnchor, { backgroundColor: borderStrokeColor }]}>
-                <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={12} />
-              </View>
-            </GestureDetector>
-          </View>
-
-          <HandleAnchor
-            position="nw"
-            gesture={createHandleGesture('nw')}
-            borderColor={borderStrokeColor}
-            style={styles.handleNW}
-          />
-          <HandleAnchor
-            position="ne"
-            gesture={createHandleGesture('ne')}
-            borderColor={borderStrokeColor}
-            style={styles.handleNE}
-          />
-          <HandleAnchor
-            position="se"
-            gesture={createHandleGesture('se')}
-            borderColor={borderStrokeColor}
-            style={styles.handleSE}
-          />
-          <HandleAnchor
-            position="sw"
-            gesture={createHandleGesture('sw')}
-            borderColor={borderStrokeColor}
-            style={styles.handleSW}
-          />
-
-          {baseWidthPx >= 48 && baseHeightPx >= 48 ? (
+          {element.lockMovement ? null : (
             <>
+              <View pointerEvents="box-none" style={styles.rotateWrap}>
+                <View style={[styles.rotateStem, { backgroundColor: borderStrokeColor }]} />
+                <GestureDetector gesture={combinedRotateGesture}>
+                  <View
+                    hitSlop={{ top: 14, left: 14, right: 14, bottom: 0 }}
+                    style={[styles.rotateAnchor, { backgroundColor: borderStrokeColor }]}>
+                    <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={12} />
+                  </View>
+                </GestureDetector>
+              </View>
+
               <HandleAnchor
-                position="n"
-                gesture={createHandleGesture('n')}
+                position="nw"
+                gesture={createHandleGesture('nw')}
                 borderColor={borderStrokeColor}
-                style={styles.handleN}
+                style={styles.handleNW}
               />
               <HandleAnchor
-                position="e"
-                gesture={createHandleGesture('e')}
+                position="ne"
+                gesture={createHandleGesture('ne')}
                 borderColor={borderStrokeColor}
-                style={styles.handleE}
+                style={styles.handleNE}
               />
               <HandleAnchor
-                position="s"
-                gesture={createHandleGesture('s')}
+                position="se"
+                gesture={createHandleGesture('se')}
                 borderColor={borderStrokeColor}
-                style={styles.handleS}
+                style={styles.handleSE}
               />
               <HandleAnchor
-                position="w"
-                gesture={createHandleGesture('w')}
+                position="sw"
+                gesture={createHandleGesture('sw')}
                 borderColor={borderStrokeColor}
-                style={styles.handleW}
+                style={styles.handleSW}
               />
+
+              {baseWidthPx >= 48 && baseHeightPx >= 48 ? (
+                <>
+                  <HandleAnchor
+                    position="n"
+                    gesture={createHandleGesture('n')}
+                    borderColor={borderStrokeColor}
+                    style={styles.handleN}
+                  />
+                  <HandleAnchor
+                    position="e"
+                    gesture={createHandleGesture('e')}
+                    borderColor={borderStrokeColor}
+                    style={styles.handleE}
+                  />
+                  <HandleAnchor
+                    position="s"
+                    gesture={createHandleGesture('s')}
+                    borderColor={borderStrokeColor}
+                    style={styles.handleS}
+                  />
+                  <HandleAnchor
+                    position="w"
+                    gesture={createHandleGesture('w')}
+                    borderColor={borderStrokeColor}
+                    style={styles.handleW}
+                  />
+                </>
+              ) : null}
             </>
-          ) : null}
+          )}
 
           {element.lockMovement ? (
             <View pointerEvents="none" style={styles.lockBadge}>

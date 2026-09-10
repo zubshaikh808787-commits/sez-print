@@ -9,9 +9,16 @@ import {
 } from '@/components/editor/types';
 import { buildIndustryPreviewElements } from '@/constants/industry-template-elements';
 import { buildJewelryTemplateElements } from '@/constants/jewelry-template-elements';
+import { buildRatTail143Elements } from '@/constants/rat-tail-143';
 import { templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
 import { generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { CABLE_FLAG_DIECUT, isCableFlagPreviewType } from '@/constants/cable-flag-diecut';
+import { hasStockSilhouette } from '@/lib/stock-silhouette';
+import {
+  canvasMmFromGeometry,
+  geometryForPreviewType,
+  isRatTailGeometry,
+} from '@/lib/media-geometry';
 import {
   colorBackground,
   emptyBackground,
@@ -63,6 +70,7 @@ function text(
     top: frame.top,
     width: frame.width,
     height: textBlockHeightMm(fontSize, content.split('\n').length),
+    drawingColorIndex: 1,
     ...extra,
   };
 }
@@ -77,6 +85,7 @@ function barcode(frame: Frame, content: string): LabelElement {
     top: frame.top,
     width: frame.width,
     height: frame.height ?? 10,
+    drawingColorIndex: 1,
   };
 }
 
@@ -176,6 +185,10 @@ export function buildTemplateElements(
   h: number,
   previewType?: string,
 ): LabelElement[] {
+  if (previewType === 'cable-rattail-143x635' || previewType === 'jew-rattail-143x635') {
+    return buildRatTail143Elements();
+  }
+
   if (previewType?.startsWith('jew-')) {
     return buildJewelryTemplateElements(previewType, w, h);
   }
@@ -389,10 +402,25 @@ export function createIndustryTemplateDocument(params: {
   previewType: string;
 }): LabelDocument {
   const document = instantiateTemplate(getTemplateDefinition(params));
+  const geometry = geometryForPreviewType(params.previewType);
   if (isCableFlagPreviewType(params.previewType)) {
     document.mediaShape = 'diecut';
     document.widthMm = CABLE_FLAG_DIECUT.widthMm;
     document.heightMm = CABLE_FLAG_DIECUT.heightMm;
+  } else if (params.previewType.startsWith('circle-')) {
+    document.mediaShape = 'circle';
+  } else if (isRatTailGeometry(geometry)) {
+    const box = canvasMmFromGeometry(geometry);
+    document.mediaShape = 'diecut';
+    document.mediaGeometry = geometry;
+    document.widthMm = box.widthMm;
+    document.heightMm = box.heightMm;
+    document.background = emptyBackground();
+  } else if (hasStockSilhouette(params.previewType)) {
+    document.mediaShape = 'diecut';
+    document.widthMm = params.widthMm;
+    document.heightMm = params.heightMm;
+    document.background = emptyBackground();
   }
   return document;
 }

@@ -8,18 +8,20 @@ import { runOnJS } from 'react-native-reanimated';
 
 import { KonvaTransformer, type TransformCommitPayload } from './konva-transformer';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
+import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
 import { type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { mediaShapeClipStyle } from '@/lib/label-geometry';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
 import { isCableFlagDieCutDocument } from '@/constants/cable-flag-diecut';
+import { hasStockSilhouette } from '@/lib/stock-silhouette';
+import { isRatTailGeometry, ratTailBodyRectMm } from '@/lib/media-geometry';
 import { sortLayers } from '@/lib/template-schema';
 
 type KonvaCanvasProps = {
   document: LabelDocument;
   canvasWidthPx: number;
   canvasHeightPx: number;
-  scaleX: number;
-  scaleY: number;
+  pxPerMM: number;
   padZoom: number;
   selectedIds: string[];
   selectionColor: string;
@@ -38,8 +40,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     document: doc,
     canvasWidthPx,
     canvasHeightPx,
-    scaleX,
-    scaleY,
+    pxPerMM,
     padZoom,
     selectedIds,
     selectionColor,
@@ -59,7 +60,8 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   const shapeClip = mediaShapeClipStyle(doc.mediaShape, w, h);
 
   const cableFlag = isCableFlagDieCutDocument(doc);
-  const backgroundColor = cableFlag
+  const stockCut = hasStockSilhouette(doc.templatePreviewType) || isRatTailGeometry(doc.mediaGeometry);
+  const backgroundColor = cableFlag || stockCut
     ? 'transparent'
     : doc.background?.type === 'color'
       ? doc.background.color
@@ -67,13 +69,12 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 
   // Grid lines
   const gridLines = useMemo(() => {
-    if (!showGrid || scaleX <= 0 || scaleY <= 0) return null;
-    const stepPxX = 5 * scaleX;
-    const stepPxY = 5 * scaleY;
+    if (!showGrid || pxPerMM <= 0) return null;
+    const stepPx = 5 * pxPerMM;
     const vertical: number[] = [];
     const horizontal: number[] = [];
-    for (let x = stepPxX; x < w; x += stepPxX) vertical.push(x);
-    for (let y = stepPxY; y < h; y += stepPxY) horizontal.push(y);
+    for (let x = stepPx; x < w; x += stepPx) vertical.push(x);
+    for (let y = stepPx; y < h; y += stepPx) horizontal.push(y);
     return (
       <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
         {vertical.map((x) => (
@@ -84,7 +85,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         ))}
       </Svg>
     );
-  }, [showGrid, scaleX, scaleY, w, h]);
+  }, [showGrid, pxPerMM, w, h]);
 
   // Jewelry rat-tail guides (if applicable)
   const jewelryGuides = useMemo(() => {
@@ -95,7 +96,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         <View
           style={{
             position: 'absolute',
-            top: foldYMm * scaleY,
+            top: foldYMm * pxPerMM,
             left: 0,
             right: 0,
             borderBottomWidth: 1,
@@ -106,7 +107,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         <View
           style={{
             position: 'absolute',
-            top: bodyHeightMm * scaleY,
+            top: bodyHeightMm * pxPerMM,
             left: 0,
             right: 0,
             borderBottomWidth: 1,
@@ -116,32 +117,45 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         <View
           style={{
             position: 'absolute',
-            top: bodyHeightMm * scaleY,
+            top: bodyHeightMm * pxPerMM,
             bottom: 0,
-            left: ((tagWidthMm - tailWidthMm) / 2) * scaleX,
-            width: tailWidthMm * scaleX,
+            left: ((tagWidthMm - tailWidthMm) / 2) * pxPerMM,
+            width: tailWidthMm * pxPerMM,
             borderWidth: 1,
             borderColor: '#E2E8F0',
             borderStyle: 'dashed',
-            borderRadius: 1.2 * scaleX,
+            borderRadius: 1.2 * pxPerMM,
           }}
         />
       </View>
     );
-  }, [doc.templatePreviewType, scaleX, scaleY]);
+  }, [doc.templatePreviewType, pxPerMM]);
+
+  const stockOutline = useMemo(() => {
+    if (!hasStockSilhouette(doc.templatePreviewType) && !isRatTailGeometry(doc.mediaGeometry)) return null;
+    return (
+      <StockSilhouetteOverlay
+        document={doc}
+        scaleX={pxPerMM}
+        scaleY={pxPerMM}
+        widthPx={w}
+        heightPx={h}
+      />
+    );
+  }, [doc, pxPerMM, w, h]);
 
   const cableFlagOutline = useMemo(() => {
     if (!isCableFlagDieCutDocument(doc)) return null;
     return (
       <CableFlagDieCutOverlay
         document={doc}
-        scaleX={scaleX}
-        scaleY={scaleY}
+        scaleX={pxPerMM}
+        scaleY={pxPerMM}
         widthPx={w}
         heightPx={h}
       />
     );
-  }, [doc, scaleX, scaleY, w, h]);
+  }, [doc, pxPerMM, w, h]);
 
   const deselectGesture = useMemo(
     () =>
@@ -160,8 +174,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         width: w,
         height: h,
         backgroundColor,
-        ...shapeClip,
+        ...(stockCut ? { overflow: 'hidden' as const } : shapeClip),
       }}>
+      {stockOutline}
       <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={{ width: w, height: h, ...shapeClip }}>
         <View
           collapsable={false}
@@ -195,13 +210,20 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             <KonvaTransformer
               key={element.id}
               element={element}
-              scaleX={scaleX}
-              scaleY={scaleY}
+              pxPerMM={pxPerMM}
               padZoom={padZoom}
               selected={selectedIds.includes(element.id)}
               selectionColor={selectionColor}
-              canvasWidthMm={doc.widthMm}
-              canvasHeightMm={doc.heightMm}
+              canvasWidthMm={
+                isRatTailGeometry(doc.mediaGeometry)
+                  ? ratTailBodyRectMm(doc.mediaGeometry).width
+                  : doc.widthMm
+              }
+              canvasHeightMm={
+                isRatTailGeometry(doc.mediaGeometry)
+                  ? ratTailBodyRectMm(doc.mediaGeometry).height
+                  : doc.heightMm
+              }
               onSelect={onSelect}
               onOpenPanel={onOpenPanel}
               onEditText={onEditText}
@@ -211,13 +233,13 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             />
           ))}
 
-          {doc.elements.length === 0 ? (
+          {doc.elements.length === 0 && !stockCut ? (
             <View pointerEvents="none" style={styles.emptyHintWrap}>
               <Text style={styles.emptyHint}>Tap a tool below to add elements</Text>
             </View>
           ) : null}
 
-          {doc.mediaShape === 'diecut' || cableFlag ? null : (
+          {doc.mediaShape === 'diecut' || cableFlag || stockCut ? null : (
             <View pointerEvents="none" style={styles.artboardBorder} />
           )}
         </View>

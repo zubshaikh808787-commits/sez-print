@@ -8,8 +8,11 @@ import {
   type BarcodeElementState,
 } from '@/components/editor/types';
 import { buildShippingTemplateElements } from '@/constants/shipping-template-elements';
+import { CABLE_FLAG_DIECUT } from '@/constants/cable-flag-diecut';
+import { buildRatTail143Elements } from '@/constants/rat-tail-143';
 import { templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
 import { generateId, type LabelElement } from '@/lib/label-document';
+import { CABLE_STOCK } from '@/lib/stock-silhouette';
 
 type Frame = { left: number; top: number; width: number; height?: number };
 
@@ -30,6 +33,7 @@ function text(
     width: frame.width,
     height: extra.height ?? textBlockHeightMm(fontSize, content.split('\n').length),
     autoWrapping: 'Word',
+    drawingColorIndex: 1,
     ...extra,
   };
 }
@@ -49,6 +53,7 @@ function barcode(
     width: frame.width,
     height: frame.height ?? 10,
     textFlag: extra.textFlag ?? 'Bottom',
+    drawingColorIndex: extra.drawingColorIndex ?? 1,
     ...extra,
   };
 }
@@ -90,6 +95,8 @@ function box(
     radius?: number;
     color?: number;
     lineWidth?: number;
+    lockMovement?: boolean;
+    needPrinting?: boolean;
   } = {},
 ): LabelElement {
   return {
@@ -106,6 +113,8 @@ function box(
     fillColor: opts.fillColor,
     roundRadius: opts.radius ?? 1.2,
     drawingColorIndex: opts.color ?? 1,
+    lockMovement: opts.lockMovement ?? false,
+    needPrinting: opts.needPrinting ?? true,
   };
 }
 
@@ -157,16 +166,53 @@ function clipart(frame: Frame, clipartId: string): LabelElement {
   };
 }
 
+function contentRect(w: number, h: number): LabelElement[] {
+  const { smallPt } = templateFontSizes(w, h);
+  const pad = Math.max(0.6, Math.min(w, h) * 0.06);
+  const innerW = Math.max(4, w - pad * 2);
+  if (h < 14) {
+    return [
+      text({ left: pad, top: Math.max(0.4, (h - textBlockHeightMm(smallPt, 1)) / 2), width: innerW }, 'Product', smallPt, {
+        bold: true,
+      }),
+    ];
+  }
+  const titleH = textBlockHeightMm(smallPt, 1);
+  const barH = Math.max(4, Math.min(h * 0.42, h - pad * 2 - titleH - 1));
+  return [
+    text({ left: pad, top: pad, width: innerW }, 'Product', smallPt, { bold: true }),
+    barcode(
+      { left: pad, top: pad + titleH + 0.6, width: innerW, height: barH },
+      '6901234567892',
+      { textFlag: h < 22 ? 'Hide' : 'Bottom' },
+    ),
+  ];
+}
+
 function outline(w: number, h: number, radius = 1.2) {
-  return [box(0.7, 0.7, w - 1.4, h - 1.4, { radius })];
+  return [
+    box(0.7, 0.7, w - 1.4, h - 1.4, { radius, lockMovement: true }),
+    ...contentRect(w, h),
+  ];
 }
 
 function dualCols(w: number, h: number, radius = 1.2) {
   const gap = 0.8;
   const colW = (w - 1.6 - gap) / 2;
+  const { smallPt } = templateFontSizes(colW, h);
   return [
-    box(0.8, 0.8, colW, h - 1.6, { radius }),
-    box(0.8 + colW + gap, 0.8, colW, h - 1.6, { radius }),
+    box(0.8, 0.8, colW, h - 1.6, { radius, lockMovement: true }),
+    box(0.8 + colW + gap, 0.8, colW, h - 1.6, { radius, lockMovement: true }),
+    text({ left: 1.4, top: h * 0.28, width: Math.max(4, colW - 1.2) }, 'Left', smallPt, {
+      align: 'center',
+      bold: true,
+    }),
+    text(
+      { left: 1.4 + colW + gap, top: h * 0.28, width: Math.max(4, colW - 1.2) },
+      'Right',
+      smallPt,
+      { align: 'center', bold: true },
+    ),
   ];
 }
 
@@ -185,7 +231,7 @@ function multiCols(
   const els: LabelElement[] = [];
   for (let i = 0; i < count; i += 1) {
     const left = pad + i * (colW + gap);
-    els.push(box(left, pad, colW, h - pad * 2, { radius, fill: true, fillColor: '#FFFFFF' }));
+    els.push(box(left, pad, colW, h - pad * 2, { radius, fill: true, fillColor: '#FFFFFF', lockMovement: true }));
     const caption = labels?.[i] ?? `Label ${i + 1}`;
     els.push(
       text(
@@ -202,9 +248,18 @@ function multiCols(
 function dualStacked(w: number, h: number, radius = 1.5) {
   const gap = 0.6;
   const rowH = (h - 1.6 - gap) / 2;
+  const { smallPt } = templateFontSizes(w, rowH);
   return [
-    box(0.8, 0.8, w - 1.6, rowH, { radius }),
-    box(0.8, 0.8 + rowH + gap, w - 1.6, rowH, { radius }),
+    box(0.8, 0.8, w - 1.6, rowH, { radius, lockMovement: true }),
+    box(0.8, 0.8 + rowH + gap, w - 1.6, rowH, { radius, lockMovement: true }),
+    text({ left: 1.4, top: 0.8 + rowH * 0.28, width: w - 2.8 }, 'Panel A', smallPt, {
+      align: 'center',
+      bold: true,
+    }),
+    text({ left: 1.4, top: 0.8 + rowH + gap + rowH * 0.28, width: w - 2.8 }, 'Panel B', smallPt, {
+      align: 'center',
+      bold: true,
+    }),
   ];
 }
 
@@ -325,70 +380,170 @@ export function buildIndustryPreviewElements(
     case 'four-ups-20x15':
       return multiCols(w, h, 4, 1.0, ['1', '2', '3', '4']);
 
+    case 'cable-rattail-143x635':
+      return buildRatTail143Elements();
+
     case 'cable-yellow-4col': {
-      const colW = (w - pad * 2) / 4;
-      return [0, 1, 2, 3].map((i) =>
-        box(pad + i * colW, pad, colW - (i < 3 ? 0.35 : 0), h - pad * 2, { rounded: false }),
+      const cols = CABLE_STOCK.yellowCols;
+      const colW = w / cols;
+      const labels = ['A1', 'A2', 'B1', 'B2'];
+      return labels.map((label, i) =>
+        text(
+          { left: i * colW + 0.4, top: h * 0.28, width: colW - 0.8 },
+          label,
+          smallPt,
+          { align: 'center', bold: true },
+        ),
       );
     }
-    case 'cable-12.5x74':
-      return pStyle(w, h);
-    case 'cable-301-pstyle':
-      return pStyle(w, h, [line({ left: pad + 1, top: h * 0.5, width: w * 0.62 })]);
+    case 'cable-12.5x74': {
+      const { headW, foldX } = CABLE_STOCK.barbell;
+      return [
+        text({ left: 1.2, top: 1.4, width: foldX - 2.2 }, 'CABLE IN', smallPt * 0.85, { align: 'center' }),
+        text({ left: foldX + 1.2, top: 1.4, width: headW - foldX - 2.2 }, 'CABLE OUT', smallPt * 0.85, {
+          align: 'center',
+        }),
+      ];
+    }
+    case 'cable-301-pstyle': {
+      const { headW } = CABLE_STOCK.p301;
+      const half = h / 2;
+      return [
+        text({ left: 1.2, top: 1.2, width: headW - 2.4 }, 'PORT 01', smallPt, { align: 'center', bold: true }),
+        text({ left: 1.2, top: half + 1.0, width: headW - 2.4 }, 'LINE A', smallPt * 0.9, { align: 'center' }),
+      ];
+    }
     case 'cable-428-inspected':
-      return pStyle(w, h, [
-        text({ left: pad + 1, top: h * 0.08, width: w * 0.6 }, 'CABLE 428', smallPt, { bold: true }),
-        text({ left: pad + 1, top: h * 0.28, width: w * 0.6 }, 'RESET CIRCUIT', smallPt * 0.9),
-        line({ left: pad + 1, top: h * 0.48, width: w * 0.6 }),
-        text({ left: pad + 1, top: h * 0.55, width: w * 0.6 }, 'INSPECTED 15/AUG', smallPt * 0.9),
-      ]);
-    case 'cable-tall-dual-flag':
-      return dualCols(w, h, 0.6);
+      return [
+        text({ left: 1.2, top: h * 0.1, width: CABLE_STOCK.inspected.headW - 2.4 }, 'CABLE 428', smallPt * 0.92, {
+          align: 'center',
+        }),
+        text({ left: 1.2, top: h * 0.28, width: CABLE_STOCK.inspected.headW - 2.4 }, 'RESET CIRCUIT', smallPt * 0.82, {
+          align: 'center',
+        }),
+        text({ left: 1.2, top: h * 0.56, width: CABLE_STOCK.inspected.headW - 2.4 }, 'INSPECTED', smallPt * 0.82, {
+          align: 'center',
+        }),
+        text(
+          { left: 1.2, top: h * 0.72, width: CABLE_STOCK.inspected.headW - 2.4 },
+          '15/AUG/BG  12:42PM',
+          smallPt * 0.72,
+          { align: 'center' },
+        ),
+      ];
+    case 'cable-tall-dual-flag': {
+      const colW = w / 2;
+      const bodyH = h * CABLE_STOCK.tallFlag.bodyRatio;
+      return [
+        text({ left: 1, top: 4, width: colW - 2 }, 'FLAG A', smallPt, { align: 'center', bold: true }),
+        text({ left: 1, top: bodyH * 0.45, width: colW - 2 }, 'TO: A-01', smallPt * 0.85, { align: 'center' }),
+        text({ left: colW + 1, top: 4, width: colW - 2 }, 'FLAG B', smallPt, { align: 'center', bold: true }),
+        text({ left: colW + 1, top: bodyH * 0.45, width: colW - 2 }, 'TO: B-01', smallPt * 0.85, { align: 'center' }),
+      ];
+    }
     case 'cable-d38-inverted':
       return [
-        ...dualStacked(w, h, 0.5),
-        text({ left: pad + 1, top: h * 0.12, width: innerW * 0.7 }, 'China Telecom  A-01', smallPt),
-        text({ left: pad + 1, top: h * 0.58, width: innerW * 0.7 }, 'China Telecom  A-01', smallPt),
+        text({ left: 1, top: 3.2, width: 36 }, 'A-01', smallPt * 0.92, { align: 'center', rotation: 180 }),
+        text({ left: 1, top: 8.2, width: 36 }, 'China Telecom', smallPt * 0.78, { align: 'center', rotation: 180 }),
+        text({ left: 1, top: 14.2, width: 36 }, 'China Telecom', smallPt * 0.78, { align: 'center' }),
+        text({ left: 1, top: 19.2, width: 36 }, 'A-01', smallPt * 0.92, { align: 'center' }),
+        text({ left: 39, top: h - 21, width: 36 }, 'A-01', smallPt * 0.92, { align: 'center', rotation: 180 }),
+        text({ left: 39, top: h - 16, width: 36 }, 'China Telecom', smallPt * 0.78, { align: 'center', rotation: 180 }),
+        text({ left: 39, top: h - 10, width: 36 }, 'China Telecom', smallPt * 0.78, { align: 'center' }),
+        text({ left: 39, top: h - 5, width: 36 }, 'A-01', smallPt * 0.92, { align: 'center' }),
       ];
     case 'cable-gp60-hangtag':
       return [
-        ...dualCols(w, h, 0.4),
-        text({ left: pad + 1, top: h * 0.12, width: innerW * 0.45 }, 'GB45-60RD', smallPt, { bold: true }),
-        text({ left: pad + 1, top: h * 0.32, width: innerW * 0.45 }, 'Indoor Hangtag', smallPt * 0.9),
-        text({ left: w * 0.54, top: h * 0.12, width: innerW * 0.45 }, 'GB45-60RD', smallPt, { bold: true }),
-        text({ left: w * 0.54, top: h * 0.32, width: innerW * 0.45 }, 'Indoor Hangtag', smallPt * 0.9),
+        text({ left: 2, top: 10.5, width: w * 0.44 }, 'GB45-60RD', smallPt * 0.92, { align: 'center' }),
+        text({ left: 2, top: 16, width: w * 0.44 }, 'Indoor Hangtag', smallPt * 0.8, { align: 'center' }),
+        text({ left: 2, top: 23, width: w * 0.44 }, 'Stick Method: Hangtag', smallPt * 0.68, { align: 'center' }),
+        text({ left: 2, top: 28, width: w * 0.44 }, 'Stick Equipment: Large Diameter Cable', smallPt * 0.62, { align: 'center' }),
+        text({ left: 2, top: 35, width: w * 0.44 }, 'Employee No.: 027', smallPt * 0.72, { align: 'center' }),
+        text({ left: w * 0.52, top: 10.5, width: w * 0.44 }, 'GB45-60RD', smallPt * 0.92, { align: 'center' }),
+        text({ left: w * 0.52, top: 16, width: w * 0.44 }, 'Indoor Hangtag', smallPt * 0.8, { align: 'center' }),
+        text({ left: w * 0.52, top: 23, width: w * 0.44 }, 'Stick Method: Hangtag', smallPt * 0.68, { align: 'center' }),
+        text({ left: w * 0.52, top: 28, width: w * 0.44 }, 'Stick Equipment: Large Diameter Cable', smallPt * 0.62, { align: 'center' }),
+        text({ left: w * 0.52, top: 35, width: w * 0.44 }, 'Employee No.: 027', smallPt * 0.72, { align: 'center' }),
       ];
-    case 'cable-hb38-red':
-      return pStyle(w, h);
-    case 'cable-lf45-double':
-      return pStyle(w, h, dualStacked(w * 0.68, h, 0.4));
-    case 'cable-lf64-dash':
-      return pStyle(w, h, [line({ left: pad + 1, top: h * 0.5, width: w * 0.6 })]);
-    case 'cable-lt38-tstyle':
-      return tStyle(w, h);
-    case 'cable-lt45-tstyle':
-      return tStyle(w, h);
-    case 'cable-pstyle-barcode':
-      return pStyle(w, h, [
-        barcode({ left: pad + 1, top: h * 0.1, width: w * 0.58, height: h * 0.32 }, '001234567895'),
-        text({ left: pad + 1, top: h * 0.55, width: w * 0.4 }, 'USB CABLE', smallPt, { bold: true }),
-      ]);
-    case 'cable-pstyle-panel23':
-      return pStyle(w, h, [
-        text({ left: pad + 1, top: h * 0.12, width: w * 0.6 }, 'PANEL 23 42:A', smallPt, { bold: true }),
-        text({ left: pad + 1, top: h * 0.34, width: w * 0.6 }, 'INSPECTED 02/29', smallPt),
-      ]);
+    case 'cable-hb38-red': {
+      const { headW } = CABLE_STOCK.hb38;
+      const headX = w - headW;
+      const half = h / 2;
+      return [
+        text({ left: headX + 1, top: 1.2, width: headW - 2 }, 'HB38', smallPt, { align: 'center', bold: true }),
+        text({ left: headX + 1, top: half + 0.8, width: headW - 2 }, 'CABLE', smallPt * 0.9, { align: 'center' }),
+      ];
+    }
+    case 'cable-lf45-double': {
+      const { headW } = CABLE_STOCK.lf45;
+      const half = h / 2;
+      return [
+        text({ left: 1.2, top: 1.4, width: headW - 2.4 }, 'LF45 UPPER', smallPt * 0.9, { align: 'center' }),
+        text({ left: 1.2, top: half + 1.0, width: headW - 2.4 }, 'LF45 LOWER', smallPt * 0.9, { align: 'center' }),
+      ];
+    }
+    case 'cable-lf64-dash': {
+      const { headW } = CABLE_STOCK.lf64;
+      return [
+        text({ left: 1.4, top: 2.2, width: headW - 2.8 }, 'LF64 CABLE', smallPt, { align: 'center', bold: true }),
+        text({ left: 1.4, top: h * 0.72, width: headW - 2.8 }, 'DASH ID 6401', smallPt * 0.85, { align: 'center' }),
+      ];
+    }
+    case 'cable-lt38-tstyle': {
+      const { headH } = CABLE_STOCK.lt38;
+      return [
+        text({ left: 1.2, top: 2.2, width: w - 2.4 }, 'LT38 HEAD', smallPt, { align: 'center', bold: true }),
+        text({ left: 1.2, top: headH / 2 + 1.2, width: w - 2.4 }, 'T-STYLE', smallPt * 0.9, { align: 'center' }),
+      ];
+    }
+    case 'cable-lt45-tstyle': {
+      const { headH } = CABLE_STOCK.lt45;
+      return [
+        text({ left: 1.2, top: 3.0, width: w - 2.4 }, 'LT45 HEAD', smallPt, { align: 'center', bold: true }),
+        text({ left: 1.2, top: headH / 2 + 2.0, width: w - 2.4 }, 'T-STYLE', smallPt * 0.9, { align: 'center' }),
+      ];
+    }
+    case 'cable-pstyle-barcode': {
+      const { headW } = CABLE_STOCK.pstyle;
+      return [
+        barcode({ left: 2, top: 1.4, width: headW - 4, height: 10 }, '001234567895'),
+        text({ left: 2, top: 14.2, width: 12 }, 'USB', smallPt * 0.92),
+        text({ left: 2, top: 18.4, width: 12 }, 'CABLE', smallPt * 0.92),
+      ];
+    }
+    case 'cable-pstyle-panel23': {
+      const { headW } = CABLE_STOCK.panel23;
+      return [
+        text({ left: 1.5, top: 3.2, width: headW - 3 }, 'PANEL 23 42:A', smallPt * 0.92, { align: 'center' }),
+        text({ left: 1.5, top: 9.2, width: headW - 3 }, 'INSPECTED 02/29', smallPt * 0.92, { align: 'center' }),
+      ];
+    }
     case 'cable-tstyle-barcode':
-      return tStyle(w, h, [
-        text({ left: pad + 1, top: h * 0.06, width: innerW }, 'BCX 13.1.03.ZX.IN3', smallPt, { bold: true }),
-        text({ left: pad + 1, top: h * 0.2, width: innerW }, 'PPL 15.3.01.AT.OUT8', smallPt),
-        barcode({ left: pad + 1, top: h * 0.36, width: innerW, height: h * 0.16 }, 'B03F09R11'),
-      ]);
+      return [
+        text({ left: 1, top: 1.4, width: innerW }, 'BCX 13.1.03.ZX.IN3', smallPt * 0.78, { align: 'center' }),
+        text({ left: 1, top: 5.4, width: innerW }, 'PPL 15.3.01.AT.OUT8', smallPt * 0.85, { align: 'center' }),
+        barcode({ left: 2, top: 11.2, width: innerW - 2, height: 7.2 }, 'B03F09R11'),
+      ];
     case 'cable-flag-50x73':
     case 'cable-flag-50x70':
-    case 'cable-flag-50x70-2up':
-      // Die-cut outline is an editor/gallery guide only — the printer gets content, not cut lines.
-      return [];
+    case 'cable-flag-50x70-2up': {
+      const { columnWidthMm, columns, headHeightMm } = CABLE_FLAG_DIECUT;
+      const els: LabelElement[] = [];
+      for (let i = 0; i < columns; i++) {
+        const left = i * columnWidthMm + 1;
+        const width = columnWidthMm - 2;
+        els.push(
+          text({ left, top: 4, width }, 'CABLE', smallPt, { align: 'center', bold: true }),
+        );
+        els.push(
+          text({ left, top: 12, width }, `FLAG ${i + 1}`, smallPt * 0.9, { align: 'center' }),
+        );
+        els.push(
+          text({ left, top: headHeightMm * 0.55, width }, 'TO: SW-01', smallPt * 0.8, { align: 'center' }),
+        );
+      }
+      return els;
+    }
 
     case 'other-8x60-5rows':
       return [table({ left: pad, top: pad, width: innerW, height: h - pad * 2 }, 5, 1)];
@@ -537,7 +692,12 @@ export function buildIndustryPreviewElements(
     case 'circle-30':
     case 'circle-40':
     case 'circle-50':
-      return [circle(w, h)];
+      return [
+        text({ left: w * 0.12, top: h * 0.38, width: w * 0.76 }, 'QC PASS', bodyPt, {
+          align: 'center',
+          bold: true,
+        }),
+      ];
 
     case 'smkt-black-yellow-60x40':
       return [

@@ -38,6 +38,12 @@ import {
   cableFlagPrintDocument,
   isCableFlagDieCutDocument,
 } from '@/constants/cable-flag-diecut';
+import {
+  RAT_TAIL_143_PRINT,
+  isRatTail143Document,
+  ratTail143PrintPaper,
+  refitRatTail143Document,
+} from '@/constants/rat-tail-143';
 import { dataPageCount, resolveDocumentData } from '@/lib/data-binding';
 import {
   composeUpsDocument,
@@ -57,6 +63,7 @@ import {
   printCaptureLayout,
   printJobSizeError,
   rasterizePngForPrint,
+  rotatePngBase64,
   sendIsolatedPrintCopies,
   waitForNextPaint,
 } from '@/lib/printer/print-job';
@@ -369,16 +376,18 @@ export default function PrintScreen() {
   /** Base document (page-independent). Null for PDF documents, which show a card. */
   const jewelryDieCutJob = isJewelryDieCutDocument(sourceDocument);
   const cableFlagJob = isCableFlagDieCutDocument(sourceDocument);
+  const ratTail143Job = isRatTail143Document(sourceDocument);
   const baseDocument = useMemo<LabelDocument | null>(() => {
     if (!sourceDocument) return null;
     // Jewellery 3-up: keep the 14 mm tag. Composing UPS first makes a 48 mm
     // strip with empty side panels, then print lands on the left of the sheet.
     // Cable pair is already the 50 × 73 mm canvas — do not compose/tile to 100 mm.
-    if (jewelryDieCutJob || cableFlagJob) return sourceDocument;
+    if (jewelryDieCutJob || cableFlagJob || ratTail143Job) return sourceDocument;
     return sourceDocument.ups ? composeUpsDocument(sourceDocument) : sourceDocument;
-  }, [sourceDocument, jewelryDieCutJob, cableFlagJob]);
+  }, [sourceDocument, jewelryDieCutJob, cableFlagJob, ratTail143Job]);
   const jewelryJobDpi = jewelryDieCutJob ? JEWELRY_DIECUT.printDpi : null;
   const cableJobDpi = cableFlagJob ? CABLE_FLAG_DIECUT.printDpi : null;
+  const ratTailJobDpi = ratTail143Job ? RAT_TAIL_143_PRINT.printDpi : null;
 
   const defaultPreset = useMemo<PrintSizePreset | null>(() => {
     if (cableFlagJob) {
@@ -390,6 +399,7 @@ export default function PrintScreen() {
 
   const defaultPrintSize = useMemo<LabelSizeMm>(() => {
     if (!baseDocument) return { widthMm: defaults.labelWidth, heightMm: defaults.labelHeight };
+    if (ratTail143Job) return ratTail143PrintPaper();
     if (cableFlagJob) {
       return { widthMm: CABLE_FLAG_DIECUT.widthMm, heightMm: CABLE_FLAG_DIECUT.heightMm };
     }
@@ -397,7 +407,7 @@ export default function PrintScreen() {
       return { widthMm: JEWELRY_DIECUT.sheetWidthMm, heightMm: JEWELRY_DIECUT.sheetHeightMm };
     }
     return printMediaSizeMm(baseDocument.widthMm, baseDocument.heightMm);
-  }, [baseDocument, defaultPreset, defaults.labelWidth, defaults.labelHeight, cableFlagJob]);
+  }, [baseDocument, defaultPreset, defaults.labelWidth, defaults.labelHeight, cableFlagJob, ratTail143Job]);
 
   const [copies, setCopies] = useState(1);
   const [darkness, setDarkness] = useState<number | null>(null);
@@ -457,6 +467,9 @@ export default function PrintScreen() {
 
   const displayDocument = useMemo(() => {
     if (!previewDocument || !printSize) return previewDocument;
+    if (ratTail143Job && previewDocument) {
+      return refitRatTail143Document(previewDocument);
+    }
     if (cableFlagJob && previewDocument) {
       return cableFlagPrintDocument(previewDocument);
     }
@@ -470,9 +483,17 @@ export default function PrintScreen() {
       return refitJewelryDieCutDocument(tiled);
     }
     return applyPrintSize(previewDocument, printPreset, printSize);
-  }, [previewDocument, printSize, printPreset, jewelryDieCutJob, cableFlagJob, sourceDocument]);
+  }, [
+    previewDocument,
+    printSize,
+    printPreset,
+    jewelryDieCutJob,
+    cableFlagJob,
+    ratTail143Job,
+    sourceDocument,
+  ]);
 
-  const jobDpi = jewelryJobDpi ?? cableJobDpi ?? getPrinterManager().getPrintDpi();
+  const jobDpi = jewelryJobDpi ?? cableJobDpi ?? ratTailJobDpi ?? getPrinterManager().getPrintDpi();
 
   /** Native printer-dot artboard for capture — SIZE-in-dots (1 px = 1 printer dot). */
   const printCaptureSize = useMemo(() => {
@@ -505,10 +526,10 @@ export default function PrintScreen() {
   // Stick 2-up media: default feed gap to 2 mm. Jewellery 3-up keeps 3 mm.
   useEffect(() => {
     if (!upsSource || upsGapInitialized.current) return;
-    if (upsSource.columns === JEWELRY_DIECUT.columns || jewelryDieCutJob || cableFlagJob) return;
+    if (upsSource.columns === JEWELRY_DIECUT.columns || jewelryDieCutJob || cableFlagJob || ratTail143Job) return;
     upsGapInitialized.current = true;
     setGapLength(2);
-  }, [upsSource, jewelryDieCutJob, cableFlagJob]);
+  }, [upsSource, jewelryDieCutJob, cableFlagJob, ratTail143Job]);
 
   // Sync print size if a different document ID or dimension is loaded
   const lastDocKeyRef = useRef<string | null>(null);
@@ -520,8 +541,9 @@ export default function PrintScreen() {
       setPrintPreset(defaultPreset);
       setPrintSize(defaultPrintSize);
       if (cableFlagJob) setOrientation('0°');
+      if (ratTail143Job) setOrientation('90°');
     }
-  }, [baseDocument, defaultPreset, defaultPrintSize, cableFlagJob]);
+  }, [baseDocument, defaultPreset, defaultPrintSize, cableFlagJob, ratTail143Job]);
 
   // The Print preview renders the live vector document model via LabelPreview.
   // Hardware rasterization is executed on-demand during actual print dispatch.
@@ -597,8 +619,12 @@ export default function PrintScreen() {
 
     const widthMm = (displayDocument ?? previewDocument)?.widthMm ?? defaults.labelWidth;
     const heightMm = (displayDocument ?? previewDocument)?.heightMm ?? defaults.labelHeight;
-    const orientationDeg = parseInt(orientation.replace('°', ''), 10) as LabelOrientation;
-    const paper = orientedPrintSize(widthMm, heightMm, orientationDeg);
+    const orientationDeg = (
+      ratTail143Job ? RAT_TAIL_143_PRINT.captureOrientation : parseInt(orientation.replace('°', ''), 10)
+    ) as LabelOrientation;
+    const paper = ratTail143Job
+      ? ratTail143PrintPaper()
+      : orientedPrintSize(widthMm, heightMm, orientationDeg);
     const sizeError = printJobSizeError(paper.widthMm, paper.heightMm);
     if (sizeError) {
       Alert.alert('Unsupported Size', sizeError);
@@ -610,7 +636,7 @@ export default function PrintScreen() {
     const timer = new PrintTimingLogger();
 
     try {
-      const dieCutJob = jewelryDieCutJob || cableFlagJob;
+      const dieCutJob = jewelryDieCutJob || cableFlagJob || ratTail143Job;
       const dither = dieCutJob ? false : defaults.colorMode === 'Halftone';
       const threshold = dieCutJob
         ? Math.min(
@@ -699,11 +725,30 @@ export default function PrintScreen() {
 
         const artworkPhoto = Boolean(params.imageUri) && !params.labelId;
 
-        // Native PNG print used Bitmap.createScaledBitmap when capture ≠ packed
-        // size, which changed millimetres. JS encode crops/pads only.
         const usedNative = false;
-
-        if (!usedNative) {
+        if (manager.isJosh) {
+          console.info(
+            `[JOSH-PRINT-P1:PREFLIGHT] Label print dispatching via JOSH LPAPI: page=${page + 1}/${pageCount}, size=${paper.widthMm}x${paper.heightMm}mm, copies=${copies}`,
+          );
+          timer.start('transmit');
+          await manager.printJoshPngLabelFast({
+            pngBase64: ratTail143Job
+              ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
+              : base64,
+            widthMm: paper.widthMm,
+            heightMm: paper.heightMm,
+            gapMm: gapLength,
+            copies: copies,
+            density: darkness,
+            speed: speed,
+            orientation: ratTail143Job ? 0 : orientationDeg,
+            dpi: jobDpi,
+          });
+          timer.end('transmit');
+          console.info(
+            `[JOSH-PRINT-P5:FINALIZE] page ${page + 1} total: ${Date.now() - pageStart} ms | JOSH LPAPI SDK path`,
+          );
+        } else if (!usedNative) {
           timer.start('rasterize');
           const bits = rasterizePngForPrint(base64, {
             widthMm,
@@ -799,6 +844,7 @@ export default function PrintScreen() {
     printRasterKey,
     jewelryDieCutJob,
     cableFlagJob,
+    ratTail143Job,
   ]);
 
   return (
@@ -895,7 +941,10 @@ export default function PrintScreen() {
           {activeDoc ? (
             <View style={styles.sizeBadge}>
               <Text style={styles.sizeBadgeText}>
-                {formatPrintSize(activeDoc.widthMm, activeDoc.heightMm)}
+                {formatPrintSize(
+                  ratTail143Job ? RAT_TAIL_143_PRINT.widthMm : activeDoc.widthMm,
+                  ratTail143Job ? RAT_TAIL_143_PRINT.heightMm : activeDoc.heightMm,
+                )}
               </Text>
             </View>
           ) : null}
@@ -1009,6 +1058,16 @@ export default function PrintScreen() {
               </View>
             ) : null}
 
+            {ratTail143Job ? (
+              <View style={styles.cardSection}>
+                <Text style={styles.groupLabel}>Rat Tail Label</Text>
+                <Text style={styles.helperText}>
+                  Prints 14.3 × 101.6 mm wrap stock (paddle first, empty tail). Barcode and text stay
+                  locked on the 63.5 mm body. SIZE is not 101.6 × 14.3 — that lands ink on the strap.
+                </Text>
+              </View>
+            ) : null}
+
             <View style={styles.cardSection}>
               <Text style={styles.groupLabel}>Paper Type</Text>
               <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
@@ -1041,7 +1100,14 @@ export default function PrintScreen() {
             {showAdvanced ? (
               <View style={styles.advancedBody}>
                 <Text style={[styles.groupLabel, { marginTop: 8 }]}>Orientation</Text>
-                <ChipGroup options={ORIENTATIONS} selected={orientation} onSelect={setOrientation} />
+                <ChipGroup
+                  options={ORIENTATIONS}
+                  selected={orientation}
+                  onSelect={(value) => {
+                    if (ratTail143Job) return;
+                    setOrientation(value);
+                  }}
+                />
 
                 <StepperRow
                   label="Print Darkness"
@@ -1099,15 +1165,20 @@ export default function PrintScreen() {
         </Pressable>
         {/* Size picker — opens sheet to choose a different paper/label size. */}
         <Pressable
-          disabled={printing || isPdfJob}
+          disabled={printing || isPdfJob || ratTail143Job || cableFlagJob}
           onPress={() => setSizeSheetOpen(true)}
           hitSlop={8}
-          style={({ pressed }) => [styles.sizeBtn, (pressed || isPdfJob) && styles.pressed]}>
+          style={({ pressed }) => [
+            styles.sizeBtn,
+            (pressed || isPdfJob || ratTail143Job || cableFlagJob) && styles.pressed,
+          ]}>
           <AppIcon name="rectangle.dashed" tintColor="#FFFFFF" size={18} />
           <Text style={styles.sizeBtnText} numberOfLines={1}>
-            {activeDoc
-              ? `${(Math.round(activeDoc.widthMm * 100) / 100).toFixed(2)}×${(Math.round(activeDoc.heightMm * 100) / 100).toFixed(2)}mm`
-              : 'Size'}
+            {ratTail143Job
+              ? `${RAT_TAIL_143_PRINT.widthMm.toFixed(2)}×${RAT_TAIL_143_PRINT.heightMm.toFixed(2)}mm`
+              : activeDoc
+                ? `${(Math.round(activeDoc.widthMm * 100) / 100).toFixed(2)}×${(Math.round(activeDoc.heightMm * 100) / 100).toFixed(2)}mm`
+                : 'Size'}
           </Text>
         </Pressable>
         {/* Print button — prints the active label at its selected/previewed dimensions */}
