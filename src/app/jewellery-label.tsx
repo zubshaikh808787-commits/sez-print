@@ -16,24 +16,14 @@ import { Image } from 'expo-image';
 import { AppIcon } from '@/components/app-icon';
 import { LabelPreview } from '@/components/label-preview';
 import { Palette } from '@/constants/ui';
-import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
-import { buildJewelryTemplateElements } from '@/constants/jewelry-template-elements';
+import { JEWELRY_DIECUT } from '@/constants/jewelry-diecut';
 import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { TEMPLATES, type TemplateItem } from '@/app/(tabs)/template';
-import {
-  createLabelDocument,
-  createUpsConfig,
-  generateId,
-  type LabelElement,
-} from '@/lib/label-document';
 import { useLabelStore } from '@/stores/label-store';
-import { useSettingsStore } from '@/stores/settings-store';
 
 const ACCENT = '#48C3C7';
 const DEFAULT_TAG_W = JEWELRY_DIECUT.tagWidthMm;
 const DEFAULT_TAG_H = JEWELRY_DIECUT.tagHeightMm;
-const UPS_COLUMNS = JEWELRY_DIECUT.columns;
-const UPS_GAP = JEWELRY_DIECUT.gapMm;
 
 const SIZE_PRESETS = [
   { label: '14 × 96 mm (Jewellery Tag)', width: JEWELRY_DIECUT.tagWidthMm, height: JEWELRY_DIECUT.tagHeightMm },
@@ -45,7 +35,6 @@ const SIZE_PRESETS = [
 export default function JewelleryLabelScreen() {
   const insets = useSafeAreaInsets();
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
-  const defaults = useSettingsStore((s) => s.defaults);
 
   // Filter all jewelry templates from the Industry catalog
   const jewelryTemplates = useMemo(
@@ -54,33 +43,6 @@ export default function JewelleryLabelScreen() {
   );
 
   const handleSelectTemplate = (tpl: TemplateItem) => {
-    if (tpl.previewType === JEWELRY_DIECUT_PREVIEW_SINGLE) {
-      // 3-Up UPS document with 3 tabs
-      const seedElements = buildJewelryTemplateElements(tpl.previewType, DEFAULT_TAG_W, DEFAULT_TAG_H);
-      const ups = createUpsConfig({
-        columns: UPS_COLUMNS,
-        columnSpacingMm: UPS_GAP,
-        batchEdit: true,
-        seedElements,
-      });
-      const doc = createLabelDocument({
-        name: tpl.nameLine2 ? `${tpl.name} ${tpl.nameLine2}` : tpl.name,
-        widthMm: DEFAULT_TAG_W,
-        heightMm: DEFAULT_TAG_H,
-        orientation: defaults.orientation,
-        paperType: defaults.paperType,
-        elements: ups.panels[0] ?? seedElements,
-        background: { type: 'color', color: '#FFFFFF' },
-      });
-      doc.ups = ups;
-      doc.templatePreviewType = JEWELRY_DIECUT_PREVIEW_SINGLE;
-      doc.templateCategory = 'jewelry';
-      upsertDocument(doc);
-      router.replace({ pathname: '/edit', params: { labelId: doc.id } });
-      return;
-    }
-
-    // Direct template creation
     const doc = createIndustryTemplateDocument({
       name: tpl.nameLine2 ? `${tpl.name} ${tpl.nameLine2}` : tpl.name,
       category: tpl.category,
@@ -96,7 +58,7 @@ export default function JewelleryLabelScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 1,
-      allowsEditing: true,
+      allowsEditing: false,
     });
 
     if (result.canceled || !result.assets?.[0]) return;

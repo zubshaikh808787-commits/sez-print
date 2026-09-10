@@ -72,6 +72,43 @@ export function containFitLabel(container: PixelSize, label: MillimetreSize): Co
   };
 }
 
+/**
+ * Nested image canvas on a label (import only). Image pixels are an aspect
+ * ratio; the rectangle is contain-fitted into `content` (or the full label).
+ */
+export function containFitImageOnLabel(
+  label: MillimetreSize,
+  image: PixelSize,
+  content?: MmRect,
+): MmRect {
+  const box = content ?? {
+    left: 0,
+    top: 0,
+    width: finitePositive(label.widthMm, 0.01),
+    height: finitePositive(label.heightMm, 0.01),
+  };
+  const bw = finitePositive(box.width, 0.01);
+  const bh = finitePositive(box.height, 0.01);
+  const iw = finitePositive(image.widthPx, 1);
+  const ih = finitePositive(image.heightPx, 1);
+  const aspect = iw / ih;
+  let width: number;
+  let height: number;
+  if (bw / bh > aspect) {
+    height = bh;
+    width = height * aspect;
+  } else {
+    width = bw;
+    height = width / aspect;
+  }
+  return {
+    left: box.left + (bw - width) / 2,
+    top: box.top + (bh - height) / 2,
+    width,
+    height,
+  };
+}
+
 export function mmToPx(mm: number, pxPerMM: number): number {
   if (!Number.isFinite(mm) || !Number.isFinite(pxPerMM) || pxPerMM <= 0) return 0;
   return mm * pxPerMM;

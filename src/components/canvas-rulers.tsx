@@ -1,11 +1,14 @@
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-const TICK = '#94A3B8';
-const MAJOR = '#64748B';
-const LABEL = '#475569';
+import { Palette } from '@/constants/ui';
 
-export const RULER_SIZE = 20;
+const MINOR = 'rgba(15, 118, 110, 0.28)';
+const MAJOR = '#0F766E';
+const ACCENT = Palette.accent;
+const LABEL = '#134E4A';
+
+export const RULER_SIZE = 26;
 
 /**
  * Map mm → px with the canvas edge as the authoritative end.
@@ -26,95 +29,142 @@ function ticksFor(lengthMm: number, sizePx: number) {
       major: Math.abs(mm % majorEvery) < 0.001 || mm < 0.001,
     });
   }
-  // Always include the exact end mark so ruler length matches the canvas.
   if (items.length === 0 || Math.abs(items[items.length - 1].mm - lengthMm) > 0.01) {
     items.push({ mm: lengthMm, px: sizePx, major: true });
   }
   return items;
 }
 
+function formatTick(mm: number) {
+  return Number.isInteger(mm) ? String(mm) : mm.toFixed(1);
+}
+
+function spacedMajor(ticks: { mm: number; px: number; major: boolean }[], minGapPx: number) {
+  const majors = ticks.filter((t) => t.major);
+  const kept: typeof majors = [];
+  for (const tick of majors) {
+    const prev = kept[kept.length - 1];
+    if (prev && Math.abs(tick.px - prev.px) < minGapPx) continue;
+    kept.push(tick);
+  }
+  const last = majors[majors.length - 1];
+  if (last && kept[kept.length - 1] !== last) {
+    if (kept.length && Math.abs(last.px - kept[kept.length - 1].px) < minGapPx) {
+      kept[kept.length - 1] = last;
+    } else {
+      kept.push(last);
+    }
+  }
+  return kept;
+}
+
+/** Stable millimetre scale along the main canvas. Ticks align to the nested artboard. */
 export function HorizontalRuler({
-  widthPx,
+  trackWidthPx,
+  originPx,
+  contentWidthPx,
   lengthMm,
 }: {
-  widthPx: number;
+  trackWidthPx: number;
+  originPx: number;
+  contentWidthPx: number;
   lengthMm: number;
-  /** @deprecated Ignored — ticks are derived from widthPx / lengthMm so they match the canvas. */
-  pxPerMm?: number;
 }) {
-  const ticks = useMemo(() => ticksFor(lengthMm, widthPx), [lengthMm, widthPx]);
+  const track = Math.max(1, trackWidthPx);
+  const content = Math.max(1, contentWidthPx);
+  const origin = Math.max(0, originPx);
+  const ticks = useMemo(() => ticksFor(lengthMm, content), [lengthMm, content]);
+  const labels = useMemo(() => spacedMajor(ticks, 22), [ticks]);
+
   return (
-    <View style={[styles.hTrack, { width: widthPx }]}>
+    <View style={[styles.hTrack, { width: track }]}>
+      <View style={styles.hAccent} />
       {ticks.map((tick) => (
         <View
           key={`h-${tick.mm}`}
           style={[
             styles.hTick,
             {
-              left: tick.px,
-              height: tick.major ? 12 : 7,
-              backgroundColor: tick.major ? MAJOR : TICK,
+              left: origin + tick.px,
+              height: tick.major ? 14 : 7,
+              backgroundColor: tick.major ? MAJOR : MINOR,
+              width: tick.major ? 1.5 : 1,
             },
           ]}
         />
       ))}
-      {ticks
-        .filter((t) => t.major)
-        .map((tick) => (
-          <Text
-            key={`hl-${tick.mm}`}
-            style={[
-              styles.hLabel,
-              {
-                left: Math.min(tick.px + 2, Math.max(0, widthPx - 18)),
-              },
-            ]}>
-            {Number.isInteger(tick.mm) ? tick.mm : tick.mm.toFixed(1)}
-          </Text>
-        ))}
+      {labels.map((tick) => (
+        <Text
+          key={`hl-${tick.mm}`}
+          style={[
+            styles.hLabel,
+            tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01 ? styles.endLabel : null,
+            {
+              left: Math.min(origin + tick.px + 3, Math.max(0, track - 22)),
+            },
+          ]}>
+          {formatTick(tick.mm)}
+        </Text>
+      ))}
     </View>
   );
 }
 
 export function VerticalRuler({
-  heightPx,
+  trackHeightPx,
+  originPx,
+  contentHeightPx,
   lengthMm,
 }: {
-  heightPx: number;
+  trackHeightPx: number;
+  originPx: number;
+  contentHeightPx: number;
   lengthMm: number;
-  /** @deprecated Ignored — ticks are derived from heightPx / lengthMm so they match the canvas. */
-  pxPerMm?: number;
 }) {
-  const ticks = useMemo(() => ticksFor(lengthMm, heightPx), [lengthMm, heightPx]);
+  const track = Math.max(1, trackHeightPx);
+  const content = Math.max(1, contentHeightPx);
+  const origin = Math.max(0, originPx);
+  const ticks = useMemo(() => ticksFor(lengthMm, content), [lengthMm, content]);
+  const labels = useMemo(() => spacedMajor(ticks, 16), [ticks]);
+
   return (
-    <View style={[styles.vTrack, { height: heightPx }]}>
+    <View style={[styles.vTrack, { height: track }]}>
+      <View style={styles.vAccent} />
       {ticks.map((tick) => (
         <View
           key={`v-${tick.mm}`}
           style={[
             styles.vTick,
             {
-              top: tick.px,
-              width: tick.major ? 12 : 7,
-              backgroundColor: tick.major ? MAJOR : TICK,
+              top: origin + tick.px,
+              width: tick.major ? 14 : 7,
+              backgroundColor: tick.major ? MAJOR : MINOR,
+              height: tick.major ? 1.5 : 1,
             },
           ]}
         />
       ))}
-      {ticks
-        .filter((t) => t.major)
-        .map((tick) => (
-          <Text
-            key={`vl-${tick.mm}`}
-            style={[
-              styles.vLabel,
-              {
-                top: Math.min(tick.px + 2, Math.max(0, heightPx - 12)),
-              },
-            ]}>
-            {Number.isInteger(tick.mm) ? tick.mm : tick.mm.toFixed(1)}
-          </Text>
-        ))}
+      {labels.map((tick) => (
+        <Text
+          key={`vl-${tick.mm}`}
+          style={[
+            styles.vLabel,
+            tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01 ? styles.endLabel : null,
+            {
+              top: Math.min(origin + tick.px + 2, Math.max(0, track - 12)),
+            },
+          ]}>
+          {formatTick(tick.mm)}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+export function RulerCorner() {
+  return (
+    <View style={styles.corner}>
+      <Text style={styles.cornerText}>mm</Text>
     </View>
   );
 }
@@ -122,34 +172,75 @@ export function VerticalRuler({
 const styles = StyleSheet.create({
   hTrack: {
     height: RULER_SIZE,
-    backgroundColor: '#E8EEF4',
+    backgroundColor: '#F3F7FB',
     overflow: 'hidden',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(23, 166, 184, 0.35)',
   },
   vTrack: {
     width: RULER_SIZE,
-    backgroundColor: '#E8EEF4',
+    backgroundColor: '#F3F7FB',
     overflow: 'hidden',
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: 'rgba(23, 166, 184, 0.35)',
+  },
+  hAccent: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 2,
+    backgroundColor: ACCENT,
+    opacity: 0.85,
+  },
+  vAccent: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
+    width: 2,
+    backgroundColor: ACCENT,
+    opacity: 0.85,
   },
   hTick: {
     position: 'absolute',
     top: 0,
-    width: 1,
   },
   vTick: {
     position: 'absolute',
     left: 0,
-    height: 1,
   },
   hLabel: {
     position: 'absolute',
-    top: 8,
-    fontSize: 8,
+    top: 9,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.2,
     color: LABEL,
   },
   vLabel: {
     position: 'absolute',
     left: 1,
     fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 0.15,
     color: LABEL,
+  },
+  endLabel: {
+    color: ACCENT,
+  },
+  corner: {
+    width: RULER_SIZE,
+    height: RULER_SIZE,
+    backgroundColor: Palette.header,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cornerText: {
+    color: '#5EEAD4',
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
   },
 });

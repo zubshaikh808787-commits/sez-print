@@ -25,6 +25,8 @@ type KonvaCanvasProps = {
   padZoom: number;
   selectedIds: string[];
   selectionColor: string;
+  /** Editor nested artboard fill. Print capture keeps document white. */
+  surfaceColor?: string;
   showGrid?: boolean;
   onSelect: (id: string) => void;
   onDeselectAll: () => void;
@@ -44,6 +46,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     padZoom,
     selectedIds,
     selectionColor,
+    surfaceColor,
     showGrid = false,
     onSelect,
     onDeselectAll,
@@ -63,9 +66,11 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   const stockCut = hasStockSilhouette(doc.templatePreviewType) || isRatTailGeometry(doc.mediaGeometry);
   const backgroundColor = cableFlag || stockCut
     ? 'transparent'
-    : doc.background?.type === 'color'
-      ? doc.background.color
-      : '#FFFFFF';
+    : surfaceColor
+      ? surfaceColor
+      : doc.background?.type === 'color'
+        ? doc.background.color
+        : '#FFFFFF';
 
   // Grid lines
   const gridLines = useMemo(() => {
@@ -267,6 +272,6 @@ const styles = StyleSheet.create({
   artboardBorder: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.25)',
+    borderColor: 'rgba(15, 118, 110, 0.35)',
   },
 });

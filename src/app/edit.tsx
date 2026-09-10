@@ -50,11 +50,12 @@ import type { TransformCommitPayload } from '@/components/editor/konva-transform
 import {
   ArtboardFrame,
   CATALOG_STOCK_LINER,
+  EDITOR_ARTBOARD_COLOR,
+  EDITOR_WORKSPACE_COLOR,
   fitLabelCanvas,
-  LABEL_PAD_STAGE_COLOR,
   LABEL_PAD_STAGE_MIN_HEIGHT,
 } from '@/components/label-preview';
-import { HorizontalRuler, RULER_SIZE, VerticalRuler } from '@/components/canvas-rulers';
+import { HorizontalRuler, RULER_SIZE, RulerCorner, VerticalRuler } from '@/components/canvas-rulers';
 import { LabelSizeEditor } from '@/components/label-size-editor';
 import { LabelSettingsMenu } from '@/components/editor/more-menu';
 import { LinePropertyPanel } from '@/components/editor/line-property-panel';
@@ -106,14 +107,14 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
-import { clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
+import { clampLabelMm, containFitImageOnLabel, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { textBlockHeightMm } from '@/lib/element-sizing';
-import { isJewelryDieCutDocument, refitJewelryDieCutDocument } from '@/constants/jewelry-diecut';
+import { isJewelryDieCutDocument, JEWELRY_DIECUT, refitJewelryDieCutDocument } from '@/constants/jewelry-diecut';
 import { isRatTail143Document, refitRatTail143Document } from '@/constants/rat-tail-143';
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
-import { isRatTailGeometry } from '@/lib/media-geometry';
+import { isRatTailGeometry, ratTailBodyRectMm } from '@/lib/media-geometry';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import {
@@ -421,21 +422,27 @@ export default function EditScreen() {
     return Math.max(220, Math.min(Math.round(tall * 0.35), 360));
   }, [screenSize.height, windowHeight]);
   const layoutWidth = stageWidth > 0 ? stageWidth : initialStageWidth;
-  // Physical mm stay on the document. Pad pixels come from the measured ZoomableEditPad.
-  const { canvasWidthPx, canvasHeightPx, pxPerMM } = useMemo(() => {
-    const padW = padInner.width > 1 ? padInner.width : Math.max(120, layoutWidth - 16);
-    const padH = padInner.height > 1 ? padInner.height : Math.max(100, stageMaxHeight - 16);
-    const fitted = fitEditorPadBoard(doc.widthMm, doc.heightMm, padW, padH, RULER_SIZE);
-    return {
-      canvasWidthPx: Math.max(1, fitted.widthPx),
-      canvasHeightPx: Math.max(1, fitted.heightPx),
-      pxPerMM: fitted.scale,
-    };
-  }, [padInner.width, padInner.height, layoutWidth, stageMaxHeight, doc.widthMm, doc.heightMm]);
+  // Phone workspace is constant. Label millimetres only change the inner artboard.
+  const workspaceW = padInner.width > 1 ? padInner.width : Math.max(120, layoutWidth - 16);
+  const workspaceH = padInner.height > 1 ? padInner.height : Math.max(100, stageMaxHeight - 16);
+  const { canvasWidthPx, canvasHeightPx, pxPerMM, boardOffsetXPx, boardOffsetYPx, innerWidthPx, innerHeightPx } =
+    useMemo(() => {
+      const fitted = fitEditorPadBoard(doc.widthMm, doc.heightMm, workspaceW, workspaceH, RULER_SIZE);
+      return {
+        canvasWidthPx: Math.max(1, fitted.widthPx),
+        canvasHeightPx: Math.max(1, fitted.heightPx),
+        pxPerMM: fitted.scale,
+        boardOffsetXPx: fitted.offsetXPx,
+        boardOffsetYPx: fitted.offsetYPx,
+        innerWidthPx: Math.max(1, fitted.innerWidthPx),
+        innerHeightPx: Math.max(1, fitted.innerHeightPx),
+      };
+    }, [workspaceW, workspaceH, doc.widthMm, doc.heightMm]);
 
-  const stageBg = hasStockSilhouette(doc.templatePreviewType) || isRatTailGeometry(doc.mediaGeometry)
-    ? CATALOG_STOCK_LINER
-    : LABEL_PAD_STAGE_COLOR;
+  const dieCutPad =
+    hasStockSilhouette(doc.templatePreviewType) || isRatTailGeometry(doc.mediaGeometry);
+  const stageBg = EDITOR_WORKSPACE_COLOR;
+  const artboardFill = dieCutPad ? CATALOG_STOCK_LINER : EDITOR_ARTBOARD_COLOR;
 
   // Always reopen at Fit. View zoom is optional; it must not change physical mm.
   useEffect(() => {
@@ -1157,34 +1164,47 @@ export default function EditScreen() {
   const handlePickImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      quality: 0.75,
+      quality: 1,
       allowsEditing: false,
     });
     if (!mountedRef.current) return;
     if (result.canceled || result.assets.length === 0) return;
     const asset = result.assets[0];
     if (!asset.uri) return;
-    const docW = docRef.current.widthMm;
-    const docH = docRef.current.heightMm;
-    const maxW = docW * 0.5;
-    const ratio = asset.width && asset.height ? asset.height / asset.width : 1;
+    const current = docRef.current;
+    const docW = current.widthMm;
+    const docH = current.heightMm;
+    const assetW = asset.width || 1;
+    const assetH = asset.height || 1;
+    const content =
+      isRatTailGeometry(current.mediaGeometry)
+        ? ratTailBodyRectMm(current.mediaGeometry)
+        : isJewelryDieCutDocument(current)
+          ? { left: 0, top: 0, width: docW, height: Math.min(docH, JEWELRY_DIECUT.bodyHeightMm) }
+          : undefined;
+    const nested = containFitImageOnLabel(
+      { widthMm: docW, heightMm: docH },
+      { widthPx: assetW, heightPx: assetH },
+      content,
+    );
 
     Alert.alert(
-      'Fit Image to Canvas Pad?',
-      `Do you want to stretch the overall image to fit the entire canvas pad (${docW} × ${docH} mm), or keep its original aspect ratio?`,
+      'Place image on label?',
+      `The phone pad stays the same. A nested ${docW} × ${docH} mm canvas holds the photo so you can fit it on the label.`,
       [
         {
-          text: 'Fit to Canvas Pad (Stretch)',
+          text: 'Fit on label',
           onPress: () => {
             if (!mountedRef.current) return;
             const el = addElement('image', {
               uri: asset.uri,
-              left: 0,
-              top: 0,
-              width: docW,
-              height: docH,
-              contentFit: 'fill',
-              aspectRatioLocked: false,
+              left: nested.left,
+              top: nested.top,
+              width: nested.width,
+              height: nested.height,
+              contentFit: 'contain',
+              aspectRatioLocked: true,
+              originalAspect: assetW / assetH,
             });
             if (el) {
               setImageTab('Regular');
@@ -1193,15 +1213,19 @@ export default function EditScreen() {
           },
         },
         {
-          text: 'Keep Aspect Ratio',
+          text: 'Fill label',
           onPress: () => {
             if (!mountedRef.current) return;
+            const box = content ?? { left: 0, top: 0, width: docW, height: docH };
             const el = addElement('image', {
               uri: asset.uri,
-              width: maxW,
-              height: Math.min(maxW * ratio, docH - 2),
-              contentFit: 'contain',
-              aspectRatioLocked: true,
+              left: box.left,
+              top: box.top,
+              width: box.width,
+              height: box.height,
+              contentFit: 'fill',
+              aspectRatioLocked: false,
+              originalAspect: assetW / assetH,
             });
             if (el) {
               setImageTab('Regular');
@@ -1567,39 +1591,64 @@ export default function EditScreen() {
         onZoomChange={setPadZoom}
         onViewportLayout={handlePadLayout}
         oneFingerPanEnabled={false}>
-        <View
-          style={[
-            styles.rulerBoard,
-            {
-              width: RULER_SIZE + (canvasWidthPx || 1),
-              height: RULER_SIZE + (canvasHeightPx || 1),
-              backgroundColor: stageBg,
-            },
-          ]}>
-          <View style={styles.rulerTopRow}>
-            <View style={styles.rulerCorner} />
-            <HorizontalRuler widthPx={canvasWidthPx || 1} lengthMm={doc.widthMm} pxPerMm={pxPerMM} />
-          </View>
-          <View style={styles.rulerBodyRow}>
-            <VerticalRuler heightPx={canvasHeightPx || 1} lengthMm={doc.heightMm} pxPerMm={pxPerMM} />
-            <KonvaCanvas
-              ref={canvasShotRef}
-              document={doc}
-              canvasWidthPx={canvasWidthPx}
-              canvasHeightPx={canvasHeightPx}
-              pxPerMM={pxPerMM}
-              padZoom={padZoom}
-              selectedIds={selectedIds}
-              selectionColor={selectionColor}
-              showGrid={Boolean(editorSettings.editorGrid)}
-              onSelect={handleSelect}
-              onDeselectAll={handleDeselectAll}
-              onOpenPanel={openPanelFor}
-              onEditText={beginTextEdit}
-              onTransformStart={handleTransformStart}
-              onTransformEnd={handleTransformEnd}
-              onQuickRotate={handleRotateElement}
-            />
+        <View style={[styles.workspace, { backgroundColor: stageBg }]} pointerEvents="box-none">
+          <View
+            style={[
+              styles.rulerFrame,
+              {
+                width: RULER_SIZE + innerWidthPx,
+                height: RULER_SIZE + innerHeightPx,
+              },
+            ]}>
+            <View style={styles.rulerTopRow}>
+              <RulerCorner />
+              <HorizontalRuler
+                trackWidthPx={innerWidthPx}
+                originPx={boardOffsetXPx}
+                contentWidthPx={canvasWidthPx || 1}
+                lengthMm={doc.widthMm}
+              />
+            </View>
+            <View style={styles.rulerBodyRow}>
+              <VerticalRuler
+                trackHeightPx={innerHeightPx}
+                originPx={boardOffsetYPx}
+                contentHeightPx={canvasHeightPx || 1}
+                lengthMm={doc.heightMm}
+              />
+              <View style={[styles.innerDesk, { width: innerWidthPx, height: innerHeightPx }]}>
+                <View
+                  style={[
+                    styles.artboardSlot,
+                    {
+                      left: boardOffsetXPx,
+                      top: boardOffsetYPx,
+                      width: canvasWidthPx || 1,
+                      height: canvasHeightPx || 1,
+                    },
+                  ]}>
+                  <KonvaCanvas
+                    ref={canvasShotRef}
+                    document={doc}
+                    canvasWidthPx={canvasWidthPx}
+                    canvasHeightPx={canvasHeightPx}
+                    pxPerMM={pxPerMM}
+                    padZoom={padZoom}
+                    selectedIds={selectedIds}
+                    selectionColor={selectionColor}
+                    surfaceColor={artboardFill}
+                    showGrid={Boolean(editorSettings.editorGrid)}
+                    onSelect={handleSelect}
+                    onDeselectAll={handleDeselectAll}
+                    onOpenPanel={openPanelFor}
+                    onEditText={beginTextEdit}
+                    onTransformStart={handleTransformStart}
+                    onTransformEnd={handleTransformEnd}
+                    onQuickRotate={handleRotateElement}
+                  />
+                </View>
+              </View>
+            </View>
           </View>
         </View>
       </ZoomableEditPad>
@@ -2255,9 +2304,11 @@ const styles = StyleSheet.create({
   },
   stage: {
     width: '100%',
+    flexGrow: 0,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: LABEL_PAD_STAGE_COLOR,
+    backgroundColor: EDITOR_WORKSPACE_COLOR,
     paddingVertical: 8,
     paddingHorizontal: 8,
     minHeight: LABEL_PAD_STAGE_MIN_HEIGHT,
@@ -2269,22 +2320,38 @@ const styles = StyleSheet.create({
     minHeight: 0,
     overflow: 'hidden',
   },
-  rulerBoard: {
+  workspace: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: EDITOR_WORKSPACE_COLOR,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 40,
+  },
+  rulerFrame: {
     flexDirection: 'column',
     overflow: 'hidden',
-    alignSelf: 'center',
-    backgroundColor: LABEL_PAD_STAGE_COLOR,
+    backgroundColor: EDITOR_WORKSPACE_COLOR,
+  },
+  innerDesk: {
+    position: 'relative',
+    backgroundColor: EDITOR_WORKSPACE_COLOR,
+    overflow: 'hidden',
+  },
+  artboardSlot: {
+    position: 'absolute',
+    overflow: 'hidden',
+    borderRadius: 3,
+    shadowColor: '#0B1F33',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
   rulerTopRow: {
     flexDirection: 'row',
   },
   rulerBodyRow: {
     flexDirection: 'row',
-  },
-  rulerCorner: {
-    width: RULER_SIZE,
-    height: RULER_SIZE,
-    backgroundColor: '#DDE4EC',
   },
   emptyHintWrap: {
     ...StyleSheet.absoluteFillObject,

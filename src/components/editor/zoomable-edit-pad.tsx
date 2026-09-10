@@ -296,8 +296,6 @@ const styles = StyleSheet.create({
   },
   viewport: {
     ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   controls: {
     position: 'absolute',

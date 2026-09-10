@@ -90,6 +90,8 @@ type ContentProps = {
   widthPx: number;
   heightPx: number;
   scale: number;
+  /** Print capture: decode at printer-dot size so import photos match template sharpness. */
+  forPrint?: boolean;
 };
 
 function textStyleFor(
@@ -631,7 +633,7 @@ function ArcTextContent({
   );
 }
 
-export function ElementContentView({ element, widthPx, heightPx, scale }: ContentProps) {
+export function ElementContentView({ element, widthPx, heightPx, scale, forPrint }: ContentProps) {
   switch (element.type) {
     case 'text':
       return <TextContent element={element} scale={scale} widthPx={widthPx} />;
@@ -664,16 +666,24 @@ export function ElementContentView({ element, widthPx, heightPx, scale }: Conten
       if (element.flipH) transforms.push({ scaleX: -1 });
       if (element.flipV) transforms.push({ scaleY: -1 });
       const fit = element.contentFit ?? 'fill';
+      const decodeW = Math.max(1, Math.round(widthPx));
+      const decodeH = Math.max(1, Math.round(heightPx));
       return (
         <View style={[styles.fill, { overflow: 'hidden' }, element.antiColor && styles.antiBg]}>
           <Image
-            source={{ uri: element.uri }}
+            source={
+              forPrint
+                ? { uri: element.uri, width: decodeW, height: decodeH }
+                : { uri: element.uri }
+            }
             style={[
               styles.fill,
               transforms.length > 0 ? { transform: transforms } : null,
               element.colorMode === 'B & W' ? { tintColor: '#111827' } : null,
             ]}
             contentFit={fit}
+            cachePolicy="memory-disk"
+            priority={forPrint ? 'high' : 'normal'}
           />
         </View>
       );

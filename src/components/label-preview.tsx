@@ -11,7 +11,10 @@ import { dotsPerMm, rectMmToDots } from '@/lib/printer/print-spec';
 import { canvasFillFromDocument, sortLayers, templateUsesDieCutBackground } from '@/lib/template-schema';
 
 /** Workspace chrome around the artboard — not part of template content. */
-export const LABEL_PAD_STAGE_COLOR = '#C5CDD6';
+export const LABEL_PAD_STAGE_COLOR = '#FFFFFF';
+export const EDITOR_WORKSPACE_COLOR = '#FFFFFF';
+/** Nested label artboard — darker white so it reads on the main canvas. */
+export const EDITOR_ARTBOARD_COLOR = '#E6EBEF';
 export const LABEL_PAD_INSET = 14;
 export const LABEL_PAD_STAGE_MIN_HEIGHT = 176;
 export const ARTBOARD_BORDER_WIDTH = 1;
@@ -200,6 +203,7 @@ function LabelElements({
               widthPx={widthPx}
               heightPx={heightPx}
               scale={contentScale}
+              forPrint={printDpi != null}
             />
           </View>
         );

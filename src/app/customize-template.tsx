@@ -9,7 +9,7 @@ export default function CustomizeTemplateScreen() {
       subtitle="Create a new template or open one you already saved."
       createDetail="Blank canvas — set size and layout from scratch"
       onCreate={() =>
-        router.replace({ pathname: '/new-label-setup', params: { focusSize: '1' } })
+        router.replace({ pathname: '/new-label-setup', params: { focusSize: '1', isSingleCanvas: 'true' } })
       }
     />
   );

@@ -45,7 +45,9 @@ export default function NewLabelModal() {
             <CreationOption
               label="Blank Label"
               color="#17A6B8"
-              onPress={() => router.replace('/new-label-setup')}>
+              onPress={() =>
+                router.replace({ pathname: '/new-label-setup', params: { isSingleCanvas: 'true' } })
+              }>
               <AppIcon name="plus.rectangle" tintColor="#FFFFFF" size={30} pointerEvents="none" />
             </CreationOption>
 
@@ -74,7 +76,7 @@ export default function NewLabelModal() {
                 const result = await ImagePicker.launchImageLibraryAsync({
                   mediaTypes: ['images'],
                   quality: 1,
-                  allowsEditing: true,
+                  allowsEditing: false,
                 });
                 if (result.canceled || !result.assets?.[0]) return;
                 const asset = result.assets[0];

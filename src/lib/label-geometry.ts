@@ -15,6 +15,7 @@ import type { MediaShape } from '@/lib/label-document';
 export {
   computeScale,
   containFitLabel,
+  containFitImageOnLabel,
   mmToPx,
   pxToMm,
   rectMmToPx,
@@ -192,10 +193,6 @@ export function printMediaSizeMm(widthMm: number, heightMm: number): LabelSizeMm
 export const CATALOG_REF_WIDTH_MM = 90;
 export const CATALOG_REF_HEIGHT_MM = 52;
 
-/** Typical editor pad reference — 80×50 mm nearly fills the pad; smaller stock stays smaller. */
-export const EDITOR_REF_WIDTH_MM = 80;
-export const EDITOR_REF_HEIGHT_MM = 50;
-
 function fitLabelSizeCapped(
   widthMm: number,
   heightMm: number,
@@ -258,22 +255,36 @@ export function fitEditorPadBoard(
   padWidthPx: number,
   padHeightPx: number,
   rulerSizePx: number,
-): { widthPx: number; heightPx: number; scale: number; boardWidthPx: number; boardHeightPx: number } {
+): {
+  widthPx: number;
+  heightPx: number;
+  scale: number;
+  boardWidthPx: number;
+  boardHeightPx: number;
+  innerWidthPx: number;
+  innerHeightPx: number;
+  offsetXPx: number;
+  offsetYPx: number;
+} {
   const padInset = 6;
   const maxBoardW = Math.max(64, padWidthPx - padInset);
   const maxBoardH = Math.max(64, padHeightPx - padInset - EDITOR_PAD_ZOOM_CHROME_PX);
-  const maxCanvasW = Math.max(48, maxBoardW - rulerSizePx);
-  const maxCanvasH = Math.max(48, maxBoardH - rulerSizePx);
+  const innerWidthPx = Math.max(48, maxBoardW - rulerSizePx);
+  const innerHeightPx = Math.max(48, maxBoardH - rulerSizePx);
   const fitted = containFitLabel(
-    { widthPx: maxCanvasW, heightPx: maxCanvasH },
+    { widthPx: innerWidthPx, heightPx: innerHeightPx },
     { widthMm, heightMm },
   );
   return {
     widthPx: fitted.canvasWidthPx,
     heightPx: fitted.canvasHeightPx,
     scale: fitted.pxPerMM,
-    boardWidthPx: rulerSizePx + fitted.canvasWidthPx,
-    boardHeightPx: rulerSizePx + fitted.canvasHeightPx,
+    innerWidthPx,
+    innerHeightPx,
+    boardWidthPx: rulerSizePx + innerWidthPx,
+    boardHeightPx: rulerSizePx + innerHeightPx,
+    offsetXPx: fitted.offsetXPx,
+    offsetYPx: fitted.offsetYPx,
   };
 }
 

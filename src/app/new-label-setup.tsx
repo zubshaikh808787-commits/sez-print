@@ -27,20 +27,23 @@ import {
     generateId,
     type LabelElement,
 } from '@/lib/label-document';
-import { clampLabelMm, validateLabelSize } from '@/lib/label-geometry';
+import { clampLabelMm, containFitImageOnLabel, validateLabelSize } from '@/lib/label-geometry';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { Image } from 'expo-image';
 
 const SETUP_PRESETS = [
-  { label: '14 × 96 mm (Jewellery Tag)', width: JEWELRY_DIECUT.tagWidthMm, height: JEWELRY_DIECUT.tagHeightMm },
-  { label: '54 × 96 mm (3-Up Sheet)', width: JEWELRY_DIECUT.sheetWidthMm, height: JEWELRY_DIECUT.sheetHeightMm },
-  { label: '50 × 70 mm (Cable Flag)', width: CABLE_FLAG_DIECUT.tagWidthMm, height: CABLE_FLAG_DIECUT.tagHeightMm },
-  { label: '100 × 70 mm (Cable Flag 2-Up)', width: CABLE_FLAG_DIECUT.sheetWidthMm, height: CABLE_FLAG_DIECUT.sheetHeightMm },
+  { label: '80 × 10 mm', width: 80, height: 10 },
+  { label: '50 × 25 mm', width: 50, height: 25 },
+  { label: '50 × 70 mm', width: 50, height: 70 },
+  { label: '60 × 14 mm', width: 60, height: 14 },
+  { label: '50 × 50 mm (Square)', width: 50, height: 50 },
   { label: '50 × 30 mm (Retail)', width: 50, height: 30 },
   { label: '40 × 30 mm (Price Tag)', width: 40, height: 30 },
   { label: '57 × 30 mm (Receipt)', width: 57, height: 30 },
-  { label: '50 × 50 mm (Square)', width: 50, height: 50 },
+  { label: '14 × 96 mm (Jewellery Tag)', width: JEWELRY_DIECUT.tagWidthMm, height: JEWELRY_DIECUT.tagHeightMm },
+  { label: '54 × 96 mm (3-Up Sheet)', width: JEWELRY_DIECUT.sheetWidthMm, height: JEWELRY_DIECUT.sheetHeightMm },
+  { label: '50 × 73 mm (Cable Flag)', width: CABLE_FLAG_DIECUT.widthMm, height: CABLE_FLAG_DIECUT.heightMm },
 ];
 
 export default function NewLabelSetupScreen() {
@@ -91,7 +94,7 @@ export default function NewLabelSetupScreen() {
         : params.cloneWidth
           ? parseFloat(params.cloneWidth)
           : isImportImage
-            ? JEWELRY_DIECUT.tagWidthMm
+            ? 50
             : 57,
   );
   const [labelHeight, setLabelHeight] = useState(
@@ -102,7 +105,7 @@ export default function NewLabelSetupScreen() {
         : params.cloneHeight
           ? parseFloat(params.cloneHeight)
           : isImportImage
-            ? JEWELRY_DIECUT.tagHeightMm
+            ? 30
             : 30,
   );
   const [columns, setColumns] = useState(
@@ -132,27 +135,34 @@ export default function NewLabelSetupScreen() {
       const imgId = generateId();
       const assetW = parseFloat(params.importImageWidth || '0') || 1;
       const assetH = parseFloat(params.importImageHeight || '0') || 1;
-      const ratio = assetH / assetW;
-      const maxBodyH = size.widthMm <= 15 ? JEWELRY_DIECUT.bodyHeightMm : size.heightMm - 2;
-      const imgH = Math.min(Math.round(size.widthMm * ratio * 10) / 10, maxBodyH);
+      const jewelryBody =
+        params.isJewelleryTag === 'true' || size.widthMm <= 15
+          ? { left: 0, top: 0, width: size.widthMm, height: Math.min(size.heightMm, JEWELRY_DIECUT.bodyHeightMm) }
+          : undefined;
+      const nested = containFitImageOnLabel(
+        { widthMm: size.widthMm, heightMm: size.heightMm },
+        { widthPx: assetW, heightPx: assetH },
+        jewelryBody,
+      );
 
       const imgElement: LabelElement = {
         id: imgId,
         type: 'image',
         uri: params.importImageUri,
         rotation: 0,
-        left: 0,
-        top: 0,
-        width: size.widthMm,
-        height: Math.max(5, imgH),
+        left: nested.left,
+        top: nested.top,
+        width: nested.width,
+        height: nested.height,
         lockMovement: false,
         needPrinting: true,
         antiColor: false,
         contentFit: 'contain',
         aspectRatioLocked: true,
+        originalAspect: assetW / assetH,
       };
 
-      // SINGLE CANVAS: user edits on one clean permanent canvas
+      // Nested image canvas on the selected label size. Phone pad stays constant.
       const doc = createLabelDocument({
         name: labelName,
         widthMm: size.widthMm,
@@ -280,7 +290,8 @@ export default function NewLabelSetupScreen() {
             </Text>
           ) : (
             <Text style={styles.previewHint}>
-              Canvas: {labelWidth} × {labelHeight} mm (Single Canvas)
+              Phone pad stays the same size. Label canvas: {labelWidth} × {labelHeight} mm
+              {isImportImage ? ' · imported image sits on that canvas' : ''}
             </Text>
           )}
         </View>

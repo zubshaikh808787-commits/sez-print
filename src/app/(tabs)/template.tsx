@@ -19,11 +19,10 @@ import { ShareNodeIcon } from '@/components/home-icons';
 import { LabelPreview } from '@/components/label-preview';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette } from '@/constants/ui';
-import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
+import { JEWELRY_DIECUT } from '@/constants/jewelry-diecut';
 import { CABLE_FLAG_DIECUT, CABLE_FLAG_PREVIEW_SINGLE } from '@/constants/cable-flag-diecut';
 import { useTabBarPadding } from '@/hooks/use-tab-bar-padding';
 import { createIndustryTemplateDocument } from '@/constants/template-documents';
-import { createUpsConfig } from '@/lib/label-document';
 import { useLabelStore } from '@/stores/label-store';
 import { useTranslation } from '@/lib/i18n';
 
@@ -1759,16 +1758,6 @@ export default function TemplateScreen() {
         heightMm: template.height,
         previewType: template.previewType,
       });
-      if (template.previewType === JEWELRY_DIECUT_PREVIEW_SINGLE) {
-        doc.ups = createUpsConfig({
-          columns: JEWELRY_DIECUT.columns,
-          columnSpacingMm: JEWELRY_DIECUT.gapMm,
-          batchEdit: true,
-          seedElements: doc.elements,
-        });
-        doc.templatePreviewType = JEWELRY_DIECUT_PREVIEW_SINGLE;
-        doc.templateCategory = 'jewelry';
-      }
       upsertDocument(doc);
       router.push({
         pathname: '/edit',
