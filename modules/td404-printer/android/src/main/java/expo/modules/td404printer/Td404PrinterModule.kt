@@ -38,7 +38,7 @@ import java.util.concurrent.TimeUnit
 class Td404PrinterModule : Module() {
   private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
   private val ioExecutor = Executors.newCachedThreadPool()
-  private val connectTimeoutMs = 5_000L
+  private val connectTimeoutMs = 8_000L
   private val printChunk = 32 * 1024
   private var socket: BluetoothSocket? = null
   private var connectedMac: String? = null
@@ -196,8 +196,12 @@ class Td404PrinterModule : Module() {
       ioExecutor.execute {
         try {
           @SuppressLint("MissingPermission")
-          if (adapter.isDiscovering) adapter.cancelDiscovery()
+          if (adapter.isDiscovering) {
+            adapter.cancelDiscovery()
+            try { Thread.sleep(150) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+          }
           closeSocket()
+          try { Thread.sleep(100) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
 
           val device = adapter.getRemoteDevice(macAddress.uppercase())
           val sock = openSppSocket(device)
@@ -549,26 +553,53 @@ class Td404PrinterModule : Module() {
 
   @SuppressLint("MissingPermission")
   private fun openSppSocket(device: BluetoothDevice): BluetoothSocket {
-    val attempts = listOf(
-      { device.createInsecureRfcommSocketToServiceRecord(sppUuid) },
-      { device.createRfcommSocketToServiceRecord(sppUuid) },
-      {
-        val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
-        method.invoke(device, 1) as BluetoothSocket
-      },
-    )
+    val isBonded = try {
+      device.bondState == BluetoothDevice.BOND_BONDED
+    } catch (_: SecurityException) {
+      false
+    }
+
+    val attempts = if (isBonded) {
+      listOf(
+        "secure-rfcomm" to { device.createRfcommSocketToServiceRecord(sppUuid) },
+        "insecure-rfcomm" to { device.createInsecureRfcommSocketToServiceRecord(sppUuid) },
+        "channel-1" to {
+          val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+          method.invoke(device, 1) as BluetoothSocket
+        },
+      )
+    } else {
+      listOf(
+        "insecure-rfcomm" to { device.createInsecureRfcommSocketToServiceRecord(sppUuid) },
+        "secure-rfcomm" to { device.createRfcommSocketToServiceRecord(sppUuid) },
+        "channel-1" to {
+          val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+          method.invoke(device, 1) as BluetoothSocket
+        },
+      )
+    }
+
     var lastError: Exception? = null
-    for (makeSocket in attempts) {
+    for ((name, makeSocket) in attempts) {
       var sock: BluetoothSocket? = null
       try {
+        android.util.Log.i("Td404Printer", "Opening SPP socket via $name...")
         sock = makeSocket()
         connectWithTimeout(sock, connectTimeoutMs)
+        android.util.Log.i("Td404Printer", "SPP socket connected successfully via $name")
         return sock
       } catch (e: Exception) {
+        android.util.Log.w("Td404Printer", "SPP attempt via $name failed: ${e.message}")
         lastError = e
         try {
           sock?.close()
         } catch (_: Exception) {
+        }
+        try {
+          Thread.sleep(200)
+        } catch (_: InterruptedException) {
+          Thread.currentThread().interrupt()
+          break
         }
       }
     }

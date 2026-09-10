@@ -491,7 +491,7 @@ export function DegreesPropertyPanel({
       <StepperRow
         label="Width"
         value={formatMm(state.width)}
-        onMinus={() => patch({ width: Math.max(1, state.width - 0.1) })}
+        onMinus={() => patch({ width: Math.max(0.5, state.width - 0.1) })}
         onPlus={() => patch({ width: state.width + 0.1 })}
       />
     </>

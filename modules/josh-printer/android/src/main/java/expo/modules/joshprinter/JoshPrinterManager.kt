@@ -52,7 +52,7 @@ class JoshPrinterManager(private val context: Context) {
         private const val CONNECT_TIMEOUT_MS = 20_000L
         private const val CONNECT_RETRY_DELAY_MS = 1_500L
         private const val CONNECT_MAX_ATTEMPTS = 2
-        private const val PRINT_TIMEOUT_MS = 30_000L
+        private const val PRINT_TIMEOUT_MS = 15_000L
         private const val MAX_RECONNECT_ATTEMPTS = 3
         private val RECONNECT_DELAYS_MS = longArrayOf(1000, 2000, 4000)
 
@@ -189,6 +189,16 @@ class JoshPrinterManager(private val context: Context) {
                 }
                 PrintProgress.DataEnded -> {
                     Log.i(TAG, "[JOSH-PRINT-P3:DATA-TRANSMITTED] Bluetooth byte transmission completed, waiting for hardware print confirmation...")
+                    // If hardware does not send Success packet within 1500ms after all bytes are sent,
+                    // count down as success so print completes fast without hanging on models lacking hardware ACK
+                    mainHandler.postDelayed({
+                        if (printLatch != null && isPrinting.get() && !lastPrintSuccess) {
+                            Log.i(TAG, "[JOSH-PRINT-P4:FALLBACK-SUCCESS] DataEnded confirmed and safety timer elapsed; completing print.")
+                            lastPrintSuccess = true
+                            printLatch?.countDown()
+                            handlePrintSuccess()
+                        }
+                    }, 1500)
                 }
                 else -> {
                     Log.d(TAG, "[JOSH-PRINT-P4:HARDWARE-PROGRESS] $progress (info=$addiInfo)")
@@ -371,6 +381,12 @@ class JoshPrinterManager(private val context: Context) {
             lastError = "JOSH_BT_DISABLED: Bluetooth is not enabled"
             emitError("JOSH_BT_DISABLED", "Bluetooth adapter is not enabled")
             return false
+        }
+
+        // Cancel any active Bluetooth discovery to avoid RFCOMM page collisions
+        if (btAdapter.isDiscovering) {
+            try { btAdapter.cancelDiscovery() } catch (_: Exception) {}
+            try { Thread.sleep(150) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
         }
 
         // Already connected to this device?
@@ -791,19 +807,17 @@ class JoshPrinterManager(private val context: Context) {
             printLatch = latch
 
             // Strategy 1 (Primary - Official Demo MainActivity.java line 762): api.printBitmap(bitmap, printParams)
-            // Passing null or printParams with ONLY copies allows printer to use calibrated hardware darkness,
-            // speed & gap without Opcode 66/67/68 rejection halts in DzPrinter.
-            val printParams: Bundle? = if (copies > 1) {
-                Bundle().apply {
-                    putInt(PrintParamName.PRINT_COPIES, copies)
-                }
-            } else {
-                null
+            val printParams = Bundle().apply {
+                if (paramGapType >= 0) putInt(PrintParamName.GAP_TYPE, paramGapType)
+                if (paramGapLength >= 0) putInt(PrintParamName.GAP_LENGTH, paramGapLength)
+                if (paramDensity >= 0) putInt(PrintParamName.PRINT_DENSITY, paramDensity)
+                if (paramSpeed >= 0) putInt(PrintParamName.PRINT_SPEED, paramSpeed)
+                if (copies > 1) putInt(PrintParamName.PRINT_COPIES, copies)
             }
+            val finalParams = if (printParams.isEmpty) null else printParams
 
-            currentApi.abortJob()
             var submitted = try {
-                currentApi.printBitmap(bitmap, printParams)
+                currentApi.printBitmap(bitmap, finalParams)
             } catch (e: Exception) {
                 Log.w(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] currentApi.printBitmap threw", e)
                 false
@@ -814,11 +828,10 @@ class JoshPrinterManager(private val context: Context) {
             if (!submitted) {
                 Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 2 fallback to startJob -> drawBitmap -> commitJob")
                 submitted = try {
-                    currentApi.abortJob()
                     if (currentApi.startJob(finalWidthMm, finalHeightMm, 0)) {
                         currentApi.drawBitmap(bitmap, 0.0, 0.0, finalWidthMm, finalHeightMm)
-                        if (printParams != null) {
-                            currentApi.commitJobWithParam(printParams)
+                        if (finalParams != null) {
+                            currentApi.commitJobWithParam(finalParams)
                         } else {
                             currentApi.commitJob()
                         }
@@ -836,11 +849,10 @@ class JoshPrinterManager(private val context: Context) {
             if (!submitted) {
                 Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 3 fallback with drawBitmapWithActualSize")
                 submitted = try {
-                    currentApi.abortJob()
                     if (currentApi.startJob(finalWidthMm, finalHeightMm, 0)) {
                         currentApi.drawBitmapWithActualSize(bitmap, 0.0, 0.0)
-                        if (printParams != null) {
-                            currentApi.commitJobWithParam(printParams)
+                        if (finalParams != null) {
+                            currentApi.commitJobWithParam(finalParams)
                         } else {
                             currentApi.commitJob()
                         }

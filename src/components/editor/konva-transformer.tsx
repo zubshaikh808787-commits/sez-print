@@ -15,7 +15,7 @@ import { AppIcon } from '@/components/app-icon';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelElement } from '@/lib/label-document';
 import { mmToPt } from '@/lib/label-document';
-import { finiteMm } from '@/lib/editor/engine';
+import { finiteMm, MIN_ELEMENT_MM, roundMm } from '@/lib/editor/engine';
 import { mmToPx, pxToMm } from '@/lib/label-coordinate-system';
 
 export type TransformCommitPayload = {
@@ -48,8 +48,7 @@ const HANDLE_SIZE = 18;
 const HANDLE_RADIUS = 3;
 const ROTATE_HANDLE_SIZE = 24;
 const ROTATE_STEM = 28;
-/** Handle chrome and tap targets stay ≥18px. Content paints at true mm × scale. */
-const MIN_HANDLE_PX = 18;
+const HIT_TARGET_PX = 36;
 const DOUBLE_TAP_MS = 350;
 const TOOLTIP_MS = 80;
 
@@ -80,8 +79,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const baseTopPx = mmToPx(finiteMm(element.top), pxPerMMSafe);
   const baseWidthPx = Math.max(1, mmToPx(sizeMm.width, pxPerMMSafe));
   const baseHeightPx = Math.max(element.type === 'line' ? 2 : 1, mmToPx(sizeMm.height, pxPerMMSafe));
-  /** Resize floor in px ≈ 2 mm so handles never rewrite a 18px-inflated millimetre size. */
-  const minResizePx = Math.max(4, 2 * pxPerMMSafe);
+  const minMm = element.type === 'line' ? 0.1 : MIN_ELEMENT_MM;
+  const minResizePx = Math.max(2, minMm * pxPerMMSafe);
   const baseRotation = element.rotation ?? 0;
 
   const transX = useSharedValue(0);
@@ -95,18 +94,30 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const [tooltipText, setTooltipText] = React.useState<string | null>(null);
   const lastTooltipAt = useRef(0);
 
-  const committedPosRef = useRef<{ leftMm: number; topMm: number } | null>(null);
+  const committedRef = useRef<{
+    leftMm: number;
+    topMm: number;
+    widthMm: number;
+    heightMm: number;
+    rotation: number;
+  } | null>(null);
 
   useEffect(() => {
     selectedSv.value = selected;
   }, [selected, selectedSv]);
 
   useEffect(() => {
-    // If props caught up to our last committed position, sync and reset offsets simultaneously
-    if (committedPosRef.current) {
-      const { leftMm, topMm } = committedPosRef.current;
-      if (Math.abs(element.left - leftMm) <= 0.2 && Math.abs(element.top - topMm) <= 0.2) {
-        committedPosRef.current = null;
+    if (committedRef.current) {
+      const committed = committedRef.current;
+      const posOk =
+        Math.abs(element.left - committed.leftMm) <= 0.05 &&
+        Math.abs(element.top - committed.topMm) <= 0.05;
+      const sizeOk =
+        Math.abs(sizeMm.width - committed.widthMm) <= 0.05 &&
+        Math.abs(sizeMm.height - committed.heightMm) <= 0.05;
+      const rotOk = Math.abs(((element.rotation ?? 0) % 360) - committed.rotation) <= 0.5;
+      if (posOk && sizeOk && rotOk) {
+        committedRef.current = null;
         transX.value = 0;
         transY.value = 0;
         animW.value = baseWidthPx;
@@ -114,9 +125,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         animRot.value = baseRotation;
         isInteracting.value = false;
         pendingCommit.value = false;
-        return;
       }
-      // Still waiting for React state update to arrive; keep visual offsets active so it doesn't jump
       return;
     }
 
@@ -132,6 +141,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   }, [
     element.left,
     element.top,
+    sizeMm.width,
+    sizeMm.height,
+    element.rotation,
     baseLeftPx,
     baseTopPx,
     baseWidthPx,
@@ -173,18 +185,16 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       const widthMm = sizeMm.width;
       const heightMm = sizeMm.height;
 
-      // Keep element strictly within canvas boundaries
       const maxLeft = Math.max(0, canvasWidthMm - widthMm);
       const maxTop = Math.max(0, canvasHeightMm - heightMm);
       const leftMm = Math.max(0, Math.min(maxLeft, pxToMm(nextLeftPx, pxPerMMSafe)));
       const topMm = Math.max(0, Math.min(maxTop, pxToMm(nextTopPx, pxPerMMSafe)));
 
-      const roundedLeft = Math.round(leftMm * 10) / 10;
-      const roundedTop = Math.round(topMm * 10) / 10;
+      const roundedLeft = roundMm(leftMm);
+      const roundedTop = roundMm(topMm);
 
-      // If position didn't actually change, reset shared values immediately
-      if (Math.abs(roundedLeft - element.left) < 0.05 && Math.abs(roundedTop - element.top) < 0.05) {
-        committedPosRef.current = null;
+      if (Math.abs(roundedLeft - element.left) < 0.005 && Math.abs(roundedTop - element.top) < 0.005) {
+        committedRef.current = null;
         transX.value = 0;
         transY.value = 0;
         isInteracting.value = false;
@@ -192,25 +202,20 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         return;
       }
 
-      committedPosRef.current = { leftMm: roundedLeft, topMm: roundedTop };
-
-      // Safety timeout: if React doesn't update within 160ms, ensure values are normalized
-      setTimeout(() => {
-        if (committedPosRef.current) {
-          committedPosRef.current = null;
-          transX.value = 0;
-          transY.value = 0;
-          isInteracting.value = false;
-          pendingCommit.value = false;
-        }
-      }, 160);
+      committedRef.current = {
+        leftMm: roundedLeft,
+        topMm: roundedTop,
+        widthMm: roundMm(widthMm),
+        heightMm: roundMm(heightMm),
+        rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
+      };
 
       callbacksRef.current.onTransformEnd({
         id: element.id,
         leftMm: roundedLeft,
         topMm: roundedTop,
-        widthMm: Math.round(widthMm * 10) / 10,
-        heightMm: Math.round(heightMm * 10) / 10,
+        widthMm: roundMm(widthMm),
+        heightMm: roundMm(heightMm),
         rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
       });
     },
@@ -221,38 +226,45 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const dispatchResizeCommit = useCallback(
     (nextLeftPx: number, nextTopPx: number, nextWPx: number, nextHPx: number, rot: number) => {
       setTooltipText(null);
+      const minMm = element.type === 'line' ? 0.1 : MIN_ELEMENT_MM;
+      let widthMm = Math.max(minMm, pxToMm(nextWPx, pxPerMMSafe));
+      let heightMm = Math.max(minMm, pxToMm(nextHPx, pxPerMMSafe));
+      widthMm = Math.min(widthMm, Math.max(minMm, canvasWidthMm));
+      heightMm = Math.min(heightMm, Math.max(minMm, canvasHeightMm));
       let leftMm = Math.max(0, pxToMm(nextLeftPx, pxPerMMSafe));
       let topMm = Math.max(0, pxToMm(nextTopPx, pxPerMMSafe));
-      let widthMm = Math.max(2, pxToMm(nextWPx, pxPerMMSafe));
-      let heightMm = Math.max(element.type === 'line' ? 0.5 : 2, pxToMm(nextHPx, pxPerMMSafe));
-
-      if (leftMm + widthMm > canvasWidthMm) {
-        widthMm = Math.max(2, canvasWidthMm - leftMm);
-      }
-      if (topMm + heightMm > canvasHeightMm) {
-        heightMm = Math.max(element.type === 'line' ? 0.5 : 2, canvasHeightMm - topMm);
-      }
+      leftMm = Math.min(Math.max(0, canvasWidthMm - widthMm), leftMm);
+      topMm = Math.min(Math.max(0, canvasHeightMm - heightMm), topMm);
 
       let fontSize: number | undefined;
       if (element.type === 'text' || element.type === 'degrees' || element.type === 'time') {
         if ('fontSize' in element && typeof element.fontSize === 'number') {
-          const oldH = Math.max(1, sizeMm.height);
+          const oldH = Math.max(0.1, sizeMm.height);
           const ratio = heightMm / oldH;
-          fontSize = Math.max(4, Math.min(72, Math.round(element.fontSize * ratio * 2) / 2));
+          fontSize = Math.max(3, Math.min(72, Math.round(element.fontSize * ratio * 2) / 2));
         }
       }
 
-      const roundedLeft = Math.round(leftMm * 10) / 10;
-      const roundedTop = Math.round(topMm * 10) / 10;
-      committedPosRef.current = { leftMm: roundedLeft, topMm: roundedTop };
+      const roundedLeft = roundMm(leftMm);
+      const roundedTop = roundMm(topMm);
+      const roundedW = roundMm(widthMm);
+      const roundedH = roundMm(heightMm);
+      const rotation = ((Math.round(rot) % 360) + 360) % 360;
+      committedRef.current = {
+        leftMm: roundedLeft,
+        topMm: roundedTop,
+        widthMm: roundedW,
+        heightMm: roundedH,
+        rotation,
+      };
 
       callbacksRef.current.onTransformEnd({
         id: element.id,
         leftMm: roundedLeft,
         topMm: roundedTop,
-        widthMm: Math.round(widthMm * 10) / 10,
-        heightMm: Math.round(heightMm * 10) / 10,
-        rotation: ((Math.round(rot) % 360) + 360) % 360,
+        widthMm: roundedW,
+        heightMm: roundedH,
+        rotation,
         fontSize,
       });
     },
@@ -263,13 +275,21 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const dispatchRotateCommit = useCallback(
     (rot: number) => {
       setTooltipText(null);
+      const rotation = ((Math.round(rot) % 360) + 360) % 360;
+      committedRef.current = {
+        leftMm: roundMm(element.left),
+        topMm: roundMm(element.top),
+        widthMm: roundMm(sizeMm.width),
+        heightMm: roundMm(sizeMm.height),
+        rotation,
+      };
       callbacksRef.current.onTransformEnd({
         id: element.id,
-        leftMm: Math.round(element.left * 10) / 10,
-        topMm: Math.round(element.top * 10) / 10,
-        widthMm: Math.round(sizeMm.width * 10) / 10,
-        heightMm: Math.round(sizeMm.height * 10) / 10,
-        rotation: ((Math.round(rot) % 360) + 360) % 360,
+        leftMm: roundMm(element.left),
+        topMm: roundMm(element.top),
+        widthMm: roundMm(sizeMm.width),
+        heightMm: roundMm(sizeMm.height),
+        rotation,
       });
     },
     [element.id, element.left, element.top, sizeMm.width, sizeMm.height],
@@ -280,8 +300,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       const now = Date.now();
       if (now - lastTooltipAt.current < TOOLTIP_MS) return;
       lastTooltipAt.current = now;
-      const wMm = pxToMm(wPx, pxPerMMSafe).toFixed(1);
-      const hMm = pxToMm(hPx, pxPerMMSafe).toFixed(1);
+      const wMm = pxToMm(wPx, pxPerMMSafe).toFixed(2);
+      const hMm = pxToMm(hPx, pxPerMMSafe).toFixed(2);
       setTooltipText(`${wMm} × ${hMm} mm`);
     },
     [pxPerMMSafe],
@@ -295,6 +315,18 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const startAngle = useSharedValue(0);
   const anchorX = useSharedValue(0);
   const anchorY = useSharedValue(0);
+  const startAbsX = useSharedValue(0);
+  const startAbsY = useSharedValue(0);
+  const lockAspect = element.type === 'image' && Boolean(element.aspectRatioLocked);
+  const bodyHitSlop = useMemo(() => {
+    const target = selected ? HIT_TARGET_PX : 42;
+    return {
+      top: Math.max(12, (target - Math.max(1, baseHeightPx)) / 2),
+      bottom: Math.max(12, (target - Math.max(1, baseHeightPx)) / 2),
+      left: Math.max(12, (target - Math.max(1, baseWidthPx)) / 2),
+      right: Math.max(12, (target - Math.max(1, baseWidthPx)) / 2),
+    };
+  }, [selected, baseHeightPx, baseWidthPx]);
 
   const bodyDragGesture = useMemo(
     () =>
@@ -303,18 +335,15 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         .minDistance(2)
         .maxPointers(1)
         .shouldCancelWhenOutside(false)
-        .hitSlop({
-          top: Math.max(0, (42 - Math.max(MIN_HANDLE_PX, baseHeightPx)) / 2),
-          bottom: Math.max(0, (42 - Math.max(MIN_HANDLE_PX, baseHeightPx)) / 2),
-          left: Math.max(0, (42 - Math.max(MIN_HANDLE_PX, baseWidthPx)) / 2),
-          right: Math.max(0, (42 - Math.max(MIN_HANDLE_PX, baseWidthPx)) / 2),
-        })
-        .onStart(() => {
+        .hitSlop(bodyHitSlop)
+        .onStart((e) => {
           'worklet';
           isInteracting.value = true;
           pendingCommit.value = false;
           startTX.value = transX.value;
           startTY.value = transY.value;
+          startAbsX.value = e.absoluteX;
+          startAbsY.value = e.absoluteY;
           if (!selectedSv.value) {
             runOnJS(callbacksRef.current.onSelect)(element.id);
           }
@@ -325,8 +354,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         .onUpdate((e) => {
           'worklet';
           const z = padZoom > 0 ? padZoom : 1;
-          const rawLeft = baseLeftPx + startTX.value + e.translationX / z;
-          const rawTop = baseTopPx + startTY.value + e.translationY / z;
+          const rawLeft = baseLeftPx + startTX.value + (e.absoluteX - startAbsX.value) / z;
+          const rawTop = baseTopPx + startTY.value + (e.absoluteY - startAbsY.value) / z;
 
           const maxLeftPx = Math.max(0, (canvasWidthMm - sizeMm.width) * sx);
           const maxTopPx = Math.max(0, (canvasHeightMm - sizeMm.height) * sy);
@@ -345,7 +374,21 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             baseTopPx + transY.value,
           );
         }),
-    [element.lockMovement, baseHeightPx, baseWidthPx, padZoom, baseLeftPx, baseTopPx, canvasWidthMm, canvasHeightMm, sizeMm.width, sizeMm.height, sx, sy, dispatchDragCommit, element.id],
+    [
+      element.lockMovement,
+      bodyHitSlop,
+      padZoom,
+      baseLeftPx,
+      baseTopPx,
+      canvasWidthMm,
+      canvasHeightMm,
+      sizeMm.width,
+      sizeMm.height,
+      sx,
+      sy,
+      dispatchDragCommit,
+      element.id,
+    ],
   );
 
   const handleSingleTap = useCallback(() => {
@@ -387,7 +430,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         .minDistance(1)
         .maxPointers(1)
         .shouldCancelWhenOutside(false)
-        .onStart(() => {
+        .onStart((e) => {
           'worklet';
           isInteracting.value = true;
           pendingCommit.value = false;
@@ -396,6 +439,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           startTX.value = transX.value;
           startTY.value = transY.value;
           startRot.value = animRot.value;
+          startAbsX.value = e.absoluteX;
+          startAbsY.value = e.absoluteY;
 
           const w = startW.value;
           const h = startH.value;
@@ -448,8 +493,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           const rad = (startRot.value * Math.PI) / 180;
           const cos = Math.cos(rad);
           const sin = Math.sin(rad);
-          const rawDx = e.translationX / z;
-          const rawDy = e.translationY / z;
+          const rawDx = (e.absoluteX - startAbsX.value) / z;
+          const rawDy = (e.absoluteY - startAbsY.value) / z;
           const dx = rawDx * cos + rawDy * sin;
           const dy = -rawDx * sin + rawDy * cos;
 
@@ -476,6 +521,28 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             nw = Math.max(minResizePx, startW.value - dx);
             nh = Math.max(minResizePx, startH.value + dy);
           }
+
+          if (lockAspect && startH.value > 0) {
+            const ratio = startW.value / startH.value;
+            const corner =
+              handle === 'se' || handle === 'nw' || handle === 'ne' || handle === 'sw';
+            if (corner) {
+              if (Math.abs(nw - startW.value) >= Math.abs(nh - startH.value)) {
+                nh = Math.max(minResizePx, nw / ratio);
+              } else {
+                nw = Math.max(minResizePx, nh * ratio);
+              }
+            } else if (handle === 'e' || handle === 'w') {
+              nh = Math.max(minResizePx, nw / ratio);
+            } else {
+              nw = Math.max(minResizePx, nh * ratio);
+            }
+          }
+
+          const canvasWPx = canvasWidthMm * sx;
+          const canvasHPx = canvasHeightMm * sy;
+          nw = Math.min(Math.max(minResizePx, nw), canvasWPx);
+          nh = Math.min(Math.max(minResizePx, nh), canvasHPx);
 
           let ax = 0;
           let ay = 0;
@@ -507,14 +574,15 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
           const ldx = ax - nw / 2;
           const ldy = ay - nh / 2;
-          const left = anchorX.value - nw / 2 - ldx * cos + ldy * sin;
-          const top = anchorY.value - nh / 2 - ldx * sin - ldy * cos;
+          let left = anchorX.value - nw / 2 - ldx * cos + ldy * sin;
+          let top = anchorY.value - nh / 2 - ldx * sin - ldy * cos;
+          left = Math.max(0, Math.min(Math.max(0, canvasWPx - nw), left));
+          top = Math.max(0, Math.min(Math.max(0, canvasHPx - nh), top));
 
           animW.value = nw;
           animH.value = nh;
           transX.value = left - baseLeftPx;
           transY.value = top - baseTopPx;
-          runOnJS(updateTooltipJS)(nw, nh);
         })
         .onEnd(() => {
           'worklet';
@@ -526,7 +594,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             animH.value,
             animRot.value,
           );
-        }),
+        })
+        .blocksExternalGesture(bodyDragGesture),
     [
       padZoom,
       baseLeftPx,
@@ -541,15 +610,36 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       startTX,
       startTY,
       startRot,
+      startAbsX,
+      startAbsY,
       anchorX,
       anchorY,
       isInteracting,
       pendingCommit,
       element.id,
       dispatchResizeCommit,
-      updateTooltipJS,
       minResizePx,
+      lockAspect,
+      bodyDragGesture,
+      canvasWidthMm,
+      canvasHeightMm,
+      sx,
+      sy,
     ],
+  );
+
+  const handleGestures = useMemo(
+    () => ({
+      nw: createHandleGesture('nw'),
+      n: createHandleGesture('n'),
+      ne: createHandleGesture('ne'),
+      e: createHandleGesture('e'),
+      se: createHandleGesture('se'),
+      s: createHandleGesture('s'),
+      sw: createHandleGesture('sw'),
+      w: createHandleGesture('w'),
+    }),
+    [createHandleGesture],
   );
 
   const rotateGesture = useMemo(
@@ -557,11 +647,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       Gesture.Pan()
         .minDistance(2)
         .maxPointers(1)
-        .onStart(() => {
+        .onStart((e) => {
           'worklet';
           isInteracting.value = true;
           pendingCommit.value = false;
           startRot.value = animRot.value;
+          startAbsX.value = e.absoluteX;
+          startAbsY.value = e.absoluteY;
           const cy = animH.value / 2;
           startAngle.value = Math.atan2(-ROTATE_STEM - cy, 0);
           if (callbacksRef.current.onTransformStart) {
@@ -573,8 +665,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           const z = padZoom > 0 ? padZoom : 1;
           const cx = animW.value / 2;
           const cy = animH.value / 2;
-          const touchX = cx + e.translationX / z;
-          const touchY = -ROTATE_STEM + e.translationY / z;
+          const touchX = cx + (e.absoluteX - startAbsX.value) / z;
+          const touchY = -ROTATE_STEM + (e.absoluteY - startAbsY.value) / z;
           const currentAngle = Math.atan2(touchY - cy, touchX - cx);
           let deg =
             startRot.value + ((currentAngle - startAngle.value) * 180) / Math.PI;
@@ -730,57 +822,52 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
               <HandleAnchor
                 position="nw"
-                gesture={createHandleGesture('nw')}
+                gesture={handleGestures.nw}
                 borderColor={borderStrokeColor}
                 style={styles.handleNW}
               />
               <HandleAnchor
                 position="ne"
-                gesture={createHandleGesture('ne')}
+                gesture={handleGestures.ne}
                 borderColor={borderStrokeColor}
                 style={styles.handleNE}
               />
               <HandleAnchor
                 position="se"
-                gesture={createHandleGesture('se')}
+                gesture={handleGestures.se}
                 borderColor={borderStrokeColor}
                 style={styles.handleSE}
               />
               <HandleAnchor
                 position="sw"
-                gesture={createHandleGesture('sw')}
+                gesture={handleGestures.sw}
                 borderColor={borderStrokeColor}
                 style={styles.handleSW}
               />
-
-              {baseWidthPx >= 48 && baseHeightPx >= 48 ? (
-                <>
-                  <HandleAnchor
-                    position="n"
-                    gesture={createHandleGesture('n')}
-                    borderColor={borderStrokeColor}
-                    style={styles.handleN}
-                  />
-                  <HandleAnchor
-                    position="e"
-                    gesture={createHandleGesture('e')}
-                    borderColor={borderStrokeColor}
-                    style={styles.handleE}
-                  />
-                  <HandleAnchor
-                    position="s"
-                    gesture={createHandleGesture('s')}
-                    borderColor={borderStrokeColor}
-                    style={styles.handleS}
-                  />
-                  <HandleAnchor
-                    position="w"
-                    gesture={createHandleGesture('w')}
-                    borderColor={borderStrokeColor}
-                    style={styles.handleW}
-                  />
-                </>
-              ) : null}
+              <HandleAnchor
+                position="n"
+                gesture={handleGestures.n}
+                borderColor={borderStrokeColor}
+                style={styles.handleN}
+              />
+              <HandleAnchor
+                position="e"
+                gesture={handleGestures.e}
+                borderColor={borderStrokeColor}
+                style={styles.handleE}
+              />
+              <HandleAnchor
+                position="s"
+                gesture={handleGestures.s}
+                borderColor={borderStrokeColor}
+                style={styles.handleS}
+              />
+              <HandleAnchor
+                position="w"
+                gesture={handleGestures.w}
+                borderColor={borderStrokeColor}
+                style={styles.handleW}
+              />
             </>
           )}
 

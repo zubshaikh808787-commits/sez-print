@@ -72,21 +72,45 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         ? doc.background.color
         : '#FFFFFF';
 
-  // Grid lines
+  // Grid lines — engraved 1 / 5 / 10 mm like a machinist scale
   const gridLines = useMemo(() => {
     if (!showGrid || pxPerMM <= 0) return null;
-    const stepPx = 5 * pxPerMM;
-    const vertical: number[] = [];
-    const horizontal: number[] = [];
-    for (let x = stepPx; x < w; x += stepPx) vertical.push(x);
-    for (let y = stepPx; y < h; y += stepPx) horizontal.push(y);
+    const vertical: { x: number; kind: 'minor' | 'mid' | 'major' }[] = [];
+    const horizontal: { y: number; kind: 'minor' | 'mid' | 'major' }[] = [];
+    const stepMm = pxPerMM >= 3 ? 1 : 5;
+    for (let mm = stepMm; mm * pxPerMM < w - 0.5; mm += stepMm) {
+      const kind = mm % 10 === 0 ? 'major' : mm % 5 === 0 ? 'mid' : 'minor';
+      vertical.push({ x: mm * pxPerMM, kind });
+    }
+    for (let mm = stepMm; mm * pxPerMM < h - 0.5; mm += stepMm) {
+      const kind = mm % 10 === 0 ? 'major' : mm % 5 === 0 ? 'mid' : 'minor';
+      horizontal.push({ y: mm * pxPerMM, kind });
+    }
+    const stroke = (kind: 'minor' | 'mid' | 'major') =>
+      kind === 'major' ? '#94A3B8' : kind === 'mid' ? '#CBD5E1' : '#E8EEF4';
     return (
       <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
-        {vertical.map((x) => (
-          <Line key={`v${x}`} x1={x} y1={0} x2={x} y2={h} stroke="#E2E8F0" strokeWidth={1} />
+        {vertical.map((tick) => (
+          <Line
+            key={`v${tick.x}`}
+            x1={tick.x}
+            y1={0}
+            x2={tick.x}
+            y2={h}
+            stroke={stroke(tick.kind)}
+            strokeWidth={tick.kind === 'major' ? 1 : StyleSheet.hairlineWidth}
+          />
         ))}
-        {horizontal.map((y) => (
-          <Line key={`h${y}`} x1={0} y1={y} x2={w} y2={y} stroke="#E2E8F0" strokeWidth={1} />
+        {horizontal.map((tick) => (
+          <Line
+            key={`h${tick.y}`}
+            x1={0}
+            y1={tick.y}
+            x2={w}
+            y2={tick.y}
+            stroke={stroke(tick.kind)}
+            strokeWidth={tick.kind === 'major' ? 1 : StyleSheet.hairlineWidth}
+          />
         ))}
       </Svg>
     );
@@ -179,11 +203,12 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         width: w,
         height: h,
         backgroundColor,
-        ...(stockCut ? { overflow: 'hidden' as const } : shapeClip),
+        overflow: 'visible',
       }}>
       {stockOutline}
-      <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={{ width: w, height: h, ...shapeClip }}>
+      <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={{ width: w, height: h, overflow: 'visible' }}>
         <View
+          pointerEvents="none"
           collapsable={false}
           style={[
             styles.canvasPad,
@@ -195,7 +220,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             },
           ]}>
           {doc.background?.type === 'image' ? (
-            <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+            <View style={StyleSheet.absoluteFillObject}>
               <Image
                 source={{ uri: doc.background.uri }}
                 style={StyleSheet.absoluteFillObject}
@@ -207,47 +232,47 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
           {jewelryGuides}
           {gridLines}
 
-          <GestureDetector gesture={deselectGesture}>
-            <View style={StyleSheet.absoluteFillObject} collapsable={false} />
-          </GestureDetector>
-
-          {sortLayers(doc.elements).map((element: LabelElement) => (
-            <KonvaTransformer
-              key={element.id}
-              element={element}
-              pxPerMM={pxPerMM}
-              padZoom={padZoom}
-              selected={selectedIds.includes(element.id)}
-              selectionColor={selectionColor}
-              canvasWidthMm={
-                isRatTailGeometry(doc.mediaGeometry)
-                  ? ratTailBodyRectMm(doc.mediaGeometry).width
-                  : doc.widthMm
-              }
-              canvasHeightMm={
-                isRatTailGeometry(doc.mediaGeometry)
-                  ? ratTailBodyRectMm(doc.mediaGeometry).height
-                  : doc.heightMm
-              }
-              onSelect={onSelect}
-              onOpenPanel={onOpenPanel}
-              onEditText={onEditText}
-              onTransformStart={onTransformStart}
-              onTransformEnd={onTransformEnd}
-              onQuickRotate={onQuickRotate}
-            />
-          ))}
-
           {doc.elements.length === 0 && !stockCut ? (
-            <View pointerEvents="none" style={styles.emptyHintWrap}>
+            <View style={styles.emptyHintWrap}>
               <Text style={styles.emptyHint}>Tap a tool below to add elements</Text>
             </View>
           ) : null}
 
           {doc.mediaShape === 'diecut' || cableFlag || stockCut ? null : (
-            <View pointerEvents="none" style={styles.artboardBorder} />
+            <View style={styles.artboardBorder} />
           )}
         </View>
+
+        <GestureDetector gesture={deselectGesture}>
+          <View style={StyleSheet.absoluteFillObject} collapsable={false} />
+        </GestureDetector>
+
+        {sortLayers(doc.elements).map((element: LabelElement) => (
+          <KonvaTransformer
+            key={element.id}
+            element={element}
+            pxPerMM={pxPerMM}
+            padZoom={padZoom}
+            selected={selectedIds.includes(element.id)}
+            selectionColor={selectionColor}
+            canvasWidthMm={
+              isRatTailGeometry(doc.mediaGeometry)
+                ? ratTailBodyRectMm(doc.mediaGeometry).width
+                : doc.widthMm
+            }
+            canvasHeightMm={
+              isRatTailGeometry(doc.mediaGeometry)
+                ? ratTailBodyRectMm(doc.mediaGeometry).height
+                : doc.heightMm
+            }
+            onSelect={onSelect}
+            onOpenPanel={onOpenPanel}
+            onEditText={onEditText}
+            onTransformStart={onTransformStart}
+            onTransformEnd={onTransformEnd}
+            onQuickRotate={onQuickRotate}
+          />
+        ))}
       </ViewShot>
       {cableFlagOutline}
     </View>
@@ -257,7 +282,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 const styles = StyleSheet.create({
   canvasPad: {
     overflow: 'hidden',
-    position: 'relative',
+    position: 'absolute',
+    left: 0,
+    top: 0,
   },
   emptyHintWrap: {
     ...StyleSheet.absoluteFillObject,
@@ -272,6 +299,6 @@ const styles = StyleSheet.create({
   artboardBorder: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: 1,
-    borderColor: 'rgba(15, 118, 110, 0.35)',
+    borderColor: 'rgba(94, 234, 212, 0.45)',
   },
 });

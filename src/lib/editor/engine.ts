@@ -245,6 +245,29 @@ export function reorderElements(
   return rest.map((el, i) => ({ ...el, zIndex: i }));
 }
 
+/** Keep a box on the label. Size stays as given (down to MIN_ELEMENT_MM); only left/top move. */
+export function clampBoxOnCanvas(
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  canvas: CanvasBounds,
+): { left: number; top: number } {
+  const w = Math.max(MIN_ELEMENT_MM, finiteMm(width, MIN_ELEMENT_MM));
+  const h = Math.max(0.1, finiteMm(height, MIN_ELEMENT_MM));
+  const maxLeft = Math.max(0, canvas.widthMm - w);
+  const maxTop = Math.max(0, canvas.heightMm - h);
+  return {
+    left: roundMm(Math.min(maxLeft, Math.max(0, finiteMm(left)))),
+    top: roundMm(Math.min(maxTop, Math.max(0, finiteMm(top)))),
+  };
+}
+
+function offsetCloneOnCanvas(el: LabelElement, canvas: CanvasBounds, offsetMm: number) {
+  const size = elementSizeMm(el);
+  return clampBoxOnCanvas(finiteMm(el.left) + offsetMm, finiteMm(el.top) + offsetMm, size.width, size.height, canvas);
+}
+
 export function duplicateElements(
   elements: LabelElement[],
   ids: string[],
@@ -257,8 +280,9 @@ export function duplicateElements(
   const clones = sources.map((el) => {
     const clone = JSON.parse(JSON.stringify(el)) as LabelElement;
     clone.id = generateId();
-    clone.left = finiteMm(el.left) + offsetMm;
-    clone.top = finiteMm(el.top) + offsetMm;
+    const next = offsetCloneOnCanvas(el, canvas, offsetMm);
+    clone.left = next.left;
+    clone.top = next.top;
     clone.lockMovement = false;
     return clone;
   });
@@ -282,8 +306,9 @@ export function pasteElementsFromClipboard(elements: LabelElement[], canvas: Can
   const clones = clipboard.map((el) => {
     const clone = JSON.parse(JSON.stringify(el)) as LabelElement;
     clone.id = generateId();
-    clone.left = Math.min(canvas.widthMm - 2, finiteMm(el.left) + 2);
-    clone.top = Math.min(canvas.heightMm - 2, finiteMm(el.top) + 2);
+    const next = offsetCloneOnCanvas(el, canvas, 2);
+    clone.left = next.left;
+    clone.top = next.top;
     clone.lockMovement = false;
     return clone;
   });
@@ -322,7 +347,7 @@ export function sanitizeTransform(payload: {
   };
   if (payload.fontSize != null) {
     const fs = finiteMm(payload.fontSize, 12);
-    return { ...out, fontSize: Math.max(4, Math.min(72, fs)) };
+        return { ...out, fontSize: Math.max(3, Math.min(72, fs)) };
   }
   return out;
 }

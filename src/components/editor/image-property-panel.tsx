@@ -194,9 +194,9 @@ export function ImagePropertyPanel({
 
   const handleWidthChange = useCallback(
     (delta: number) => {
-      const nextW = Math.max(1, Math.round((state.width + delta) * 10) / 10);
+      const nextW = Math.max(0.5, Math.round((state.width + delta) * 10) / 10);
       if (isAspectLocked) {
-        const nextH = Math.max(1, Math.round((nextW / currentAspect) * 10) / 10);
+        const nextH = Math.max(0.5, Math.round((nextW / currentAspect) * 10) / 10);
         patch({ width: nextW, height: nextH });
       } else {
         patch({ width: nextW });
@@ -207,9 +207,9 @@ export function ImagePropertyPanel({
 
   const handleHeightChange = useCallback(
     (delta: number) => {
-      const nextH = Math.max(1, Math.round((state.height + delta) * 10) / 10);
+      const nextH = Math.max(0.5, Math.round((state.height + delta) * 10) / 10);
       if (isAspectLocked) {
-        const nextW = Math.max(1, Math.round((nextH * currentAspect) * 10) / 10);
+        const nextW = Math.max(0.5, Math.round((nextH * currentAspect) * 10) / 10);
         patch({ width: nextW, height: nextH });
       } else {
         patch({ height: nextH });

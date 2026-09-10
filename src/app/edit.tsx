@@ -129,7 +129,6 @@ import {
   pasteElementsFromClipboard,
   reorderElements,
   sanitizeTransform,
-  snapBoxToGuides,
 } from '@/lib/editor/engine';
 
 type IconName = AppIconName;
@@ -898,18 +897,6 @@ export default function EditScreen() {
   const handleTransformEnd = useCallback(
     (payload: TransformCommitPayload) => {
       const clean = sanitizeTransform(payload);
-      const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
-      const others = docRef.current.elements
-        .filter((el) => el.id !== payload.id && el.type !== 'border' && el.needPrinting !== false)
-        .map((el) => boxOf(el));
-      const snapped = snapBoxToGuides(
-        clean.leftMm,
-        clean.topMm,
-        clean.widthMm,
-        clean.heightMm,
-        others,
-        canvas,
-      );
       const recordHistory = !transformingRef.current;
       if (transformingRef.current) {
         historyRef.current.commit();
@@ -920,15 +907,22 @@ export default function EditScreen() {
         (elements) =>
           elements.map((el) => {
             if (el.id !== payload.id) return el;
+            const prevSize = elementSizeMm(el);
+            const resized =
+              Math.abs(prevSize.width - clean.widthMm) > 0.04 ||
+              Math.abs(prevSize.height - clean.heightMm) > 0.04;
             const next: LabelElement = {
               ...el,
-              left: snapped.left,
-              top: snapped.top,
+              left: clean.leftMm,
+              top: clean.topMm,
               width: clean.widthMm,
               rotation: clean.rotation,
             };
-            if ('height' in next && typeof next.height === 'number') {
+            if (resized || typeof (el as { height?: number }).height === 'number') {
               (next as { height: number }).height = clean.heightMm;
+            }
+            if (resized && 'autoTextHeight' in next) {
+              (next as { autoTextHeight: boolean }).autoTextHeight = false;
             }
             if (clean.fontSize !== undefined && 'fontSize' in next) {
               (next as { fontSize: number }).fontSize = clean.fontSize;
@@ -2329,17 +2323,17 @@ const styles = StyleSheet.create({
   },
   rulerFrame: {
     flexDirection: 'column',
-    overflow: 'hidden',
+    overflow: 'visible',
     backgroundColor: EDITOR_WORKSPACE_COLOR,
   },
   innerDesk: {
     position: 'relative',
     backgroundColor: EDITOR_WORKSPACE_COLOR,
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   artboardSlot: {
     position: 'absolute',
-    overflow: 'hidden',
+    overflow: 'visible',
     borderRadius: 3,
     shadowColor: '#0B1F33',
     shadowOffset: { width: 0, height: 2 },

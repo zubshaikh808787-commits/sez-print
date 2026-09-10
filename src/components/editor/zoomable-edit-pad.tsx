@@ -5,7 +5,6 @@
  * cannot steal element drag/resize.
  */
 
-import { Palette } from '@/constants/ui';
 import { formatViewZoomLabel } from '@/lib/label-geometry';
 import { ReactNode, useCallback, useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
@@ -304,16 +303,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.94)',
+    backgroundColor: 'rgba(14, 20, 28, 0.94)',
     borderRadius: 20,
     paddingHorizontal: 6,
     paddingVertical: 4,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#D5DCE4',
+    borderColor: '#2C3642',
     elevation: 3,
-    shadowColor: '#0B1F33',
+    shadowColor: '#0B1016',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.35,
     shadowRadius: 4,
   },
   ctrlBtn: {
@@ -322,13 +321,13 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#1C2430',
   },
   ctrlBtnDisabled: {
     opacity: 0.35,
   },
   ctrlGlyph: {
-    color: Palette.ink,
+    color: '#E8EEF4',
     fontSize: 20,
     fontWeight: '600',
     lineHeight: 22,
@@ -341,10 +340,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   zoomText: {
-    color: Palette.ink,
-    fontSize: 14,
+    color: '#5EEAD4',
+    fontSize: 13,
     fontWeight: '800',
-    letterSpacing: 0.3,
+    letterSpacing: 0.6,
   },
   pressed: {
     opacity: 0.75,

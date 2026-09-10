@@ -4,9 +4,13 @@ import {
   EditorHistory,
   alignBox,
   boxOf,
+  clampBoxOnCanvas,
   duplicateElements,
   finiteMm,
+  MIN_ELEMENT_MM,
   nudgeBox,
+  pasteElementsFromClipboard,
+  copyElementsToClipboard,
   reorderElements,
   roundMm,
   sanitizeTransform,
@@ -14,6 +18,7 @@ import {
 } from '../engine';
 import { DEFAULT_ELEMENT_STATE } from '../../../components/editor/types';
 import type { LabelElement } from '../../label-document';
+import { clampElementToLabel } from '../../element-sizing';
 
 function textEl(id: string, left: number, top: number, width = 10, height = 6): LabelElement {
   return {
@@ -117,7 +122,65 @@ function testSanitizeTransform() {
   assert.equal(roundMm(1.234), 1.23);
   const size = boxOf(textEl('t', 3, 4, 8, 5));
   assert.equal(size.left, 3);
+  const tiny = sanitizeTransform({
+    leftMm: 48.77,
+    topMm: 1.23,
+    widthMm: 0.5,
+    heightMm: 0.5,
+    rotation: 0,
+  });
+  assert.equal(tiny.widthMm, MIN_ELEMENT_MM);
+  assert.equal(tiny.heightMm, MIN_ELEMENT_MM);
+  assert.equal(tiny.leftMm, 48.77);
+  assert.equal(tiny.topMm, 1.23);
   console.log('ok sanitizeTransform strips NaN and clamps size/rotation/font');
+}
+
+function testSmallContentCanSitAnywhere() {
+  const canvas = { widthMm: 50, heightMm: 73 };
+  const w = 0.5;
+  const h = 0.5;
+  for (const left of [0, 0.01, 12.34, 24.99, 49.5]) {
+    const parked = nudgeBox(left, 10, w, h, 0, 0, canvas);
+    assert.equal(parked.left, roundMm(Math.min(canvas.widthMm - w, Math.max(0, left))));
+  }
+  const corner = nudgeBox(49.5, 72.5, w, h, 0, 0, canvas);
+  assert.equal(corner.left, 49.5);
+  assert.equal(corner.top, 72.5);
+
+  const clamped = clampBoxOnCanvas(80, -4, 0.5, 0.5, canvas);
+  assert.equal(clamped.left, 49.5);
+  assert.equal(clamped.top, 0);
+
+  const el = textEl('tiny', 40.25, 60.1, 0.5, 0.5);
+  const kept = clampElementToLabel(el, { widthMm: 50, heightMm: 73 });
+  assert.equal(kept.width, 0.5);
+  assert.ok('height' in kept && kept.height === 0.5);
+  assert.equal(kept.left, 40.25);
+  assert.equal(kept.top, 60.1);
+
+  const inflated = clampElementToLabel(textEl('edge', 49.5, 72.5, 0.5, 0.5), {
+    widthMm: 50,
+    heightMm: 73,
+  });
+  assert.equal(inflated.width, 0.5);
+  assert.equal(inflated.left, 49.5);
+  assert.equal(inflated.top, 72.5);
+  console.log('ok 0.5 mm content can sit anywhere on the artboard');
+}
+
+function testPasteTinyStaysOnCanvas() {
+  const canvas = { widthMm: 50, heightMm: 73 };
+  const source = [textEl('a', 48, 70, 0.5, 0.5)];
+  copyElementsToClipboard(source, ['a']);
+  const pasted = pasteElementsFromClipboard(source, canvas);
+  assert.equal(pasted.newIds.length, 1);
+  const clone = pasted.elements[1];
+  assert.ok(clone.left + 0.5 <= 50 + 1e-9);
+  assert.ok(clone.top + 0.5 <= 73 + 1e-9);
+  assert.ok(clone.left >= 0);
+  assert.ok(clone.top >= 0);
+  console.log('ok paste of 0.5 mm content stays inside the label');
 }
 
 function main() {
@@ -127,6 +190,8 @@ function main() {
   testNudgeAndAlign();
   testDuplicateAndZOrder();
   testSanitizeTransform();
+  testSmallContentCanSitAnywhere();
+  testPasteTinyStaysOnCanvas();
   console.log('ALL EDITOR ENGINE TESTS PASSED');
 }
 

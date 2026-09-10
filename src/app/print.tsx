@@ -65,6 +65,7 @@ import {
   rasterizePngForPrint,
   rotatePngBase64,
   sendIsolatedPrintCopies,
+  tryNativeSdkPngPrint,
   waitForNextPaint,
 } from '@/lib/printer/print-job';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
@@ -725,7 +726,7 @@ export default function PrintScreen() {
 
         const artworkPhoto = Boolean(params.imageUri) && !params.labelId;
 
-        const usedNative = false;
+        let usedNative = false;
         if (manager.isJosh) {
           console.info(
             `[JOSH-PRINT-P1:PREFLIGHT] Label print dispatching via JOSH LPAPI: page=${page + 1}/${pageCount}, size=${paper.widthMm}x${paper.heightMm}mm, copies=${copies}`,
@@ -748,7 +749,39 @@ export default function PrintScreen() {
           console.info(
             `[JOSH-PRINT-P5:FINALIZE] page ${page + 1} total: ${Date.now() - pageStart} ms | JOSH LPAPI SDK path`,
           );
-        } else if (!usedNative) {
+        } else if (manager.transport === 'td404-spp' && !artworkPhoto) {
+          // Native TD-404 SPP fast path: direct C++/Kotlin 1-bit packing (<15ms)
+          timer.start('sdkFastPrint');
+          try {
+            usedNative = await tryNativeSdkPngPrint({
+              pngBase64: ratTail143Job
+                ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
+                : base64,
+              widthMm: paper.widthMm,
+              heightMm: paper.heightMm,
+              gapMm: gapLength,
+              copies,
+              density: darkness,
+              speed: speed ?? 6,
+              vOffsetMm: vOffset,
+              hOffsetMm: hOffset,
+              media: wantsBline ? 'bline' : media,
+              orientation: ratTail143Job ? 0 : orientationDeg,
+              dpi: jobDpi,
+            });
+            if (usedNative) {
+              console.info(
+                `[print] page ${page + 1} total: ${Date.now() - pageStart} ms | SDK LabelCommand native fast path (TD-404)`,
+              );
+            }
+          } catch (err) {
+            console.warn('[print] Native SDK fast print failed, falling back to JS:', err);
+            usedNative = false;
+          }
+          timer.end('sdkFastPrint');
+        }
+
+        if (!manager.isJosh && !usedNative) {
           timer.start('rasterize');
           const bits = rasterizePngForPrint(base64, {
             widthMm,
@@ -784,10 +817,6 @@ export default function PrintScreen() {
           console.info(
             '[print] page', page + 1, 'total:', Date.now() - pageStart, 'ms |',
             'data:', bytes.length, 'bytes (JS path)',
-          );
-        } else {
-          console.info(
-            '[print] page', page + 1, 'total:', Date.now() - pageStart, 'ms | SDK LabelCommand path',
           );
         }
       }
