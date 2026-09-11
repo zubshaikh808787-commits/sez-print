@@ -97,11 +97,19 @@ export class EditorHistory {
     this.future = [];
     this.baseline = null;
   }
+
+  /** Snapshots still reachable via undo/redo — keep their image files. */
+  retainedSnapshots(): LabelElement[][] {
+    const out = [...this.past, ...this.future];
+    if (this.baseline) out.push(this.baseline);
+    return out;
+  }
 }
 
 export type CanvasBounds = { widthMm: number; heightMm: number };
 
 export function boxOf(el: LabelElement): { left: number; top: number; width: number; height: number } {
+  // Millimetres on the artboard — never view pixels.
   const size = elementSizeMm(el);
   return {
     left: finiteMm(el.left),
@@ -124,9 +132,20 @@ function nearest(value: number, targets: number[], threshold: number): number | 
   return best;
 }
 
+/** `v` is a vertical line at x = positionMm; `h` is a horizontal line at y. */
+export type SnapGuide = { axis: 'v' | 'h'; positionMm: number };
+
+export function guidesEqual(a: SnapGuide[], b: SnapGuide[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].axis !== b[i].axis || a[i].positionMm !== b[i].positionMm) return false;
+  }
+  return true;
+}
+
 /**
  * Snap a box to canvas edges, canvas centre, and other object edges/centres.
- * Returns millimetre left/top — never screen pixels.
+ * Returns millimetre left/top — never screen pixels — plus the alignment lines that fired.
  */
 export function snapBoxToGuides(
   left: number,
@@ -136,7 +155,7 @@ export function snapBoxToGuides(
   others: { left: number; top: number; width: number; height: number }[],
   canvas: CanvasBounds,
   thresholdMm = SNAP_THRESHOLD_MM,
-): { left: number; top: number } {
+): { left: number; top: number; guides: SnapGuide[] } {
   const xTargets = [0, canvas.widthMm / 2, canvas.widthMm];
   const yTargets = [0, canvas.heightMm / 2, canvas.heightMm];
   for (const o of others) {
@@ -146,21 +165,36 @@ export function snapBoxToGuides(
 
   let nextLeft = left;
   let nextTop = top;
+  const guides: SnapGuide[] = [];
   const snapL = nearest(left, xTargets, thresholdMm);
   const snapR = nearest(left + width, xTargets, thresholdMm);
   const snapCx = nearest(left + width / 2, xTargets, thresholdMm);
-  if (snapL != null) nextLeft = snapL;
-  else if (snapR != null) nextLeft = snapR - width;
-  else if (snapCx != null) nextLeft = snapCx - width / 2;
+  if (snapL != null) {
+    nextLeft = snapL;
+    guides.push({ axis: 'v', positionMm: roundMm(snapL) });
+  } else if (snapR != null) {
+    nextLeft = snapR - width;
+    guides.push({ axis: 'v', positionMm: roundMm(snapR) });
+  } else if (snapCx != null) {
+    nextLeft = snapCx - width / 2;
+    guides.push({ axis: 'v', positionMm: roundMm(snapCx) });
+  }
 
   const snapT = nearest(top, yTargets, thresholdMm);
   const snapB = nearest(top + height, yTargets, thresholdMm);
   const snapCy = nearest(top + height / 2, yTargets, thresholdMm);
-  if (snapT != null) nextTop = snapT;
-  else if (snapB != null) nextTop = snapB - height;
-  else if (snapCy != null) nextTop = snapCy - height / 2;
+  if (snapT != null) {
+    nextTop = snapT;
+    guides.push({ axis: 'h', positionMm: roundMm(snapT) });
+  } else if (snapB != null) {
+    nextTop = snapB - height;
+    guides.push({ axis: 'h', positionMm: roundMm(snapB) });
+  } else if (snapCy != null) {
+    nextTop = snapCy - height / 2;
+    guides.push({ axis: 'h', positionMm: roundMm(snapCy) });
+  }
 
-  return { left: roundMm(nextLeft), top: roundMm(nextTop) };
+  return { left: roundMm(nextLeft), top: roundMm(nextTop), guides };
 }
 
 export function nudgeBox(
@@ -262,6 +296,9 @@ export function clampBoxOnCanvas(
     top: roundMm(Math.min(maxTop, Math.max(0, finiteMm(top)))),
   };
 }
+
+/** Keep a dragged box on the label (Konva `dragBoundFunc`, millimetres). */
+export const dragBoundMm = clampBoxOnCanvas;
 
 function offsetCloneOnCanvas(el: LabelElement, canvas: CanvasBounds, offsetMm: number) {
   const size = elementSizeMm(el);

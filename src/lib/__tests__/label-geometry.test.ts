@@ -168,6 +168,8 @@ function testViewZoomLabel() {
   assert.equal(formatViewZoomLabel(1), 'Fit');
   assert.equal(formatViewZoomLabel(1.5), '150%');
   assert.equal(formatViewZoomLabel(0.8), '80%');
+  assert.equal(formatViewZoomLabel(0.25), '25%');
+  assert.equal(formatViewZoomLabel(8), '800%');
   console.log('ok view zoom label is Fit at 100%');
 }
 

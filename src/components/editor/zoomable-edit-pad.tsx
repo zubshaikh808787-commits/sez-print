@@ -2,11 +2,22 @@
  * Zoomable editing pad.
  * Two-finger pinch zooms around the pinch focal point. Two-finger pan moves a
  * zoomed artboard. One-finger pan is only used when nothing is selected so it
- * cannot steal element drag/resize.
+ * cannot steal element drag/resize. Fit (zoom = 1) clears pan.
+ *
+ * This is React Native Gesture Handler on iOS/Android — not a WKWebView. The
+ * WebView `touch-action` / momentum-scroll issues from the brief do not apply;
+ * `.shouldCancelWhenOutside(false)` keeps the pinch/pan from being cancelled
+ * by a parent native scroll (Phase 7.2).
  */
 
 import { formatViewZoomLabel } from '@/lib/label-geometry';
-import { ReactNode, useCallback, useEffect, useMemo } from 'react';
+import {
+  VIEW_ZOOM_MAX,
+  VIEW_ZOOM_MIN,
+  VIEW_ZOOM_STEP,
+  clampViewZoom,
+} from '@/lib/editor/view-transform';
+import { ReactNode, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -16,30 +27,42 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-const MIN_ZOOM = 0.55;
-const MAX_ZOOM = 5;
-const ZOOM_STEP = 1.25;
 const ZOOM_REPORT_MS = 80;
+
+export type EditPadViewTransform = {
+  zoom: number;
+  panX: number;
+  panY: number;
+};
 
 type ZoomableEditPadProps = {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   zoom: number;
   onZoomChange: (zoom: number) => void;
+  onViewTransformChange?: (view: EditPadViewTransform) => void;
   onViewportLayout?: (size: { width: number; height: number }) => void;
+  onWindowOriginChange?: (origin: { x: number; y: number }) => void;
   minZoom?: number;
   maxZoom?: number;
   oneFingerPanEnabled?: boolean;
 };
+
+function panLimit(viewSize: number, zoom: number) {
+  'worklet';
+  return Math.max(24, (viewSize * Math.max(0, zoom - 1)) / 2 + 48);
+}
 
 export function ZoomableEditPad({
   children,
   style,
   zoom,
   onZoomChange,
+  onViewTransformChange,
   onViewportLayout,
-  minZoom = MIN_ZOOM,
-  maxZoom = MAX_ZOOM,
+  onWindowOriginChange,
+  minZoom = VIEW_ZOOM_MIN,
+  maxZoom = VIEW_ZOOM_MAX,
   oneFingerPanEnabled = false,
 }: ZoomableEditPadProps) {
   const zoomSv = useSharedValue(zoom);
@@ -56,11 +79,24 @@ export function ZoomableEditPad({
   const viewW = useSharedValue(1);
   const viewH = useSharedValue(1);
   const lastZoomReportAt = useSharedValue(0);
+  const rootRef = useRef<View>(null);
 
   useEffect(() => {
     minZoomSv.value = minZoom;
     maxZoomSv.value = maxZoom;
   }, [minZoom, maxZoom, minZoomSv, maxZoomSv]);
+
+  const reportView = useCallback(
+    (nextZoom: number, nextPanX: number, nextPanY: number) => {
+      const z = clampViewZoom(Math.min(maxZoom, Math.max(minZoom, nextZoom)));
+      const panCleared = z <= 1.01;
+      const x = panCleared ? 0 : nextPanX;
+      const y = panCleared ? 0 : nextPanY;
+      onZoomChange(z);
+      onViewTransformChange?.({ zoom: z, panX: x, panY: y });
+    },
+    [maxZoom, minZoom, onZoomChange, onViewTransformChange],
+  );
 
   useEffect(() => {
     if (pinchActive.value) return;
@@ -68,19 +104,14 @@ export function ZoomableEditPad({
     if (zoom <= 1.01) {
       panX.value = 0;
       panY.value = 0;
+      onViewTransformChange?.({ zoom, panX: 0, panY: 0 });
     }
-  }, [zoom, zoomSv, panX, panY, pinchActive]);
-
-  const reportZoom = useCallback(
-    (next: number) => {
-      onZoomChange(Math.min(maxZoom, Math.max(minZoom, next)));
-    },
-    [maxZoom, minZoom, onZoomChange],
-  );
+  }, [zoom, zoomSv, panX, panY, pinchActive, onViewTransformChange]);
 
   const pinch = useMemo(
     () =>
       Gesture.Pinch()
+        .shouldCancelWhenOutside(false)
         .onStart((e) => {
           'worklet';
           pinchActive.value = true;
@@ -113,8 +144,8 @@ export function ZoomableEditPad({
             x = 0;
             y = 0;
           } else {
-            const limitX = Math.max(24, (viewW.value * Math.max(0, next - 1)) / 2 + 48);
-            const limitY = Math.max(24, (viewH.value * Math.max(0, next - 1)) / 2 + 48);
+            const limitX = panLimit(viewW.value, next);
+            const limitY = panLimit(viewH.value, next);
             x = Math.min(limitX, Math.max(-limitX, x));
             y = Math.min(limitY, Math.max(-limitY, y));
           }
@@ -124,13 +155,13 @@ export function ZoomableEditPad({
           const now = Date.now();
           if (now - lastZoomReportAt.value >= ZOOM_REPORT_MS) {
             lastZoomReportAt.value = now;
-            runOnJS(reportZoom)(next);
+            runOnJS(reportView)(next, x, y);
           }
         })
         .onEnd(() => {
           'worklet';
           pinchActive.value = false;
-          runOnJS(reportZoom)(zoomSv.value);
+          runOnJS(reportView)(zoomSv.value, panX.value, panY.value);
         }),
     [
       lastZoomReportAt,
@@ -144,7 +175,7 @@ export function ZoomableEditPad({
       pinchFocalX,
       pinchFocalY,
       pinchStartZoom,
-      reportZoom,
+      reportView,
       viewH,
       viewW,
       zoomSv,
@@ -156,6 +187,7 @@ export function ZoomableEditPad({
       Gesture.Pan()
         .minPointers(2)
         .maxPointers(2)
+        .shouldCancelWhenOutside(false)
         .onStart(() => {
           'worklet';
           panStartX.value = panX.value;
@@ -170,12 +202,23 @@ export function ZoomableEditPad({
             return;
           }
           const z = zoomSv.value;
-          const limitX = Math.max(24, (viewW.value * Math.max(0, z - 1)) / 2 + 48);
-          const limitY = Math.max(24, (viewH.value * Math.max(0, z - 1)) / 2 + 48);
-          panX.value = Math.min(limitX, Math.max(-limitX, panStartX.value + e.translationX));
-          panY.value = Math.min(limitY, Math.max(-limitY, panStartY.value + e.translationY));
+          const limitX = panLimit(viewW.value, z);
+          const limitY = panLimit(viewH.value, z);
+          const x = Math.min(limitX, Math.max(-limitX, panStartX.value + e.translationX));
+          const y = Math.min(limitY, Math.max(-limitY, panStartY.value + e.translationY));
+          panX.value = x;
+          panY.value = y;
+          const now = Date.now();
+          if (now - lastZoomReportAt.value >= ZOOM_REPORT_MS) {
+            lastZoomReportAt.value = now;
+            runOnJS(reportView)(z, x, y);
+          }
+        })
+        .onEnd(() => {
+          'worklet';
+          runOnJS(reportView)(zoomSv.value, panX.value, panY.value);
         }),
-    [panStartX, panStartY, panX, panY, pinchActive, viewH, viewW, zoomSv],
+    [lastZoomReportAt, panStartX, panStartY, panX, panY, pinchActive, reportView, viewH, viewW, zoomSv],
   );
 
   const oneFingerPan = useMemo(
@@ -185,6 +228,7 @@ export function ZoomableEditPad({
         .minPointers(1)
         .maxPointers(1)
         .minDistance(12)
+        .shouldCancelWhenOutside(false)
         .onStart(() => {
           'worklet';
           panStartX.value = panX.value;
@@ -194,12 +238,23 @@ export function ZoomableEditPad({
           'worklet';
           if (zoomSv.value <= 1.01) return;
           const z = zoomSv.value;
-          const limitX = Math.max(24, (viewW.value * Math.max(0, z - 1)) / 2 + 48);
-          const limitY = Math.max(24, (viewH.value * Math.max(0, z - 1)) / 2 + 48);
-          panX.value = Math.min(limitX, Math.max(-limitX, panStartX.value + e.translationX));
-          panY.value = Math.min(limitY, Math.max(-limitY, panStartY.value + e.translationY));
+          const limitX = panLimit(viewW.value, z);
+          const limitY = panLimit(viewH.value, z);
+          const x = Math.min(limitX, Math.max(-limitX, panStartX.value + e.translationX));
+          const y = Math.min(limitY, Math.max(-limitY, panStartY.value + e.translationY));
+          panX.value = x;
+          panY.value = y;
+          const now = Date.now();
+          if (now - lastZoomReportAt.value >= ZOOM_REPORT_MS) {
+            lastZoomReportAt.value = now;
+            runOnJS(reportView)(z, x, y);
+          }
+        })
+        .onEnd(() => {
+          'worklet';
+          runOnJS(reportView)(zoomSv.value, panX.value, panY.value);
         }),
-    [oneFingerPanEnabled, zoom, panStartX, panStartY, panX, panY, viewH, viewW, zoomSv],
+    [lastZoomReportAt, oneFingerPanEnabled, zoom, panStartX, panStartY, panX, panY, reportView, viewH, viewW, zoomSv],
   );
 
   const composed = useMemo(
@@ -215,28 +270,35 @@ export function ZoomableEditPad({
     (next: number) => {
       const clamped = Math.min(maxZoom, Math.max(minZoom, next));
       zoomSv.value = withTiming(clamped, { duration: 180 });
+      let nextPanX = panX.value;
+      let nextPanY = panY.value;
       if (clamped <= 1.01) {
+        nextPanX = 0;
+        nextPanY = 0;
         panX.value = withTiming(0, { duration: 180 });
         panY.value = withTiming(0, { duration: 180 });
       } else {
-        const limitX = Math.max(24, (viewW.value * Math.max(0, clamped - 1)) / 2 + 48);
-        const limitY = Math.max(24, (viewH.value * Math.max(0, clamped - 1)) / 2 + 48);
-        panX.value = withTiming(Math.min(limitX, Math.max(-limitX, panX.value)), { duration: 180 });
-        panY.value = withTiming(Math.min(limitY, Math.max(-limitY, panY.value)), { duration: 180 });
+        const limitX = panLimit(viewW.value, clamped);
+        const limitY = panLimit(viewH.value, clamped);
+        nextPanX = Math.min(limitX, Math.max(-limitX, panX.value));
+        nextPanY = Math.min(limitY, Math.max(-limitY, panY.value));
+        panX.value = withTiming(nextPanX, { duration: 180 });
+        panY.value = withTiming(nextPanY, { duration: 180 });
       }
-      onZoomChange(clamped);
+      reportView(clamped, nextPanX, nextPanY);
     },
-    [maxZoom, minZoom, onZoomChange, zoomSv, panX, panY, viewW, viewH],
+    [maxZoom, minZoom, reportView, zoomSv, panX, panY, viewW, viewH],
   );
 
-  const zoomIn = () => setZoomAnimated(zoom * ZOOM_STEP);
-  const zoomOut = () => setZoomAnimated(zoom / ZOOM_STEP);
+  const zoomIn = () => setZoomAnimated(zoom * VIEW_ZOOM_STEP);
+  const zoomOut = () => setZoomAnimated(zoom / VIEW_ZOOM_STEP);
   const zoomFit = () => setZoomAnimated(1);
 
   const zoomLabel = formatViewZoomLabel(zoom);
 
   return (
     <View
+      ref={rootRef}
       style={[styles.root, style]}
       onLayout={(e) => {
         const { width, height } = e.nativeEvent.layout;
@@ -244,6 +306,11 @@ export function ZoomableEditPad({
           viewW.value = width;
           viewH.value = height;
           onViewportLayout?.({ width, height });
+          rootRef.current?.measureInWindow((x, y) => {
+            if (Number.isFinite(x) && Number.isFinite(y)) {
+              onWindowOriginChange?.({ x, y });
+            }
+          });
         }
       }}>
       <GestureDetector gesture={composed}>

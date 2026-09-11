@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import type { AutoWrapping, QrErrorLevel, QrZoneSize } from '@/components/editor/types';
+import { DEFAULT_CANVAS_SPLIT_RATIO } from '@/lib/editor/canvas-split';
 import type { LabelOrientation, PaperType } from '@/lib/label-document';
 
 export type ColorMode = 'Original' | 'B & W' | 'Halftone';
@@ -14,6 +15,10 @@ export type EditorSettings = {
   editorGrid: boolean;
   /** Extra D-pad under the canvas. Off by default — use Editor Settings to show it. */
   showNudgePad: boolean;
+  /** Canvas share of the editor split column (0.35–0.89). */
+  canvasSplitRatio: number;
+  /** When true, the tools sheet is collapsed and the canvas uses the full column. */
+  canvasSplitFullscreen: boolean;
   borderColorIndex: number;
   tableColorIndex: number;
 };
@@ -56,6 +61,8 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   pictureAdsorption: true,
   editorGrid: false,
   showNudgePad: false,
+  canvasSplitRatio: DEFAULT_CANVAS_SPLIT_RATIO,
+  canvasSplitFullscreen: false,
   borderColorIndex: 1,
   tableColorIndex: 1,
 };

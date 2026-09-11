@@ -69,14 +69,31 @@ function testSnapGuides() {
   const snapped = snapBoxToGuides(0.3, 4.8, 10, 6, [], { widthMm: 50, heightMm: 30 }, 0.45);
   assert.equal(snapped.left, 0);
   assert.equal(snapped.top, 4.8);
+  assert.ok(snapped.guides.some((g) => g.axis === 'v' && g.positionMm === 0));
 
   const toCenter = snapBoxToGuides(19.8, 12, 10, 6, [], { widthMm: 50, heightMm: 30 }, 0.45);
   assert.equal(toCenter.left, 20);
+  assert.ok(toCenter.guides.some((g) => g.axis === 'v' && g.positionMm === 25));
 
   const other = { left: 20, top: 0, width: 10, height: 8 };
   const toObject = snapBoxToGuides(9.7, 0, 10, 6, [other], { widthMm: 50, heightMm: 30 }, 0.45);
   assert.equal(toObject.left, 10);
+  assert.ok(toObject.guides.some((g) => g.axis === 'v' && g.positionMm === 20));
   console.log('ok snap to canvas edge, center, and object edge');
+}
+
+function testFivePixelCenterSnap() {
+  const canvas = { widthMm: 50, heightMm: 30 };
+  const near = snapBoxToGuides(19.2, 4, 10, 6, [], canvas, 1.25);
+  assert.equal(near.left, 20);
+  assert.ok(near.guides.some((g) => g.axis === 'v' && g.positionMm === 25));
+  const far = snapBoxToGuides(17, 4, 10, 6, [], canvas, 1.25);
+  assert.equal(far.left, 17);
+  assert.equal(
+    far.guides.some((g) => g.axis === 'v' && g.positionMm === 25),
+    false,
+  );
+  console.log('ok ~5px threshold snaps to horizontal center and ignores farther boxes');
 }
 
 function testNudgeAndAlign() {
@@ -187,6 +204,7 @@ function main() {
   testFiniteMm();
   testHistoryTransactions();
   testSnapGuides();
+  testFivePixelCenterSnap();
   testNudgeAndAlign();
   testDuplicateAndZOrder();
   testSanitizeTransform();

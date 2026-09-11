@@ -21,6 +21,9 @@ export {
   rectMmToPx,
   rectPxToMm,
   printDotsPerMm,
+  pointerToMm,
+  mmToPointer,
+  viewPxPerMm,
 } from '@/lib/label-coordinate-system';
 
 export { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout, formatTsplSizeCommand };
@@ -246,7 +249,8 @@ export function fitEditorLabel(
 export const EDITOR_PAD_ZOOM_CHROME_PX = 48;
 
 /**
- * Fit the canvas so the ruler board (rulers + artboard) stays inside the pad.
+ * Single source for editor fit `pxPerMM` (`scale`). Letterboxes the label into
+ * the pad; view zoom is a separate multiplier (`viewPxPerMm`), not a second fit.
  * Use the measured ZoomableEditPad size, not the phone window width.
  */
 export function fitEditorPadBoard(

@@ -1,22 +1,23 @@
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Animated,
   AppState,
+  ActivityIndicator,
   Dimensions,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  UIManager,
+  Vibration,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -38,6 +39,38 @@ import {
   normalizeDocumentElements,
   scaleDocumentToSize,
 } from '@/lib/element-sizing';
+import {
+  DEFAULT_CANVAS_SPLIT_RATIO,
+  NUDGE_PAD_SPLIT_EXTRA_PX,
+  PANEL_MIN_HEIGHT_PX,
+  RULER_DEBOUNCE_MS,
+  SPLIT_ANIMATION_MS,
+  clampCanvasSplitHeight,
+  clampStoredSplitRatio,
+  persistableSplitRatio,
+  restoreCanvasSplitHeight,
+  workspaceHeightFromSplit,
+  type SplitReleaseResult,
+} from '@/lib/editor/canvas-split';
+import {
+  EDITOR_WORKSPACE_PAD_BOTTOM_PX,
+  editorViewTransform,
+  snapThresholdMm,
+  stepViewZoom,
+  windowPointToMm,
+  type EditorViewTransform,
+} from '@/lib/editor/view-transform';
+import { applyLiveDragPosition } from '@/lib/editor/drag-layer';
+import { collectImageFileUris, placeImportedImageMm } from '@/lib/editor/image-ingest';
+import { ingestEditorImage, sweepEditorImageFiles } from '@/lib/editor/image-ingest-native';
+import {
+  isPaletteDropOnArtboard,
+  paletteDropTopLeftMm,
+  paletteDropTypeForLabel,
+} from '@/lib/editor/palette-drop';
+import { chromeStrokeForFill, paletteGhostSizePx } from '@/lib/editor/canvas-chrome';
+import { PaletteDragGhost } from '@/components/editor/palette-drag-ghost';
+import { PaletteToolItem } from '@/components/editor/palette-tool-item';
 import { DegreesPropertyPanel } from '@/components/editor/degrees-property-panel';
 import { ArcTextPropertyPanel } from '@/components/editor/arctext-property-panel';
 import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel';
@@ -46,7 +79,8 @@ import { ElementContentView } from '@/components/editor/element-renderer';
 import { ZoomableEditPad } from '@/components/editor/zoomable-edit-pad';
 import { EditingPad } from '@/components/editor/editing-pad';
 import { KonvaCanvas } from '@/components/editor/konva-canvas';
-import type { TransformCommitPayload } from '@/components/editor/konva-transformer';
+import type { TransformCommitPayload, TransformMovePayload } from '@/components/editor/konva-transformer';
+import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
 import {
   ArtboardFrame,
   CATALOG_STOCK_LINER,
@@ -107,7 +141,7 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
-import { clampLabelMm, containFitImageOnLabel, fitEditorPadBoard } from '@/lib/label-geometry';
+import { clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { textBlockHeightMm } from '@/lib/element-sizing';
@@ -124,11 +158,14 @@ import {
   clipboardHasContent,
   copyElementsToClipboard,
   duplicateElements,
+  guidesEqual,
   isEditorVisible,
   nudgeBox,
   pasteElementsFromClipboard,
   reorderElements,
   sanitizeTransform,
+  snapBoxToGuides,
+  type SnapGuide,
 } from '@/lib/editor/engine';
 
 type IconName = AppIconName;
@@ -155,6 +192,17 @@ const TOOLS: { icon: IconName; label: string }[] = [
 ];
 
 const MAX_HISTORY = 60;
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+function animateEditorSplit() {
+  LayoutAnimation.configureNext({
+    duration: SPLIT_ANIMATION_MS,
+    update: { type: LayoutAnimation.Types.easeInEaseOut },
+  });
+}
 
 function HeaderAction({
   icon,
@@ -251,6 +299,39 @@ function isTextEditableElement(type: LabelElement['type']) {
   return type === 'text' || type === 'degrees';
 }
 
+function paletteDefaultSizeMm(
+  type: ElementType,
+  canvas: { widthMm: number; heightMm: number },
+  elements: LabelElement[],
+): { widthMm: number; heightMm: number } {
+  switch (type) {
+    case 'barcode': {
+      const fit = fitBarcodeDefaults(canvas.widthMm, canvas.heightMm, elements);
+      return { widthMm: fit.width, heightMm: fit.height };
+    }
+    case 'qrcode': {
+      const fit = fitQrcodeDefaults(canvas.widthMm, canvas.heightMm, elements);
+      return { widthMm: fit.width, heightMm: fit.height };
+    }
+    case 'line': {
+      const fit = fitLineDefaults(canvas.widthMm, canvas.heightMm, elements);
+      return { widthMm: fit.width, heightMm: fit.height };
+    }
+    case 'shape':
+    case 'arctext': {
+      const fit = fitShapeDefaults(canvas.widthMm, canvas.heightMm, elements);
+      return { widthMm: fit.width, heightMm: fit.height };
+    }
+    default: {
+      const fit =
+        type === 'time'
+          ? fitTimeDefaults(canvas.widthMm, canvas.heightMm, elements)
+          : fitTextDefaults(canvas.widthMm, canvas.heightMm, elements);
+      return { widthMm: fit.width, heightMm: textBlockHeightMm(fit.fontSize, 1) };
+    }
+  }
+}
+
 
 
 
@@ -272,6 +353,7 @@ export default function EditScreen() {
 
   const defaults = useSettingsStore((s) => s.defaults);
   const editorSettings = useSettingsStore((s) => s.editor);
+  const patchEditor = useSettingsStore((s) => s.patchEditor);
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
   const savedDocuments = useLabelStore((s) => s.documents);
   const { t } = useTranslation();
@@ -379,16 +461,58 @@ export default function EditScreen() {
   const [saveAsName, setSaveAsName] = useState('');
   const [pickerRows, setPickerRows] = useState(2);
   const [pickerColumns, setPickerColumns] = useState(3);
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const [screenSize, setScreenSize] = useState(() => Dimensions.get('screen'));
+  const { width: windowWidth } = useWindowDimensions();
   const initialStageWidth = useMemo(
     () => Math.min(windowWidth || Dimensions.get('window').width, MaxContentWidth),
     [windowWidth],
   );
   const [stageWidth, setStageWidth] = useState(initialStageWidth);
   const [padInner, setPadInner] = useState({ width: 0, height: 0 });
+  const [splitViewportH, setSplitViewportH] = useState(0);
+  const [splitDragging, setSplitDragging] = useState(false);
+  const [canvasFullscreen, setCanvasFullscreen] = useState(() =>
+    Boolean(editorSettings.canvasSplitFullscreen),
+  );
+  const [canvasSplitH, setCanvasSplitH] = useState(() =>
+    restoreCanvasSplitHeight({
+      ratio: clampStoredSplitRatio(editorSettings.canvasSplitRatio ?? DEFAULT_CANVAS_SPLIT_RATIO),
+      fullscreen: Boolean(editorSettings.canvasSplitFullscreen),
+      viewportPx: Math.max(Dimensions.get('window').height, 560) * 0.62,
+      panelMinPx: PANEL_MIN_HEIGHT_PX,
+    }),
+  );
+  const [rulerView, setRulerView] = useState({
+    innerWidthPx: 1,
+    innerHeightPx: 1,
+    boardOffsetXPx: 0,
+    boardOffsetYPx: 0,
+    canvasWidthPx: 1,
+    canvasHeightPx: 1,
+  });
+  const panelMinForSplit =
+    PANEL_MIN_HEIGHT_PX + (editorSettings.showNudgePad ? NUDGE_PAD_SPLIT_EXTRA_PX : 0);
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
   const [padZoom, setPadZoom] = useState(1);
+  const padPanRef = useRef({ x: 0, y: 0 });
+  const editorViewRef = useRef<EditorViewTransform | null>(null);
+  const padWindowOriginRef = useRef({ x: 0, y: 0 });
+  const overlayOriginRef = useRef({ x: 0, y: 0 });
+  const overlayViewRef = useRef<View>(null);
+  const paletteGhostRef = useRef<{
+    type: ElementType;
+    label: string;
+    widthMm: number;
+    heightMm: number;
+  } | null>(null);
+  const [paletteGhost, setPaletteGhost] = useState<{
+    windowX: number;
+    windowY: number;
+    widthPx: number;
+    heightPx: number;
+    icon: AppIconName;
+  } | null>(null);
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
+  const [imageIngesting, setImageIngesting] = useState(false);
 
   const [textTab, setTextTab] = useState<PropertyTab>('Regular');
   const [barcodeTab, setBarcodeTab] = useState<BarcodePropertyTab>('Regular');
@@ -408,22 +532,27 @@ export default function EditScreen() {
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
 
   useEffect(() => {
-    const sub = Dimensions.addEventListener('change', ({ screen }) => {
-      setScreenSize(screen);
-    });
-    return () => sub.remove();
-  }, []);
+    if (splitViewportH <= 0 || splitDragging) return;
+    setCanvasSplitH(
+      restoreCanvasSplitHeight({
+        ratio: clampStoredSplitRatio(editorSettings.canvasSplitRatio ?? DEFAULT_CANVAS_SPLIT_RATIO),
+        fullscreen: canvasFullscreen,
+        viewportPx: splitViewportH,
+        panelMinPx: panelMinForSplit,
+      }),
+    );
+  }, [
+    splitViewportH,
+    panelMinForSplit,
+    editorSettings.canvasSplitRatio,
+    canvasFullscreen,
+    splitDragging,
+  ]);
 
-  // Screen height (not window) so the pad does not jump when the keyboard opens.
-  // Recalculate on rotation so landscape still contain-fits.
-  const stageMaxHeight = useMemo(() => {
-    const tall = Math.max(screenSize.height || 0, windowHeight || 0);
-    return Math.max(220, Math.min(Math.round(tall * 0.35), 360));
-  }, [screenSize.height, windowHeight]);
   const layoutWidth = stageWidth > 0 ? stageWidth : initialStageWidth;
   // Phone workspace is constant. Label millimetres only change the inner artboard.
   const workspaceW = padInner.width > 1 ? padInner.width : Math.max(120, layoutWidth - 16);
-  const workspaceH = padInner.height > 1 ? padInner.height : Math.max(100, stageMaxHeight - 16);
+  const workspaceH = workspaceHeightFromSplit(canvasSplitH);
   const { canvasWidthPx, canvasHeightPx, pxPerMM, boardOffsetXPx, boardOffsetYPx, innerWidthPx, innerHeightPx } =
     useMemo(() => {
       const fitted = fitEditorPadBoard(doc.widthMm, doc.heightMm, workspaceW, workspaceH, RULER_SIZE);
@@ -438,6 +567,145 @@ export default function EditScreen() {
       };
     }, [workspaceW, workspaceH, doc.widthMm, doc.heightMm]);
 
+  const writeEditorView = useCallback(
+    (zoom: number, panX: number, panY: number) => {
+      editorViewRef.current = editorViewTransform({
+        pxPerMM,
+        viewZoom: zoom,
+        panX,
+        panY,
+        viewWidthPx: workspaceW,
+        viewHeightPx: workspaceH,
+        innerWidthPx,
+        innerHeightPx,
+        rulerSizePx: RULER_SIZE,
+        boardOffsetXPx,
+        boardOffsetYPx,
+        workspacePaddingBottomPx: EDITOR_WORKSPACE_PAD_BOTTOM_PX,
+      });
+    },
+    [pxPerMM, workspaceW, workspaceH, innerWidthPx, innerHeightPx, boardOffsetXPx, boardOffsetYPx],
+  );
+
+  useEffect(() => {
+    writeEditorView(padZoom, padPanRef.current.x, padPanRef.current.y);
+  }, [writeEditorView, padZoom]);
+
+  const handleViewTransformChange = useCallback(
+    (view: { zoom: number; panX: number; panY: number }) => {
+      padPanRef.current = { x: view.panX, y: view.panY };
+      writeEditorView(view.zoom, view.panX, view.panY);
+    },
+    [writeEditorView],
+  );
+
+  const handlePadWindowOrigin = useCallback((origin: { x: number; y: number }) => {
+    padWindowOriginRef.current = origin;
+  }, []);
+
+  const windowPointToArtboardMm = useCallback((windowX: number, windowY: number) => {
+    const view = editorViewRef.current;
+    if (!view || !(view.pxPerMM > 0)) return null;
+    return windowPointToMm({ x: windowX, y: windowY }, padWindowOriginRef.current, view);
+  }, []);
+
+  const publishSnapGuides = useCallback((next: SnapGuide[]) => {
+    setSnapGuides((prev) => (guidesEqual(prev, next) ? prev : next));
+  }, []);
+
+  useEffect(() => {
+    const next = {
+      innerWidthPx,
+      innerHeightPx,
+      boardOffsetXPx,
+      boardOffsetYPx,
+      canvasWidthPx,
+      canvasHeightPx,
+    };
+    if (!splitDragging) {
+      setRulerView(next);
+      return;
+    }
+    const timer = setTimeout(() => setRulerView(next), RULER_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [
+    splitDragging,
+    innerWidthPx,
+    innerHeightPx,
+    boardOffsetXPx,
+    boardOffsetYPx,
+    canvasWidthPx,
+    canvasHeightPx,
+  ]);
+
+  const persistSplit = useCallback(
+    (canvasPx: number, fullscreen: boolean) => {
+      patchEditor({
+        canvasSplitFullscreen: fullscreen,
+        canvasSplitRatio: persistableSplitRatio({
+          canvasPx,
+          viewportPx: splitViewportH,
+          fullscreen,
+          lastRatio: editorSettings.canvasSplitRatio,
+        }),
+      });
+    },
+    [patchEditor, splitViewportH, editorSettings.canvasSplitRatio],
+  );
+
+  const toggleCanvasFullscreen = useCallback(() => {
+    animateEditorSplit();
+    const next = !canvasFullscreen;
+    const viewport = splitViewportH > 0 ? splitViewportH : canvasSplitH + panelMinForSplit;
+    const height = restoreCanvasSplitHeight({
+      ratio: clampStoredSplitRatio(editorSettings.canvasSplitRatio ?? DEFAULT_CANVAS_SPLIT_RATIO),
+      fullscreen: next,
+      viewportPx: viewport,
+      panelMinPx: panelMinForSplit,
+    });
+    setCanvasFullscreen(next);
+    setCanvasSplitH(height);
+    persistSplit(height, next);
+  }, [
+    canvasFullscreen,
+    canvasSplitH,
+    editorSettings.canvasSplitRatio,
+    panelMinForSplit,
+    persistSplit,
+    splitViewportH,
+  ]);
+
+  const handleSplitDragStart = useCallback(() => {
+    setSplitDragging(true);
+    if (!canvasFullscreen) return;
+    setCanvasFullscreen(false);
+    setCanvasSplitH((height) =>
+      clampCanvasSplitHeight({
+        viewportPx: splitViewportH,
+        requestedCanvasPx: height,
+        panelMinPx: panelMinForSplit,
+      }),
+    );
+  }, [canvasFullscreen, panelMinForSplit, splitViewportH]);
+
+  const handleSplitDragEnd = useCallback(
+    (result: SplitReleaseResult) => {
+      setSplitDragging(false);
+      if (result.snapped) {
+        try {
+          Vibration.vibrate(8);
+        } catch {
+          // web / unsupported
+        }
+        animateEditorSplit();
+      }
+      setCanvasFullscreen(result.fullscreen);
+      setCanvasSplitH(result.canvasPx);
+      persistSplit(result.canvasPx, result.fullscreen);
+    },
+    [persistSplit],
+  );
+
   const dieCutPad =
     hasStockSilhouette(doc.templatePreviewType) || isRatTailGeometry(doc.mediaGeometry);
   const stageBg = EDITOR_WORKSPACE_COLOR;
@@ -447,8 +715,7 @@ export default function EditScreen() {
   useEffect(() => {
     setPadZoom(1);
   }, [doc.widthMm, doc.heightMm, doc.templatePreviewType]);
-  const selectionColor =
-    ['#FCA5A5', '#EF4444', '#991B1B'][editorSettings.borderColorIndex] ?? Palette.accent;
+  const selectionColor = chromeStrokeForFill(artboardFill);
 
   const selectedElement =
     selectedIds.length === 1
@@ -892,10 +1159,45 @@ export default function EditScreen() {
   const handleTransformStart = useCallback((_id: string) => {
     transformingRef.current = true;
     historyRef.current.begin(docRef.current.elements);
-  }, []);
+    publishSnapGuides([]);
+  }, [publishSnapGuides]);
+
+  const snapMoveMm = useCallback(
+    (input: { id: string; leftMm: number; topMm: number; widthMm: number; heightMm: number }) => {
+      const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
+      const others = docRef.current.elements.filter((el) => el.id !== input.id).map(boxOf);
+      const view = editorViewRef.current;
+      const threshold = snapThresholdMm(view?.pxPerMM ?? 0, view?.viewZoom ?? 1);
+      const snapped = snapBoxToGuides(
+        input.leftMm,
+        input.topMm,
+        input.widthMm,
+        input.heightMm,
+        others,
+        canvas,
+        threshold,
+      );
+      publishSnapGuides(snapped.guides);
+      return { leftMm: snapped.left, topMm: snapped.top };
+    },
+    [publishSnapGuides],
+  );
+
+  const handleTransformMove = useCallback(
+    (payload: TransformMovePayload) => {
+      setElements((elements) =>
+        applyLiveDragPosition(elements, payload.id, payload.leftMm, payload.topMm, {
+          widthMm: docRef.current.widthMm,
+          heightMm: docRef.current.heightMm,
+        }),
+      );
+    },
+    [setElements],
+  );
 
   const handleTransformEnd = useCallback(
     (payload: TransformCommitPayload) => {
+      publishSnapGuides([]);
       const clean = sanitizeTransform(payload);
       const recordHistory = !transformingRef.current;
       if (transformingRef.current) {
@@ -932,7 +1234,7 @@ export default function EditScreen() {
         recordHistory,
       );
     },
-    [setElements, bumpHistory],
+    [setElements, bumpHistory, publishSnapGuides],
   );
 
 
@@ -1040,10 +1342,10 @@ export default function EditScreen() {
   }, [selectedIds, setElements]);
 
   const zoomInPad = useCallback(() => {
-    setPadZoom((z) => Math.min(5, Math.round(z * 1.25 * 100) / 100));
+    setPadZoom((z) => stepViewZoom(z, 1));
   }, []);
   const zoomOutPad = useCallback(() => {
-    setPadZoom((z) => Math.max(0.55, Math.round((z / 1.25) * 100) / 100));
+    setPadZoom((z) => stepViewZoom(z, -1));
   }, []);
 
   const saveDocument = useCallback(
@@ -1165,75 +1467,64 @@ export default function EditScreen() {
     if (result.canceled || result.assets.length === 0) return;
     const asset = result.assets[0];
     if (!asset.uri) return;
-    const current = docRef.current;
-    const docW = current.widthMm;
-    const docH = current.heightMm;
-    const assetW = asset.width || 1;
-    const assetH = asset.height || 1;
-    const content =
-      isRatTailGeometry(current.mediaGeometry)
+
+    setImageIngesting(true);
+    try {
+      const ingested = await ingestEditorImage({
+        uri: asset.uri,
+        width: asset.width,
+        height: asset.height,
+      });
+      if (!mountedRef.current) return;
+      const current = docRef.current;
+      const content = isRatTailGeometry(current.mediaGeometry)
         ? ratTailBodyRectMm(current.mediaGeometry)
         : isJewelryDieCutDocument(current)
-          ? { left: 0, top: 0, width: docW, height: Math.min(docH, JEWELRY_DIECUT.bodyHeightMm) }
+          ? { left: 0, top: 0, width: current.widthMm, height: Math.min(current.heightMm, JEWELRY_DIECUT.bodyHeightMm) }
           : undefined;
-    const nested = containFitImageOnLabel(
-      { widthMm: docW, heightMm: docH },
-      { widthPx: assetW, heightPx: assetH },
-      content,
-    );
+      const placed = placeImportedImageMm({
+        widthPx: ingested.widthPx,
+        heightPx: ingested.heightPx,
+        pxPerMM,
+        canvas: { widthMm: current.widthMm, heightMm: current.heightMm },
+        content,
+      });
+      const el = addElement('image', {
+        uri: ingested.previewUri,
+        printUri: ingested.printUri,
+        left: placed.left,
+        top: placed.top,
+        width: placed.width,
+        height: placed.height,
+        contentFit: 'contain',
+        aspectRatioLocked: true,
+        originalAspect: ingested.originalAspect,
+        workingWidthPx: ingested.workingWidthPx,
+        workingHeightPx: ingested.workingHeightPx,
+      });
+      if (el) {
+        setImageTab('Regular');
+        setPanelOpen(true);
+      }
+    } catch (error) {
+      if (!mountedRef.current) return;
+      Alert.alert(
+        'Could not place photo',
+        error instanceof Error ? error.message : 'The image could not be decoded.',
+      );
+    } finally {
+      if (mountedRef.current) setImageIngesting(false);
+    }
+  }, [addElement, pxPerMM]);
 
-    Alert.alert(
-      'Place image on label?',
-      `The phone pad stays the same. A nested ${docW} × ${docH} mm canvas holds the photo so you can fit it on the label.`,
-      [
-        {
-          text: 'Fit on label',
-          onPress: () => {
-            if (!mountedRef.current) return;
-            const el = addElement('image', {
-              uri: asset.uri,
-              left: nested.left,
-              top: nested.top,
-              width: nested.width,
-              height: nested.height,
-              contentFit: 'contain',
-              aspectRatioLocked: true,
-              originalAspect: assetW / assetH,
-            });
-            if (el) {
-              setImageTab('Regular');
-              setPanelOpen(true);
-            }
-          },
-        },
-        {
-          text: 'Fill label',
-          onPress: () => {
-            if (!mountedRef.current) return;
-            const box = content ?? { left: 0, top: 0, width: docW, height: docH };
-            const el = addElement('image', {
-              uri: asset.uri,
-              left: box.left,
-              top: box.top,
-              width: box.width,
-              height: box.height,
-              contentFit: 'fill',
-              aspectRatioLocked: false,
-              originalAspect: assetW / assetH,
-            });
-            if (el) {
-              setImageTab('Regular');
-              setPanelOpen(true);
-            }
-          },
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ],
-    );
-  }, [addElement]);
+  useEffect(() => {
+    const keep = collectImageFileUris([
+      doc.elements,
+      ...historyRef.current.retainedSnapshots(),
+      ...savedDocuments.map((item) => item.elements),
+    ]);
+    void sweepEditorImageFiles(keep);
+  }, [doc.elements, historyRev, savedDocuments]);
 
   useFocusEffect(
     useCallback(() => {
@@ -1380,33 +1671,145 @@ export default function EditScreen() {
     });
   };
 
+  const openAddedElementPanel = useCallback((label: string) => {
+    switch (label) {
+      case 'Text':
+        setTextTab('Regular');
+        setPanelOpen(true);
+        break;
+      case 'Barcode':
+        setBarcodeTab('Regular');
+        setPanelOpen(true);
+        break;
+      case 'QRCode':
+        setQrcodeTab('Regular');
+        setPanelOpen(true);
+        break;
+      case 'Line':
+        setLineTab('Regular');
+        setPanelOpen(true);
+        break;
+      case 'Shapes':
+        setShapeTab('Regular');
+        setPanelOpen(true);
+        break;
+      case 'Time':
+        setTimeTab('Regular');
+        setPanelOpen(true);
+        break;
+      case 'ArcText':
+        setArcTextTab('Regular');
+        setPanelOpen(true);
+        break;
+      case 'Degrees':
+        setDegreesTab('Regular');
+        setPanelOpen(true);
+        break;
+      default:
+        break;
+    }
+  }, []);
+
+  const beginPaletteDrag = useCallback((
+    type: ElementType,
+    label: string,
+    icon: AppIconName,
+    windowX: number,
+    windowY: number,
+  ) => {
+    const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
+    const size = paletteDefaultSizeMm(type, canvas, docRef.current.elements);
+    const ghostPx = paletteGhostSizePx(size.widthMm, size.heightMm);
+    paletteGhostRef.current = { type, label, widthMm: size.widthMm, heightMm: size.heightMm };
+    setPaletteGhost({
+      windowX,
+      windowY,
+      widthPx: ghostPx.widthPx,
+      heightPx: ghostPx.heightPx,
+      icon,
+    });
+  }, []);
+
+  const movePaletteDrag = useCallback(
+    (windowX: number, windowY: number) => {
+      setPaletteGhost((prev) => (prev ? { ...prev, windowX, windowY } : prev));
+      const ghost = paletteGhostRef.current;
+      if (!ghost) return;
+      const mm = windowPointToArtboardMm(windowX, windowY);
+      const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
+      if (!mm || !isPaletteDropOnArtboard(mm, canvas)) {
+        publishSnapGuides([]);
+        return;
+      }
+      const view = editorViewRef.current;
+      const placed = paletteDropTopLeftMm({
+        pointerMm: mm,
+        widthMm: ghost.widthMm,
+        heightMm: ghost.heightMm,
+        canvas,
+        others: docRef.current.elements.map(boxOf),
+        thresholdMm: snapThresholdMm(view?.pxPerMM ?? 0, view?.viewZoom ?? 1),
+      });
+      publishSnapGuides(placed.guides);
+    },
+    [publishSnapGuides, windowPointToArtboardMm],
+  );
+
+  const endPaletteDrag = useCallback(
+    (windowX: number, windowY: number) => {
+      const ghost = paletteGhostRef.current;
+      paletteGhostRef.current = null;
+      setPaletteGhost(null);
+      publishSnapGuides([]);
+      if (!ghost) return;
+      const mm = windowPointToArtboardMm(windowX, windowY);
+      const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
+      if (!mm || !isPaletteDropOnArtboard(mm, canvas)) return;
+      const view = editorViewRef.current;
+      const placed = paletteDropTopLeftMm({
+        pointerMm: mm,
+        widthMm: ghost.widthMm,
+        heightMm: ghost.heightMm,
+        canvas,
+        others: docRef.current.elements.map(boxOf),
+        thresholdMm: snapThresholdMm(view?.pxPerMM ?? 0, view?.viewZoom ?? 1),
+      });
+      const overrides: Record<string, unknown> = {
+        left: placed.left,
+        top: placed.top,
+        width: ghost.widthMm,
+      };
+      if (ghost.type !== 'text' && ghost.type !== 'degrees' && ghost.type !== 'time') {
+        overrides.height = ghost.heightMm;
+      }
+      addElement(ghost.type, overrides);
+      openAddedElementPanel(ghost.label);
+    },
+    [addElement, openAddedElementPanel, publishSnapGuides, windowPointToArtboardMm],
+  );
+
   const handleToolPress = (label: string) => {
     setShowLabelMenu(false);
     switch (label) {
       case 'Text':
         addElement('text');
-        setTextTab('Regular');
-        setPanelOpen(true);
+        openAddedElementPanel(label);
         break;
       case 'Barcode':
         addElement('barcode');
-        setBarcodeTab('Regular');
-        setPanelOpen(true);
+        openAddedElementPanel(label);
         break;
       case 'QRCode':
         addElement('qrcode');
-        setQrcodeTab('Regular');
-        setPanelOpen(true);
+        openAddedElementPanel(label);
         break;
       case 'Line':
         addElement('line');
-        setLineTab('Regular');
-        setPanelOpen(true);
+        openAddedElementPanel(label);
         break;
       case 'Shapes':
         addElement('shape');
-        setShapeTab('Regular');
-        setPanelOpen(true);
+        openAddedElementPanel(label);
         break;
       case 'Table':
         setPickerRows(2);
@@ -1415,18 +1818,15 @@ export default function EditScreen() {
         break;
       case 'Time':
         addElement('time');
-        setTimeTab('Regular');
-        setPanelOpen(true);
+        openAddedElementPanel(label);
         break;
       case 'ArcText':
         addElement('arctext');
-        setArcTextTab('Regular');
-        setPanelOpen(true);
+        openAddedElementPanel(label);
         break;
       case 'Degrees':
         addElement('degrees');
-        setDegreesTab('Regular');
-        setPanelOpen(true);
+        openAddedElementPanel(label);
         break;
       case 'Image':
         void handlePickImage();
@@ -1572,7 +1972,7 @@ export default function EditScreen() {
     </View>
   );  const renderCanvas = () => (
     <View
-      style={[styles.stage, { height: stageMaxHeight, backgroundColor: stageBg }]}
+      style={[styles.stage, { height: canvasSplitH, minHeight: 0, backgroundColor: stageBg }]}
       onLayout={(event) => {
         const next = Math.round(event.nativeEvent.layout.width);
         if (next > 0 && Math.abs(next - stageWidth) > 1) {
@@ -1583,8 +1983,10 @@ export default function EditScreen() {
         style={styles.stageZoom}
         zoom={padZoom}
         onZoomChange={setPadZoom}
+        onViewTransformChange={handleViewTransformChange}
         onViewportLayout={handlePadLayout}
-        oneFingerPanEnabled={false}>
+        onWindowOriginChange={handlePadWindowOrigin}
+        oneFingerPanEnabled={selectedIds.length === 0}>
         <View style={[styles.workspace, { backgroundColor: stageBg }]} pointerEvents="box-none">
           <View
             style={[
@@ -1597,17 +1999,17 @@ export default function EditScreen() {
             <View style={styles.rulerTopRow}>
               <RulerCorner />
               <HorizontalRuler
-                trackWidthPx={innerWidthPx}
-                originPx={boardOffsetXPx}
-                contentWidthPx={canvasWidthPx || 1}
+                trackWidthPx={rulerView.innerWidthPx}
+                originPx={rulerView.boardOffsetXPx}
+                contentWidthPx={rulerView.canvasWidthPx || 1}
                 lengthMm={doc.widthMm}
               />
             </View>
             <View style={styles.rulerBodyRow}>
               <VerticalRuler
-                trackHeightPx={innerHeightPx}
-                originPx={boardOffsetYPx}
-                contentHeightPx={canvasHeightPx || 1}
+                trackHeightPx={rulerView.innerHeightPx}
+                originPx={rulerView.boardOffsetYPx}
+                contentHeightPx={rulerView.canvasHeightPx || 1}
                 lengthMm={doc.heightMm}
               />
               <View style={[styles.innerDesk, { width: innerWidthPx, height: innerHeightPx }]}>
@@ -1637,8 +2039,12 @@ export default function EditScreen() {
                     onOpenPanel={openPanelFor}
                     onEditText={beginTextEdit}
                     onTransformStart={handleTransformStart}
+                    onTransformMove={handleTransformMove}
                     onTransformEnd={handleTransformEnd}
                     onQuickRotate={handleRotateElement}
+                    pointerToMm={windowPointToArtboardMm}
+                    snapMoveMm={snapMoveMm}
+                    snapGuides={snapGuides}
                   />
                 </View>
               </View>
@@ -1776,6 +2182,7 @@ export default function EditScreen() {
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}
+            onBusyChange={setImageIngesting}
           />
         );
       default:
@@ -1828,6 +2235,7 @@ export default function EditScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.body, { maxWidth: MaxContentWidth }]}>
+        <View style={styles.subToolbarRow}>
         <Pressable
           onPress={() => {
             if (isRatTail143Document(doc)) return;
@@ -1845,6 +2253,23 @@ export default function EditScreen() {
               : 'Tap to customize size'}
           </Text>
         </Pressable>
+          <Pressable
+            onPress={toggleCanvasFullscreen}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={canvasFullscreen ? 'Restore editing panel' : 'Maximize canvas'}
+            style={({ pressed }) => [styles.splitMaxBtn, pressed && styles.pressed]}>
+            <AppIcon
+              name={
+                canvasFullscreen
+                  ? 'arrow.down.right.and.arrow.up.left'
+                  : 'arrow.up.left.and.arrow.down.right'
+              }
+              tintColor={Palette.accent}
+              size={18}
+            />
+          </Pressable>
+        </View>
 
         {doc.ups && doc.ups.columns > 1 ? (
           doc.ups.columns >= 3 ? (
@@ -1914,35 +2339,51 @@ export default function EditScreen() {
           )
         ) : null}
 
-        {renderCanvas()}
+        <View
+          style={styles.splitColumn}
+          onLayout={(event) => {
+            const next = Math.round(event.nativeEvent.layout.height);
+            if (next <= 0) return;
+            setSplitViewportH((prev) => (Math.abs(prev - next) <= 1 ? prev : next));
+          }}>
+          {renderCanvas()}
 
-        {editorSettings.showNudgePad ? (
-          <EditingPad
-            enabled={selectedIds.length > 0}
-            locked={Boolean(selectedElement?.lockMovement) || (selectedIds.length > 0 && doc.elements.filter((el) => selectedIds.includes(el.id)).every((el) => el.lockMovement))}
-            hidden={selectedIds.some((id) => {
-              const el = doc.elements.find((item) => item.id === id);
-              return el != null && !isEditorVisible(el);
-            })}
-            canPaste={clipboardHasContent()}
-            viewZoom={padZoom}
-            onNudge={nudgeSelected}
-            onRotate={rotateSelectedBy}
-            onAlign={alignSelected}
-            onDuplicate={duplicateSelected}
-            onDelete={deleteSelected}
-            onLock={() => setLockOnSelection(!(selectedElement?.lockMovement ?? false))}
-            onHide={toggleHideSelected}
-            onCopy={copySelected}
-            onPaste={pasteClipboard}
-            onFront={() => reorderSelected('front')}
-            onBack={() => reorderSelected('back')}
-            onZoomIn={zoomInPad}
-            onZoomOut={zoomOutPad}
+          <CanvasPanelDivider
+            canvasHeightPx={canvasSplitH}
+            viewportPx={splitViewportH > 0 ? splitViewportH : canvasSplitH + panelMinForSplit}
+            panelMinPx={panelMinForSplit}
+            onCanvasHeightChange={setCanvasSplitH}
+            onDragStart={handleSplitDragStart}
+            onDragEnd={handleSplitDragEnd}
           />
-        ) : null}
 
-        <View style={styles.sheet}>
+          {editorSettings.showNudgePad && !canvasFullscreen ? (
+            <EditingPad
+              enabled={selectedIds.length > 0}
+              locked={Boolean(selectedElement?.lockMovement) || (selectedIds.length > 0 && doc.elements.filter((el) => selectedIds.includes(el.id)).every((el) => el.lockMovement))}
+              hidden={selectedIds.some((id) => {
+                const el = doc.elements.find((item) => item.id === id);
+                return el != null && !isEditorVisible(el);
+              })}
+              canPaste={clipboardHasContent()}
+              viewZoom={padZoom}
+              onNudge={nudgeSelected}
+              onRotate={rotateSelectedBy}
+              onAlign={alignSelected}
+              onDuplicate={duplicateSelected}
+              onDelete={deleteSelected}
+              onLock={() => setLockOnSelection(!(selectedElement?.lockMovement ?? false))}
+              onHide={toggleHideSelected}
+              onCopy={copySelected}
+              onPaste={pasteClipboard}
+              onFront={() => reorderSelected('front')}
+              onBack={() => reorderSelected('back')}
+              onZoomIn={zoomInPad}
+              onZoomOut={zoomOutPad}
+            />
+          ) : null}
+
+          <View style={[styles.sheet, canvasFullscreen && styles.sheetCollapsed]} pointerEvents={canvasFullscreen ? 'none' : 'auto'}>
           {propertyMode ? (
             <View style={styles.panelHeader}>
               {renderToolbar()}
@@ -1960,15 +2401,32 @@ export default function EditScreen() {
             style={styles.sheetScroll}
             contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.three }}
             showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled">
+            keyboardShouldPersistTaps="handled"
+            scrollEnabled={paletteGhost == null}>
             {propertyMode ? renderPanel() : (
               <View style={styles.toolsGrid}>
-                {TOOLS.map((t) => (
-                  <ToolItem key={t.label} {...t} onPress={() => handleToolPress(t.label)} />
-                ))}
+                {TOOLS.map((t) => {
+                  const dropType = paletteDropTypeForLabel(t.label);
+                  if (dropType) {
+                    return (
+                      <PaletteToolItem
+                        key={t.label}
+                        icon={t.icon}
+                        label={t.label}
+                        style={styles.toolItem}
+                        onPress={() => handleToolPress(t.label)}
+                        onDragStart={(x, y) => beginPaletteDrag(dropType, t.label, t.icon, x, y)}
+                        onDragMove={movePaletteDrag}
+                        onDragEnd={endPaletteDrag}
+                      />
+                    );
+                  }
+                  return <ToolItem key={t.label} {...t} onPress={() => handleToolPress(t.label)} />;
+                })}
               </View>
             )}
           </ScrollView>
+        </View>
         </View>
 
         {textEditId ? (
@@ -2142,6 +2600,35 @@ export default function EditScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+      <View
+        ref={overlayViewRef}
+        pointerEvents="none"
+        collapsable={false}
+        style={StyleSheet.absoluteFillObject}
+        onLayout={() => {
+          overlayViewRef.current?.measureInWindow((x, y) => {
+            overlayOriginRef.current = { x, y };
+          });
+        }}>
+        {paletteGhost ? (
+          <PaletteDragGhost
+            windowX={paletteGhost.windowX}
+            windowY={paletteGhost.windowY}
+            widthPx={paletteGhost.widthPx}
+            heightPx={paletteGhost.heightPx}
+            overlayOrigin={overlayOriginRef.current}
+            icon={paletteGhost.icon}
+          />
+        ) : null}
+      </View>
+      {imageIngesting ? (
+        <View style={styles.imageIngestOverlay} pointerEvents="auto">
+          <View style={styles.imageIngestCard}>
+            <ActivityIndicator color={Palette.accent} />
+            <Text style={styles.imageIngestText}>Placing photo…</Text>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -2152,8 +2639,33 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.screen,
     alignItems: 'center',
   },
+  imageIngestOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.28)',
+    zIndex: 50,
+  },
+  imageIngestCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  imageIngestText: {
+    ...Type.action,
+    color: Palette.ink,
+  },
   body: {
     flex: 1,
+    width: '100%',
+  },
+  splitColumn: {
+    flex: 1,
+    minHeight: 0,
     width: '100%',
   },
   header: {
@@ -2219,12 +2731,24 @@ const styles = StyleSheet.create({
   propertyModeShell: {
     flex: 1,
   },
+  subToolbarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: Spacing.two,
+  },
   subToolbar: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     gap: 2,
+  },
+  splitMaxBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dimText: {
     color: Palette.muted,
@@ -2319,7 +2843,7 @@ const styles = StyleSheet.create({
     backgroundColor: EDITOR_WORKSPACE_COLOR,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingBottom: 40,
+    paddingBottom: EDITOR_WORKSPACE_PAD_BOTTOM_PX,
   },
   rulerFrame: {
     flexDirection: 'column',
@@ -2414,6 +2938,14 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     minHeight: 0,
     ...cardShadow,
+  },
+  sheetCollapsed: {
+    flex: 0,
+    height: 0,
+    minHeight: 0,
+    paddingTop: 0,
+    overflow: 'hidden',
+    opacity: 0,
   },
   sheetScroll: {
     flex: 1,

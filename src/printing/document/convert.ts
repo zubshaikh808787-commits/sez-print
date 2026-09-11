@@ -275,7 +275,7 @@ async function convertImage(
     return null;
   }
 
-  const gray = await ctx.decodeImageUri(el.uri);
+  const gray = await ctx.decodeImageUri(el.printUri || el.uri);
   if (!gray) {
     logPrintTrace('CONVERT_SKIP', { id: el.id, type: 'image', reason: 'decode returned null' });
     return null;

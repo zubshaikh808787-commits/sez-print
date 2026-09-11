@@ -666,16 +666,19 @@ export function ElementContentView({ element, widthPx, heightPx, scale, forPrint
       if (element.flipH) transforms.push({ scaleX: -1 });
       if (element.flipV) transforms.push({ scaleY: -1 });
       const fit = element.contentFit ?? 'fill';
-      const decodeW = Math.max(1, Math.round(widthPx));
-      const decodeH = Math.max(1, Math.round(heightPx));
+      const displayUri = forPrint ? element.printUri || element.uri : element.uri;
+      const decodeW = Math.max(
+        1,
+        Math.round(forPrint ? widthPx : element.workingWidthPx ?? widthPx),
+      );
+      const decodeH = Math.max(
+        1,
+        Math.round(forPrint ? heightPx : element.workingHeightPx ?? heightPx),
+      );
       return (
         <View style={[styles.fill, { overflow: 'hidden' }, element.antiColor && styles.antiBg]}>
           <Image
-            source={
-              forPrint
-                ? { uri: element.uri, width: decodeW, height: decodeH }
-                : { uri: element.uri }
-            }
+            source={{ uri: displayUri, width: decodeW, height: decodeH }}
             style={[
               styles.fill,
               transforms.length > 0 ? { transform: transforms } : null,
@@ -683,6 +686,7 @@ export function ElementContentView({ element, widthPx, heightPx, scale, forPrint
             ]}
             contentFit={fit}
             cachePolicy="memory-disk"
+            recyclingKey={`${element.id}:${displayUri}`}
             priority={forPrint ? 'high' : 'normal'}
           />
         </View>

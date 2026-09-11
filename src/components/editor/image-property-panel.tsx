@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 
@@ -7,6 +7,7 @@ import { AppIcon } from '@/components/app-icon';
 import { PositionControls } from '@/components/editor/position-controls';
 import { formatMm, normalizeRotation } from '@/components/editor/types';
 import type { ImageElementState } from '@/lib/label-document';
+import { ingestEditorImage } from '@/lib/editor/image-ingest-native';
 
 const ACCENT = '#48C3C7';
 const TABS = ['Regular', 'Position', 'Rotate'] as const;
@@ -115,6 +116,7 @@ export type ImagePropertyPanelProps = {
   labelWidthMm: number;
   labelHeightMm: number;
   elementHeightMm: number;
+  onBusyChange?: (busy: boolean) => void;
 };
 
 export function ImagePropertyPanel({
@@ -125,6 +127,7 @@ export function ImagePropertyPanel({
   labelWidthMm,
   labelHeightMm,
   elementHeightMm,
+  onBusyChange,
 }: ImagePropertyPanelProps) {
   const currentRotation = normalizeRotation(state.rotation ?? 0);
   const isAspectLocked = state.aspectRatioLocked ?? true;
@@ -134,6 +137,30 @@ export function ImagePropertyPanel({
     patch({ rotation: normalizeRotation(currentRotation + 90) });
   }, [currentRotation, patch]);
 
+  const applyIngestedAsset = useCallback(
+    async (uri: string, width?: number, height?: number) => {
+      onBusyChange?.(true);
+      try {
+        const ingested = await ingestEditorImage({ uri, width, height });
+        patch({
+          uri: ingested.previewUri,
+          printUri: ingested.printUri,
+          originalAspect: ingested.originalAspect,
+          workingWidthPx: ingested.workingWidthPx,
+          workingHeightPx: ingested.workingHeightPx,
+        });
+      } catch (error) {
+        Alert.alert(
+          'Could not update photo',
+          error instanceof Error ? error.message : 'The image could not be decoded.',
+        );
+      } finally {
+        onBusyChange?.(false);
+      }
+    },
+    [onBusyChange, patch],
+  );
+
   const handleCropImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -142,8 +169,8 @@ export function ImagePropertyPanel({
     });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
-    patch({ uri: asset.uri });
-  }, [patch]);
+    await applyIngestedAsset(asset.uri, asset.width, asset.height);
+  }, [applyIngestedAsset]);
 
   const handleReplaceImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -153,8 +180,8 @@ export function ImagePropertyPanel({
     });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
-    patch({ uri: asset.uri });
-  }, [patch]);
+    await applyIngestedAsset(asset.uri, asset.width, asset.height);
+  }, [applyIngestedAsset]);
 
   const handleFlipH = useCallback(() => {
     patch({ flipH: !state.flipH });

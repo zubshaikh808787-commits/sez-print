@@ -95,6 +95,7 @@ function AppRoot() {
         <Stack.Screen name="printer-connect" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="printer-diagnostics" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="calibration-print" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="canvas-skia-prototype" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="phase2-canvas" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="phase3-image-import" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="phase4-text" options={{ animation: 'slide_from_right' }} />

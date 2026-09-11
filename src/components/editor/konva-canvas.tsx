@@ -1,4 +1,4 @@
-import React, { forwardRef, memo, useMemo } from 'react';
+import React, { forwardRef, memo, useCallback, useMemo, useState } from 'react';
 import { Image } from 'expo-image';
 import { StyleSheet, Text, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
@@ -6,7 +6,7 @@ import Svg, { Line } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
-import { KonvaTransformer, type TransformCommitPayload } from './konva-transformer';
+import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
 import { type LabelDocument, type LabelElement } from '@/lib/label-document';
@@ -16,6 +16,9 @@ import { isCableFlagDieCutDocument } from '@/constants/cable-flag-diecut';
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
 import { isRatTailGeometry, ratTailBodyRectMm } from '@/lib/media-geometry';
 import { sortLayers } from '@/lib/template-schema';
+import { idleElementRefsUnchanged, splitCanvasLayers } from '@/lib/editor/drag-layer';
+import { SNAP_GUIDE_COLOR, SNAP_GUIDE_STROKE_PX } from '@/lib/editor/canvas-chrome';
+import type { SnapGuide } from '@/lib/editor/engine';
 
 type KonvaCanvasProps = {
   document: LabelDocument;
@@ -33,9 +36,78 @@ type KonvaCanvasProps = {
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
   onTransformStart?: (id: string) => void;
+  onTransformMove?: (payload: TransformMovePayload) => void;
   onTransformEnd: (payload: TransformCommitPayload) => void;
   onQuickRotate?: (id: string) => void;
+  /** Window point → artboard mm. Drag commit goes through this, not raw px. */
+  pointerToMm?: (windowX: number, windowY: number) => { x: number; y: number } | null;
+  snapMoveMm?: (input: {
+    id: string;
+    leftMm: number;
+    topMm: number;
+    widthMm: number;
+    heightMm: number;
+  }) => { leftMm: number; topMm: number };
+  snapGuides?: SnapGuide[];
 };
+
+type ElementChrome = {
+  pxPerMM: number;
+  padZoom: number;
+  selectedIds: string[];
+  selectionColor: string;
+  canvasWidthMm: number;
+  canvasHeightMm: number;
+  onSelect: (id: string) => void;
+  onOpenPanel: (id: string) => void;
+  onEditText: (id: string) => void;
+  onTransformStart?: (id: string) => void;
+  onTransformMove?: (payload: TransformMovePayload) => void;
+  onTransformEnd: (payload: TransformCommitPayload) => void;
+  onQuickRotate?: (id: string) => void;
+  pointerToMm?: (windowX: number, windowY: number) => { x: number; y: number } | null;
+  snapMoveMm?: (input: {
+    id: string;
+    leftMm: number;
+    topMm: number;
+    widthMm: number;
+    heightMm: number;
+  }) => { leftMm: number; topMm: number };
+};
+
+const CanvasElementNodes = memo(function CanvasElementNodes({
+  elements,
+  chrome,
+}: {
+  elements: LabelElement[];
+  chrome: ElementChrome;
+}) {
+  return (
+    <>
+      {elements.map((element) => (
+        <KonvaTransformer
+          key={element.id}
+          element={element}
+          pxPerMM={chrome.pxPerMM}
+          padZoom={chrome.padZoom}
+          selected={chrome.selectedIds.includes(element.id)}
+          selectionColor={chrome.selectionColor}
+          canvasWidthMm={chrome.canvasWidthMm}
+          canvasHeightMm={chrome.canvasHeightMm}
+          onSelect={chrome.onSelect}
+          onOpenPanel={chrome.onOpenPanel}
+          onEditText={chrome.onEditText}
+          onTransformStart={chrome.onTransformStart}
+          onTransformMove={chrome.onTransformMove}
+          onTransformEnd={chrome.onTransformEnd}
+          onQuickRotate={chrome.onQuickRotate}
+          pointerToMm={chrome.pointerToMm}
+          snapMoveMm={chrome.snapMoveMm}
+        />
+      ))}
+    </>
+  );
+}, (prev, next) => prev.chrome === next.chrome && idleElementRefsUnchanged(prev.elements, next.elements));
 
 export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function KonvaCanvas(
   {
@@ -53,11 +125,16 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     onOpenPanel,
     onEditText,
     onTransformStart,
+    onTransformMove,
     onTransformEnd,
     onQuickRotate,
+    pointerToMm,
+    snapMoveMm,
+    snapGuides = [],
   },
   ref,
 ) {
+  const [activeId, setActiveId] = useState<string | null>(null);
   const w = Math.max(1, canvasWidthPx);
   const h = Math.max(1, canvasHeightPx);
   const shapeClip = mediaShapeClipStyle(doc.mediaShape, w, h);
@@ -196,6 +273,72 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     [onDeselectAll],
   );
 
+  const handleLiftStart = useCallback(
+    (id: string) => {
+      setActiveId(id);
+      onTransformStart?.(id);
+    },
+    [onTransformStart],
+  );
+
+  const handleLiftEnd = useCallback(
+    (payload: TransformCommitPayload) => {
+      setActiveId(null);
+      onTransformEnd(payload);
+    },
+    [onTransformEnd],
+  );
+
+  const canvasWidthMm = isRatTailGeometry(doc.mediaGeometry)
+    ? ratTailBodyRectMm(doc.mediaGeometry).width
+    : doc.widthMm;
+  const canvasHeightMm = isRatTailGeometry(doc.mediaGeometry)
+    ? ratTailBodyRectMm(doc.mediaGeometry).height
+    : doc.heightMm;
+
+  const sortedElements = useMemo(() => sortLayers(doc.elements), [doc.elements]);
+  const { content, active } = useMemo(
+    () => splitCanvasLayers(sortedElements, activeId),
+    [sortedElements, activeId],
+  );
+
+  const chrome = useMemo<ElementChrome>(
+    () => ({
+      pxPerMM,
+      padZoom,
+      selectedIds,
+      selectionColor,
+      canvasWidthMm,
+      canvasHeightMm,
+      onSelect,
+      onOpenPanel,
+      onEditText,
+      onTransformStart: handleLiftStart,
+      onTransformMove,
+      onTransformEnd: handleLiftEnd,
+      onQuickRotate,
+      pointerToMm,
+      snapMoveMm,
+    }),
+    [
+      pxPerMM,
+      padZoom,
+      selectedIds,
+      selectionColor,
+      canvasWidthMm,
+      canvasHeightMm,
+      onSelect,
+      onOpenPanel,
+      onEditText,
+      handleLiftStart,
+      onTransformMove,
+      handleLiftEnd,
+      onQuickRotate,
+      pointerToMm,
+      snapMoveMm,
+    ],
+  );
+
   return (
     <View
       collapsable={false}
@@ -219,6 +362,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
               ...shapeClip,
             },
           ]}>
+          {/* pageLayer: static artboard / page boundary. listening: false */}
           {doc.background?.type === 'image' ? (
             <View style={StyleSheet.absoluteFillObject}>
               <Image
@@ -234,7 +378,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 
           {doc.elements.length === 0 && !stockCut ? (
             <View style={styles.emptyHintWrap}>
-              <Text style={styles.emptyHint}>Tap a tool below to add elements</Text>
+              <Text style={styles.emptyHint}>Tap or drag a tool onto the label</Text>
             </View>
           ) : null}
 
@@ -247,34 +391,49 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
           <View style={StyleSheet.absoluteFillObject} collapsable={false} />
         </GestureDetector>
 
-        {sortLayers(doc.elements).map((element: LabelElement) => (
-          <KonvaTransformer
-            key={element.id}
-            element={element}
-            pxPerMM={pxPerMM}
-            padZoom={padZoom}
-            selected={selectedIds.includes(element.id)}
-            selectionColor={selectionColor}
-            canvasWidthMm={
-              isRatTailGeometry(doc.mediaGeometry)
-                ? ratTailBodyRectMm(doc.mediaGeometry).width
-                : doc.widthMm
-            }
-            canvasHeightMm={
-              isRatTailGeometry(doc.mediaGeometry)
-                ? ratTailBodyRectMm(doc.mediaGeometry).height
-                : doc.heightMm
-            }
-            onSelect={onSelect}
-            onOpenPanel={onOpenPanel}
-            onEditText={onEditText}
-            onTransformStart={onTransformStart}
-            onTransformEnd={onTransformEnd}
-            onQuickRotate={onQuickRotate}
-          />
-        ))}
+        <View pointerEvents="box-none" collapsable={false} style={StyleSheet.absoluteFillObject}>
+          {/* contentLayer: idle elements. Images use expo-image memory-disk cache
+              (Konva node `.cache()` equivalent) so drag does not re-decode. */}
+          <CanvasElementNodes elements={content} chrome={chrome} />
+        </View>
+        {active ? (
+          <View
+            pointerEvents="box-none"
+            collapsable={false}
+            style={[StyleSheet.absoluteFillObject, styles.activeLayer]}>
+            {/* activeLayer: the moving node, including full-bleed photos */}
+            <CanvasElementNodes elements={[active]} chrome={chrome} />
+          </View>
+        ) : null}
       </ViewShot>
       {cableFlagOutline}
+      {snapGuides.length > 0 ? (
+        <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
+          {snapGuides.map((guide, index) =>
+            guide.axis === 'v' ? (
+              <Line
+                key={`v${guide.positionMm}-${index}`}
+                x1={guide.positionMm * pxPerMM}
+                y1={0}
+                x2={guide.positionMm * pxPerMM}
+                y2={h}
+                stroke={SNAP_GUIDE_COLOR}
+                strokeWidth={SNAP_GUIDE_STROKE_PX}
+              />
+            ) : (
+              <Line
+                key={`h${guide.positionMm}-${index}`}
+                x1={0}
+                y1={guide.positionMm * pxPerMM}
+                x2={w}
+                y2={guide.positionMm * pxPerMM}
+                stroke={SNAP_GUIDE_COLOR}
+                strokeWidth={SNAP_GUIDE_STROKE_PX}
+              />
+            ),
+          )}
+        </Svg>
+      ) : null}
     </View>
   );
 });
@@ -300,5 +459,8 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderWidth: 1,
     borderColor: 'rgba(94, 234, 212, 0.45)',
+  },
+  activeLayer: {
+    zIndex: 20,
   },
 });

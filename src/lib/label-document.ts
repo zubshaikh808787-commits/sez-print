@@ -41,6 +41,10 @@ export type ImageElementState = {
   grayThreshold?: number;
   aspectRatioLocked?: boolean;
   originalAspect?: number;
+  /** Full-resolution file for print. Canvas `uri` may be a downscaled working copy. */
+  printUri?: string;
+  workingWidthPx?: number;
+  workingHeightPx?: number;
 };
 
 export type ClipartElementState = {
@@ -133,6 +137,11 @@ export type LabelUpsConfig = {
   panels: LabelElement[][];
 };
 
+/**
+ * Canonical label. `widthMm` / `heightMm` and every element's `left` / `top` /
+ * `width` / `height` are millimetres on the physical stock — never view pixels
+ * and never a function of zoom/pan.
+ */
 export type LabelDocument = {
   id: string;
   name: string;

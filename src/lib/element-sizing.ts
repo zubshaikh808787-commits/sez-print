@@ -222,6 +222,16 @@ export function clampElementToLabel(
   doc: Pick<LabelDocument, 'widthMm' | 'heightMm' | 'mediaGeometry'>,
 ): LabelElement {
   if (element.type === 'border') {
+    if (
+      element.left === 0 &&
+      element.top === 0 &&
+      element.width === doc.widthMm &&
+      element.height === doc.heightMm &&
+      (element.rotation ?? 0) === 0 &&
+      element.lockMovement === true
+    ) {
+      return element;
+    }
     return {
       ...element,
       left: 0,
@@ -261,6 +271,12 @@ export function clampElementToLabel(
     Math.max(bounds.top, finiteSize(element.top, 0)),
     Math.max(bounds.top, bounds.top + bounds.height - (height || minH)),
   );
+
+  const heightMatches =
+    !('height' in element && typeof element.height === 'number') || element.height === height;
+  if (element.left === left && element.top === top && element.width === width && heightMatches) {
+    return element;
+  }
 
   const patch: Record<string, unknown> = { left, top, width };
 

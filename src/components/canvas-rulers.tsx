@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect } from 'react-native-svg';
 
+import { rulerTicksFor, type RulerTick } from '@/lib/editor/ruler-ticks';
+
 export const RULER_SIZE = 28;
 
 const TRACK = '#141B24';
@@ -14,42 +16,7 @@ const TICK_END = '#5EEAD4';
 const LABEL = '#D5DEE8';
 const LABEL_END = '#5EEAD4';
 
-type Tick = { mm: number; px: number; kind: 'minor' | 'mid' | 'major' };
-
-function tickStepMm(lengthMm: number, sizePx: number) {
-  const pxPerMm = sizePx / Math.max(lengthMm, 0.01);
-  if (pxPerMm >= 6) return 0.5;
-  if (pxPerMm >= 3) return 1;
-  if (pxPerMm >= 1.6) return 2;
-  return 5;
-}
-
-/**
- * Map mm → px with the canvas edge as the authoritative end.
- * Using (mm / lengthMm) * sizePx keeps the last tick exactly on the canvas edge
- * even after pixel rounding of widthPx/heightPx.
- */
-function ticksFor(lengthMm: number, sizePx: number): Tick[] {
-  const length = Math.max(lengthMm, 0.01);
-  const step = tickStepMm(lengthMm, sizePx);
-  const items: Tick[] = [];
-  for (let mm = 0; mm <= lengthMm + 0.001; mm += step) {
-    const px = (mm / length) * sizePx;
-    if (px > sizePx + 0.5) break;
-    const isEnd = mm < 0.001 || Math.abs(mm - lengthMm) < 0.01;
-    const major10 = isEnd || Math.abs(mm % 10) < 0.001;
-    const mid5 = !major10 && Math.abs(mm % 5) < 0.001;
-    items.push({
-      mm: Math.round(mm * 100) / 100,
-      px,
-      kind: major10 ? 'major' : mid5 ? 'mid' : 'minor',
-    });
-  }
-  if (items.length === 0 || Math.abs(items[items.length - 1].mm - lengthMm) > 0.01) {
-    items.push({ mm: lengthMm, px: sizePx, kind: 'major' });
-  }
-  return items;
-}
+type Tick = RulerTick;
 
 function formatTick(mm: number) {
   return Number.isInteger(mm) ? String(mm) : mm.toFixed(1);
@@ -95,7 +62,7 @@ export function HorizontalRuler({
   const track = Math.max(1, trackWidthPx);
   const content = Math.max(1, contentWidthPx);
   const origin = Math.max(0, originPx);
-  const ticks = useMemo(() => ticksFor(lengthMm, content), [lengthMm, content]);
+  const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
   const labels = useMemo(() => spacedMajor(ticks, 20), [ticks]);
 
   return (
@@ -154,7 +121,7 @@ export function VerticalRuler({
   const track = Math.max(1, trackHeightPx);
   const content = Math.max(1, contentHeightPx);
   const origin = Math.max(0, originPx);
-  const ticks = useMemo(() => ticksFor(lengthMm, content), [lengthMm, content]);
+  const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
   const labels = useMemo(() => spacedMajor(ticks, 14), [ticks]);
 
   return (

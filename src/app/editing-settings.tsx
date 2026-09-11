@@ -19,6 +19,15 @@ export default function EditingSettingsScreen() {
         By adjusting the various Settings of the editor, you can choose the editing method that
         meets your habits.
       </SettingsNote>
+      <SettingsCard>
+        <SettingsNavRow
+          label="Skia canvas prototype"
+          onPress={() => router.push('/canvas-skia-prototype')}
+        />
+      </SettingsCard>
+      <SettingsNote>
+        Phase 8 comparison surface: one image on a Skia artboard. Production editing is unchanged.
+      </SettingsNote>
 
       <SettingsCard>
         <SettingsNavRow

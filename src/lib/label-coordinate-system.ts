@@ -4,6 +4,10 @@
  * Stored model is millimetres (`widthMm` / `heightMm`, element `left` / `top` /
  * `width` / `height`). Screen pixels and printer dots are always derived.
  * Both axes share one scale so the pad never stretches.
+ *
+ * Fit `pxPerMM` comes from contain-fit (label mm into the pad). View zoom/pan
+ * sit on top of that — they never rewrite stored millimetres. Convert a
+ * pointer through `pointerToMm` so drop/nudge math stays on the artboard.
  */
 
 import { dotsPerMm as printerDotsPerMm } from '@/lib/printer/print-spec';
@@ -140,4 +144,74 @@ export function rectPxToMm(rect: MmRect, pxPerMM: number): MmRect {
 /** Printer dots/mm — 304 DPI heads are 12 dpm, not 304/25.4. */
 export function printDotsPerMm(dpi = 304): number {
   return printerDotsPerMm(dpi);
+}
+
+export type ViewPoint = { x: number; y: number };
+
+/**
+ * Live editor view. `pxPerMM` is the contain-fit scale (unzoomed artboard).
+ * `viewZoom` / `pan*` are the ZoomableEditPad transform (origin = view centre).
+ *
+ * Window/pad points are RN logical pixels (RNGH `absoluteX/Y`). Do not multiply
+ * by `PixelRatio` — that double-counts retina density and breaks millimetre
+ * placement (Phase 7.3).
+ */
+export type EditorViewTransform = {
+  pxPerMM: number;
+  viewZoom: number;
+  panX: number;
+  panY: number;
+  viewWidthPx: number;
+  viewHeightPx: number;
+  artboardOriginXPx: number;
+  artboardOriginYPx: number;
+};
+
+/** Screen millimetres: fit scale × view zoom. Do not write this into the store. */
+export function viewPxPerMm(fitPxPerMm: number, viewZoom: number): number {
+  const fit = Number.isFinite(fitPxPerMm) && fitPxPerMm > 0 ? fitPxPerMm : 0;
+  const zoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
+  return fit * zoom;
+}
+
+/**
+ * Invert the pad transform: translate(pan) then scale(zoom) around the view
+ * centre — matching `ZoomableEditPad`'s animated style.
+ */
+export function invertViewPoint(screen: ViewPoint, view: EditorViewTransform): ViewPoint {
+  const cx = view.viewWidthPx / 2;
+  const cy = view.viewHeightPx / 2;
+  const zoom = Number.isFinite(view.viewZoom) && view.viewZoom > 0 ? view.viewZoom : 1;
+  const panX = Number.isFinite(view.panX) ? view.panX : 0;
+  const panY = Number.isFinite(view.panY) ? view.panY : 0;
+  return {
+    x: cx + (screen.x - cx - panX) / zoom,
+    y: cy + (screen.y - cy - panY) / zoom,
+  };
+}
+
+/** Pad-local logical px → millimetres on the artboard. Not device pixels. */
+export function pointerToMm(clientPoint: ViewPoint, view: EditorViewTransform): ViewPoint {
+  const local = invertViewPoint(clientPoint, view);
+  const pxPerMM = Number.isFinite(view.pxPerMM) && view.pxPerMM > 0 ? view.pxPerMM : 1;
+  return {
+    x: (local.x - view.artboardOriginXPx) / pxPerMM,
+    y: (local.y - view.artboardOriginYPx) / pxPerMM,
+  };
+}
+
+/** Artboard millimetres → pad-local client point (inverse of `pointerToMm`). */
+export function mmToPointer(mm: ViewPoint, view: EditorViewTransform): ViewPoint {
+  const pxPerMM = Number.isFinite(view.pxPerMM) && view.pxPerMM > 0 ? view.pxPerMM : 1;
+  const zoom = Number.isFinite(view.viewZoom) && view.viewZoom > 0 ? view.viewZoom : 1;
+  const panX = Number.isFinite(view.panX) ? view.panX : 0;
+  const panY = Number.isFinite(view.panY) ? view.panY : 0;
+  const localX = view.artboardOriginXPx + mm.x * pxPerMM;
+  const localY = view.artboardOriginYPx + mm.y * pxPerMM;
+  const cx = view.viewWidthPx / 2;
+  const cy = view.viewHeightPx / 2;
+  return {
+    x: cx + panX + (localX - cx) * zoom,
+    y: cy + panY + (localY - cy) * zoom,
+  };
 }
