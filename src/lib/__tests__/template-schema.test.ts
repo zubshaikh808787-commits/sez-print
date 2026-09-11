@@ -11,7 +11,7 @@ import {
 import { createLabelDocument, elementSizeMm, type LabelElement } from '../label-document';
 import { canvasMmFromGeometry, isRatTailGeometry, RAT_TAIL_143 } from '../media-geometry';
 import { clampElementToLabel } from '../element-sizing';
-import { instantiateTemplate, validateTemplateDocument } from '../template-schema';
+import { instantiateTemplate, validateTemplateDocument, canvasFillFromDocument, templateUsesDieCutBackground } from '../template-schema';
 
 type FactorySku = {
   previewType: string;
@@ -86,6 +86,8 @@ const OTHER_SKUS: FactorySku[] = [
   { previewType: 'rect-40x80', name: '40x80', category: 'General', widthMm: 40, heightMm: 80 },
   { previewType: 'four-ups-20x15', name: "4 UP's-20x15", category: 'Multi-UP', widthMm: 86, heightMm: 15 },
   { previewType: 'circle-40', name: 'Circle-40', category: 'Circle', widthMm: 45, heightMm: 45 },
+  { previewType: 'two-ups-circle-30', name: "2 UP's-Circle-30", category: 'Multi-UP', widthMm: 62, heightMm: 30 },
+  { previewType: 'two-ups-circle-40', name: "2 UP's-Circle-40", category: 'Multi-UP', widthMm: 82, heightMm: 40 },
 ];
 
 function factoryDoc(sku: FactorySku) {
@@ -294,6 +296,42 @@ function testFactoryDocs(skus: FactorySku[]) {
   console.log(`ok ${skus.length} factory documents validate inside canvas`);
 }
 
+function testCircleTemplatesDrawRoundStock() {
+  const single = factoryDoc({
+    previewType: 'circle-40',
+    name: 'Circle-40',
+    category: 'Circle',
+    widthMm: 45,
+    heightMm: 45,
+  });
+  assert.equal(single.mediaShape, 'circle');
+  assert.equal(templateUsesDieCutBackground('circle-40'), false);
+  assert.notEqual(canvasFillFromDocument(single), 'transparent');
+  const ring = single.elements.find((el) => el.type === 'shape' && el.figureShape === 'circle');
+  assert.ok(ring, 'single circle template must include a circle shape');
+  if (ring && ring.type === 'shape') {
+    assert.equal(ring.fill, true);
+    assert.equal(ring.fillColor, '#FFFFFF');
+  }
+
+  const twoUp = factoryDoc({
+    previewType: 'two-ups-circle-30',
+    name: "2 UP's-Circle-30",
+    category: 'Multi-UP',
+    widthMm: 62,
+    heightMm: 30,
+  });
+  assert.notEqual(twoUp.mediaShape, 'circle');
+  const circles = twoUp.elements.filter((el) => el.type === 'shape' && el.figureShape === 'circle');
+  assert.equal(circles.length, 2);
+  for (const el of circles) {
+    const size = elementSizeMm(el);
+    assert.ok(el.left + size.width <= twoUp.widthMm + 0.4);
+    assert.ok(el.top + size.height <= twoUp.heightMm + 0.4);
+  }
+  console.log('ok circle templates draw round stock; 2-up is two circles on a rectangular sheet');
+}
+
 function main() {
   testValidateRejectsNaN();
   testValidateRejectsEmptyBarcode();
@@ -301,6 +339,7 @@ function main() {
   testPrintGeometryUnchanged();
   testRatTail143Geometry();
   testFactoryDocs([...JEWELRY_SKUS, ...CABLE_SKUS, ...OTHER_SKUS]);
+  testCircleTemplatesDrawRoundStock();
   console.log('ALL TEMPLATE SCHEMA TESTS PASSED');
 }
 

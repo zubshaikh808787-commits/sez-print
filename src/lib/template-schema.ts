@@ -43,7 +43,6 @@ export function colorBackground(color: string): TemplateBackground {
 export function templateUsesDieCutBackground(previewType: string): boolean {
   return (
     previewType.startsWith('jew-') ||
-    previewType.startsWith('circle-') ||
     previewType.startsWith('cable-') ||
     isCableFlagPreviewType(previewType)
   );

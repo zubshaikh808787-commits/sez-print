@@ -82,6 +82,8 @@ export interface TemplateItem {
     | 'dual-cols-22.5x13'
     | 'two-ups-30x20'
     | 'two-ups-40x25'
+    | 'two-ups-circle-30'
+    | 'two-ups-circle-40'
     | 'three-ups-25x15'
     | 'three-ups-30x20'
     | 'four-ups-20x15'
@@ -408,6 +410,24 @@ export const TEMPLATES: TemplateItem[] = [
     width: 82,
     height: 25,
     previewType: 'two-ups-40x25',
+  },
+  {
+    id: 'mup-circle-1',
+    name: "2 UP's-Circle-30",
+    dimensions: '62 x 30',
+    category: 'Multi-UP',
+    width: 62,
+    height: 30,
+    previewType: 'two-ups-circle-30',
+  },
+  {
+    id: 'mup-circle-2',
+    name: "2 UP's-Circle-40",
+    dimensions: '82 x 40',
+    category: 'Multi-UP',
+    width: 82,
+    height: 40,
+    previewType: 'two-ups-circle-40',
   },
   {
     id: 'mup-3',
@@ -865,7 +885,7 @@ export const TEMPLATES: TemplateItem[] = [
   {
     id: 'cir-1',
     name: '401-Circle',
-    nameLine2: 'Label-34x34-Ï†30',
+    nameLine2: 'Label-34x34-φ30',
     dimensions: '34 x 34',
     category: 'Circle',
     width: 34,
@@ -875,7 +895,7 @@ export const TEMPLATES: TemplateItem[] = [
   {
     id: 'cir-2',
     name: '402-Circle',
-    nameLine2: 'Label-45x45-Ï†40',
+    nameLine2: 'Label-45x45-φ40',
     dimensions: '45 x 45',
     category: 'Circle',
     width: 45,
@@ -885,12 +905,30 @@ export const TEMPLATES: TemplateItem[] = [
   {
     id: 'cir-3',
     name: '403-Circle',
-    nameLine2: 'Label-52x52-Ï†50',
+    nameLine2: 'Label-52x52-φ50',
     dimensions: '52 x 52',
     category: 'Circle',
     width: 52,
     height: 52,
     previewType: 'circle-50',
+  },
+  {
+    id: 'cir-2up-30',
+    name: "2 UP's-Circle-30",
+    dimensions: '62 x 30',
+    category: 'Circle',
+    width: 62,
+    height: 30,
+    previewType: 'two-ups-circle-30',
+  },
+  {
+    id: 'cir-2up-40',
+    name: "2 UP's-Circle-40",
+    dimensions: '82 x 40',
+    category: 'Circle',
+    width: 82,
+    height: 40,
+    previewType: 'two-ups-circle-40',
   },
 
   // --- JEWELRY (catalog order matches the print-app screenshots) ---

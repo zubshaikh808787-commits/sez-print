@@ -142,6 +142,7 @@ function circleShape(widthMm: number, heightMm: number): LabelElement {
     lineWidth: 0.4,
     fill: true,
     fillColor: '#FFFFFF',
+    drawingColorIndex: 1,
   };
 }
 

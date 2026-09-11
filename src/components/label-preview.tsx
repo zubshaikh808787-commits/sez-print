@@ -289,7 +289,7 @@ function HiFiCatalogCanvas({
     document.mediaShape === 'diecut' ||
     templateUsesDieCutBackground(document.templatePreviewType ?? '');
   if (density <= 1.01) {
-    return <LabelCanvas document={document} fitted={fitted} showBorder={!diecut} />;
+        <LabelCanvas document={document} fitted={fitted} showBorder={!diecut || document.mediaShape === 'circle'} />
   }
   const hiFi = {
     widthPx: fitted.widthPx * density,
@@ -305,7 +305,7 @@ function HiFiCatalogCanvas({
           transformOrigin: 'top left',
           transform: [{ scale: 1 / density }],
         }}>
-        <LabelCanvas document={document} fitted={hiFi} showBorder={!diecut} />
+        <LabelCanvas document={document} fitted={hiFi} showBorder={!diecut || document.mediaShape === 'circle'} />
       </View>
     </View>
   );

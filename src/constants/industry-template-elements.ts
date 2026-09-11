@@ -118,21 +118,32 @@ function box(
   };
 }
 
-function circle(widthMm: number, heightMm: number): LabelElement {
-  const d = Math.min(widthMm, heightMm) - 1.6;
+function circleAt(
+  left: number,
+  top: number,
+  diameter: number,
+  opts: { lockMovement?: boolean } = {},
+): LabelElement {
   return {
     ...DEFAULT_SHAPE_STATE,
     id: generateId(),
     type: 'shape',
     figureShape: 'circle',
-    left: (widthMm - d) / 2,
-    top: (heightMm - d) / 2,
-    width: d,
-    height: d,
+    left,
+    top,
+    width: diameter,
+    height: diameter,
     lineWidth: 0.4,
     fill: true,
     fillColor: '#FFFFFF',
+    drawingColorIndex: 1,
+    lockMovement: opts.lockMovement ?? false,
   };
+}
+
+function circle(widthMm: number, heightMm: number): LabelElement {
+  const d = Math.min(widthMm, heightMm) - 1.6;
+  return circleAt((widthMm - d) / 2, (heightMm - d) / 2, d, { lockMovement: true });
 }
 
 function table(frame: Frame, rows: number, columns: number): LabelElement {
@@ -236,6 +247,30 @@ function multiCols(
     els.push(
       text(
         { left: left + 0.8, top: h * 0.28, width: Math.max(4, colW - 1.6) },
+        caption,
+        Math.max(5.5, smallPt * 0.9),
+        { align: 'center', bold: true },
+      ),
+    );
+  }
+  return els;
+}
+
+/** N-up round stickers on a rectangular sheet — same gutter math as `multiCols`. */
+function multiCircleCols(w: number, h: number, count: number, labels?: string[]): LabelElement[] {
+  const gap = Math.max(0.6, Math.min(1.2, w * 0.015));
+  const pad = 0.7;
+  const colW = (w - pad * 2 - gap * (count - 1)) / count;
+  const d = Math.min(colW, h - pad * 2);
+  const { smallPt } = templateFontSizes(colW, h);
+  const els: LabelElement[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const colLeft = pad + i * (colW + gap);
+    els.push(circleAt(colLeft + (colW - d) / 2, (h - d) / 2, d, { lockMovement: true }));
+    const caption = labels?.[i] ?? `Label ${i + 1}`;
+    els.push(
+      text(
+        { left: colLeft + 0.8, top: h * 0.38, width: Math.max(4, colW - 1.6) },
         caption,
         Math.max(5.5, smallPt * 0.9),
         { align: 'center', bold: true },
@@ -373,6 +408,10 @@ export function buildIndustryPreviewElements(
       return multiCols(w, h, 2, 1.4, ['Product A', 'Product B']);
     case 'two-ups-40x25':
       return multiCols(w, h, 2, 1.6, ['Left', 'Right']);
+    case 'two-ups-circle-30':
+      return multiCircleCols(w, h, 2, ['Product A', 'Product B']);
+    case 'two-ups-circle-40':
+      return multiCircleCols(w, h, 2, ['Left', 'Right']);
     case 'three-ups-25x15':
       return multiCols(w, h, 3, 1.2, ['A', 'B', 'C']);
     case 'three-ups-30x20':
@@ -693,6 +732,7 @@ export function buildIndustryPreviewElements(
     case 'circle-40':
     case 'circle-50':
       return [
+        circle(w, h),
         text({ left: w * 0.12, top: h * 0.38, width: w * 0.76 }, 'QC PASS', bodyPt, {
           align: 'center',
           bold: true,
