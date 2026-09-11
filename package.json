@@ -61,6 +61,7 @@
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.5.1",
     "td404-printer": "file:./modules/td404-printer",
+    "tej-printer": "file:./modules/tej-printer",
     "xlsx": "^0.18.5",
     "zustand": "^5.0.15"
   },
@@ -79,7 +80,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test:print": "npx --yes tsx --tsconfig tsconfig.json src/printing/__tests__/engine.test.ts",
+    "test:print": "npx --yes tsx --tsconfig tsconfig.json src/printing/__tests__/engine.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/josh-print.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/bluetooth-guard.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/tej-print.test.ts",
+    "test:tej": "npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/tej-print.test.ts",
     "test:editor": "npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/engine.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/__tests__/label-geometry.test.ts",
     "test:templates": "npx --yes tsx --tsconfig tsconfig.json src/lib/__tests__/template-schema.test.ts",
     "print:calibration": "npx --yes tsx --tsconfig tsconfig.json scripts/print-calibration-box.ts",
@@ -101,7 +103,8 @@
         "exclude": [
           "@react-native-ml-kit/text-recognition",
           "td404-printer",
-          "josh-printer"
+          "josh-printer",
+          "tej-printer"
         ],
         "listUnknownPackages": false
       }

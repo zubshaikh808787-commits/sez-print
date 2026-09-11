@@ -8,7 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -61,6 +61,13 @@ class JoshPrinterManager(private val context: Context) {
         const val DEFAULT_SPEED = -1     // -1 = use printer default
         const val DEFAULT_GAP_TYPE = -1  // -1 = use printer default
         const val DEFAULT_GAP_LENGTH = -1
+        /** DothanTech JOSH heads are 203 DPI. 304 is TD-404 and must not size the bitmap. */
+        const val HARDWARE_DPI = 203.0
+        const val HARDWARE_DPM = 8.0
+        /** Official demo: Label / 间隙纸. Die-cut 50×30 stock. */
+        const val GAP_TYPE_LABEL = 2
+        const val GAP_TYPE_RECEIPT = 0
+        const val GAP_TYPE_BLACK_MARK = 3
     }
 
     // ─── State Machine ─────────────────────────────────────────────────
@@ -286,6 +293,12 @@ class JoshPrinterManager(private val context: Context) {
         val currentApi = api
         if (currentApi == null) {
             emitError("JOSH_SDK_ERROR", "LPAPI not initialized")
+            return false
+        }
+
+        val btAdapter = BluetoothAdapter.getDefaultAdapter()
+        if (btAdapter == null || !btAdapter.isEnabled) {
+            Log.w(TAG, "[DISCOVERY_START] Bluetooth is off — skipping LPAPI discovery")
             return false
         }
 
@@ -685,25 +698,23 @@ class JoshPrinterManager(private val context: Context) {
      * @param pngBytes Raw PNG bytes (decoded from base64 by the caller).
      * @param widthMm Physical label width in mm.
      * @param heightMm Physical label height in mm.
-     * @param dpi Printer DPI (default 203).
-     * @param copies Number of copies.
-     * @param paramDensity Print density override (-1 = use configured default).
-     * @param paramSpeed Print speed override (-1 = use configured default).
-     * @param direction Print rotation angle (0, 90, 180, 270).
-     *
-     * @return Map with job info on success, or null on failure.
+     * Physical size is locked with LPAPI startJob(widthMm, heightMm) + drawBitmap in mm.
+     * Bitmap pixels are never treated as 304 DPI TSPL dots (that prints ~1.5× too large).
      */
     fun printBitmap(
         pngBytes: ByteArray,
         widthMm: Double,
         heightMm: Double,
-        dpi: Double = 203.0,
+        dpi: Double = HARDWARE_DPI,
         copies: Int = 1,
         paramDensity: Int = -1,
         paramSpeed: Int = -1,
         direction: Int = 0,
-        paramGapType: Int = -1,
-        paramGapLength: Int = -1,
+        paramGapType: Int = GAP_TYPE_LABEL,
+        paramGapLength: Int = 3,
+        hOffsetMm: Double = 0.0,
+        vOffsetMm: Double = 0.0,
+        alignment: String = "left",
     ): Map<String, Any?>? {
         val currentApi = api ?: run {
             lastError = "JOSH_SDK_ERROR: LPAPI not initialized"
@@ -760,110 +771,91 @@ class JoshPrinterManager(private val context: Context) {
                 }
             val tDecode = System.currentTimeMillis()
 
-            // ── Calculate target dimensions ────────────────────────────
-            val dpm = if (dpi == 203.0) 8.0 else if (dpi == 304.0) 12.0 else dpi / 25.4
-            val targetW = Math.max(1, Math.round(widthMm * dpm).toInt())
-            val targetH = Math.max(1, Math.round(heightMm * dpm).toInt())
+            val hardwareDpi = if (dpi == 300.0) 300.0 else HARDWARE_DPI
+            val dpm = if (hardwareDpi == 300.0) hardwareDpi / 25.4 else HARDWARE_DPM
 
-            Log.i(TAG, "[$jobId] [JOSH-PRINT-P2:RASTERIZE] src=${decoded.width}x${decoded.height} target=${targetW}x${targetH} dpm=$dpm direction=$direction")
-
-            // ── Always composite onto solid OPAQUE WHITE canvas ────────
-            // This prevents alpha transparency from corrupting thermal monochrome binarization.
-            var bitmap = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            canvas.drawColor(Color.WHITE)
-            val srcRect = Rect(0, 0, decoded.width, decoded.height)
-            val dstRect = Rect(0, 0, targetW, targetH)
-            val paint = Paint().apply {
-                isFilterBitmap = true
-                isDither = true
-            }
-            canvas.drawBitmap(decoded, srcRect, dstRect, paint)
-            decoded.recycle()
-
-            // ── Software Pre-Rotation (Shields hardware from rotation opcode crashes) ──
+            var working = decoded
             var finalWidthMm = widthMm
             var finalHeightMm = heightMm
             if (direction != 0) {
-                val matrix = Matrix().apply {
-                    postRotate(direction.toFloat())
-                }
-                val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-                if (rotated !== bitmap) {
-                    bitmap.recycle()
-                    bitmap = rotated
+                val matrix = Matrix().apply { postRotate(direction.toFloat()) }
+                val rotated = Bitmap.createBitmap(working, 0, 0, working.width, working.height, matrix, true)
+                if (rotated !== working) {
+                    working.recycle()
+                    working = rotated
                 }
                 if (direction == 90 || direction == 270) {
                     finalWidthMm = heightMm
                     finalHeightMm = widthMm
                 }
-                Log.d(TAG, "[$jobId] [JOSH-PRINT-P2:RASTERIZE] Bitmap pre-rotated by ${direction}° -> size=${bitmap.width}x${bitmap.height} mm=${finalWidthMm}x${finalHeightMm}")
             }
+
+            val targetW = Math.max(1, Math.round(finalWidthMm * dpm).toInt())
+            val targetH = Math.max(1, Math.round(finalHeightMm * dpm).toInt())
+            Log.i(
+                TAG,
+                "[$jobId] [JOSH-PRINT-P2:RASTERIZE] src=${working.width}x${working.height} page=${targetW}x${targetH}px " +
+                    "${finalWidthMm}x${finalHeightMm}mm dpm=$dpm dpi=$hardwareDpi dir=$direction align=$alignment offset=${hOffsetMm}x${vOffsetMm}",
+            )
+
+            val bitmap = containFitToPage(working, targetW, targetH, alignment)
+            if (working !== decoded && !working.isRecycled) working.recycle()
+            if (!decoded.isRecycled) decoded.recycle()
             val tFit = System.currentTimeMillis()
 
-            // ── Submit to LPAPI ────────────────────────────────────────
             lastPrintSuccess = false
             val latch = CountDownLatch(1)
             printLatch = latch
 
-            // Strategy 1 (Primary - Official Demo MainActivity.java line 762): api.printBitmap(bitmap, printParams)
+            val gapTypeValue = if (paramGapType >= 0) paramGapType else GAP_TYPE_LABEL
+            val gapLengthValue = if (paramGapLength >= 0) paramGapLength else 3
+            try {
+                currentApi.setPrintPageGapType(gapTypeValue)
+                currentApi.setPrintPageGapLength(gapLengthValue)
+            } catch (e: Exception) {
+                Log.w(TAG, "[$jobId] [JOSH-PRINT-P2:GAP] setPrintPageGap* threw (non-fatal)", e)
+            }
+
             val printParams = Bundle().apply {
-                if (paramGapType >= 0) putInt(PrintParamName.GAP_TYPE, paramGapType)
-                if (paramGapLength >= 0) putInt(PrintParamName.GAP_LENGTH, paramGapLength)
+                putInt(PrintParamName.GAP_TYPE, gapTypeValue)
+                putInt(PrintParamName.GAP_LENGTH, gapLengthValue)
                 if (paramDensity >= 0) putInt(PrintParamName.PRINT_DENSITY, paramDensity)
                 if (paramSpeed >= 0) putInt(PrintParamName.PRINT_SPEED, paramSpeed)
                 if (copies > 1) putInt(PrintParamName.PRINT_COPIES, copies)
             }
-            val finalParams = if (printParams.isEmpty) null else printParams
 
-            var submitted = try {
-                currentApi.printBitmap(bitmap, finalParams)
-            } catch (e: Exception) {
-                Log.w(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] currentApi.printBitmap threw", e)
-                false
-            }
-            Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 1 (direct printBitmap) submitted: $submitted")
+            val xMm = hOffsetMm
+            val yMm = Math.max(0.0, vOffsetMm)
 
-            // Strategy 2 (Fallback - Official Demo line 697-734): startJob -> drawBitmap -> commitJob()
+            // Strategy 1: millimetre page lock (official LPAPI demo). SIZE is mm, not pixels.
+            var submitted = submitMmJob(currentApi, bitmap, finalWidthMm, finalHeightMm, xMm, yMm, printParams)
+            Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 1 startJob(mm)+drawBitmap(mm) submitted=$submitted")
+
+            // Strategy 2: same mm job without extra params (some models reject density opcodes).
             if (!submitted) {
-                Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 2 fallback to startJob -> drawBitmap -> commitJob")
-                submitted = try {
-                    if (currentApi.startJob(finalWidthMm, finalHeightMm, 0)) {
-                        currentApi.drawBitmap(bitmap, 0.0, 0.0, finalWidthMm, finalHeightMm)
-                        if (finalParams != null) {
-                            currentApi.commitJobWithParam(finalParams)
-                        } else {
-                            currentApi.commitJob()
-                        }
-                    } else {
-                        false
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 2 threw", e)
-                    false
-                }
-                Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 2 submitted: $submitted")
+                submitted = submitMmJob(currentApi, bitmap, finalWidthMm, finalHeightMm, xMm, yMm, null)
+                Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 2 startJob(mm) no-params submitted=$submitted")
             }
 
-            // Strategy 3 (Fallback with drawBitmapWithActualSize):
+            // Strategy 3: 1 pixel = 1 hardware dot at 203 DPI (50×30 → 400×240, not 600×360).
             if (!submitted) {
-                Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 3 fallback with drawBitmapWithActualSize")
                 submitted = try {
-                    if (currentApi.startJob(finalWidthMm, finalHeightMm, 0)) {
-                        currentApi.drawBitmapWithActualSize(bitmap, 0.0, 0.0)
-                        if (finalParams != null) {
-                            currentApi.commitJobWithParam(finalParams)
-                        } else {
-                            currentApi.commitJob()
-                        }
-                    } else {
-                        false
-                    }
+                    currentApi.printBitmap(bitmap, printParams)
                 } catch (e: Exception) {
-                    Log.w(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 3 threw", e)
+                    Log.w(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] printBitmap threw", e)
                     false
                 }
-                Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 3 submitted: $submitted")
+                Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 3 printBitmap@${hardwareDpi}dpi submitted=$submitted")
+            }
+
+            if (!submitted) {
+                submitted = try {
+                    currentApi.printBitmap(bitmap, null)
+                } catch (e: Exception) {
+                    Log.w(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] printBitmap(null) threw", e)
+                    false
+                }
+                Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 4 printBitmap(null) submitted=$submitted")
             }
 
             if (!submitted) {
@@ -1039,6 +1031,58 @@ class JoshPrinterManager(private val context: Context) {
                 setState(State.DISCONNECTED)
             }
             Log.i(TAG, "[JOSH-PRINT-P5:TEST-FINALIZE] State restored to ${state.get()}")
+        }
+    }
+
+    private fun containFitToPage(
+        src: Bitmap,
+        pageW: Int,
+        pageH: Int,
+        alignment: String,
+    ): Bitmap {
+        val page = Bitmap.createBitmap(pageW, pageH, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(page)
+        canvas.drawColor(Color.WHITE)
+        if (src.width <= 0 || src.height <= 0) return page
+        val scale = Math.min(pageW.toFloat() / src.width, pageH.toFloat() / src.height)
+        val dw = src.width * scale
+        val dh = src.height * scale
+        val left = if (alignment.equals("center", ignoreCase = true)) (pageW - dw) / 2f else 0f
+        val top = if (alignment.equals("center", ignoreCase = true)) (pageH - dh) / 2f else 0f
+        val paint = Paint().apply {
+            isFilterBitmap = true
+            isDither = true
+            isAntiAlias = false
+        }
+        canvas.drawBitmap(src, null, RectF(left, top, left + dw, top + dh), paint)
+        return page
+    }
+
+    private fun submitMmJob(
+        api: LPAPI,
+        bitmap: Bitmap,
+        widthMm: Double,
+        heightMm: Double,
+        xMm: Double,
+        yMm: Double,
+        params: Bundle?,
+    ): Boolean {
+        return try {
+            if (!api.startJob(widthMm, heightMm, 0)) {
+                false
+            } else {
+                api.setItemHorizontalAlignment(0)
+                api.setItemVerticalAlignment(0)
+                api.drawBitmap(bitmap, xMm, yMm, widthMm, heightMm)
+                if (params != null) {
+                    api.commitJobWithParam(params)
+                } else {
+                    api.commitJob()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "[JOSH-PRINT-P3:SUBMIT] startJob(mm)+drawBitmap(mm) threw", e)
+            false
         }
     }
 

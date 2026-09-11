@@ -85,6 +85,12 @@ class Td404PrinterModule : Module() {
       getAdapter() != null
     }
 
+    /** Adapter power only — does not start scan, discovery, or connect. */
+    Function("isBluetoothEnabled") {
+      val adapter = getAdapter()
+      adapter != null && adapter.isEnabled
+    }
+
     /** Always-available paired list (even when not discoverable / already connected in system BT). */
     AsyncFunction("getBondedDevices") { promise: Promise ->
       val context = appContext.reactContext
@@ -136,7 +142,15 @@ class Td404PrinterModule : Module() {
         return@AsyncFunction
       }
       if (!adapter.isEnabled) {
-        promise.reject("BT_OFF", "Bluetooth is turned off. Enable Bluetooth and try again.", null)
+        // Resolve (do not reject) so JS `void startScan()` cannot surface LogBox.
+        sendEvent("onScanFinished", emptyMap<String, Any?>())
+        promise.resolve(
+          mapOf(
+            "discoveryStarted" to false,
+            "bondedCount" to 0,
+            "reason" to "BT_OFF",
+          ),
+        )
         return@AsyncFunction
       }
 
@@ -191,6 +205,10 @@ class Td404PrinterModule : Module() {
       val adapter = getAdapter()
       if (adapter == null) {
         promise.reject("NO_ADAPTER", "Bluetooth adapter not found.", null)
+        return@AsyncFunction
+      }
+      if (!adapter.isEnabled) {
+        promise.reject("BT_OFF", "Bluetooth is turned off. Enable Bluetooth and try again.", null)
         return@AsyncFunction
       }
       ioExecutor.execute {

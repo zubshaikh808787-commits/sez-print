@@ -69,6 +69,7 @@ import {
   waitForNextPaint,
 } from '@/lib/printer/print-job';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
+import { joshEffectiveDpi } from '@/lib/printer/josh-print';
 import { logPrintTrace } from '@/printing';
 import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
@@ -494,7 +495,10 @@ export default function PrintScreen() {
     sourceDocument,
   ]);
 
-  const jobDpi = jewelryJobDpi ?? cableJobDpi ?? ratTailJobDpi ?? getPrinterManager().getPrintDpi();
+  const jobDpi = (() => {
+    const raw = jewelryJobDpi ?? cableJobDpi ?? ratTailJobDpi ?? getPrinterManager().getPrintDpi();
+    return getPrinterManager().isJosh ? joshEffectiveDpi(raw) : raw;
+  })();
 
   /** Native printer-dot artboard for capture — SIZE-in-dots (1 px = 1 printer dot). */
   const printCaptureSize = useMemo(() => {
@@ -744,6 +748,10 @@ export default function PrintScreen() {
             speed: speed,
             orientation: ratTail143Job ? 0 : orientationDeg,
             dpi: jobDpi,
+            hOffsetMm: hOffset,
+            vOffsetMm: vOffset,
+            media: wantsBline ? 'bline' : media,
+            alignment: manager.getActivePrinterProfile().alignment,
           });
           timer.end('transmit');
           console.info(

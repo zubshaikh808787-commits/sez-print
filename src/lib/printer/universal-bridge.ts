@@ -170,6 +170,9 @@ export async function printArtworkJob(input: ArtworkPrintInput): Promise<Rendere
         copies: input.copies ?? 1,
         density: input.density,
         speed: input.speed,
+        hOffsetMm: input.offsetXmm,
+        vOffsetMm: input.offsetYmm,
+        media: input.mediaType ?? 'gap',
       });
     });
     return job;

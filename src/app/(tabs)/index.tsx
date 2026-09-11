@@ -23,7 +23,8 @@ import {
   ShareNodeIcon,
   ShippingLabelIcon,
 } from '@/components/home-icons';
-import { LabelPreview, LABEL_PAD_STAGE_MIN_HEIGHT } from '@/components/label-preview';
+import { HomeHeroFlow } from '@/components/home-hero-flow';
+import { LabelPreview } from '@/components/label-preview';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { androidRipple, cardShadow, Palette, scaleFont } from '@/constants/ui';
 import { useTabBarPadding } from '@/hooks/use-tab-bar-padding';
@@ -94,6 +95,8 @@ const MENU_GAP = 12;
 const SCREEN_PAD = 16;
 const WIDE_TILE_H = 62;
 const SQUARE_TILE_H = 96;
+const HOME_PREVIEW_MAX_HEIGHT = 118;
+const HEADER_HERO_EXTRA = 112;
 
 function Tile({
   iconComponent,
@@ -190,6 +193,7 @@ export default function HomeScreen() {
     <View style={styles.root}>
       {/* Navy Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.two }]}>
+        <HomeHeroFlow />
         <Pressable
           onPress={() => router.push('/printer-connect')}
           android_ripple={androidRipple}
@@ -244,7 +248,7 @@ export default function HomeScreen() {
                   <LabelPreview
                     document={recentLabel}
                     width={previewWidth}
-                    maxHeight={LABEL_PAD_STAGE_MIN_HEIGHT}
+                    maxHeight={HOME_PREVIEW_MAX_HEIGHT}
                     showStage
                     style={styles.previewBorder}
                   />
@@ -383,8 +387,9 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: Palette.header,
     paddingHorizontal: Spacing.four,
-    paddingBottom: Spacing.six + 6,
+    paddingBottom: HEADER_HERO_EXTRA,
     alignItems: 'flex-end',
+    overflow: 'hidden',
   },
   connection: {
     flexDirection: 'row',
@@ -395,6 +400,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 14,
     borderRadius: 10,
+    zIndex: 2,
+    elevation: 4,
   },
   connectionText: {
     color: '#FFFFFF',
@@ -403,7 +410,7 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
-    marginTop: -(Spacing.six),
+    marginTop: -36,
   },
   content: {
     paddingHorizontal: SCREEN_PAD,
@@ -423,9 +430,9 @@ const styles = StyleSheet.create({
   cardTopSection: {
     backgroundColor: Palette.cardTop,
     paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 10,
-    gap: 8,
+    paddingTop: 8,
+    paddingBottom: 8,
+    gap: 6,
   },
   cardHead: {
     flexDirection: 'row',
@@ -466,7 +473,7 @@ const styles = StyleSheet.create({
   },
   emptyPreview: {
     width: '100%',
-    aspectRatio: 2.05,
+    height: HOME_PREVIEW_MAX_HEIGHT,
     borderRadius: 10,
     backgroundColor: '#F4F6F9',
     alignItems: 'center',

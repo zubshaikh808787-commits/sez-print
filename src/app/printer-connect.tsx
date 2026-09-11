@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Platform,
   Pressable,
   ScrollView,
@@ -20,9 +21,14 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { cardShadow, Palette } from '@/constants/ui';
 import { backendHealth, getBackendBaseUrl } from '@/lib/printer/backend-api';
 import {
+  BLUETOOTH_OFF_MESSAGE,
+  isBluetoothOffError,
+} from '@/lib/printer/bluetooth-guard';
+import {
   getPrinterManager,
   isLikelyTd404Name,
   isLikelyJoshName,
+  isLikelyTejName,
   type BluetoothCapabilities,
   type DiscoveredPrinter,
 } from '@/lib/printer/printer-manager';
@@ -81,26 +87,57 @@ export default function PrinterConnectScreen() {
   const [caps, setCaps] = useState<BluetoothCapabilities>(() =>
     getPrinterManager().getCapabilities(),
   );
+  const [bluetoothOn, setBluetoothOn] = useState(() => getPrinterManager().isBluetoothEnabled());
   const mountedRef = useRef(true);
+
+  const refreshCaps = useCallback(() => {
+    const mgr = getPrinterManager();
+    const nextCaps = mgr.getCapabilities();
+    const on = mgr.isBluetoothEnabled();
+    setCaps(nextCaps);
+    setBluetoothOn(on);
+    return { caps: nextCaps, bluetoothOn: on };
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
-    setCaps(getPrinterManager().getCapabilities());
+    refreshCaps();
     void backendHealth().then((ok) => {
       if (mountedRef.current) setBackendOk(ok);
     });
+    const appSub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active' || !mountedRef.current) return;
+      const { caps: nextCaps, bluetoothOn: on } = refreshCaps();
+      if (on && nextCaps.canScan) {
+        setNativeHint(null);
+      } else if (!on && nextCaps.canScan) {
+        setNativeHint(BLUETOOTH_OFF_MESSAGE);
+      }
+    });
     return () => {
       mountedRef.current = false;
+      appSub.remove();
       getPrinterManager().stopScan();
     };
-  }, []);
+  }, [refreshCaps]);
 
   const startScan = useCallback(async () => {
+    const { caps: nextCaps, bluetoothOn: on } = refreshCaps();
+    if (!nextCaps.canScan) {
+      setNativeHint(nextCaps.reason);
+      return;
+    }
+    if (!on) {
+      setDevices([]);
+      setScanning(false);
+      setScanErrors([]);
+      setNativeHint(BLUETOOTH_OFF_MESSAGE);
+      return;
+    }
     setDevices([]);
     setScanning(true);
     setNativeHint(null);
     setScanErrors([]);
-    setCaps(getPrinterManager().getCapabilities());
     try {
       const result = await getPrinterManager().startScan((device) => {
         if (!mountedRef.current) return;
@@ -119,6 +156,9 @@ export default function PrinterConnectScreen() {
       });
       if (mountedRef.current) {
         setScanErrors(result.errors);
+        if (result.errors.some((entry) => isBluetoothOffError(entry))) {
+          setBluetoothOn(false);
+        }
         if (result.paired + result.nearby === 0) {
           const detail =
             result.errors[0] ||
@@ -133,21 +173,28 @@ export default function PrinterConnectScreen() {
         const message =
           error instanceof Error ? error.message : 'Could not start scanning for printers.';
         setNativeHint(message);
-        setCaps(getPrinterManager().getCapabilities());
-        Alert.alert('Bluetooth Scan Failed', message);
+        refreshCaps();
+        if (!isBluetoothOffError(error)) {
+          Alert.alert('Bluetooth Scan Failed', message);
+        }
       }
     } finally {
       if (mountedRef.current) setScanning(false);
     }
-  }, []);
+  }, [refreshCaps]);
 
   useEffect(() => {
-    if (getPrinterManager().getCapabilities().canScan) {
-      void startScan();
-    } else {
-      setNativeHint(getPrinterManager().getCapabilities().reason);
+    const { caps: nextCaps, bluetoothOn: on } = refreshCaps();
+    if (!nextCaps.canScan) {
+      setNativeHint(nextCaps.reason);
+      return;
     }
-  }, [startScan]);
+    if (!on) {
+      setNativeHint(BLUETOOTH_OFF_MESSAGE);
+      return;
+    }
+    void startScan().catch(() => {});
+  }, [startScan, refreshCaps]);
 
   const paired = useMemo(
     () =>
@@ -179,6 +226,12 @@ export default function PrinterConnectScreen() {
   );
 
   const handleConnect = async (device: DiscoveredPrinter) => {
+    if (!getPrinterManager().isBluetoothEnabled()) {
+      setBluetoothOn(false);
+      setNativeHint(BLUETOOTH_OFF_MESSAGE);
+      Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
+      return;
+    }
     setConnectingId(device.id);
     try {
       const isTd404 = device.likelyTd404 || isLikelyTd404Name(device.name);
@@ -210,6 +263,12 @@ export default function PrinterConnectScreen() {
   };
 
   const handleMacConnect = async () => {
+    if (!getPrinterManager().isBluetoothEnabled()) {
+      setBluetoothOn(false);
+      setNativeHint(BLUETOOTH_OFF_MESSAGE);
+      Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
+      return;
+    }
     setConnectingId('mac');
     try {
       await getPrinterManager().connectByMac(macInput, macInput);
@@ -225,6 +284,12 @@ export default function PrinterConnectScreen() {
   };
 
   const handleJoshMacConnect = async () => {
+    if (!getPrinterManager().isBluetoothEnabled()) {
+      setBluetoothOn(false);
+      setNativeHint(BLUETOOTH_OFF_MESSAGE);
+      Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
+      return;
+    }
     setConnectingId('mac-josh');
     try {
       console.info(`[JOSH-CONN-P1:IDENTIFY] Manual MAC connect entered: ${macInput}`);
@@ -242,6 +307,12 @@ export default function PrinterConnectScreen() {
 
   const handleReconnectLast = async () => {
     if (!lastDeviceId) return;
+    if (!getPrinterManager().isBluetoothEnabled()) {
+      setBluetoothOn(false);
+      setNativeHint(BLUETOOTH_OFF_MESSAGE);
+      Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
+      return;
+    }
     setConnectingId(lastDeviceId);
     try {
       const isTd = isLikelyTd404Name(lastDeviceName);
@@ -298,7 +369,11 @@ export default function PrinterConnectScreen() {
   const showBluetoothSettings =
     Platform.OS !== 'web' &&
     status !== 'connected' &&
-    (paired.length === 0 || scanErrors.length > 0 || Boolean(nativeHint) || !caps.canScan);
+    (!bluetoothOn ||
+      paired.length === 0 ||
+      scanErrors.length > 0 ||
+      Boolean(nativeHint) ||
+      !caps.canScan);
 
   const bluetoothSettingsLabel =
     Platform.OS === 'ios' ? 'Open Settings' : 'Open Bluetooth Settings';
@@ -328,6 +403,7 @@ export default function PrinterConnectScreen() {
   const renderDevice = (device: DiscoveredPrinter, index: number, total: number) => {
     const td404 = device.likelyTd404 || isLikelyTd404Name(device.name);
     const isJosh = !td404 && (device.likelyJosh || isLikelyJoshName(device.name) || device.transport === 'josh-lpapi');
+    const isTej = !td404 && !isJosh && (device.likelyTej || isLikelyTejName(device.name) || device.transport === 'tej-spp');
     return (
       <Pressable
         key={device.id}
@@ -338,13 +414,17 @@ export default function PrinterConnectScreen() {
           index < total - 1 && styles.deviceRowBorder,
           pressed && styles.pressed,
         ]}>
-        <AppIcon name="printer" tintColor={isJosh ? '#10B981' : td404 ? Palette.accent : Palette.ink} size={20} />
+        <AppIcon name="printer" tintColor={isJosh ? '#10B981' : isTej ? '#8B5CF6' : td404 ? Palette.accent : Palette.ink} size={20} />
         <View style={styles.deviceInfo}>
           <View style={styles.nameRow}>
             <Text style={styles.deviceName}>{device.name ?? 'Unknown device'}</Text>
             {isJosh ? (
               <View style={[styles.badge, { backgroundColor: '#10B981' }]}>
                 <Text style={styles.badgeText}>JOSH</Text>
+              </View>
+            ) : isTej ? (
+              <View style={[styles.badge, { backgroundColor: '#8B5CF6' }]}>
+                <Text style={styles.badgeText}>TEJ</Text>
               </View>
             ) : td404 ? (
               <View style={styles.badge}>
@@ -366,11 +446,13 @@ export default function PrinterConnectScreen() {
           <Text style={styles.deviceMeta}>
             {device.transport === 'josh-lpapi'
               ? 'JOSH LPAPI'
-              : device.transport === 'bluetooth-spp'
-                ? 'Classic BT'
-                : device.transport === 'wifi'
-                  ? 'Wi‑Fi'
-                  : 'BLE'}
+              : device.transport === 'tej-spp'
+                ? 'TEJ YX'
+                : device.transport === 'bluetooth-spp'
+                  ? 'Classic BT'
+                  : device.transport === 'wifi'
+                    ? 'Wi‑Fi'
+                    : 'BLE'}
             {' · '}
             {device.id}
             {device.rssi != null ? ` · ${device.rssi} dBm` : ''}
@@ -422,17 +504,33 @@ export default function PrinterConnectScreen() {
             </View>
           ) : null}
 
+          {caps.canScan && !bluetoothOn ? (
+            <View style={styles.blockerCard}>
+              <Text style={styles.blockerTitle}>Bluetooth is off</Text>
+              <Text style={styles.blockerBody}>
+                Turn Bluetooth on to scan or connect a printer. No scan or reconnect runs while it
+                is off. Wi‑Fi printers below still work.
+              </Text>
+              <Pressable
+                onPress={() => void openPhoneBluetoothSettings()}
+                style={({ pressed }) => [styles.settingsBtn, pressed && styles.pressed]}>
+                <AppIcon name="link" tintColor={Palette.accent} size={16} />
+                <Text style={styles.settingsBtnText}>{bluetoothSettingsLabel}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           <View style={styles.heroCard}>
             <Text style={styles.heroTitle}>TD-404 Bluetooth</Text>
             <Text style={styles.heroBody}>
               Scan lists paired printers first (fast), then nearby devices for a few seconds. Tap Connect as soon as your printer appears.
             </Text>
             <Pressable
-              onPress={() => void startScan()}
-              disabled={connectingId !== null || !caps.canScan}
+              onPress={() => void startScan().catch(() => {})}
+              disabled={connectingId !== null || !caps.canScan || !bluetoothOn}
               style={({ pressed }) => [
                 styles.connectBtn,
-                (connectingId !== null || !caps.canScan) && styles.connectBtnDisabled,
+                (connectingId !== null || !caps.canScan || !bluetoothOn) && styles.connectBtnDisabled,
                 pressed && styles.pressed,
               ]}>
               {scanning ? (
@@ -530,6 +628,8 @@ export default function PrinterConnectScreen() {
               <Text style={styles.emptyText}>
                 {!caps.canScan
                   ? 'Build the Android app to list printers paired in system Bluetooth.'
+                  : !bluetoothOn
+                    ? 'Turn Bluetooth on to list paired printers.'
                   : scanning
                     ? 'Loading paired Bluetooth devices…'
                     : 'No paired printers yet. Pair the TD-404 in Android Bluetooth settings, then rescan.'}
@@ -541,9 +641,9 @@ export default function PrinterConnectScreen() {
 
           <View style={styles.scanHeader}>
             <Text style={styles.sectionTitle}>Nearby devices ({nearby.length})</Text>
-            {!scanning && caps.canScan ? (
+            {!scanning && caps.canScan && bluetoothOn ? (
               <Pressable
-                onPress={() => void startScan()}
+                onPress={() => void startScan().catch(() => {})}
                 style={({ pressed }) => [styles.rescanBtn, pressed && styles.pressed]}>
                 <AppIcon name="arrow.clockwise" tintColor={Palette.accent} size={15} />
                 <Text style={styles.rescanText}>Rescan</Text>
@@ -555,6 +655,8 @@ export default function PrinterConnectScreen() {
               <Text style={styles.emptyText}>
                 {!caps.canScan
                   ? 'Nearby scan requires the development build.'
+                  : !bluetoothOn
+                    ? 'Turn Bluetooth on to search nearby printers.'
                   : scanning
                     ? 'Searching nearby…'
                     : 'No nearby printers found. Keep the printer on and in range.'}

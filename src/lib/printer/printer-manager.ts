@@ -13,6 +13,11 @@ import {
   PRINTER_PROFILES,
   type PrinterProfile,
 } from '@/lib/printer/print-spec';
+import {
+  BLUETOOTH_OFF_MESSAGE,
+  bluetoothOffScanResult,
+} from '@/lib/printer/bluetooth-guard';
+import { joshEffectiveDpi, joshGapTypeFromMedia } from '@/lib/printer/josh-print';
 import { encodeTscTextSample } from '@/lib/printer/tsc';
 import { usePrinterStore } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
@@ -21,10 +26,11 @@ export type DiscoveredPrinter = {
   id: string;
   name: string | null;
   rssi: number | null;
-  transport?: 'bluetooth-spp' | 'bluetooth-ble' | 'wifi' | 'josh-lpapi';
-  sdkId?: 'td404' | 'josh' | 'generic';
+  transport?: 'bluetooth-spp' | 'bluetooth-ble' | 'wifi' | 'josh-lpapi' | 'tej-spp';
+  sdkId?: 'td404' | 'josh' | 'generic' | 'tej';
   likelyTd404?: boolean;
   likelyJosh?: boolean;
+  likelyTej?: boolean;
   bonded?: boolean;
 };
 
@@ -35,7 +41,9 @@ export type BluetoothCapabilities = {
   classicSppAvailable: boolean;
   bleAvailable: boolean;
   joshAvailable: boolean;
+  tejAvailable: boolean;
   canScan: boolean;
+  bluetoothOn: boolean;
   reason: string | null;
 };
 
@@ -239,6 +247,29 @@ export function isLikelyJoshName(name: string | null | undefined): boolean {
   );
 }
 
+export function isLikelyTejName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const n = name.toLowerCase().trim();
+  // CRITICAL: "Tejas" is a TD-404 printer, NEVER claim Tejas as Tej!
+  if (n.includes('tejas')) return false;
+  if (isLikelyJoshName(name)) return false;
+  return (
+    n === 'tej' ||
+    n.startsWith('tej ') ||
+    n.startsWith('tej-') ||
+    n.startsWith('tej_') ||
+    n.endsWith(' tej') ||
+    n.includes('tej ') ||
+    n.includes('tej_') ||
+    n.includes('tej-') ||
+    n.includes('y50') ||
+    n.includes('z212') ||
+    n.includes('tp3z431') ||
+    n.includes('ge920') ||
+    n.startsWith('yx')
+  );
+}
+
 /** True when this connection should get TSPL label jobs (SIZE/GAP/BITMAP), not ESC/POS receipts. */
 export function shouldUseTsplCommandSet(opts: {
   activeTransport: string | null;
@@ -274,7 +305,7 @@ type WritableTarget = {
   withResponse: boolean;
 };
 
-type ActiveTransport = 'td404-spp' | 'ble' | 'wifi' | 'josh-lpapi' | null;
+type ActiveTransport = 'td404-spp' | 'ble' | 'wifi' | 'josh-lpapi' | 'tej-spp' | null;
 
 class PrinterManager {
   private ble: any = null;
@@ -287,6 +318,7 @@ class PrinterManager {
   private activeTransport: ActiveTransport = null;
   private td404ScanStop: (() => Promise<void>) | null = null;
   private joshScanStop: (() => Promise<void>) | null = null;
+  private tejScanStop: (() => Promise<void>) | null = null;
   private backendPrinterId: string | null = null;
   private lastScanError: string | null = null;
   /** Negotiated BLE ATT MTU. Payload = mtu - 3. */
@@ -312,7 +344,7 @@ class PrinterManager {
   }
 
   get isJosh(): boolean {
-    if (this.activeTransport === 'td404-spp') return false;
+    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'tej-spp') return false;
     if (this.activeTransport === 'josh-lpapi') return true;
     const store = usePrinterStore.getState();
     if (store.transport === 'bluetooth-spp' || store.sdkId === 'td404') return false;
@@ -330,17 +362,37 @@ class PrinterManager {
     return false;
   }
 
+  get isTej(): boolean {
+    if (this.activeTransport === 'tej-spp') return true;
+    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'josh-lpapi') return false;
+    const store = usePrinterStore.getState();
+    if (store.transport === 'tej-spp' || store.sdkId === 'tej') return true;
+    const name = store.deviceName ?? store.lastDeviceName;
+    if (isLikelyTd404Name(name) || isLikelyJoshName(name)) return false;
+    if (this.activeTransport === null && Boolean(this.getTej()?.isTejConnected?.())) {
+      return true;
+    }
+    return isLikelyTejName(name);
+  }
+
+  private hasBleNative(): boolean {
+    try {
+      return Boolean(
+        NativeModules.BleClientManager ||
+          NativeModules.BleManager ||
+          NativeModules.RNBlePlx,
+      );
+    } catch {
+      return false;
+    }
+  }
+
   private getBle(): any {
     if (!this.bleLoadTried) {
       this.bleLoadTried = true;
       try {
         // Expo Go ships neither ble-plx nor our TD-404 module — detect early.
-        const native =
-          NativeModules.BleClientManager ||
-          NativeModules.BleManager ||
-          NativeModules.RNBlePlx ||
-          null;
-        if (!native) {
+        if (!this.hasBleNative()) {
           this.ble = null;
           this.bleLoadError =
             'BLE native module missing (Expo Go / web cannot scan Bluetooth printers).';
@@ -376,6 +428,15 @@ class PrinterManager {
     }
   }
 
+  private getTej() {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require('tej-printer') as typeof import('tej-printer');
+    } catch {
+      return null;
+    }
+  }
+
   getCapabilities(): BluetoothCapabilities {
     const isWeb = Platform.OS === 'web';
     const expoGo = isExpoGoRuntime();
@@ -383,17 +444,18 @@ class PrinterManager {
     const classicSppAvailable = Boolean(td404?.isTd404NativeAvailable());
     const josh = this.getJosh();
     const joshAvailable = Boolean(josh?.isJoshNativeAvailable());
-    // Probe BLE (lazy).
-    const bleAvailable = this.getBle() !== null;
+    const tej = this.getTej();
+    const tejAvailable = Boolean(tej?.isTejNativeAvailable());
+    const bleAvailable = this.hasBleNative() || this.ble !== null;
 
     let reason: string | null = null;
     if (isWeb) {
       reason =
         'Bluetooth scan is not available in the browser. Use an Android development build, or connect the printer over Wi‑Fi below.';
-    } else if (expoGo && !classicSppAvailable && !bleAvailable && !joshAvailable) {
+    } else if (expoGo && !classicSppAvailable && !bleAvailable && !joshAvailable && !tejAvailable) {
       reason =
         'You are running Expo Go. Bluetooth printer modules need a development build. Run: npx expo run:android';
-    } else if (!classicSppAvailable && !bleAvailable && !joshAvailable) {
+    } else if (!classicSppAvailable && !bleAvailable && !joshAvailable && !tejAvailable) {
       reason =
         this.bleLoadError ||
         'No Bluetooth native modules are linked. Rebuild the app with npx expo run:android.';
@@ -406,9 +468,42 @@ class PrinterManager {
       classicSppAvailable,
       bleAvailable,
       joshAvailable,
-      canScan: classicSppAvailable || bleAvailable || joshAvailable,
+      tejAvailable,
+      canScan: classicSppAvailable || bleAvailable || joshAvailable || tejAvailable,
+      bluetoothOn: this.isBluetoothEnabled(),
       reason,
     };
+  }
+
+  /**
+   * Phone Bluetooth adapter power. Does not start scan, discovery, or connect.
+   * When the native helper is missing (older APK), returns true so scan can
+   * still run — JS wrappers swallow BT_OFF instead of crashing LogBox.
+   */
+  isBluetoothEnabled(): boolean {
+    if (Platform.OS === 'web') return false;
+    try {
+      const td404 = this.getTd404();
+      const td = td404?.isTd404BluetoothEnabled?.();
+      if (typeof td === 'boolean') return td;
+    } catch {
+      // fall through
+    }
+    try {
+      const josh = this.getJosh();
+      const js = josh?.isJoshBluetoothEnabled?.();
+      if (typeof js === 'boolean') return js;
+    } catch {
+      // fall through
+    }
+    try {
+      const tej = this.getTej();
+      const tj = tej?.isTejBluetoothEnabled?.();
+      if (typeof tj === 'boolean') return tj;
+    } catch {
+      // fall through
+    }
+    return true;
   }
 
   get isAvailable(): boolean {
@@ -439,9 +534,9 @@ class PrinterManager {
 
     // JOSH / LPAPI printer
     if (store.sdkId === 'josh' || this.activeTransport === 'josh-lpapi') {
-      const dpi = settings.printerDpi ?? 203;
-      const alignment = settings.printerAlignment ?? 'center';
-      const headWidthMm = settings.printheadWidthMm ?? 108;
+      const dpi = joshEffectiveDpi(settings.printerDpi);
+      const alignment = settings.printerAlignment ?? 'left';
+      const headWidthMm = settings.printheadWidthMm === 108 ? 50 : (settings.printheadWidthMm ?? 50);
       const headWidthDots = mmToDots(headWidthMm, dpi);
       return {
         id: 'josh-lpapi',
@@ -595,6 +690,12 @@ class PrinterManager {
       throw new Error(msg);
     }
 
+    if (!this.isBluetoothEnabled()) {
+      usePrinterStore.getState().setStatus('disconnected');
+      this.lastScanError = BLUETOOTH_OFF_MESSAGE;
+      return bluetoothOffScanResult();
+    }
+
     await this.ensurePermissions('full');
     this.stopScan();
     usePrinterStore.getState().setStatus('scanning');
@@ -630,14 +731,16 @@ class PrinterManager {
         for (const d of bonded) {
           const isTd = isLikelyTd404Name(d.name);
           const isJosh = !isTd && isLikelyJoshName(d.name);
+          const isTej = !isTd && !isJosh && isLikelyTejName(d.name);
           emit({
             id: d.id,
             name: d.name,
             rssi: null,
-            transport: isJosh ? 'josh-lpapi' : 'bluetooth-spp',
-            sdkId: isJosh ? 'josh' : 'td404',
-            likelyTd404: isTd || !isJosh,
+            transport: isJosh ? 'josh-lpapi' : isTej ? 'tej-spp' : 'bluetooth-spp',
+            sdkId: isJosh ? 'josh' : isTej ? 'tej' : 'td404',
+            likelyTd404: isTd || (!isJosh && !isTej),
             likelyJosh: isJosh,
+            likelyTej: isTej,
             bonded: true,
           });
         }
@@ -645,6 +748,32 @@ class PrinterManager {
         errors.push(
           error instanceof Error ? error.message : 'Failed to read paired Bluetooth devices.',
         );
+      }
+    }
+
+    const tej = this.getTej();
+    const hasTejNative = Boolean(tej?.isTejNativeAvailable());
+    if (hasTejNative && tej) {
+      try {
+        const bonded = await tej.getTejBondedDevices();
+        for (const d of bonded) {
+          const isTej = isLikelyTejName(d.name);
+          if (isTej) {
+            emit({
+              id: d.id,
+              name: d.name,
+              rssi: null,
+              transport: 'tej-spp',
+              sdkId: 'tej',
+              likelyTej: true,
+              likelyJosh: false,
+              likelyTd404: false,
+              bonded: true,
+            });
+          }
+        }
+      } catch {
+        // ignore
       }
     }
 
@@ -658,6 +787,11 @@ class PrinterManager {
       hasJoshNative && josh
         ? this.startJoshScan(josh, emit).catch((err) => {
             errors.push(err instanceof Error ? err.message : 'JOSH scan failed.');
+          })
+        : Promise.resolve(),
+      hasTejNative && tej
+        ? this.startTejScan(tej, emit).catch((err) => {
+            errors.push(err instanceof Error ? err.message : 'Tej scan failed.');
           })
         : Promise.resolve(),
       !hasNative && ble
@@ -707,6 +841,22 @@ class PrinterManager {
                 sdkId: 'td404',
                 likelyTd404: true,
                 likelyJosh: false,
+                likelyTej: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
+            const isTej = isLikelyTejName(device.name);
+            if (isTej) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'tej-spp',
+                sdkId: 'tej',
+                likelyTej: true,
+                likelyJosh: false,
+                likelyTd404: false,
                 bonded: device.bonded ?? false,
               });
               return;
@@ -719,15 +869,56 @@ class PrinterManager {
               sdkId: 'josh',
               likelyJosh: true,
               likelyTd404: false,
+              likelyTej: false,
               bonded: device.bonded ?? false,
             });
           },
-          () => finish(),
+          (error) => finish(error),
         );
         this.joshScanStop = handle.stop;
         setTimeout(() => finish(), SCAN_TIMEOUT_MS);
       } catch (error) {
         finish(error instanceof Error ? error : new Error('JOSH scan failed to start.'));
+      }
+    });
+  }
+
+  private startTejScan(
+    tej: NonNullable<ReturnType<PrinterManager['getTej']>>,
+    onDevice: (device: DiscoveredPrinter) => void,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        void this.tejScanStop?.().catch(() => {});
+        this.tejScanStop = null;
+        if (error) reject(error);
+        else resolve();
+      };
+
+      try {
+        const handle = tej.startTejScan(
+          (device: any) => {
+            onDevice({
+              id: device.id,
+              name: device.name,
+              rssi: null,
+              transport: 'tej-spp',
+              sdkId: 'tej',
+              likelyTej: true,
+              likelyJosh: false,
+              likelyTd404: false,
+              bonded: device.bonded ?? false,
+            });
+          },
+          (error: any) => finish(error),
+        );
+        this.tejScanStop = handle.stop;
+        setTimeout(() => finish(), SCAN_TIMEOUT_MS);
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error('Tej scan failed to start.'));
       }
     });
   }
@@ -763,7 +954,7 @@ class PrinterManager {
             likelyTd404: device.likelyTd404 ?? isLikelyTd404Name(device.name),
             bonded: device.bonded,
           });
-        }, () => finish());
+        }, (error) => finish(error));
         this.td404ScanStop = handle.stop;
         this.scanAbort = () => finish();
         this.scanTimer = setTimeout(() => finish(), SCAN_TIMEOUT_MS);
@@ -777,6 +968,9 @@ class PrinterManager {
     ble: any,
     onDevice: (device: DiscoveredPrinter) => void,
   ): Promise<void> {
+    if (!this.isBluetoothEnabled()) {
+      return;
+    }
     await this.waitForBlePoweredOn(ble);
 
     return new Promise<void>((resolve, reject) => {
@@ -831,6 +1025,8 @@ class PrinterManager {
     this.td404ScanStop = null;
     void this.joshScanStop?.().catch(() => {});
     this.joshScanStop = null;
+    void this.tejScanStop?.().catch(() => {});
+    this.tejScanStop = null;
     try {
       this.ble?.stopDeviceScan();
     } catch {
@@ -885,6 +1081,10 @@ class PrinterManager {
   ): Promise<void> {
     this.stopScan();
     usePrinterStore.getState().setStatus('connecting');
+    if (transport !== 'wifi' && !this.isBluetoothEnabled()) {
+      usePrinterStore.getState().clearConnection();
+      throw new Error(BLUETOOTH_OFF_MESSAGE);
+    }
     const connectStart = Date.now();
 
     // ── Routing diagnostics ──────────────────────────────────────────
@@ -985,6 +1185,87 @@ class PrinterManager {
       throw new Error('JOSH printer routing failed. The device was identified as JOSH but the JOSH connection path was not entered.');
     }
 
+    const isTargetTej =
+      !isExplicitTd404 &&
+      !isTargetJosh &&
+      (transport === 'tej-spp' || (Boolean(deviceName) && isLikelyTejName(deviceName)));
+
+    if (isTargetTej) {
+      const tej = this.getTej();
+      const diag = tej?.getTejNativeDiagnostic?.() ?? {
+        isLinked: false,
+        isAvailable: false,
+        reason: 'Tej module failed to load (require error)',
+      };
+      console.info(
+        `[CONN-ROUTE] TEJ path: isLinked=${diag.isLinked}, isAvailable=${diag.isAvailable}, reason=${diag.reason ?? 'OK'}`,
+      );
+
+      if (!tej || !diag.isAvailable) {
+        const reason = diag.reason ?? 'Tej native module is not available in running APK.';
+        console.error(`[CONN-ROUTE] TEJ path BLOCKED: ${reason}`);
+        usePrinterStore.getState().clearConnection();
+        throw new Error(`Tej printer cannot connect: ${reason}`);
+      }
+
+      try {
+        await this.ensurePermissions('connect-only');
+        console.info(
+          `[TEJ-CONN] Initiating Tej connection: mac=${deviceId}, name=${deviceName ?? 'unknown'}, transport=${transport ?? 'auto'}`,
+        );
+
+        if (tej.isTejConnected()) {
+          console.info('[TEJ-CONN] Closing lingering Tej SDK session');
+          await tej.disconnectTej().catch(() => {});
+        }
+        const josh = this.getJosh();
+        if (josh?.isJoshConnected()) {
+          await josh.disconnectJosh().catch(() => {});
+        }
+        const td404 = this.getTd404();
+        if (td404?.isTd404Connected()) {
+          await td404.disconnectTd404().catch(() => {});
+        }
+        if (this.connectedDevice) {
+          await this.connectedDevice.cancelConnection().catch(() => {});
+          this.connectedDevice = null;
+          this.writableTarget = null;
+        }
+
+        console.info(`[TEJ-CONN] Submitting Tej connection request → ${deviceId} (${deviceName ?? 'Tej'})`);
+        const result = await tej.connectTej(deviceId, deviceName);
+        this.activeTransport = 'tej-spp';
+        this.connectedDevice = null;
+        this.writableTarget = null;
+        this.backendPrinterId = null;
+        this.bleNegotiatedMtu = 0;
+        this.lastErrorMessage = null;
+        console.info(
+          `[TEJ-CONN] Tej connected in ${Date.now() - connectStart} ms → ${result.id} (${result.name ?? deviceName})`,
+        );
+        usePrinterStore.getState().setConnectedDevice(result.id, result.name ?? deviceName ?? deviceId, {
+          transport: 'tej-spp',
+          sdkId: 'tej',
+          backendPrinterId: null,
+        });
+        return;
+      } catch (error) {
+        console.warn(
+          `[TEJ-CONN] Tej connect failed after ${Date.now() - connectStart} ms:`,
+          error,
+        );
+        this.lastErrorMessage = error instanceof Error ? error.message : String(error);
+        usePrinterStore.getState().clearConnection();
+        throw error instanceof Error ? error : new Error('Failed to connect to Tej printer.');
+      }
+    }
+
+    if (transport === 'tej-spp') {
+      console.error('[CONN-ROUTE] transport=tej-spp but TEJ path was not taken — blocking SPP fallback');
+      usePrinterStore.getState().clearConnection();
+      throw new Error('Tej printer routing failed. The device was identified as Tej but the Tej connection path was not entered.');
+    }
+
     const preferSpp =
       transport === 'bluetooth-spp' ||
       (transport !== 'bluetooth-ble' && transport !== 'wifi' && Platform.OS === 'android');
@@ -997,6 +1278,11 @@ class PrinterManager {
         if (josh?.isJoshConnected()) {
           console.info('[printer] Closing active JOSH LPAPI session before opening SPP');
           await josh.disconnectJosh().catch(() => {});
+        }
+        const tej = this.getTej();
+        if (tej?.isTejConnected()) {
+          console.info('[printer] Closing active Tej session before opening SPP');
+          await tej.disconnectTej().catch(() => {});
         }
         console.info('[printer] SPP connect →', deviceId, deviceName);
         // Native Kotlin module handles its own timeout with proper socket cleanup.
@@ -1060,6 +1346,21 @@ class PrinterManager {
       );
     }
     await this.connect(mac, name ?? 'JOSH', 'josh-lpapi');
+  }
+
+  /** Connect specifically to Tej printer by MAC address. */
+  async connectTejByMac(macAddress: string, name?: string): Promise<void> {
+    const mac = macAddress.trim().toUpperCase();
+    if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) {
+      throw new Error('Enter a MAC like AA:BB:CC:DD:EE:FF (from Android Bluetooth settings).');
+    }
+    const tej = this.getTej();
+    if (!tej?.isTejNativeAvailable()) {
+      throw new Error(
+        'Tej Bluetooth connect needs a development build (`npx expo run:android`).',
+      );
+    }
+    await this.connect(mac, name ?? 'Tej Printer', 'tej-spp');
   }
 
   async connectWifi(ip: string, port = 9100, name?: string): Promise<void> {
@@ -1183,6 +1484,9 @@ class PrinterManager {
     if (this.activeTransport === 'josh-lpapi') {
       await this.getJosh()?.disconnectJosh();
     }
+    if (this.activeTransport === 'tej-spp') {
+      await this.getTej()?.disconnectTej();
+    }
     if (this.activeTransport === 'wifi' && this.backendPrinterId) {
       try {
         const { getBackendBaseUrl } = await import('@/lib/printer/backend-api');
@@ -1211,6 +1515,9 @@ class PrinterManager {
     }
     if (this.activeTransport === 'josh-lpapi') {
       return Boolean(this.getJosh()?.isJoshConnected());
+    }
+    if (this.activeTransport === 'tej-spp') {
+      return Boolean(this.getTej()?.isTejConnected());
     }
     if (this.activeTransport === 'wifi') {
       return Boolean(this.backendPrinterId);
@@ -1257,6 +1564,12 @@ class PrinterManager {
   async ensureConnected(): Promise<{ alreadyConnected: boolean; reconnectMs: number }> {
     if (this.isConnectionHealthy()) {
       return { alreadyConnected: true, reconnectMs: 0 };
+    }
+
+    if (!this.isBluetoothEnabled()) {
+      this.connectionState = 'error';
+      this.lastErrorMessage = BLUETOOTH_OFF_MESSAGE;
+      throw new Error(BLUETOOTH_OFF_MESSAGE);
     }
 
     // Connection is dead or missing — attempt reconnect.
@@ -1311,6 +1624,10 @@ class PrinterManager {
     if (this.isConnected) return true;
     const store = usePrinterStore.getState();
     if (!store.lastDeviceId) return false;
+    if (!this.isBluetoothEnabled()) {
+      this.lastErrorMessage = BLUETOOTH_OFF_MESSAGE;
+      return false;
+    }
     try {
       const isTd = isLikelyTd404Name(store.lastDeviceName);
       const isTargetJosh =
@@ -1318,16 +1635,31 @@ class PrinterManager {
         (store.sdkId === 'josh' ||
           store.transport === 'josh-lpapi' ||
           (Boolean(store.lastDeviceName) && isLikelyJoshName(store.lastDeviceName)));
+      const isTargetTej =
+        !isTd &&
+        !isTargetJosh &&
+        (store.sdkId === 'tej' ||
+          store.transport === 'tej-spp' ||
+          (Boolean(store.lastDeviceName) && isLikelyTejName(store.lastDeviceName)));
 
       console.info(
-        `[printer] auto-reconnect → ${store.lastDeviceId} ${store.lastDeviceName ?? ''} (isTargetJosh=${isTargetJosh})`,
+        `[printer] auto-reconnect → ${store.lastDeviceId} ${store.lastDeviceName ?? ''} (isTargetJosh=${isTargetJosh}, isTargetTej=${isTargetTej})`,
       );
       if (isTargetJosh) {
         console.info(
           `[JOSH-CONN-P1:IDENTIFY] Auto-reconnect identified JOSH printer: ${store.lastDeviceId} (${store.lastDeviceName ?? 'JOSH'})`,
         );
       }
-      const transport = isTargetJosh ? 'josh-lpapi' : (store.transport ?? 'bluetooth-spp');
+      if (isTargetTej) {
+        console.info(
+          `[TEJ-CONN] Auto-reconnect identified Tej printer: ${store.lastDeviceId} (${store.lastDeviceName ?? 'Tej'})`,
+        );
+      }
+      const transport = isTargetJosh
+        ? 'josh-lpapi'
+        : isTargetTej
+          ? 'tej-spp'
+          : (store.transport ?? 'bluetooth-spp');
       // For Wi-Fi, skip — requires explicit IP entry.
       if (transport === 'wifi') return false;
       await this.connect(
@@ -1364,6 +1696,24 @@ class PrinterManager {
       console.info('[JOSH-PRINT-P3:SUBMIT] Submitting test text to LPAPI hardware...');
       await josh.printJoshTestText(text);
       console.info('[JOSH-PRINT-P5:FINALIZE] JOSH test print completed successfully');
+      return;
+    }
+
+    if (this.activeTransport === 'tej-spp' || this.isTej) {
+      console.info(`[TEJ-PRINT] Test print dispatching via Tej SDK: "${text}"`);
+      const tej = this.getTej();
+      if (!tej) throw new Error('Tej module not available.');
+      if (!this.isConnected) {
+        const store = usePrinterStore.getState();
+        await this.connect(store.deviceId ?? store.lastDeviceId!, store.deviceName ?? store.lastDeviceName, 'tej-spp');
+      }
+      // Minimal test dot label to exercise hardware
+      await tej.printTejPngLabel({
+        pngBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        copies: 1,
+        paperType: 'gap',
+      });
+      console.info('[TEJ-PRINT] Tej test print completed successfully');
       return;
     }
 
@@ -1407,6 +1757,9 @@ class PrinterManager {
   }): Promise<boolean> {
     if (this.activeTransport === 'josh-lpapi') {
       return this.printJoshPngLabelFast(options);
+    }
+    if (this.activeTransport === 'tej-spp' || this.isTej) {
+      return this.printTejPngLabelFast(options);
     }
     if (this.activeTransport !== 'td404-spp' || !this.usesTd404CommandSet) {
       return false;
@@ -1508,6 +1861,10 @@ class PrinterManager {
     speed?: number | null;
     orientation?: number;
     dpi?: number;
+    hOffsetMm?: number;
+    vOffsetMm?: number;
+    media?: 'gap' | 'bline' | 'continuous';
+    alignment?: 'left' | 'center';
   }): Promise<boolean> {
     if (!this.isJosh) {
       return false;
@@ -1524,12 +1881,17 @@ class PrinterManager {
       store.setStatus('printing');
       this.connectionState = 'printing';
       try {
+        const profile = this.getActivePrinterProfile();
+        const dpi = joshEffectiveDpi(options.dpi ?? profile.dpi);
+        const gapType = joshGapTypeFromMedia(options.media ?? 'gap');
+        const gapLength =
+          options.gapMm != null && options.gapMm > 0 ? Math.round(options.gapMm) : 3;
         console.info(
-          `[JOSH-PRINT-P1:PREFLIGHT] Preparing fast PNG print: ${options.widthMm}x${options.heightMm}mm, copies=${options.copies ?? 1}, dpi=${options.dpi ?? 203}`,
+          `[JOSH-PRINT-P1:PREFLIGHT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm dpi=${dpi} gapType=${gapType} gap=${gapLength}mm offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
         );
         await this.ensureConnected();
         const t0 = Date.now();
-        console.info('[JOSH-PRINT-P3:SUBMIT] Submitting label bitmap to LPAPI hardware...');
+        console.info('[JOSH-PRINT-P3:SUBMIT] Submitting label millimetres to LPAPI startJob...');
         const result = await josh.printJoshPngLabel({
           pngBase64: options.pngBase64,
           widthMm: options.widthMm,
@@ -1538,12 +1900,15 @@ class PrinterManager {
           density: options.density != null ? options.density : -1,
           speed: options.speed != null ? options.speed : -1,
           orientation: options.orientation ?? 0,
-          gapType: -1,
-          gapLength: options.gapMm != null && options.gapMm > 0 ? options.gapMm : -1,
-          dpi: options.dpi ?? 203,
+          gapType,
+          gapLength,
+          dpi,
+          hOffsetMm: options.hOffsetMm ?? 0,
+          vOffsetMm: options.vOffsetMm ?? 0,
+          alignment: options.alignment ?? profile.alignment,
         });
         console.info(
-          `[JOSH-PRINT-P5:FINALIZE] JOSH fast print completed in ${Date.now() - t0} ms |`,
+          `[JOSH-PRINT-P5:FINALIZE] JOSH mm print completed in ${Date.now() - t0} ms |`,
           result,
         );
       } finally {
@@ -1567,6 +1932,86 @@ class PrinterManager {
       return true;
     } catch (error) {
       console.error('[JOSH-PRINT-P5:FAILED] JOSH print failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tej SDK fast print: PNG → PrintSDK PrintImgHelper (handled by native module).
+   * Direct bitmap caching + multi-copy ACK stream.
+   */
+  async printTejPngLabelFast(options: {
+    pngBase64: string;
+    widthMm: number;
+    heightMm: number;
+    gapMm?: number;
+    copies?: number;
+    density?: number | null;
+    speed?: number | null;
+    orientation?: number;
+    dpi?: number;
+    hOffsetMm?: number;
+    vOffsetMm?: number;
+    media?: 'gap' | 'bline' | 'continuous';
+    alignment?: 'left' | 'center';
+  }): Promise<boolean> {
+    if (!this.isTej) {
+      return false;
+    }
+    this.activeTransport = 'tej-spp';
+    const tej = this.getTej();
+    if (!tej || typeof tej.printTejPngLabel !== 'function') {
+      return false;
+    }
+
+    this.printQueueDepth++;
+    const run = this.printChain.then(async () => {
+      const store = usePrinterStore.getState();
+      store.setStatus('printing');
+      this.connectionState = 'printing';
+      try {
+        await this.ensureConnected();
+        const t0 = Date.now();
+        const paperType =
+          options.media === 'continuous'
+            ? 'continuous'
+            : options.media === 'bline'
+              ? 'black'
+              : 'gap';
+        const result = await tej.printTejPngLabel({
+          pngBase64: options.pngBase64,
+          copies: Math.max(1, Math.round(options.copies ?? 1)),
+          paperType,
+          dpiDotsPerMm: options.dpi && options.dpi > 250 ? 12 : 8,
+          density: options.density != null ? options.density : undefined,
+          widthMm: options.widthMm,
+          heightMm: options.heightMm,
+        });
+        console.info(
+          `[TEJ-PRINT] Tej print completed in ${Date.now() - t0} ms |`,
+          result,
+        );
+      } finally {
+        const currentStore = usePrinterStore.getState();
+        if (currentStore.status === 'printing') {
+          currentStore.setStatus(this.isConnected ? 'connected' : 'disconnected');
+        }
+        this.connectionState = this.isConnected ? 'connected' : 'disconnected';
+      }
+    });
+    this.printChain = run.then(
+      () => {
+        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+      },
+      () => {
+        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+      },
+    );
+    try {
+      await run;
+      return true;
+    } catch (error) {
+      console.error('[TEJ-PRINT] Tej print failed:', error);
       throw error;
     }
   }

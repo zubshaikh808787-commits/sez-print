@@ -53,10 +53,14 @@ export type JoshPngLabelOptions = {
   orientation?: number;
   gapType?: number;
   gapLength?: number;
+  hOffsetMm?: number;
+  vOffsetMm?: number;
+  alignment?: 'left' | 'center';
 };
 
 type NativeJoshPrinter = {
   isAvailable(): boolean;
+  isBluetoothEnabled?(): boolean;
   isDeviceNameSupported(name: string | null): boolean;
   startDiscovery(): Promise<{ discoveryStarted?: boolean }>;
   stopDiscovery(): Promise<void>;
@@ -140,6 +144,17 @@ export function isJoshNativeAvailable(): boolean {
   }
 }
 
+/** Adapter power only. Returns null when the helper is missing (older APK). */
+export function isJoshBluetoothEnabled(): boolean | null {
+  const mod = getNative();
+  if (!mod || typeof mod.isBluetoothEnabled !== 'function') return null;
+  try {
+    return Boolean(mod.isBluetoothEnabled());
+  } catch {
+    return null;
+  }
+}
+
 export function isDeviceNameSupported(name: string | null | undefined): boolean {
   const mod = getNative();
   if (!mod || !name) return false;
@@ -152,7 +167,7 @@ export function isDeviceNameSupported(name: string | null | undefined): boolean 
 
 export function startJoshDiscovery(
   onDevice: (device: JoshDevice) => void,
-  onFinished?: () => void,
+  onFinished?: (error?: Error) => void,
 ): { stop: () => Promise<void> } {
   const mod = getNative();
   if (!mod) {
@@ -168,7 +183,19 @@ export function startJoshDiscovery(
     ? mod.addListener('onJoshScanFinished', () => onFinished())
     : null;
 
-  void mod.startDiscovery();
+  void mod
+    .startDiscovery()
+    .then((result) => {
+      if (result && result.discoveryStarted === false) {
+        onFinished?.();
+      }
+    })
+    .catch((error) => {
+      foundSub.remove();
+      finishSub?.remove();
+      const err = error instanceof Error ? error : new Error(String(error));
+      onFinished?.(err);
+    });
 
   return {
     stop: async () => {
@@ -247,8 +274,11 @@ export async function printJoshPngLabel(
     density: options.density ?? -1,
     speed: options.speed ?? -1,
     direction: options.direction ?? options.orientation ?? 0,
-    gapType: options.gapType ?? -1,
-    gapLength: options.gapLength ?? -1,
+    gapType: options.gapType ?? 2,
+    gapLength: options.gapLength ?? 3,
+    hOffsetMm: options.hOffsetMm ?? 0,
+    vOffsetMm: options.vOffsetMm ?? 0,
+    alignment: options.alignment ?? 'left',
   });
 }
 

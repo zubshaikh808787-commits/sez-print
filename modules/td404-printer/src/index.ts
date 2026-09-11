@@ -23,8 +23,9 @@ export type Td404PngLabelResult = {
 
 type NativeTd404 = {
   isAvailable(): boolean;
+  isBluetoothEnabled?(): boolean;
   getBondedDevices(): Promise<Td404Device[]>;
-  startScan(): Promise<{ discoveryStarted?: boolean; bondedCount?: number } | void>;
+  startScan(): Promise<{ discoveryStarted?: boolean; bondedCount?: number; reason?: string } | void>;
   stopScan(): Promise<void>;
   connect(
     macAddress: string,
@@ -66,6 +67,17 @@ export function isTd404NativeAvailable(): boolean {
   }
 }
 
+/** Adapter power only. Returns null when the helper is missing (older APK). */
+export function isTd404BluetoothEnabled(): boolean | null {
+  const mod = getNative();
+  if (!mod || typeof mod.isBluetoothEnabled !== 'function') return null;
+  try {
+    return Boolean(mod.isBluetoothEnabled());
+  } catch {
+    return null;
+  }
+}
+
 export async function getTd404BondedDevices(): Promise<Td404Device[]> {
   const mod = getNative();
   if (!mod) return [];
@@ -78,7 +90,7 @@ export async function getTd404BondedDevices(): Promise<Td404Device[]> {
 
 export function startTd404Scan(
   onDevice: (device: Td404Device) => void,
-  onFinished?: () => void,
+  onFinished?: (error?: Error) => void,
 ): { stop: () => Promise<void> } {
   const mod = getNative();
   if (!mod) {
@@ -94,7 +106,19 @@ export function startTd404Scan(
     ? mod.addListener('onScanFinished', () => onFinished())
     : null;
 
-  void mod.startScan();
+  void mod
+    .startScan()
+    .then((result) => {
+      if (result && result.discoveryStarted === false) {
+        onFinished?.();
+      }
+    })
+    .catch((error) => {
+      foundSub.remove();
+      finishSub?.remove();
+      const err = error instanceof Error ? error : new Error(String(error));
+      onFinished?.(err);
+    });
 
   return {
     stop: async () => {

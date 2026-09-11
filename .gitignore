@@ -53,3 +53,5 @@ eas-log-raw.bin
 # build artifacts
 *.apk
 JOSH SDK/
+backend/Demo_small/
+backend/tez sdk

@@ -89,6 +89,14 @@ class JoshPrinterModule : Module() {
       ok
     }
 
+    /** Adapter power only — does not start LPAPI discovery or connect. */
+    Function("isBluetoothEnabled") {
+      val context = getContext() ?: return@Function false
+      val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+      val adapter = manager?.adapter ?: @Suppress("DEPRECATION") BluetoothAdapter.getDefaultAdapter()
+      adapter != null && adapter.isEnabled
+    }
+
     Function("isDeviceNameSupported") { name: String? ->
       val mgr = getOrInitManager()
       val supported = mgr?.isDeviceNameSupported(name) ?: false
@@ -295,13 +303,19 @@ class JoshPrinterModule : Module() {
       val direction = (options["direction"] as? Number)?.toInt()
         ?: (options["orientation"] as? Number)?.toInt()
         ?: 0
-      val gapType = (options["gapType"] as? Number)?.toInt() ?: -1
-      val gapLength = (options["gapLength"] as? Number)?.toInt() ?: -1
+      val gapType = (options["gapType"] as? Number)?.toInt() ?: 2
+      val gapLength = (options["gapLength"] as? Number)?.toInt() ?: 3
+      val hOffsetMm = (options["hOffsetMm"] as? Number)?.toDouble() ?: 0.0
+      val vOffsetMm = (options["vOffsetMm"] as? Number)?.toDouble() ?: 0.0
+      val alignment = (options["alignment"] as? String) ?: "left"
 
       ioExecutor.execute {
         try {
           val pngBytes = Base64.decode(pngBase64, Base64.DEFAULT)
-          Log.i("JoshPrinter", "[JOSH-NATIVE-BRIDGE] Decoded ${pngBytes.size} PNG bytes, delegating to mgr.printBitmap")
+          Log.i(
+            "JoshPrinter",
+            "[JOSH-NATIVE-BRIDGE] ${widthMm}x${heightMm}mm dpi=$dpi gapType=$gapType gap=${gapLength}mm offset=${hOffsetMm}x${vOffsetMm} align=$alignment",
+          )
           val result = mgr.printBitmap(
             pngBytes = pngBytes,
             widthMm = widthMm,
@@ -312,7 +326,10 @@ class JoshPrinterModule : Module() {
             paramSpeed = speed,
             direction = direction,
             paramGapType = gapType,
-            paramGapLength = gapLength
+            paramGapLength = gapLength,
+            hOffsetMm = hOffsetMm,
+            vOffsetMm = vOffsetMm,
+            alignment = alignment,
           )
 
           if (result != null) {

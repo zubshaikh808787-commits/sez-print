@@ -1,0 +1,35 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'expo.modules.tejprinter'
+version = '1.0.0'
+
+def getExtOrDefault(name, defaultValue) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : defaultValue
+}
+
+android {
+  compileSdk getExtOrDefault('compileSdkVersion', 35)
+  namespace "expo.modules.tejprinter"
+  defaultConfig {
+    minSdk getExtOrDefault('minSdkVersion', 24)
+    targetSdk getExtOrDefault('targetSdkVersion', 35)
+    versionCode 1
+    versionName "1.0.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+repositories {
+  google()
+  mavenCentral()
+  maven { url 'https://gitee.com/it_space/bluetooth-sdk/raw/master' }
+}
+
+dependencies {
+  implementation 'androidx.core:core-ktx:1.13.1'
+  implementation 'com.yx.print:PrintSDK:68'
+}
