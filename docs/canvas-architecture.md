@@ -33,6 +33,6 @@ Files named `konva-canvas.tsx` and `konva-transformer.tsx` are **React Native** 
 | Chrome remote-debug / WKWebView | Expo RN: shake → Perf Monitor. Pinch/pan are RNGH, not `touch-action` |
 | Device pixel ratio in pointer math | Ignored. `absoluteX/Y` are logical px (`POINTER_COORD_SPACE`) |
 | Phase 7 regression checklist | [`docs/canvas-qa-checklist.md`](./canvas-qa-checklist.md) |
-| Phase 8 Skia prototype | `/canvas-skia-prototype` — Skia image + Phase 5 `boundBoxMm`. Production stays `rn-view` until `compareRendererFps` says otherwise |
+| Phase 8 Skia prototype | `/canvas-skia-prototype` — millimetre image + Phase 5 `boundBoxMm`. Native Skia is not linked (EAS Gradle). Production stays `rn-view` until `compareRendererFps` says otherwise |
 
 Jewelry 14×96 / 54×96 and cable 50×73 print millimetres stay unchanged by this layout work.

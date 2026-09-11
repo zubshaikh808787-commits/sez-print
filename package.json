@@ -22,7 +22,6 @@
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-ml-kit/text-recognition": "^2.0.0",
-    "@shopify/react-native-skia": "2.2.12",
     "expo": "~54.0.37",
     "expo-build-properties": "~1.0.10",
     "expo-camera": "~17.0.10",

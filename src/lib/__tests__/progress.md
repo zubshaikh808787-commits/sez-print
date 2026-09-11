@@ -589,7 +589,7 @@ Phase 8 — complete (see below). Production editor is unchanged.
 
 **Status:** done (2026-09-11)
 
-- `@shopify/react-native-skia` **2.2.12** (Expo 54). Native draw in `skia-image-artboard.native.tsx`; web uses an `expo-image` stand-in (no CanvasKit).
+- Native Skia was **removed from the Android binary** after EAS `Run gradlew` failed compiling `@shopify/react-native-skia` (CMake/NDK). Prototype UI keeps millimetre drag/resize on an `expo-image` artboard. Production `/edit` was never on Skia.
 - Gestures: RNGH overlay, Phase 5 `boundBoxMm` / `dragBoundMm` via `src/lib/editor/skia-prototype.ts`.
 - Screen: [`src/app/canvas-skia-prototype.tsx`](../../../src/app/canvas-skia-prototype.tsx) from Editing Settings. Presets include jewelry 54×96 and cable 50×73.
 - **`/edit` still uses `KonvaCanvas`.** This is a prototype, not a rewrite.

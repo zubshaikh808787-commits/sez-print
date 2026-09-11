@@ -132,7 +132,7 @@ Custom `expo-dev-client` may need a rebuild after adding `expo-image-manipulator
 
 ## Phase 8 — Skia prototype (not production)
 
-Open **Editing Settings → Skia canvas prototype** (`/canvas-skia-prototype`). Rebuild the Expo dev client so `@shopify/react-native-skia` is in the binary.
+Open **Editing Settings → Skia canvas prototype** (`/canvas-skia-prototype`). Native Skia is not in the Android binary (EAS Gradle); the prototype uses an `expo-image` artboard with the same millimetre handles.
 
 | Check | Lab | Device |
 |---|---|---|

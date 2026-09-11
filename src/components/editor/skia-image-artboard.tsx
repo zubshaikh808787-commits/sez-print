@@ -8,7 +8,7 @@ type Props = Omit<SkiaImageArtboardChromeProps, 'children'> & {
   imageSource: number;
 };
 
-/** Web fallback: CanvasKit is not loaded. Same millimetre chrome as the Skia path. */
+/** View artboard for the Phase 8 prototype. Native Skia is not in the binary. */
 export function SkiaImageArtboard({
   widthMm,
   heightMm,

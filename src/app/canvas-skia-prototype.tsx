@@ -1,9 +1,9 @@
 /**
- * Phase 8 — Skia prototype (artboard + one image).
+ * Phase 8 — canvas prototype (artboard + one image).
  *
- * Production `/edit` stays on RN Views. This screen draws the photo with
- * `@shopify/react-native-skia` and reuses Phase 5 `boundBoxMm` for the two
- * edge handles. Compare FPS here vs `/edit` before any full migration.
+ * Production `/edit` stays on RN Views. Native Skia was removed from the
+ * Android binary because it failed EAS Gradle (CMake/NDK). This screen uses
+ * the same millimetre drag/resize chrome with an `expo-image` artboard.
  */
 
 import { useMemo, useState } from 'react';
@@ -52,9 +52,10 @@ export default function CanvasSkiaPrototypeScreen() {
       </View>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.lede}>
-          Artboard + one image on Skia. Production editor is still{' '}
-          <Text style={styles.mono}>{PRODUCTION_RENDERER}</Text>. Rebuild the dev client after
-          adding Skia, then compare Perf Monitor FPS here against a busy `/edit` label.
+          Artboard + one image. Production editor is still{' '}
+          <Text style={styles.mono}>{PRODUCTION_RENDERER}</Text>. Native Skia is
+          not in this binary (it broke the Android Gradle build). Drag and
+          resize here still use Phase 5 millimetre math.
         </Text>
         <View style={styles.chips}>
           {STOCK.map((item, index) => (
