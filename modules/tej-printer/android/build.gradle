@@ -26,10 +26,9 @@ android {
 repositories {
   google()
   mavenCentral()
-  maven { url 'https://gitee.com/it_space/bluetooth-sdk/raw/master' }
 }
 
 dependencies {
   implementation 'androidx.core:core-ktx:1.13.1'
-  implementation 'com.yx.print:PrintSDK:68'
+  implementation files('libs/PrintSDK-68.aar')
 }
