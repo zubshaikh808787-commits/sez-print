@@ -28,6 +28,8 @@ assert.equal(tejDotsPerMm(304), 12);
 assert.equal(tejPaperTypeFromMedia('gap'), 'gap');
 assert.equal(tejPaperTypeFromMedia('bline'), 'black');
 assert.equal(tejPaperTypeFromMedia('continuous'), 'continuous');
+// Phase 3 calibration fix: tattoo paper is continuous (no physical gap/mark)
+assert.equal(tejPaperTypeFromMedia('tattoo'), 'continuous', 'Tattoo paper must map to continuous (no gap sensor)');
 assert.equal(tejPaperTypeFromMedia(undefined), 'gap');
 
 // ─── 3. Device Name Disambiguation & Hard Constraint ──────────────────

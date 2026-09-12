@@ -255,3 +255,53 @@ export async function printTejPngLabel(
   if (!mod) throw new Error('Tej native module is unavailable.');
   return mod.printPngLabel(options as Record<string, unknown>);
 }
+
+/**
+ * Returns diagnostic information about the Tej printer integration.
+ * Useful for debugging calibration and modelKey resolution issues.
+ *
+ * See TEZ_PRINTER_CALIBRATION_FIX.md §4 — Verification Checklist.
+ */
+export function getTejDiagnostics(): {
+  isLinked: boolean;
+  isAvailable: boolean;
+  isConnected: boolean;
+  state: string;
+  reason?: string;
+} {
+  const diag = getTejNativeDiagnostic();
+  if (!diag.isLinked || !diag.isAvailable) {
+    return {
+      ...diag,
+      isConnected: false,
+      state: 'UNAVAILABLE',
+    };
+  }
+  const mod = getNative();
+  if (!mod) {
+    return {
+      isLinked: true,
+      isAvailable: false,
+      isConnected: false,
+      state: 'UNAVAILABLE',
+      reason: 'Native module returned null',
+    };
+  }
+  try {
+    const st = mod.getState();
+    return {
+      isLinked: true,
+      isAvailable: true,
+      isConnected: Boolean(st?.isConnected),
+      state: st?.state ?? 'UNKNOWN',
+    };
+  } catch {
+    return {
+      isLinked: true,
+      isAvailable: true,
+      isConnected: false,
+      state: 'ERROR',
+      reason: 'Failed to query state',
+    };
+  }
+}

@@ -259,13 +259,17 @@ class TejPrinterModule : Module() {
             }
             val dpiDotsPerMm = (options["dpiDotsPerMm"] as? Number)?.toInt() ?: 8 // 8 dpm = 203 DPI
             val density = (options["density"] as? Number)?.toInt()
+            val widthMm = (options["widthMm"] as? Number)?.toInt()
+            val heightMm = (options["heightMm"] as? Number)?.toInt()
 
             mgr.printImage(
                 base64Png = base64Png,
                 copies = copies,
                 paperType = paperType,
                 dpi = dpiDotsPerMm,
-                density = density
+                density = density,
+                widthMm = widthMm,
+                heightMm = heightMm
             ) { result ->
                 result.onSuccess {
                     promise.resolve(

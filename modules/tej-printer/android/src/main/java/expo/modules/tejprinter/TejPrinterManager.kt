@@ -117,6 +117,7 @@ class TejPrinterManager(private val context: Context) {
 
     // Discovery tracking
     private val isScanning = AtomicBoolean(false)
+    private val isPrinting = AtomicBoolean(false)
     private val discoveredDevices = ConcurrentHashMap<String, DeviceItem>()
 
     // Bluetooth broadcast receiver
@@ -214,15 +215,38 @@ class TejPrinterManager(private val context: Context) {
 
     // ─── Model Key Resolution ───────────────────────────────────────────
 
+    /**
+     * Resolves the SDK modelKey from the Bluetooth device name.
+     *
+     * The YX PrintSDK uses modelKey to select internal command tables, checksum/protocol
+     * quirks, and gap/black-mark sensor calibration profiles. A wrong modelKey causes
+     * calibration failures and "different type of printer" errors.
+     *
+     * See TEZ_PRINTER_CALIBRATION_FIX.md §2.1 / §3.1 for full context.
+     */
     fun resolveModelKey(deviceName: String?): String {
-        if (deviceName == null) return DEFAULT_MODEL_KEY
+        if (deviceName == null) {
+            Log.w(TAG, "[MODEL_KEY] Device name is null, defaulting to '$DEFAULT_MODEL_KEY'")
+            return DEFAULT_MODEL_KEY
+        }
         val upper = deviceName.trim().uppercase()
-        return when {
+        val resolved = when {
+            // TP3 / Z431 family
             upper.contains("TP3") || upper.contains("Z431") -> "TP3Z431"
-            upper.contains("GE920") || upper.contains("GE") -> "GE920"
+            // GE920 family (TestActivity in vendor demo uses this key for GE920-named devices)
+            upper.contains("GE920") -> "GE920"
+            // 380-prefix family (vendor demo hides/shows paper-size inputs based on this)
+            upper.startsWith("380") -> "Z212" // TODO: confirm correct key for 380-family with vendor
+            // YC3121 family (referenced in vendor UpdateActivity for firmware updates)
+            upper.contains("YC3121") -> "Z212" // TODO: confirm correct key with vendor
+            // Y50 / Z212 / Tej / YX — the default hardware family
             upper.contains("Y50") || upper.contains("Z212") || upper.contains("TEJ") -> "Z212"
+            upper.startsWith("YX") -> "Z212"
+            // Fallback
             else -> DEFAULT_MODEL_KEY
         }
+        Log.i(TAG, "[MODEL_KEY] Resolved modelKey='$resolved' for device='$deviceName' (uppercase='$upper')")
+        return resolved
     }
 
     // ─── State Management ───────────────────────────────────────────────
@@ -266,6 +290,7 @@ class TejPrinterManager(private val context: Context) {
 
                 item.address = addr
                 item.modelKey = resolveModelKey(item.name)
+                Log.d(TAG, "[SCAN_FOUND] device='${item.name}' addr=$addr -> modelKey='${item.modelKey}'")
                 discoveredDevices[addr] = item
 
                 val devMap = mapOf(
@@ -393,6 +418,7 @@ class TejPrinterManager(private val context: Context) {
         cancelReconnect()
 
         val resolvedModelKey = if (!modelKey.isNullOrBlank()) modelKey else resolveModelKey(deviceName)
+        Log.i(TAG, "[CONNECT] addr=$macAddress name='$deviceName' requestedModelKey='$modelKey' -> resolvedModelKey='$resolvedModelKey'")
         val item = DeviceItem.build(macAddress.trim().uppercase())
         item.name = deviceName ?: "Tej Printer"
         item.modelKey = resolvedModelKey
@@ -667,6 +693,8 @@ class TejPrinterManager(private val context: Context) {
         paperType: Int = PrinterConstantPool.PaperType.GAP,
         dpi: Int = 8, // 8 dots/mm = 203 DPI
         density: Int? = null,
+        widthMm: Int? = null,
+        heightMm: Int? = null,
         onResult: (Result<Unit>) -> Unit
     ) {
         if (!isConnected()) {
@@ -674,11 +702,20 @@ class TejPrinterManager(private val context: Context) {
             return
         }
 
+        // Phase 4 fix: Re-entrancy guard — reject overlapping print calls
+        if (!isPrinting.compareAndSet(false, true)) {
+            Log.w(TAG, "[PRINT_GUARD] Rejected overlapping printImage() call — a job is already in progress")
+            onResult(Result.failure(Exception("PRINT_IN_PROGRESS: A print job is already in progress")))
+            return
+        }
+
         val totalCopies = copies.coerceAtLeast(1)
+        Log.i(TAG, "[PRINT_JOB] Starting print: copies=$totalCopies paperType=$paperType dpi=$dpi density=$density widthMm=$widthMm heightMm=$heightMm")
 
         commandExecutor.execute {
             val p = printer
             if (p == null || !p.isConnect) {
+                isPrinting.set(false)
                 mainHandler.post { onResult(Result.failure(Exception("NOT_CONNECTED"))) }
                 return@execute
             }
@@ -704,6 +741,7 @@ class TejPrinterManager(private val context: Context) {
             preCheckLatch.await(4000, TimeUnit.MILLISECONDS)
             preCheckStatus?.let { st ->
                 if (st.isCoverOpen) {
+                    isPrinting.set(false)
                     mainHandler.post {
                         listener?.onError("COVER_OPEN", "Printer cover is open.")
                         onResult(Result.failure(Exception("COVER_OPEN: Printer cover is open")))
@@ -711,6 +749,7 @@ class TejPrinterManager(private val context: Context) {
                     return@execute
                 }
                 if (st.isOutOfPaper) {
+                    isPrinting.set(false)
                     mainHandler.post {
                         listener?.onError("OUT_OF_PAPER", "Printer is out of paper.")
                         onResult(Result.failure(Exception("OUT_OF_PAPER: Printer is out of paper")))
@@ -718,6 +757,7 @@ class TejPrinterManager(private val context: Context) {
                     return@execute
                 }
                 if (st.isOverheated) {
+                    isPrinting.set(false)
                     mainHandler.post {
                         listener?.onError("OVERHEATED", "Print head is overheated.")
                         onResult(Result.failure(Exception("OVERHEATED: Print head is overheated")))
@@ -742,11 +782,13 @@ class TejPrinterManager(private val context: Context) {
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to decode base64 PNG", e)
+                isPrinting.set(false)
                 mainHandler.post { onResult(Result.failure(Exception("DECODE_FAILED: ${e.message}"))) }
                 return@execute
             }
 
             if (bitmap == null) {
+                isPrinting.set(false)
                 mainHandler.post { onResult(Result.failure(Exception("DECODE_FAILED: Null bitmap"))) }
                 return@execute
             }
@@ -754,6 +796,7 @@ class TejPrinterManager(private val context: Context) {
             transitionState(State.PRINTING)
 
             // Step 4: Cache image in SDK helper
+            // Phase 4 fix: always stop+clear before setting up new job to prevent leftover imgNames
             val helper = p.helper
             helper.stopPrint()
 
@@ -762,7 +805,13 @@ class TejPrinterManager(private val context: Context) {
             val cacheDpi = if (dpi <= 12) 128 else dpi
             helper.setImgDatas(cacheDpi, imgList)
 
-            val isGap = (paperType != PrinterConstantPool.PaperType.CONTINUOUS)
+            // Phase 3 fix: Only GAP and BLACK should trigger gap/mark sensing.
+            // TATTOO and CONTINUOUS both use the simple fixed-feed path.
+            // See TEZ_PRINTER_CALIBRATION_FIX.md §2.3 / §3.3
+            val isGap = (paperType == PrinterConstantPool.PaperType.GAP
+                      || paperType == PrinterConstantPool.PaperType.BLACK)
+            Log.i(TAG, "[PRINT_STEP 3] isGap=$isGap (paperType=$paperType, GAP=${PrinterConstantPool.PaperType.GAP}, BLACK=${PrinterConstantPool.PaperType.BLACK})")
+
             val printCompletedLatch = CountDownLatch(1)
             val currentPrintedIndex = AtomicInteger(0)
             var printJobFailed = false
@@ -842,6 +891,20 @@ class TejPrinterManager(private val context: Context) {
                 }
 
                 build.paperType(paperType)
+
+                // Phase 2 fix: Attempt to send paper size to the SDK via reflection.
+                // The vendor's PrintImgHelper.PrintBuild likely has a paperSize(w, h) or
+                // labelSize(w, h) method, but it's inside the compiled AAR.
+                // See TEZ_PRINTER_CALIBRATION_FIX.md §2.2 / §3.2
+                if (widthMm != null && heightMm != null && widthMm > 0 && heightMm > 0) {
+                    val widthDots = widthMm * dpi
+                    val heightDots = heightMm * dpi
+                    Log.i(TAG, "[PAPER_SIZE] Attempting to set paper size: ${widthMm}mm x ${heightMm}mm = ${widthDots} x ${heightDots} dots (dpi=$dpi)")
+                    trySetPaperSize(build, widthDots, heightDots)
+                } else {
+                    Log.d(TAG, "[PAPER_SIZE] No widthMm/heightMm provided, skipping paperSize configuration")
+                }
+
                 build.printImg(imgName)
 
                 if (isGap) {
@@ -864,6 +927,8 @@ class TejPrinterManager(private val context: Context) {
             val totalMaxWait = (PRINT_COPY_TIMEOUT_MS * totalCopies) + 5000L
             val finished = printCompletedLatch.await(totalMaxWait, TimeUnit.MILLISECONDS)
 
+            // Phase 4 fix: always reset isPrinting before reporting result
+            isPrinting.set(false)
             transitionState(State.CONNECTED)
 
             mainHandler.post {
@@ -878,6 +943,44 @@ class TejPrinterManager(private val context: Context) {
                     onResult(Result.success(Unit))
                 }
             }
+        }
+    }
+
+    /**
+     * Phase 2: Attempt to call paperSize(w, h) or labelSize(w, h) on PrintImgHelper.PrintBuild
+     * via reflection. The method name is unknown because the SDK is a compiled AAR.
+     *
+     * If neither method is found, logs a warning — the print will still proceed but without
+     * explicit paper size configuration (the SDK will use its defaults).
+     */
+    private fun trySetPaperSize(build: PrintImgHelper.PrintBuild, widthDots: Int, heightDots: Int) {
+        val buildClass = build.javaClass
+        val methodNames = listOf("paperSize", "labelSize", "setPaperSize", "setLabelSize", "pageSize", "setPageSize")
+
+        for (methodName in methodNames) {
+            try {
+                // Try (int, int) signature first
+                val method = buildClass.getMethod(methodName, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                method.invoke(build, widthDots, heightDots)
+                Log.i(TAG, "[PAPER_SIZE] Successfully called build.$methodName($widthDots, $heightDots)")
+                return
+            } catch (e: NoSuchMethodException) {
+                // Method doesn't exist with this name, try next
+            } catch (e: Exception) {
+                Log.w(TAG, "[PAPER_SIZE] Error calling build.$methodName: ${e.message}")
+            }
+        }
+
+        // Log all available methods for diagnostics (first time only)
+        Log.w(TAG, "[PAPER_SIZE] No paperSize/labelSize method found on ${buildClass.simpleName}. Available methods:")
+        try {
+            buildClass.methods.forEach { m ->
+                if (!m.declaringClass.name.startsWith("java.")) {
+                    Log.d(TAG, "[PAPER_SIZE]   ${m.name}(${m.parameterTypes.joinToString { it.simpleName }})")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "[PAPER_SIZE] Failed to list methods: ${e.message}")
         }
     }
 }

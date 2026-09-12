@@ -18,10 +18,17 @@ export function tejEffectiveDpi(settingsDpi?: number): number {
   return TEJ_HARDWARE_DPI;
 }
 
+/**
+ * Maps app-level media type to the Tej SDK's paper type constant.
+ *
+ * Phase 3 calibration fix: TATTOO is now classified as 'continuous' (not 'gap'),
+ * because tattoo transfer paper has no physical gap/mark for the sensor to find.
+ * See TEZ_PRINTER_CALIBRATION_FIX.md §2.3 / §3.3
+ */
 export function tejPaperTypeFromMedia(
-  media: 'gap' | 'bline' | 'continuous' | undefined,
+  media: 'gap' | 'bline' | 'continuous' | 'tattoo' | undefined,
 ): 'gap' | 'continuous' | 'black' | 'tattoo' {
-  if (media === 'continuous') return 'continuous';
+  if (media === 'continuous' || media === 'tattoo') return 'continuous';
   if (media === 'bline') return 'black';
   return 'gap';
 }
