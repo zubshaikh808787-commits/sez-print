@@ -296,13 +296,13 @@ function jewP50Faces(h: number, smallPt: number) {
 }
 
 function buildThreeUpRatTailContent(w: number, h: number, smallPt: number): LabelElement[] {
-  const { cols, tagW, gap, bodyH } = jewThreeUpLayout(w, h);
+  const { cols, tagW, gap, bodyH, sideMargin } = jewThreeUpLayout(w, h);
   const foldY = bodyH / 2;
   const inner = tagW - 1.0;
   const els: LabelElement[] = [];
   const typePt = Math.max(4.8, Math.min(6.2, smallPt * 0.82));
   for (let i = 0; i < cols; i++) {
-    const colX = i * (tagW + gap);
+    const colX = sideMargin + i * (tagW + gap);
     const left = colX + 0.5;
     els.push(textEl({ left, top: 1.6, width: inner }, 'GOLD RING', typePt, { align: 'center', bold: true }));
     els.push(textEl({ left, top: 7.0, width: inner }, '22K (916)', typePt * 0.88, { align: 'center' }));

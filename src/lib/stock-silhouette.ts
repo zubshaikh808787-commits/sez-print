@@ -77,9 +77,11 @@ export function jewHangTabLayout(w: number, h: number) {
 
 export function jewThreeUpLayout(w: number, h: number) {
   const { cols, tagW, bodyRatio, tailW } = JEWEL_STOCK.threeUp;
-  const gap = (w - tagW * cols) / Math.max(1, cols - 1);
+  const sideMargin = w >= 50 ? Math.max(2.0, (w - 46) / 2 + 1.0) : Math.max(1.0, (w - tagW * cols) / 4);
+  const printableW = Math.max(tagW * cols, w - sideMargin * 2);
+  const gap = (printableW - tagW * cols) / Math.max(1, cols - 1);
   const bodyH = h * bodyRatio;
-  return { cols, tagW, gap, bodyH, tailW, tailH: h - bodyH };
+  return { cols, tagW, gap, bodyH, tailW, tailH: h - bodyH, sideMargin };
 }
 
 function n(v: number) {
@@ -475,12 +477,12 @@ export function stockSilhouetteSpec(
 
     case 'jew-label-46x100':
     case 'jew-rattail-3row-14x100': {
-      const { cols, tagW, gap, bodyH, tailW, tailH } = jewThreeUpLayout(w, h);
+      const { cols, tagW, gap, bodyH, tailW, tailH, sideMargin } = jewThreeUpLayout(w, h);
       const paths = Array.from({ length: cols }, (_, i) =>
-        headBottomTailD(i * (tagW + gap), 0, tagW, bodyH, tailW, tailH, 2.1),
+        headBottomTailD(sideMargin + i * (tagW + gap), 0, tagW, bodyH, tailW, tailH, 2.1),
       );
       const folds = Array.from({ length: cols }, (_, i) => {
-        const x = i * (tagW + gap);
+        const x = sideMargin + i * (tagW + gap);
         return { x1: x + 0.7, y1: bodyH / 2, x2: x + tagW - 0.7, y2: bodyH / 2 };
       });
       return spec(paths, { folds });

@@ -1137,6 +1137,11 @@ export default function PrintScreen() {
             <View style={styles.cardSection}>
               <Text style={styles.groupLabel}>Paper Type</Text>
               <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
+              {jewelryDieCutJob ? (
+                <Text style={[styles.helperText, { color: '#0284C7', marginTop: 6 }]}>
+                  💡 Clear-liner jewelry rolls with black timing lines on the back require Paper Type set to "Black mark". If prints skip or overlap, run "Calibrate Paper Sensor" in Printer Connect.
+                </Text>
+              ) : null}
             </View>
           </View>
 
