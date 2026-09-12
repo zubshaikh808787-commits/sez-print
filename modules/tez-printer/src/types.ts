@@ -21,6 +21,8 @@ export type TezPrintOptions = {
   speed?: number;
   paperType?: 'gap' | 'continuous' | 'black' | 'tattoo' | number;
   threshold?: number;
+  hOffsetMm?: number;
+  vOffsetMm?: number;
 };
 
 export type TezPrintResult = {

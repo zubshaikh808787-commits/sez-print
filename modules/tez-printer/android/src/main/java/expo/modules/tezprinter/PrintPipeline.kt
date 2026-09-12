@@ -32,7 +32,9 @@ class PrintPipeline(
         val paperType: Int = 0,      // 0=GAP, 1=CONTINUOUS, 2=BLACK, 3=TATTOO
         val density: Int = 8,        // 0..15
         val speed: Float = 4.0f,     // 1.0..8.0
-        val threshold: Int = 128     // 1..254
+        val threshold: Int = 128,    // 1..254
+        val hOffsetMm: Float = 0f,
+        val vOffsetMm: Float = 0f
     )
 
     data class PrintResult(
@@ -91,12 +93,13 @@ class PrintPipeline(
             return
         }
 
-        val pageBitmap = scaleToLabelDots(bitmap, options.widthMm, options.heightMm)
+        val pageBitmap = scaleToLabelDots(bitmap, options.widthMm, options.heightMm, options.hOffsetMm, options.vOffsetMm)
         Log.i(
             TAG,
             "[PrintPipeline] Bitmap decoded: ${bitmap.width}x${bitmap.height}px → " +
             "${pageBitmap.width}x${pageBitmap.height}px | " +
             "target=${options.widthMm}x${options.heightMm}mm | " +
+            "hOffset=${options.hOffsetMm}mm, vOffset=${options.vOffsetMm}mm | " +
             "copies=${options.copies} | paperType=${options.paperType} | " +
             "density=${options.density} | speed=${options.speed}"
         )
@@ -176,12 +179,35 @@ class PrintPipeline(
     }
 
     /** Flashlabel OEM is 8 dots/mm (203 DPI). Match CreatePage millimetres 1:1. */
-    private fun scaleToLabelDots(bitmap: Bitmap, widthMm: Int, heightMm: Int): Bitmap {
+    private fun scaleToLabelDots(
+        bitmap: Bitmap,
+        widthMm: Int,
+        heightMm: Int,
+        hOffsetMm: Float = 0f,
+        vOffsetMm: Float = 0f
+    ): Bitmap {
         val w = (widthMm * OEM_DPM).coerceAtLeast(1)
         val h = (heightMm * OEM_DPM).coerceAtLeast(1)
-        if (bitmap.width == w && bitmap.height == h) return bitmap
-        Log.i(TAG, "[PrintPipeline] Scaling ${bitmap.width}x${bitmap.height} → ${w}x${h}px (${widthMm}x${heightMm}mm @ ${OEM_DPM} dpm)")
-        return Bitmap.createScaledBitmap(bitmap, w, h, true)
+        val scaled = if (bitmap.width == w && bitmap.height == h) {
+            bitmap
+        } else {
+            Log.i(TAG, "[PrintPipeline] Scaling ${bitmap.width}x${bitmap.height} → ${w}x${h}px (${widthMm}x${heightMm}mm @ ${OEM_DPM} dpm)")
+            Bitmap.createScaledBitmap(bitmap, w, h, true)
+        }
+
+        val hOffsetPx = (hOffsetMm * OEM_DPM).toInt()
+        val vOffsetPx = (vOffsetMm * OEM_DPM).toInt()
+
+        if (hOffsetPx == 0 && vOffsetPx == 0) {
+            return scaled
+        }
+
+        Log.i(TAG, "[PrintPipeline] Applying physical offsets: hOffset=${hOffsetMm}mm (${hOffsetPx}px), vOffset=${vOffsetMm}mm (${vOffsetPx}px)")
+        val target = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(target)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        canvas.drawBitmap(scaled, hOffsetPx.toFloat(), vOffsetPx.toFloat(), null)
+        return target
     }
 
     companion object {

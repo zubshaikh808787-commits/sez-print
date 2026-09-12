@@ -178,113 +178,34 @@ class TezPrinterManager private constructor() {
     }
 
     /**
-     * OEM DeviceItem.build(mac) calls NativeUtil.test3 on BluetoothDevice.getName().
-     * Seznik_Tej_DAA91 is not in that allow-list, so build() returns null.
-     * Connection only needs a valid BluetoothDevice + MAC; name can be the Y50 model alias.
+     * Never call DeviceItem.build(mac). That factory returns null for Seznik_Tej
+     * (OEM name filter), and writing .name on the result is the connect NPE.
+     * SPP only needs BluetoothDevice + MAC. Name is the Y50 model alias so
+     * connectBefore's NativeUtil.test3 check can pass.
      */
     private fun resolveDeviceItem(cleanMac: String, deviceName: String?, modelKey: String): DeviceItem {
-        val displayName = deviceName?.trim()?.takeIf { it.isNotEmpty() } ?: "Y50"
-        val adapter = try {
-            BluetoothAdapter.getDefaultAdapter()
-        } catch (_: Exception) {
-            null
-        }
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+            ?: throw IllegalStateException("Bluetooth adapter is not available.")
         val remote = try {
-            adapter?.getRemoteDevice(cleanMac)
+            adapter.getRemoteDevice(cleanMac)
         } catch (e: Exception) {
-            Log.w(TAG, "[TezPrinterManager] getRemoteDevice($cleanMac) failed", e)
-            null
-        }
-
-        try {
-            val bonded = PrinterManage.getInstance().bondedDevices
-            val match = bonded?.firstOrNull { item ->
-                val addr = item.address ?: item.blueDevice?.address
-                addr != null && addr.equals(cleanMac, ignoreCase = true)
-            }
-            if (match != null) {
-                match.modelKey = modelKey
-                if (match.name.isNullOrBlank()) {
-                    match.name = oemCompatibleName(displayName)
-                } else if (!isOemCompatibleName(match.name)) {
-                    match.name = oemCompatibleName(match.name)
-                }
-                if (match.blueDevice == null && remote != null) {
-                    match.blueDevice = remote
-                }
-                if (match.address.isNullOrBlank()) {
-                    match.address = cleanMac
-                }
-                return match
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "[TezPrinterManager] bondedDevices lookup failed", e)
-        }
-
-        val candidateNames = linkedSetOf(
-            displayName,
-            remote?.name?.trim().orEmpty(),
-            oemCompatibleName(displayName),
-            "Y50",
-            "TEZ",
-        ).filter { it.isNotBlank() }
-
-        for (candidate in candidateNames) {
-            val built = try {
-                DeviceItem.build(candidate, cleanMac)
-            } catch (_: Exception) {
-                null
-            }
-            if (built != null) {
-                built.modelKey = modelKey
-                if (built.blueDevice == null && remote != null) built.blueDevice = remote
-                if (built.name.isNullOrBlank()) built.name = candidate
-                if (built.address.isNullOrBlank()) built.address = cleanMac
-                return built
-            }
-        }
-
-        val fromMac = try {
-            DeviceItem.build(cleanMac)
-        } catch (_: Exception) {
-            null
-        }
-        if (fromMac != null) {
-            fromMac.modelKey = modelKey
-            if (fromMac.name.isNullOrBlank() || !isOemCompatibleName(fromMac.name)) {
-                fromMac.name = oemCompatibleName(displayName)
-            }
-            if (fromMac.blueDevice == null && remote != null) fromMac.blueDevice = remote
-            if (fromMac.address.isNullOrBlank()) fromMac.address = cleanMac
-            return fromMac
-        }
-
-        if (remote == null) {
             throw IllegalStateException(
-                "Bluetooth device $cleanMac is not available. Pair Seznik in Android Bluetooth settings, then connect again."
+                "Bluetooth device $cleanMac is not available. Pair Seznik in Android Bluetooth settings, then connect again.",
+                e,
             )
         }
 
         val item = DeviceItem()
+        item.blueDevice = remote
         item.address = cleanMac
         item.modelKey = modelKey
-        item.blueDevice = remote
-        item.name = oemCompatibleName(displayName)
+        item.name = "Y50"
+        Log.i(
+            TAG,
+            "[TezPrinterManager] Manual DeviceItem mac=$cleanMac modelKey=$modelKey " +
+                "alias=Y50 display=${deviceName ?: cleanMac} remoteName=${remote.name}",
+        )
         return item
-    }
-
-    private fun isOemCompatibleName(name: String?): Boolean {
-        if (name.isNullOrBlank()) return false
-        val lower = name.lowercase()
-        return lower.contains("y50") ||
-            lower.contains("tez") ||
-            lower.contains("yx") ||
-            lower.contains("flashlabel") ||
-            lower.contains("shakti")
-    }
-
-    private fun oemCompatibleName(deviceName: String): String {
-        return if (isOemCompatibleName(deviceName)) deviceName else "Y50 $deviceName"
     }
 
     fun disconnect(): CompletableFuture<Void> {
@@ -388,6 +309,7 @@ class TezPrinterManager private constructor() {
         private const val TAG = "TezPrinterManager"
         const val DEFAULT_MODEL_KEY = "Y50"
         const val DEFAULT_MERCHANT_KEY = "sez-print"
+        const val NATIVE_REVISION = "tez-connect-v2"
 
         @Volatile
         private var instance: TezPrinterManager? = null

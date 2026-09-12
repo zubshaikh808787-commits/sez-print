@@ -1049,10 +1049,10 @@ class PrinterManager {
       );
 
       if (!tez || !diag.isAvailable) {
-        const reason = diag.reason ?? 'TEZ native module is not available in running APK. Install the newly built app-debug.apk.';
-        console.error(`[CONN-ROUTE] TEZ path BLOCKED: ${reason}`);
+        const reason = diag.reason ?? 'Tez native module is missing. Install a new development build.';
+        console.warn(`[CONN-ROUTE] TEZ path blocked: ${reason}`);
         usePrinterStore.getState().clearConnection();
-        throw new Error(`Tez printer cannot connect: ${reason}`);
+        throw new Error(reason);
       }
 
       try {
@@ -1104,9 +1104,11 @@ class PrinterManager {
           `[TEZ-CONN] TEZ connect failed after ${Date.now() - connectStart} ms:`,
           error,
         );
-        this.lastErrorMessage = error instanceof Error ? error.message : String(error);
+        const formatted = tez.formatTezConnectError?.(error)
+          ?? (error instanceof Error ? error.message : String(error));
+        this.lastErrorMessage = formatted;
         usePrinterStore.getState().clearConnection();
-        throw error instanceof Error ? error : new Error('Failed to connect to Tez printer.');
+        throw new Error(formatted);
       }
     }
 
@@ -1948,6 +1950,8 @@ class PrinterManager {
           density: options.density ?? 8,
           speed: options.speed ?? 4,
           paperType,
+          hOffsetMm: options.hOffsetMm ?? 0,
+          vOffsetMm: options.vOffsetMm ?? 0,
         });
         console.info(
           `[TEZ-PRINT] Tez print completed in ${Date.now() - t0} ms |`,

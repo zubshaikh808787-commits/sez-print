@@ -103,7 +103,12 @@ export function jewelryDieCutContentIsSingleTag(doc: {
 
 export function isJewelryDieCutPreviewType(previewType?: string | null): boolean {
   return (
-    previewType === JEWELRY_DIECUT_PREVIEW_SINGLE || previewType === JEWELRY_DIECUT_PREVIEW_SHEET
+    previewType === JEWELRY_DIECUT_PREVIEW_SINGLE ||
+    previewType === JEWELRY_DIECUT_PREVIEW_SHEET ||
+    previewType === 'jew-label-46x100' ||
+    previewType === 'jew-rattail-3row-14x100' ||
+    previewType === 'jew-rattail-3row-55x80' ||
+    (Boolean(previewType) && previewType!.startsWith('jew-rattail-3row'))
   );
 }
 

@@ -25,6 +25,10 @@ class TezPrinterModule : Module() {
             true
         }
 
+        Function("getNativeRevision") {
+            TezPrinterManager.NATIVE_REVISION
+        }
+
         Function("isBluetoothEnabled") {
             manager.isBluetoothEnabled
         }
@@ -135,6 +139,8 @@ class TezPrinterModule : Module() {
             val density = (options["density"] as? Number)?.toInt() ?: 8
             val speed = (options["speed"] as? Number)?.toFloat() ?: 4.0f
             val threshold = (options["threshold"] as? Number)?.toInt() ?: 128
+            val hOffsetMm = (options["hOffsetMm"] as? Number)?.toFloat() ?: 0f
+            val vOffsetMm = (options["vOffsetMm"] as? Number)?.toFloat() ?: 0f
 
             val printOptions = PrintPipeline.Options(
                 pngBase64 = base64,
@@ -144,7 +150,9 @@ class TezPrinterModule : Module() {
                 paperType = paperType,
                 density = density,
                 speed = speed,
-                threshold = threshold
+                threshold = threshold,
+                hOffsetMm = hOffsetMm,
+                vOffsetMm = vOffsetMm
             )
 
             manager.printPipeline.print(printOptions).whenComplete { result, error ->

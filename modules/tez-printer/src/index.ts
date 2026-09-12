@@ -11,8 +11,14 @@ import {
   parsePaperType,
 } from './types';
 
+export const TEZ_NATIVE_REVISION = 'tez-connect-v2';
+
+const STALE_TEZ_APK_MESSAGE =
+  'Install a new development build to connect Seznik. Plug the phone in over USB and run: npx expo run:android';
+
 type NativeTezPrinter = {
   isAvailable(): boolean;
+  getNativeRevision?(): string;
   isBluetoothEnabled(): boolean;
   isConnected(): boolean;
   getBondedDevices(): TezDiscoveredDevice[];
@@ -73,10 +79,14 @@ export function getTezNativeDiagnostic(): {
   }
   try {
     const available = Boolean(mod.isAvailable());
+    const revision = typeof mod.getNativeRevision === 'function' ? mod.getNativeRevision() : null;
+    const current = revision === TEZ_NATIVE_REVISION;
     return {
       isLinked: true,
       isAvailable: available,
-      reason: available ? undefined : 'Native module is linked, but initialization failed',
+      reason: current
+        ? available ? undefined : 'Native module is linked, but initialization failed'
+        : STALE_TEZ_APK_MESSAGE,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -188,13 +198,40 @@ export function startTezScan(
   };
 }
 
+export function getTezNativeRevision(): string | null {
+  const mod = getNative();
+  if (!mod || typeof mod.getNativeRevision !== 'function') return null;
+  try {
+    return mod.getNativeRevision();
+  } catch {
+    return null;
+  }
+}
+
+export function formatTezConnectError(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (/DeviceItem\.name|null object reference/i.test(msg)) {
+    return STALE_TEZ_APK_MESSAGE;
+  }
+  return msg;
+}
+
 export async function connectTez(
   macAddress: string,
   deviceName?: string | null,
 ): Promise<TezDiscoveredDevice> {
   const mod = getNative();
   if (!mod) throw new Error('Tez printer module not available');
-  return mod.connect(macAddress, deviceName ?? null);
+  const revision = getTezNativeRevision();
+  console.info(`[TEZ-CONN] nativeRevision=${revision ?? 'missing'} expected=${TEZ_NATIVE_REVISION}`);
+  if (revision !== TEZ_NATIVE_REVISION) {
+    throw new Error(STALE_TEZ_APK_MESSAGE);
+  }
+  try {
+    return await mod.connect(macAddress, deviceName ?? null);
+  } catch (error) {
+    throw new Error(formatTezConnectError(error));
+  }
 }
 
 export async function disconnectTez(): Promise<boolean> {
