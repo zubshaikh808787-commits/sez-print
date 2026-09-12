@@ -1012,7 +1012,7 @@ class PrinterManager {
     );
 
     const isExplicitTd404 =
-      transport === 'bluetooth-spp' ||
+      (transport === 'bluetooth-spp' && !isLikelyTezName(deviceName) && !isLikelyShaktiName(deviceName)) ||
       isLikelyTd404Name(deviceName);
 
     const isExplicitTez =

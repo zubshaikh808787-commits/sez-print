@@ -205,8 +205,8 @@ export default function PrinterConnectScreen() {
         .sort((a, b) => {
           const aTd = a.likelyTd404 || isLikelyTd404Name(a.name);
           const bTd = b.likelyTd404 || isLikelyTd404Name(b.name);
-          const aMatch = aTd || a.likelyJosh || isLikelyJoshName(a.name);
-          const bMatch = bTd || b.likelyJosh || isLikelyJoshName(b.name);
+          const aMatch = aTd || a.likelyJosh || isLikelyJoshName(a.name) || a.likelyTez || a.likelyShakti || isLikelyTezName(a.name) || isLikelyShaktiName(a.name);
+          const bMatch = bTd || b.likelyJosh || isLikelyJoshName(b.name) || b.likelyTez || b.likelyShakti || isLikelyTezName(b.name) || isLikelyShaktiName(b.name);
           return Number(bMatch) - Number(aMatch);
         }),
     [devices],
@@ -218,8 +218,8 @@ export default function PrinterConnectScreen() {
         .sort((a, b) => {
           const aTd = a.likelyTd404 || isLikelyTd404Name(a.name);
           const bTd = b.likelyTd404 || isLikelyTd404Name(b.name);
-          const aMatch = aTd || a.likelyJosh || isLikelyJoshName(a.name);
-          const bMatch = bTd || b.likelyJosh || isLikelyJoshName(b.name);
+          const aMatch = aTd || a.likelyJosh || isLikelyJoshName(a.name) || a.likelyTez || a.likelyShakti || isLikelyTezName(a.name) || isLikelyShaktiName(a.name);
+          const bMatch = bTd || b.likelyJosh || isLikelyJoshName(b.name) || b.likelyTez || b.likelyShakti || isLikelyTezName(b.name) || isLikelyShaktiName(b.name);
           const aScore = (aMatch ? 2 : 0) + (a.rssi ?? -999);
           const bScore = (bMatch ? 2 : 0) + (b.rssi ?? -999);
           return bScore - aScore;
@@ -237,15 +237,20 @@ export default function PrinterConnectScreen() {
     setConnectingId(device.id);
     try {
       const isTd404 = device.likelyTd404 || isLikelyTd404Name(device.name);
-      const isJosh = !isTd404 && (device.transport === 'josh-lpapi' || device.likelyJosh || isLikelyJoshName(device.name));
-      const transport = isJosh
-        ? 'josh-lpapi'
-        : (device.transport === 'wifi' ? 'wifi' : 'bluetooth-spp');
+      const isTez = !isTd404 && (device.transport === 'tez-spp' || device.likelyTez || device.likelyShakti || isLikelyTezName(device.name) || isLikelyShaktiName(device.name));
+      const isJosh = !isTd404 && !isTez && (device.transport === 'josh-lpapi' || device.likelyJosh || isLikelyJoshName(device.name));
+      const transport = isTez
+        ? 'tez-spp'
+        : isJosh
+          ? 'josh-lpapi'
+          : (device.transport === 'wifi' ? 'wifi' : 'bluetooth-spp');
 
       console.info(
-        isJosh
-          ? `[JOSH-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to JOSH LPAPI`
-          : `[CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to classic BT SPP`,
+        isTez
+          ? `[TEZ-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to TEZ OEM PrintSDK`
+          : isJosh
+            ? `[JOSH-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to JOSH LPAPI`
+            : `[CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to classic BT SPP`,
       );
       await getPrinterManager().connect(
         device.id,
