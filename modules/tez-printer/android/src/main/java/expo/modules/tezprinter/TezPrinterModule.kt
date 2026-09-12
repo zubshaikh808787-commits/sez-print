@@ -18,9 +18,7 @@ class TezPrinterModule : Module() {
         )
 
         OnCreate {
-            appContext.reactContext?.let {
-                manager.initialize(it)
-            }
+            resolveApplication()?.let { manager.initialize(it) }
         }
 
         Function("isAvailable") {
@@ -60,6 +58,7 @@ class TezPrinterModule : Module() {
         }
 
         AsyncFunction("connect") { macAddress: String, deviceName: String?, promise: Promise ->
+            resolveApplication()?.let { manager.initialize(it) }
             manager.connect(macAddress, deviceName).whenComplete { result, error ->
                 if (error != null) {
                     promise.reject("ERR_TEZ_CONNECT", error.message ?: "Failed to connect", error)
@@ -217,5 +216,10 @@ class TezPrinterModule : Module() {
                 promise.reject("ERR_TEZ_TEST", e.message ?: "Test print failed", e)
             }
         }
+    }
+
+    private fun resolveApplication(): android.app.Application? {
+        return (appContext.reactContext?.applicationContext as? android.app.Application)
+            ?: appContext.currentActivity?.application
     }
 }

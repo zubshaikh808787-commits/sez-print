@@ -91,9 +91,11 @@ class PrintPipeline(
             return
         }
 
+        val pageBitmap = scaleToLabelDots(bitmap, options.widthMm, options.heightMm)
         Log.i(
             TAG,
-            "[PrintPipeline] Bitmap decoded: ${bitmap.width}x${bitmap.height}px | " +
+            "[PrintPipeline] Bitmap decoded: ${bitmap.width}x${bitmap.height}px → " +
+            "${pageBitmap.width}x${pageBitmap.height}px | " +
             "target=${options.widthMm}x${options.heightMm}mm | " +
             "copies=${options.copies} | paperType=${options.paperType} | " +
             "density=${options.density} | speed=${options.speed}"
@@ -114,7 +116,7 @@ class PrintPipeline(
         val imageName = "tez_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
 
         // Pre-process threshold image
-        helper.setImgData(options.threshold, ImgData(imageName, bitmap))
+        helper.setImgData(options.threshold, ImgData(imageName, pageBitmap))
 
         // Build chained print command sequence
         val build = helper.build(object : TaskCallback() {
@@ -173,7 +175,17 @@ class PrintPipeline(
         }
     }
 
+    /** Flashlabel OEM is 8 dots/mm (203 DPI). Match CreatePage millimetres 1:1. */
+    private fun scaleToLabelDots(bitmap: Bitmap, widthMm: Int, heightMm: Int): Bitmap {
+        val w = (widthMm * OEM_DPM).coerceAtLeast(1)
+        val h = (heightMm * OEM_DPM).coerceAtLeast(1)
+        if (bitmap.width == w && bitmap.height == h) return bitmap
+        Log.i(TAG, "[PrintPipeline] Scaling ${bitmap.width}x${bitmap.height} → ${w}x${h}px (${widthMm}x${heightMm}mm @ ${OEM_DPM} dpm)")
+        return Bitmap.createScaledBitmap(bitmap, w, h, true)
+    }
+
     companion object {
         private const val TAG = "TezPrintPipeline"
+        private const val OEM_DPM = 8
     }
 }
