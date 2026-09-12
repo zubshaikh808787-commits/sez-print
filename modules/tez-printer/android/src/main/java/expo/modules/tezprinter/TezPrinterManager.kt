@@ -86,7 +86,12 @@ class TezPrinterManager private constructor() {
             lower.contains("yc3121") || lower.contains("3121") -> "YC3121"
             lower.contains("z212") -> "Z212"
             lower.contains("ge920") -> "GE920"
-            lower.contains("y50") || lower.startsWith("yx") || lower.contains("tez") || lower.contains("shakti") -> "Y50"
+            lower.contains("y50") ||
+            lower.startsWith("yx") ||
+            lower.contains("tez") ||
+            lower.contains("seznik") ||
+            Regex("(^|[^a-z])tej([^a-z]|$)").containsMatchIn(lower) ||
+            lower.contains("shakti") -> "Y50"
             else -> DEFAULT_MODEL_KEY
         }
     }

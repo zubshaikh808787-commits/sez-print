@@ -1,3 +1,8 @@
+/** `tej` as its own token — not `tejas` (TD-404). Matches Seznik_Tej_DAA91. */
+function hasTejToken(n: string): boolean {
+  return /(^|[^a-z])tej([^a-z]|$)/.test(n);
+}
+
 export function isLikelyTezName(name: string | null | undefined): boolean {
   if (!name) return false;
   const n = name.toLowerCase().trim();
@@ -5,6 +10,9 @@ export function isLikelyTezName(name: string | null | undefined): boolean {
   if (n.includes('tejas')) return false;
   return (
     n.includes('tez') ||
+    n.includes('seznik') ||
+    n.includes('seznek') ||
+    hasTejToken(n) ||
     n.startsWith('tz-') ||
     n.startsWith('tz_') ||
     n.includes('tz100') ||

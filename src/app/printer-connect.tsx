@@ -34,6 +34,7 @@ import {
   type DiscoveredPrinter,
 } from '@/lib/printer/printer-manager';
 import { usePrinterStore } from '@/stores/printer-store';
+import { useSettingsStore } from '@/stores/settings-store';
 
 const ANDROID_BLUETOOTH_SETTINGS = 'android.settings.BLUETOOTH_SETTINGS';
 
@@ -236,8 +237,13 @@ export default function PrinterConnectScreen() {
     }
     setConnectingId(device.id);
     try {
-      const isTd404 = device.likelyTd404 || isLikelyTd404Name(device.name);
-      const isTez = !isTd404 && (device.transport === 'tez-spp' || device.likelyTez || device.likelyShakti || isLikelyTezName(device.name) || isLikelyShaktiName(device.name));
+      const isTez =
+        device.transport === 'tez-spp' ||
+        device.likelyTez ||
+        device.likelyShakti ||
+        isLikelyTezName(device.name) ||
+        isLikelyShaktiName(device.name);
+      const isTd404 = !isTez && (device.likelyTd404 || isLikelyTd404Name(device.name));
       const isJosh = !isTd404 && !isTez && (device.transport === 'josh-lpapi' || device.likelyJosh || isLikelyJoshName(device.name));
       const transport = isTez
         ? 'tez-spp'
@@ -342,11 +348,17 @@ export default function PrinterConnectScreen() {
   const handleCalibrateTez = async () => {
     setCalibrating(true);
     try {
-      const ok = await getPrinterManager().calibrateTez(0); // 0 = GAP
+      const paper = useSettingsStore.getState().defaults.paperType;
+      const tezPaper = paper === 'Receipt' ? 1 : paper === 'Black mark' ? 2 : 0;
+      const paperLabel = paper === 'Receipt' ? 'continuous' : paper === 'Black mark' ? 'black mark' : 'gap/label';
+      const ok = await getPrinterManager().calibrateTez(tezPaper);
       if (ok) {
-        Alert.alert('Calibration Complete', 'Printer paper sensor calibrated successfully.');
+        Alert.alert(
+          'Calibration Complete',
+          `Paper sensor learned ${paperLabel} stock. Keep Paper type on the print screen set to ${paper}. Then reprint.`,
+        );
       } else {
-        Alert.alert('Calibration Finished', 'Sensor calibration command was executed.');
+        Alert.alert('Calibration Finished', `Sensor calibration for ${paperLabel} paper was sent.`);
       }
     } catch (error) {
       Alert.alert(
@@ -368,8 +380,11 @@ export default function PrinterConnectScreen() {
     }
     setConnectingId(lastDeviceId);
     try {
-      const isTd = isLikelyTd404Name(lastDeviceName);
-      const isTez = !isTd && (transport === 'tez-spp' || isLikelyTezName(lastDeviceName) || isLikelyShaktiName(lastDeviceName));
+      const isTez =
+        transport === 'tez-spp' ||
+        isLikelyTezName(lastDeviceName) ||
+        isLikelyShaktiName(lastDeviceName);
+      const isTd = !isTez && isLikelyTd404Name(lastDeviceName);
       const isJosh = !isTd && !isTez && (transport === 'josh-lpapi' || isLikelyJoshName(lastDeviceName));
       if (isTez || isJosh) {
         const ok = await getPrinterManager().reconnectLastDevice();

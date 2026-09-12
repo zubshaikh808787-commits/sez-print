@@ -258,19 +258,14 @@ class PrinterManager {
   }
 
   get isTez(): boolean {
-    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'josh-lpapi') return false;
-    if (this.activeTransport === 'tez-spp') return true;
     const store = usePrinterStore.getState();
-    if (store.transport === 'bluetooth-spp' || store.sdkId === 'td404' || store.sdkId === 'josh') return false;
     const name = store.deviceName ?? store.lastDeviceName;
-    if (isLikelyTd404Name(name) || isLikelyJoshName(name)) return false;
-    if (store.sdkId === 'tez' || store.transport === 'tez-spp') {
+    // Name wins over a stale TD-404/Josh session. Seznik_Tej is Flashlabel OEM, not TSPL.
+    if (isLikelyTezName(name) || isLikelyShaktiName(name)) return true;
+    if (this.activeTransport === 'tez-spp' || store.sdkId === 'tez' || store.transport === 'tez-spp') {
       return true;
     }
     if (this.activeTransport === null && Boolean(this.getTez()?.isTezConnected?.())) {
-      return true;
-    }
-    if (isLikelyTezName(name) || isLikelyShaktiName(name)) {
       return true;
     }
     return false;
@@ -413,7 +408,10 @@ class PrinterManager {
 
   get usesTd404CommandSet(): boolean {
     const store = usePrinterStore.getState();
-    if (store.sdkId === 'josh' || this.activeTransport === 'josh-lpapi' || store.sdkId === 'tez' || this.activeTransport === 'tez-spp') {
+    if (this.isTez || store.sdkId === 'tez' || this.activeTransport === 'tez-spp') {
+      return false;
+    }
+    if (store.sdkId === 'josh' || this.activeTransport === 'josh-lpapi') {
       return true;
     }
     return shouldUseTsplCommandSet({
@@ -434,7 +432,13 @@ class PrinterManager {
     const name = (store.deviceName ?? store.lastDeviceName ?? '').toLowerCase();
 
     // TEZ / SHAKTI OEM PrintSDK printer
-    if (store.sdkId === 'tez' || this.activeTransport === 'tez-spp') {
+    if (
+      this.isTez ||
+      store.sdkId === 'tez' ||
+      this.activeTransport === 'tez-spp' ||
+      isLikelyTezName(name) ||
+      isLikelyShaktiName(name)
+    ) {
       const dpi = 203; // Standard Flashlabel OEM resolution (8 dots/mm)
       const alignment = settings.printerAlignment ?? 'center';
       const headWidthMm = settings.printheadWidthMm ?? 108;
@@ -1011,16 +1015,17 @@ class PrinterManager {
       `[CONN-ROUTE] connectInner called: id=${deviceId}, name=${deviceName ?? 'null'}, transport=${transport ?? 'undefined'}`,
     );
 
-    const isExplicitTd404 =
-      (transport === 'bluetooth-spp' && !isLikelyTezName(deviceName) && !isLikelyShaktiName(deviceName)) ||
-      isLikelyTd404Name(deviceName);
-
     const isExplicitTez =
       transport === 'tez-spp' ||
       isLikelyTezName(deviceName) ||
       isLikelyShaktiName(deviceName);
 
-    const isTargetTez = !isExplicitTd404 && isExplicitTez;
+    const isExplicitTd404 =
+      !isExplicitTez &&
+      ((transport === 'bluetooth-spp' && !isLikelyShaktiName(deviceName)) ||
+        isLikelyTd404Name(deviceName));
+
+    const isTargetTez = isExplicitTez;
 
     const isTargetJosh =
       !isExplicitTd404 &&
@@ -1103,12 +1108,6 @@ class PrinterManager {
         usePrinterStore.getState().clearConnection();
         throw error instanceof Error ? error : new Error('Failed to connect to Tez printer.');
       }
-    }
-
-    if (transport === 'tez-spp') {
-      console.error('[CONN-ROUTE] transport=tez-spp but TEZ path was not taken — blocking fallback');
-      usePrinterStore.getState().clearConnection();
-      throw new Error('Tez printer routing failed. The device was identified as Tez/Shakti but connection failed.');
     }
 
     if (isTargetJosh) {
@@ -1523,6 +1522,38 @@ class PrinterManager {
     return { alreadyConnected: false, reconnectMs: elapsed };
   }
 
+  /** Tear down a stale TD-404/Josh socket and open the OEM PrintSDK session. */
+  private async ensureTezTransport(): Promise<void> {
+    const store = usePrinterStore.getState();
+    const deviceId = store.deviceId ?? store.lastDeviceId;
+    const deviceName = store.deviceName ?? store.lastDeviceName;
+    if (!deviceId) {
+      throw new Error('No Tez/Shakti printer selected. Connect Seznik/Tez first.');
+    }
+
+    const tez = this.getTez();
+    if (!tez?.isTezNativeAvailable()) {
+      throw new Error('Tez printer module is not available in this build. Install a development client that includes tez-printer.');
+    }
+
+    if (this.activeTransport === 'tez-spp' && tez.isTezConnected()) {
+      return;
+    }
+
+    if (this.activeTransport === 'td404-spp') {
+      console.info('[TEZ-CONN] Closing stale TD-404 SPP session before OEM connect');
+      await this.getTd404()?.disconnectTd404().catch(() => {});
+      this.activeTransport = null;
+    }
+    if (this.activeTransport === 'josh-lpapi') {
+      console.info('[TEZ-CONN] Closing stale JOSH session before OEM connect');
+      await this.getJosh()?.disconnectJosh().catch(() => {});
+      this.activeTransport = null;
+    }
+
+    await this.connect(deviceId, deviceName, 'tez-spp');
+  }
+
   /** Snapshot of internal state for the diagnostics screen. */
   getDiagnostics(): DiagnosticInfo {
     const store = usePrinterStore.getState();
@@ -1554,6 +1585,16 @@ class PrinterManager {
    * No-op if already connected or no last device is stored.
    */
   async reconnectLastDevice(): Promise<boolean> {
+    if (this.isTez) {
+      try {
+        await this.ensureTezTransport();
+        return true;
+      } catch (error) {
+        console.warn('[printer] Tez auto-reconnect failed:', error);
+        this.lastErrorMessage = error instanceof Error ? error.message : String(error);
+        return false;
+      }
+    }
     if (this.isConnected) return true;
     const store = usePrinterStore.getState();
     if (!store.lastDeviceId) return false;
@@ -1562,12 +1603,12 @@ class PrinterManager {
       return false;
     }
     try {
-      const isTd = isLikelyTd404Name(store.lastDeviceName);
       const isTezDevice =
-        !isTd &&
-        (store.sdkId === 'tez' ||
-          store.transport === 'tez-spp' ||
-          (Boolean(store.lastDeviceName) && (isLikelyTezName(store.lastDeviceName) || isLikelyShaktiName(store.lastDeviceName))));
+        store.sdkId === 'tez' ||
+        store.transport === 'tez-spp' ||
+        (Boolean(store.lastDeviceName) &&
+          (isLikelyTezName(store.lastDeviceName) || isLikelyShaktiName(store.lastDeviceName)));
+      const isTd = !isTezDevice && isLikelyTd404Name(store.lastDeviceName);
       const isTargetJosh =
         !isTd &&
         !isTezDevice &&
@@ -1616,15 +1657,11 @@ class PrinterManager {
   async printTestLabel(text = 'Sez Print OK'): Promise<void> {
     if (!this.isConnected) throw new Error('No printer connected.');
 
-    if (this.activeTransport === 'tez-spp') {
+    if (this.isTez) {
       console.info(`[TEZ-PRINT] Test print dispatching via Tez SDK: "${text}"`);
+      await this.ensureTezTransport();
       const tez = this.getTez();
       if (!tez) throw new Error('Tez module not available.');
-      if (!tez.isTezConnected()) {
-        console.info('[TEZ-CONN] Printer identified as TEZ but session not active. Reconnecting...');
-        const store = usePrinterStore.getState();
-        await this.connect(store.deviceId ?? store.lastDeviceId!, store.deviceName ?? store.lastDeviceName, 'tez-spp');
-      }
       console.info('[TEZ-PRINT] Submitting test text to Tez hardware...');
       await tez.printTezTestText(text);
       console.info('[TEZ-PRINT] Tez test print completed successfully');
@@ -1684,7 +1721,7 @@ class PrinterManager {
     orientation?: number;
     dpi?: number;
   }): Promise<boolean> {
-    if (this.activeTransport === 'tez-spp') {
+    if (this.isTez || this.activeTransport === 'tez-spp') {
       return this.printTezPngLabelFast(options);
     }
     if (this.activeTransport === 'josh-lpapi') {
@@ -1884,12 +1921,11 @@ class PrinterManager {
     media?: 'gap' | 'bline' | 'continuous';
   }): Promise<boolean> {
     if (!this.isTez) {
-      return false;
+      throw new Error('Connected printer is not a Tez/Shakti printer.');
     }
-    this.activeTransport = 'tez-spp';
     const tez = this.getTez();
     if (!tez || typeof tez.printTezPngLabel !== 'function') {
-      return false;
+      throw new Error('Tez printer module is not available in this build.');
     }
 
     this.printQueueDepth++;
@@ -1902,7 +1938,7 @@ class PrinterManager {
         console.info(
           `[TEZ-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm paperType=${paperType} copies=${options.copies ?? 1}`,
         );
-        await this.ensureConnected();
+        await this.ensureTezTransport();
         const t0 = Date.now();
         const result = await tez.printTezPngLabel({
           pngBase64: options.pngBase64,
@@ -1946,7 +1982,7 @@ class PrinterManager {
     if (!this.isTez) throw new Error('Connected printer is not a Tez/Shakti printer.');
     const tez = this.getTez();
     if (!tez) throw new Error('Tez printer module not available.');
-    await this.ensureConnected();
+    await this.ensureTezTransport();
     const res = await tez.calibrateTez(paperType);
     return Boolean(res?.success);
   }

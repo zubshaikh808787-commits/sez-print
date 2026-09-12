@@ -22,6 +22,7 @@ function testNameClassification() {
   assert.equal(isLikelyTezName('oem-tez'), true);
   assert.equal(isLikelyTezName('tejas'), false, 'CRITICAL: Tejas must NOT match Tez');
   assert.equal(isLikelyTezName('tejas-404'), false);
+  assert.equal(isLikelyTezName('Seznik_Tej_DAA91'), true, 'Seznik Tej is Flashlabel OEM, not TD-404');
 
   // Shakti devices
   assert.equal(isLikelyShaktiName('Shakti Printer'), true);
@@ -38,6 +39,7 @@ function testNameClassification() {
   assert.equal(isLikelyTd404Name('TD-404'), true);
   assert.equal(isLikelyTd404Name('Tez Printer'), false, 'Tez must NOT be hijacked by TD404');
   assert.equal(isLikelyTd404Name('Shakti Printer'), false, 'Shakti must NOT be hijacked by TD404');
+  assert.equal(isLikelyTd404Name('Seznik_Tej_DAA91'), false, 'Seznik must not be sent TSPL');
 
   // Josh devices
   assert.equal(isLikelyJoshName('JOSH-LD08'), true);
@@ -45,6 +47,7 @@ function testNameClassification() {
   assert.equal(isLikelyJoshName('Tez Printer'), false);
   assert.equal(isLikelyJoshName('Shakti Printer'), false);
   assert.equal(isLikelyJoshName('Tejas'), false);
+  assert.equal(isLikelyJoshName('Seznik_Tej_DAA91'), false);
 
   console.log('ok Device name classification heuristics validated');
 }

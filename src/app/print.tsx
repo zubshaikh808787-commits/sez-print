@@ -636,6 +636,7 @@ export default function PrintScreen() {
       return;
     }
 
+    useSettingsStore.getState().patchDefaults({ paperType });
     setPrinting(true);
     printingLockRef.current = true;
     const timer = new PrintTimingLogger();
@@ -673,6 +674,8 @@ export default function PrintScreen() {
             : null;
         const capturePacked = async () => {
           const raw = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
+          // OEM PrintImgHelper needs a normal PNG. TSPL 1bpp packing is TD-404 only.
+          if (manager.isTez) return raw;
           return mapCapturePngToPackedPng(raw, widthMm, heightMm, jobDpi).pngBase64;
         };
         const [connectionResult, base64] = await Promise.all([
@@ -731,7 +734,33 @@ export default function PrintScreen() {
         const artworkPhoto = Boolean(params.imageUri) && !params.labelId;
 
         let usedNative = false;
-        if (manager.isJosh) {
+        if (manager.isTez) {
+          console.info(
+            `[TEZ-PRINT] Label print via OEM PrintSDK: page=${page + 1}/${pageCount}, size=${paper.widthMm}x${paper.heightMm}mm, copies=${copies}, media=${media}`,
+          );
+          timer.start('transmit');
+          await manager.printTezPngLabelFast({
+            pngBase64: ratTail143Job
+              ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
+              : base64,
+            widthMm: paper.widthMm,
+            heightMm: paper.heightMm,
+            gapMm: gapLength,
+            copies,
+            density: darkness,
+            speed: speed ?? 4,
+            orientation: ratTail143Job ? 0 : orientationDeg,
+            dpi: jobDpi,
+            hOffsetMm: hOffset,
+            vOffsetMm: vOffset,
+            media: wantsBline ? 'bline' : media,
+          });
+          usedNative = true;
+          timer.end('transmit');
+          console.info(
+            `[TEZ-PRINT] page ${page + 1} total: ${Date.now() - pageStart} ms | Tez OEM PrintSDK path`,
+          );
+        } else if (manager.isJosh) {
           console.info(
             `[JOSH-PRINT-P1:PREFLIGHT] Label print dispatching via JOSH LPAPI: page=${page + 1}/${pageCount}, size=${paper.widthMm}x${paper.heightMm}mm, copies=${copies}`,
           );
@@ -789,7 +818,7 @@ export default function PrintScreen() {
           timer.end('sdkFastPrint');
         }
 
-        if (!manager.isJosh && !usedNative) {
+        if (!manager.isJosh && !manager.isTez && !usedNative) {
           timer.start('rasterize');
           const bits = rasterizePngForPrint(base64, {
             widthMm,

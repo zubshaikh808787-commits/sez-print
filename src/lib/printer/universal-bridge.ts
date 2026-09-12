@@ -155,6 +155,29 @@ export async function printArtworkJob(input: ArtworkPrintInput): Promise<Rendere
   const manager = getPrinterManager();
   const job = renderArtworkToJob(input);
 
+  if (manager.isTez) {
+    const pngBase64 = grayToPngBase64({
+      width: input.gray.width,
+      height: input.gray.height,
+      gray: input.gray.gray,
+    });
+    await defaultPrintQueue.enqueue(async () => {
+      await manager.printTezPngLabelFast({
+        pngBase64,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        gapMm: input.gapMm,
+        copies: input.copies ?? 1,
+        density: input.density,
+        speed: input.speed,
+        hOffsetMm: input.offsetXmm,
+        vOffsetMm: input.offsetYmm,
+        media: input.mediaType ?? 'gap',
+      });
+    });
+    return job;
+  }
+
   if (manager.isJosh) {
     const pngBase64 = grayToPngBase64({
       width: input.gray.width,
