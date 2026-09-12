@@ -15,8 +15,8 @@
       "td404-printer": [
         "./modules/td404-printer/src/index.ts"
       ],
-      "tej-printer": [
-        "./modules/tej-printer/src/index.ts"
+      "tez-printer": [
+        "./modules/tez-printer/src/index.ts"
       ]
     }
   },

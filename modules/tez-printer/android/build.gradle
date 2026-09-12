@@ -2,7 +2,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'expo-module-gradle-plugin'
 
-group = 'expo.modules.tejprinter'
+group = 'expo.modules.tezprinter'
 version = '1.0.0'
 
 def getExtOrDefault(name, defaultValue) {
@@ -11,7 +11,7 @@ def getExtOrDefault(name, defaultValue) {
 
 android {
   compileSdk getExtOrDefault('compileSdkVersion', 35)
-  namespace "expo.modules.tejprinter"
+  namespace "expo.modules.tezprinter"
   defaultConfig {
     minSdk getExtOrDefault('minSdkVersion', 24)
     targetSdk getExtOrDefault('targetSdkVersion', 35)
@@ -26,6 +26,9 @@ android {
 repositories {
   google()
   mavenCentral()
+  flatDir {
+    dirs 'libs'
+  }
 }
 
 dependencies {

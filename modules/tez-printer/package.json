@@ -1,0 +1,21 @@
+{
+  "name": "tez-printer",
+  "version": "1.0.0",
+  "description": "Expo native module for Tez & Shakti thermal printers (Flashlabel PrintSDK)",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {},
+  "keywords": [
+    "expo",
+    "expo-module",
+    "tez",
+    "shakti",
+    "printer",
+    "bluetooth"
+  ],
+  "author": "",
+  "license": "UNLICENSED",
+  "peerDependencies": {
+    "expo": "*"
+  }
+}
