@@ -584,7 +584,7 @@ export function fitGrayToSize(
   src: GrayRaster,
   destW: number,
   destH: number,
-  mode: 'contain' | 'stretch' = 'stretch',
+  mode: 'contain' | 'cover' | 'stretch' = 'stretch',
 ): GrayRaster {
   const width = Math.max(1, Math.round(destW));
   const height = Math.max(1, Math.round(destH));
@@ -621,6 +621,33 @@ export function fitGrayToSize(
     return { width, height, gray: out };
   }
 
+  if (mode === 'cover') {
+    // Scale proportionally to fill the entire canvas; crop overflow centered.
+    const scale = Math.max(width / Math.max(src.width, 1), height / Math.max(src.height, 1));
+    const dw = Math.max(1, Math.round(src.width * scale));
+    const dh = Math.max(1, Math.round(src.height * scale));
+    // Crop offset: center the scaled image and take the visible region
+    const cropX = Math.floor((dw - width) / 2);
+    const cropY = Math.floor((dh - height) / 2);
+    const yMap = buildMap(dh, src.height);
+    const xMap = buildMap(dw, src.width);
+    const srcW = src.width;
+    const srcGray = src.gray;
+    for (let y = 0; y < height; y++) {
+      const sy = y + cropY;
+      if (sy < 0 || sy >= dh) continue;
+      const srcRow = yMap[sy] * srcW;
+      const outRow = y * width;
+      for (let x = 0; x < width; x++) {
+        const sx = x + cropX;
+        if (sx < 0 || sx >= dw) continue;
+        out[outRow + x] = srcGray[srcRow + xMap[sx]];
+      }
+    }
+    return { width, height, gray: out };
+  }
+
+  // contain: scale proportionally to fit within canvas, center with whitespace
   const scale = Math.min(width / Math.max(src.width, 1), height / Math.max(src.height, 1));
   const dw = Math.max(1, Math.round(src.width * scale));
   const dh = Math.max(1, Math.round(src.height * scale));

@@ -19,7 +19,7 @@ export type PrintHistoryEntry = {
   copies: number;
   printedAt: number;
   documentId?: string;
-  source: 'label' | 'photo' | 'pdf' | 'scan' | 'excel';
+  source: 'label' | 'photo' | 'pdf' | 'scan' | 'excel' | 'img-to-label';
 };
 
 type PrinterStoreState = {

@@ -11,7 +11,7 @@ import {
   parsePaperType,
 } from './types';
 
-export const TEZ_NATIVE_REVISION = 'tez-connect-v2';
+export const TEZ_NATIVE_REVISION = 'tez-connect-v3';
 
 const STALE_TEZ_APK_MESSAGE =
   'Install a new development build to connect Seznik. Plug the phone in over USB and run: npx expo run:android';

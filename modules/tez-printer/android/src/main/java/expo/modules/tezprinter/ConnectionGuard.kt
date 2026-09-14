@@ -36,11 +36,15 @@ class ConnectionGuard : ConnectListener {
         this.stateChangeListener = listener
     }
 
-    fun connect(printer: Printer, device: DeviceItem) {
+    fun arm(printer: Printer, device: DeviceItem) {
         stateRef.set(State.CONNECTING)
         stateChangeListener?.invoke(State.CONNECTING, null)
-        Log.i(TAG, "[ConnectionGuard] Connecting to ${device.name ?: "Unknown"} (${device.address}) modelKey=${device.modelKey}")
+        Log.i(TAG, "[ConnectionGuard] Arming SPP connect to ${device.name ?: "Unknown"} (${device.address}) modelKey=${device.modelKey}")
         printer.setListener(this)
+    }
+
+    fun connect(printer: Printer, device: DeviceItem) {
+        arm(printer, device)
         printer.connect(device)
     }
 

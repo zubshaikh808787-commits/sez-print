@@ -43,7 +43,7 @@ class TezPrinterManager private constructor() {
             }
             SDKUtils.init(app, merchantKey)
             isInitialized = true
-            Log.i(TAG, "[TezPrinterManager] SDKUtils initialized with merchantKey=$merchantKey")
+            Log.i(TAG, "[TezPrinterManager] SDKUtils initialized")
         } catch (e: Exception) {
             Log.e(TAG, "[TezPrinterManager] SDKUtils initialization failed", e)
         }
@@ -139,7 +139,7 @@ class TezPrinterManager private constructor() {
             }
 
             val modelKey = resolveModelKey(deviceName)
-            Log.i(TAG, "[TezPrinterManager] Preparing connection to $cleanMac ($deviceName), modelKey=$modelKey")
+            Log.i(TAG, "[TezPrinterManager] Preparing SPP connect to $cleanMac ($deviceName), modelKey=$modelKey")
 
             val deviceItem = resolveDeviceItem(cleanMac, deviceName, modelKey)
             Log.i(
@@ -169,7 +169,20 @@ class TezPrinterManager private constructor() {
                 }
             }
 
-            connectionGuard.connect(p, deviceItem)
+            // Skip Printer.connect(DeviceItem): that calls NativeUtil.test3 and rejects Seznik.
+            // Open the same RFCOMM socket the OEM SPP class uses after that check.
+            connectionGuard.arm(p, deviceItem)
+            preparePrinterSession(p, deviceItem)
+            Thread({
+                try {
+                    invokeSppConnect(p)
+                } catch (e: Exception) {
+                    Log.e(TAG, "[TezPrinterManager] SPP connect failed", e)
+                    if (!future.isDone) {
+                        future.completeExceptionally(e)
+                    }
+                }
+            }, "TezSppConnect").start()
         } catch (e: Exception) {
             Log.e(TAG, "[TezPrinterManager] connect failed before OEM handshake", e)
             future.completeExceptionally(e)
@@ -177,11 +190,64 @@ class TezPrinterManager private constructor() {
         return future
     }
 
+    private fun preparePrinterSession(printer: Printer, device: DeviceItem) {
+        var cls: Class<*>? = printer.javaClass
+        while (cls != null) {
+            for (field in cls.declaredFields) {
+                if (field.type == DeviceItem::class.java) {
+                    field.isAccessible = true
+                    field.set(printer, device)
+                }
+            }
+            cls = cls.superclass
+        }
+        try {
+            printer.helper?.initHandler()
+        } catch (e: Exception) {
+            Log.w(TAG, "[TezPrinterManager] helper.initHandler failed", e)
+        }
+        try {
+            cls = printer.javaClass
+            while (cls != null) {
+                for (field in cls.declaredFields) {
+                    if (field.name != "commandApi") continue
+                    field.isAccessible = true
+                    val ctor = field.type.getDeclaredConstructor(String::class.java)
+                    ctor.isAccessible = true
+                    field.set(printer, ctor.newInstance(device.modelKey ?: DEFAULT_MODEL_KEY))
+                }
+                cls = cls.superclass
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "[TezPrinterManager] commandApi setup failed", e)
+        }
+        try {
+            val init = printer.javaClass.methods.firstOrNull { it.name == "init" && it.parameterCount == 0 }
+            init?.invoke(printer)
+        } catch (e: Exception) {
+            Log.w(TAG, "[TezPrinterManager] init() failed", e)
+        }
+    }
+
+    private fun invokeSppConnect(printer: Printer) {
+        try {
+            BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
+        } catch (_: Exception) {}
+        val method = generateSequence(printer.javaClass as Class<*>?) { it.superclass }
+            .flatMap { it.declaredMethods.asSequence() }
+            .firstOrNull { method ->
+                method.name == "connect" &&
+                    method.parameterTypes.size == 1 &&
+                    (method.parameterTypes[0] == java.lang.Boolean.TYPE || method.parameterTypes[0] == Boolean::class.java)
+            } ?: throw IllegalStateException("SPP connect(boolean) not found on ${printer.javaClass.name}")
+        method.isAccessible = true
+        Log.i(TAG, "[TezPrinterManager] Invoking ${printer.javaClass.simpleName}.connect(false)")
+        method.invoke(printer, false)
+    }
+
     /**
-     * Never call DeviceItem.build(mac). That factory returns null for Seznik_Tej
-     * (OEM name filter), and writing .name on the result is the connect NPE.
-     * SPP only needs BluetoothDevice + MAC. Name is the Y50 model alias so
-     * connectBefore's NativeUtil.test3 check can pass.
+     * Never call DeviceItem.build(mac). That factory returns null for Seznik_Tej.
+     * SPP only needs BluetoothDevice + MAC + modelKey.
      */
     private fun resolveDeviceItem(cleanMac: String, deviceName: String?, modelKey: String): DeviceItem {
         val adapter = BluetoothAdapter.getDefaultAdapter()
@@ -199,11 +265,11 @@ class TezPrinterManager private constructor() {
         item.blueDevice = remote
         item.address = cleanMac
         item.modelKey = modelKey
-        item.name = "Y50"
+        item.name = deviceName ?: "Y50"
         Log.i(
             TAG,
             "[TezPrinterManager] Manual DeviceItem mac=$cleanMac modelKey=$modelKey " +
-                "alias=Y50 display=${deviceName ?: cleanMac} remoteName=${remote.name}",
+                "name=${item.name} display=${deviceName ?: cleanMac} remoteName=${remote.name}",
         )
         return item
     }
@@ -309,7 +375,7 @@ class TezPrinterManager private constructor() {
         private const val TAG = "TezPrinterManager"
         const val DEFAULT_MODEL_KEY = "Y50"
         const val DEFAULT_MERCHANT_KEY = "sez-print"
-        const val NATIVE_REVISION = "tez-connect-v2"
+        const val NATIVE_REVISION = "tez-connect-v3"
 
         @Volatile
         private var instance: TezPrinterManager? = null

@@ -15,6 +15,7 @@ const SOURCE_LABELS: Record<PrintHistoryEntry['source'], string> = {
   pdf: 'PDF',
   scan: 'Scan',
   excel: 'Data File',
+  'img-to-label': 'Image to Label',
 };
 
 function formatDate(timestamp: number): string {

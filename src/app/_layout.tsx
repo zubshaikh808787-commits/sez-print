@@ -114,6 +114,10 @@ function AppRoot() {
           options={{ presentation: 'transparentModal', animation: 'fade' }}
         />
         <Stack.Screen
+          name="img-to-label"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
           name="jewellery-label"
           options={{ presentation: 'transparentModal', animation: 'fade' }}
         />

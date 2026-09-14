@@ -15,6 +15,7 @@ import { AppIcon, type AppIconName } from '@/components/app-icon';
 import {
   CustomizeIcon,
   DocBadgeIcon,
+  ImgToLabelIcon,
   JewelleryLabelIcon,
   LabelCloneIcon,
   NewLabelIcon,
@@ -371,6 +372,18 @@ export default function HomeScreen() {
                 label="Customize"
                 href="/customize-template"
               />
+            </View>
+
+            {/* Row 4: Img to Label */}
+            <View style={styles.menuRow}>
+              <Tile
+                variant="wide"
+                style={styles.menuHalf}
+                iconComponent={<ImgToLabelIcon size={26} color={Palette.accent} />}
+                label="Img to Label"
+                href="/img-to-label"
+              />
+              <View style={styles.menuHalf} />
             </View>
           </View>
         </View>

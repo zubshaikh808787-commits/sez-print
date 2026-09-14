@@ -177,6 +177,118 @@ export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
     heightMm: 297,
     sheet: true,
   },
+  {
+    id: '1x1in',
+    label: '1 × 1 in (25.4 × 25.4 mm)',
+    detail: 'Small Square Label',
+    widthMm: 25.4,
+    heightMm: 25.4,
+  },
+  {
+    id: '4x8in',
+    label: '4 × 8 in (101.6 × 203.2 mm)',
+    detail: 'Large Shipping Label',
+    widthMm: 101.6,
+    heightMm: 203.2,
+  },
+  {
+    id: '5x7in',
+    label: '5 × 7 in (127 × 177.8 mm)',
+    detail: '5×7 Photo / Label',
+    widthMm: 127,
+    heightMm: 177.8,
+  },
+  {
+    id: 'a5',
+    label: 'A5 (148 × 210 mm)',
+    detail: 'A5 Half-Page',
+    widthMm: 148,
+    heightMm: 210,
+  },
+];
+
+/**
+ * Curated label size presets for the Img to Label feature.
+ * Ordered by common use — does not include specialty die-cut or multi-up presets.
+ */
+export const IMG_TO_LABEL_PRESETS: PrintSizePreset[] = [
+  {
+    id: '4x6in',
+    label: '4 × 6 in',
+    detail: '101.6 × 152.4 mm — Standard Shipping',
+    widthMm: 101.6,
+    heightMm: 152.4,
+  },
+  {
+    id: '100x150',
+    label: '100 × 150 mm',
+    detail: '4 × 6 in Thermal Label',
+    widthMm: 100,
+    heightMm: 150,
+  },
+  {
+    id: '3x2in',
+    label: '3 × 2 in',
+    detail: '76.2 × 50.8 mm',
+    widthMm: 76.2,
+    heightMm: 50.8,
+  },
+  {
+    id: '2x1in-itl',
+    label: '2 × 1 in',
+    detail: '50.8 × 25.4 mm',
+    widthMm: 50.8,
+    heightMm: 25.4,
+  },
+  {
+    id: '2x2in',
+    label: '2 × 2 in',
+    detail: '50.8 × 50.8 mm — Square Label',
+    widthMm: 50.8,
+    heightMm: 50.8,
+  },
+  {
+    id: '1x1in-itl',
+    label: '1 × 1 in',
+    detail: '25.4 × 25.4 mm — Small Square',
+    widthMm: 25.4,
+    heightMm: 25.4,
+  },
+  {
+    id: '100x100-itl',
+    label: '100 × 100 mm',
+    detail: '4 × 4 in Parcel / Box Label',
+    widthMm: 100,
+    heightMm: 100,
+  },
+  {
+    id: '4x8in-itl',
+    label: '4 × 8 in',
+    detail: '101.6 × 203.2 mm — Large Shipping',
+    widthMm: 101.6,
+    heightMm: 203.2,
+  },
+  {
+    id: '5x7in-itl',
+    label: '5 × 7 in',
+    detail: '127 × 177.8 mm — Photo / Label',
+    widthMm: 127,
+    heightMm: 177.8,
+  },
+  {
+    id: 'a5-itl',
+    label: 'A5',
+    detail: '148 × 210 mm',
+    widthMm: 148,
+    heightMm: 210,
+  },
+  {
+    id: 'a4-itl',
+    label: 'A4',
+    detail: '210 × 297 mm',
+    widthMm: 210,
+    heightMm: 297,
+  },
 ];
 
 export const A4_WIDTH_MM = 210;

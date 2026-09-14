@@ -737,6 +737,110 @@ export function JewelleryLabelIcon({ color = TEAL, size = 30 }: { color?: string
   );
 }
 
+/**
+ * Photo frame with a small arrow-to-label symbol for "Img to Label"
+ */
+export function ImgToLabelIcon({ color = TEAL, size = 30 }: { color?: string; size?: number }) {
+  const scale = size / 30;
+  const frameW = 20 * scale;
+  const frameH = 16 * scale;
+  const stroke = 2 * scale;
+  const radius = 3 * scale;
+  const mountainH = 5 * scale;
+  const sunSize = 4 * scale;
+
+  return (
+    <View style={[styles.iconBox, { width: size, height: size }]}>
+      {/* Photo frame */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 1 * scale,
+          left: 0,
+          width: frameW,
+          height: frameH,
+          borderRadius: radius,
+          borderWidth: stroke,
+          borderColor: color,
+          overflow: 'hidden',
+        }}>
+        {/* Sun circle */}
+        <View
+          style={{
+            position: 'absolute',
+            top: 2.5 * scale,
+            left: 3 * scale,
+            width: sunSize,
+            height: sunSize,
+            borderRadius: sunSize / 2,
+            backgroundColor: color,
+          }}
+        />
+        {/* Mountain shape */}
+        <View
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: mountainH,
+            backgroundColor: color,
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: mountainH,
+          }}
+        />
+      </View>
+      {/* Arrow pointing to label */}
+      <View
+        style={{
+          position: 'absolute',
+          right: 0,
+          bottom: 1 * scale,
+          width: 12 * scale,
+          height: 12 * scale,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+        {/* Small label rectangle */}
+        <View
+          style={{
+            width: 10 * scale,
+            height: 8 * scale,
+            borderRadius: 2 * scale,
+            borderWidth: stroke,
+            borderColor: color,
+            backgroundColor: '#FFFFFF',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+          {/* Arrow down glyph */}
+          <View
+            style={{
+              width: 4 * scale,
+              height: stroke,
+              backgroundColor: color,
+              borderRadius: 0.5,
+            }}
+          />
+          <View
+            style={{
+              width: 0,
+              height: 0,
+              borderLeftWidth: 2.5 * scale,
+              borderRightWidth: 2.5 * scale,
+              borderTopWidth: 3 * scale,
+              borderLeftColor: 'transparent',
+              borderRightColor: 'transparent',
+              borderTopColor: color,
+              marginTop: 0.5 * scale,
+            }}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   iconBox: {
     position: 'relative',
