@@ -524,6 +524,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     [pxPerMMSafe],
   );
 
+  const updateRotateTooltipJS = useCallback((deg: number) => {
+    const now = Date.now();
+    if (now - lastTooltipAt.current < TOOLTIP_MS) return;
+    lastTooltipAt.current = now;
+    setTooltipText(`${Math.round(deg)}°`);
+  }, []);
+
   const startTX = useSharedValue(0);
   const startTY = useSharedValue(0);
   const startW = useSharedValue(0);
@@ -840,14 +847,22 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             startRot.value + ((currentAngle - startAngle.value) * 180) / Math.PI;
           deg = ((deg % 360) + 360) % 360;
 
-          const snapThreshold = 4;
-          for (const cardinal of [0, 90, 180, 270, 360]) {
-            if (Math.abs(deg - cardinal) < snapThreshold || Math.abs(deg - cardinal + 360) < snapThreshold) {
-              deg = cardinal % 360;
+          const snapThreshold = 3.5;
+          const cardinalThreshold = 5.0;
+          for (let s = 0; s <= 360; s += 15) {
+            const thresh = s % 90 === 0 ? cardinalThreshold : snapThreshold;
+            if (
+              Math.abs(deg - s) < thresh ||
+              Math.abs(deg - s + 360) < thresh ||
+              Math.abs(deg - s - 360) < thresh
+            ) {
+              deg = s % 360;
               break;
             }
           }
-          animRot.value = Math.round(deg);
+          const roundedDeg = Math.round(deg);
+          animRot.value = roundedDeg;
+          runOnJS(updateRotateTooltipJS)(roundedDeg);
         })
         .onEnd(() => {
           'worklet';
@@ -869,6 +884,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       pendingCommit,
       element.id,
       dispatchRotateCommit,
+      updateRotateTooltipJS,
     ],
   );
 
