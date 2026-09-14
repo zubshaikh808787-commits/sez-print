@@ -517,7 +517,7 @@ class Td404PrinterModule : Module() {
       gapCmd +
       "SPEED $speed\r\n" +
       "DENSITY $density\r\n" +
-      "DIRECTION 0,0\r\n" +
+      "DIRECTION 0\r\n" +
       "REFERENCE 0,0\r\n" +
       "CLS\r\n" +
       "BITMAP $xDots,$yDots,$bytesPerRow,$contentH,0,"

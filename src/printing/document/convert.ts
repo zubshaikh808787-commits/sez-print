@@ -31,8 +31,7 @@ import {
 } from '@/lib/label-document';
 import { DRAWING_COLORS } from '@/components/editor/types';
 import { applySerialOffset } from '@/lib/serial-content';
-import { canRenderWithBitmapFont } from '@/printing/renderer/text';
-import { logPrintTrace } from '@/printing';
+import { logPrintTrace } from '@/printing/trace';
 
 export type ConvertOptions = {
   /**

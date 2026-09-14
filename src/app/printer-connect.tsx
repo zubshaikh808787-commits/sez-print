@@ -30,6 +30,7 @@ import {
   isLikelyJoshName,
   isLikelyTezName,
   isLikelyShaktiName,
+  isLikelyDevName,
   type BluetoothCapabilities,
   type DiscoveredPrinter,
 } from '@/lib/printer/printer-manager';
@@ -206,8 +207,26 @@ export default function PrinterConnectScreen() {
         .sort((a, b) => {
           const aTd = a.likelyTd404 || isLikelyTd404Name(a.name);
           const bTd = b.likelyTd404 || isLikelyTd404Name(b.name);
-          const aMatch = aTd || a.likelyJosh || isLikelyJoshName(a.name) || a.likelyTez || a.likelyShakti || isLikelyTezName(a.name) || isLikelyShaktiName(a.name);
-          const bMatch = bTd || b.likelyJosh || isLikelyJoshName(b.name) || b.likelyTez || b.likelyShakti || isLikelyTezName(b.name) || isLikelyShaktiName(b.name);
+          const aMatch =
+            aTd ||
+            a.likelyDev ||
+            isLikelyDevName(a.name) ||
+            a.likelyJosh ||
+            isLikelyJoshName(a.name) ||
+            a.likelyTez ||
+            a.likelyShakti ||
+            isLikelyTezName(a.name) ||
+            isLikelyShaktiName(a.name);
+          const bMatch =
+            bTd ||
+            b.likelyDev ||
+            isLikelyDevName(b.name) ||
+            b.likelyJosh ||
+            isLikelyJoshName(b.name) ||
+            b.likelyTez ||
+            b.likelyShakti ||
+            isLikelyTezName(b.name) ||
+            isLikelyShaktiName(b.name);
           return Number(bMatch) - Number(aMatch);
         }),
     [devices],
@@ -219,8 +238,26 @@ export default function PrinterConnectScreen() {
         .sort((a, b) => {
           const aTd = a.likelyTd404 || isLikelyTd404Name(a.name);
           const bTd = b.likelyTd404 || isLikelyTd404Name(b.name);
-          const aMatch = aTd || a.likelyJosh || isLikelyJoshName(a.name) || a.likelyTez || a.likelyShakti || isLikelyTezName(a.name) || isLikelyShaktiName(a.name);
-          const bMatch = bTd || b.likelyJosh || isLikelyJoshName(b.name) || b.likelyTez || b.likelyShakti || isLikelyTezName(b.name) || isLikelyShaktiName(b.name);
+          const aMatch =
+            aTd ||
+            a.likelyDev ||
+            isLikelyDevName(a.name) ||
+            a.likelyJosh ||
+            isLikelyJoshName(a.name) ||
+            a.likelyTez ||
+            a.likelyShakti ||
+            isLikelyTezName(a.name) ||
+            isLikelyShaktiName(a.name);
+          const bMatch =
+            bTd ||
+            b.likelyDev ||
+            isLikelyDevName(b.name) ||
+            b.likelyJosh ||
+            isLikelyJoshName(b.name) ||
+            b.likelyTez ||
+            b.likelyShakti ||
+            isLikelyTezName(b.name) ||
+            isLikelyShaktiName(b.name);
           const aScore = (aMatch ? 2 : 0) + (a.rssi ?? -999);
           const bScore = (bMatch ? 2 : 0) + (b.rssi ?? -999);
           return bScore - aScore;
@@ -237,26 +274,35 @@ export default function PrinterConnectScreen() {
     }
     setConnectingId(device.id);
     try {
+      const isDev =
+        device.transport === 'dev-spp' ||
+        device.likelyDev ||
+        isLikelyDevName(device.name);
       const isTez =
-        device.transport === 'tez-spp' ||
-        device.likelyTez ||
-        device.likelyShakti ||
-        isLikelyTezName(device.name) ||
-        isLikelyShaktiName(device.name);
-      const isTd404 = !isTez && (device.likelyTd404 || isLikelyTd404Name(device.name));
-      const isJosh = !isTd404 && !isTez && (device.transport === 'josh-lpapi' || device.likelyJosh || isLikelyJoshName(device.name));
-      const transport = isTez
-        ? 'tez-spp'
-        : isJosh
-          ? 'josh-lpapi'
-          : (device.transport === 'wifi' ? 'wifi' : 'bluetooth-spp');
+        !isDev &&
+        (device.transport === 'tez-spp' ||
+          device.likelyTez ||
+          device.likelyShakti ||
+          isLikelyTezName(device.name) ||
+          isLikelyShaktiName(device.name));
+      const isJosh = !isDev && !isTez && (device.transport === 'josh-lpapi' || device.likelyJosh || isLikelyJoshName(device.name));
+      const isTd404 = !isDev && !isTez && !isJosh && (device.likelyTd404 || isLikelyTd404Name(device.name));
+      const transport = isDev
+        ? 'dev-spp'
+        : isTez
+          ? 'tez-spp'
+          : isJosh
+            ? 'josh-lpapi'
+            : (device.transport === 'wifi' ? 'wifi' : 'bluetooth-spp');
 
       console.info(
-        isTez
-          ? `[TEZ-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to TEZ OEM PrintSDK`
-          : isJosh
-            ? `[JOSH-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to JOSH LPAPI`
-            : `[CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to classic BT SPP`,
+        isDev
+          ? `[DEV-CONN] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to AutoReplyPrint SDK`
+          : isTez
+            ? `[TEZ-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to TEZ OEM PrintSDK`
+            : isJosh
+              ? `[JOSH-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to JOSH LPAPI`
+              : `[CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to classic BT SPP`,
       );
       await getPrinterManager().connect(
         device.id,
@@ -290,6 +336,33 @@ export default function PrinterConnectScreen() {
       Alert.alert(
         'MAC Connect Failed',
         error instanceof Error ? error.message : 'Could not connect.',
+      );
+    } finally {
+      if (mountedRef.current) setConnectingId(null);
+    }
+  };
+
+  const handleDevMacConnect = async () => {
+    const mac = macInput.trim().toUpperCase();
+    if (!mac) {
+      Alert.alert('MAC required', 'Enter a Bluetooth MAC like AA:BB:CC:DD:EE:FF');
+      return;
+    }
+    if (!getPrinterManager().isBluetoothEnabled()) {
+      setBluetoothOn(false);
+      setNativeHint(BLUETOOTH_OFF_MESSAGE);
+      Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
+      return;
+    }
+    setConnectingId('mac-dev');
+    try {
+      console.info(`[DEV-CONN] Manual MAC connect entered: ${mac}`);
+      await getPrinterManager().connectDevByMac(mac, 'DEV');
+      Alert.alert('Connected', `SEZNIK DEV printer ${mac} linked over AutoReplyPrint SDK.`);
+    } catch (error) {
+      Alert.alert(
+        'DEV Connect Failed',
+        error instanceof Error ? error.message : 'Could not connect to DEV printer.',
       );
     } finally {
       if (mountedRef.current) setConnectingId(null);
@@ -345,6 +418,25 @@ export default function PrinterConnectScreen() {
     }
   };
 
+  const handleCalibrateDev = async () => {
+    setCalibrating(true);
+    try {
+      const ok = await getPrinterManager().calibrateDev(0); // 0 = GAP
+      if (ok) {
+        Alert.alert('Calibration Complete', 'SEZNIK DEV label sensor calibrated successfully.');
+      } else {
+        Alert.alert('Calibration Finished', 'Sensor calibration command was executed.');
+      }
+    } catch (error) {
+      Alert.alert(
+        'Calibration Failed',
+        error instanceof Error ? error.message : 'Could not calibrate DEV printer.',
+      );
+    } finally {
+      setCalibrating(false);
+    }
+  };
+
   const handleCalibrateTez = async () => {
     setCalibrating(true);
     try {
@@ -380,13 +472,17 @@ export default function PrinterConnectScreen() {
     }
     setConnectingId(lastDeviceId);
     try {
+      const isDev =
+        transport === 'dev-spp' ||
+        isLikelyDevName(lastDeviceName);
       const isTez =
-        transport === 'tez-spp' ||
-        isLikelyTezName(lastDeviceName) ||
-        isLikelyShaktiName(lastDeviceName);
-      const isTd = !isTez && isLikelyTd404Name(lastDeviceName);
-      const isJosh = !isTd && !isTez && (transport === 'josh-lpapi' || isLikelyJoshName(lastDeviceName));
-      if (isTez || isJosh) {
+        !isDev &&
+        (transport === 'tez-spp' ||
+          isLikelyTezName(lastDeviceName) ||
+          isLikelyShaktiName(lastDeviceName));
+      const isJosh = !isDev && !isTez && (transport === 'josh-lpapi' || isLikelyJoshName(lastDeviceName));
+      const isTd = !isDev && !isTez && !isJosh && isLikelyTd404Name(lastDeviceName);
+      if (isDev || isTez || isJosh) {
         const ok = await getPrinterManager().reconnectLastDevice();
         if (!ok) throw new Error('Could not reconnect to printer.');
       } else {
@@ -416,16 +512,19 @@ export default function PrinterConnectScreen() {
   const handleTestPrint = async () => {
     setTesting(true);
     try {
-      const isTez = getPrinterManager().isTez;
-      const isJosh = !isTez && getPrinterManager().isJosh;
+      const isDev = getPrinterManager().isDev;
+      const isTez = !isDev && getPrinterManager().isTez;
+      const isJosh = !isDev && !isTez && getPrinterManager().isJosh;
       console.info(
-        isTez
-          ? '[TEZ-PRINT-P1:PREFLIGHT] Test print button tapped (routing: TEZ PrintSDK)'
-          : isJosh
-            ? '[JOSH-PRINT-P1:PREFLIGHT] Test print button tapped (routing: JOSH LPAPI)'
-            : '[PRINT-P1:PREFLIGHT] Test print button tapped (routing: TD-404 / ESCPOS)',
+        isDev
+          ? '[DEV-PRINT] Test print button tapped (routing: AutoReplyPrint SDK)'
+          : isTez
+            ? '[TEZ-PRINT-P1:PREFLIGHT] Test print button tapped (routing: TEZ PrintSDK)'
+            : isJosh
+              ? '[JOSH-PRINT-P1:PREFLIGHT] Test print button tapped (routing: JOSH LPAPI)'
+              : '[PRINT-P1:PREFLIGHT] Test print button tapped (routing: TD-404 / ESCPOS)',
       );
-      const testName = isTez ? 'Sez Print TEZ' : isJosh ? 'Sez Print JOSH' : 'Sez Print TD-404';
+      const testName = isDev ? 'Sez Print DEV' : isTez ? 'Sez Print TEZ' : isJosh ? 'Sez Print JOSH' : 'Sez Print TD-404';
       await getPrinterManager().printTestLabel(testName);
       Alert.alert('Test Print Sent', 'Check the printer for a sample label.');
     } catch (error) {
@@ -473,19 +572,22 @@ export default function PrinterConnectScreen() {
   };
 
   const renderDevice = (device: DiscoveredPrinter, index: number, total: number) => {
-    const isTez = device.likelyTez || isLikelyTezName(device.name);
-    const isShakti = device.likelyShakti || isLikelyShaktiName(device.name);
-    const td404 = !isTez && !isShakti && (device.likelyTd404 || isLikelyTd404Name(device.name));
-    const isJosh = !isTez && !isShakti && !td404 && (device.likelyJosh || isLikelyJoshName(device.name) || device.transport === 'josh-lpapi');
-    const iconTint = isTez
-      ? '#8B5CF6'
-      : isShakti
-        ? '#F59E0B'
-        : isJosh
-          ? '#10B981'
-          : td404
-            ? Palette.accent
-            : Palette.ink;
+    const isDev = device.likelyDev || isLikelyDevName(device.name);
+    const isTez = !isDev && (device.likelyTez || isLikelyTezName(device.name));
+    const isShakti = !isDev && !isTez && (device.likelyShakti || isLikelyShaktiName(device.name));
+    const td404 = !isDev && !isTez && !isShakti && (device.likelyTd404 || isLikelyTd404Name(device.name));
+    const isJosh = !isDev && !isTez && !isShakti && !td404 && (device.likelyJosh || isLikelyJoshName(device.name) || device.transport === 'josh-lpapi');
+    const iconTint = isDev
+      ? '#0284C7'
+      : isTez
+        ? '#8B5CF6'
+        : isShakti
+          ? '#F59E0B'
+          : isJosh
+            ? '#10B981'
+            : td404
+              ? Palette.accent
+              : Palette.ink;
 
     return (
       <Pressable
@@ -501,7 +603,11 @@ export default function PrinterConnectScreen() {
         <View style={styles.deviceInfo}>
           <View style={styles.nameRow}>
             <Text style={styles.deviceName}>{device.name ?? 'Unknown device'}</Text>
-            {isTez ? (
+            {isDev ? (
+              <View style={[styles.badge, { backgroundColor: '#0284C7' }]}>
+                <Text style={styles.badgeText}>SEZNIK DEV</Text>
+              </View>
+            ) : isTez ? (
               <View style={[styles.badge, { backgroundColor: '#8B5CF6' }]}>
                 <Text style={styles.badgeText}>TEZ</Text>
               </View>
@@ -531,15 +637,17 @@ export default function PrinterConnectScreen() {
             ) : null}
           </View>
           <Text style={styles.deviceMeta}>
-            {device.transport === 'tez-spp'
-              ? 'TEZ YX'
-              : device.transport === 'josh-lpapi'
-                ? 'JOSH LPAPI'
-                : device.transport === 'bluetooth-spp'
-                  ? 'Classic BT'
-                  : device.transport === 'wifi'
-                    ? 'Wi‑Fi'
-                    : 'BLE'}
+            {device.transport === 'dev-spp'
+              ? 'SEZNIK DEV'
+              : device.transport === 'tez-spp'
+                ? 'TEZ YX'
+                : device.transport === 'josh-lpapi'
+                  ? 'JOSH LPAPI'
+                  : device.transport === 'bluetooth-spp'
+                    ? 'Classic BT'
+                    : device.transport === 'wifi'
+                      ? 'Wi‑Fi'
+                      : 'BLE'}
             {' · '}
             {device.id}
             {device.rssi != null ? ` · ${device.rssi} dBm` : ''}
@@ -687,6 +795,23 @@ export default function PrinterConnectScreen() {
                   <Text style={styles.connectBtnText}>Test Print</Text>
                 )}
               </Pressable>
+              {transport === 'dev-spp' || getPrinterManager().isDev ? (
+                <Pressable
+                  onPress={() => void handleCalibrateDev()}
+                  disabled={calibrating}
+                  style={({ pressed }) => [
+                    styles.testBtn,
+                    { backgroundColor: '#0284C7', marginTop: 8 },
+                    calibrating && styles.connectBtnDisabled,
+                    pressed && styles.pressed,
+                  ]}>
+                  {calibrating ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.connectBtnText}>Calibrate Paper Sensor</Text>
+                  )}
+                </Pressable>
+              ) : null}
               {transport === 'tez-spp' || getPrinterManager().isTez ? (
                 <Pressable
                   onPress={() => void handleCalibrateTez()}
@@ -786,18 +911,18 @@ export default function PrinterConnectScreen() {
             />
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <Pressable
-                onPress={() => void handleMacConnect()}
+                onPress={() => void handleDevMacConnect()}
                 disabled={connectingId !== null}
                 style={({ pressed }) => [
                   styles.wifiBtn,
-                  { flex: 1 },
+                  { flex: 1, backgroundColor: '#0284C7', borderColor: '#0284C7' },
                   connectingId !== null && styles.connectBtnDisabled,
                   pressed && styles.pressed,
                 ]}>
-                {connectingId === 'mac' ? (
-                  <ActivityIndicator color={Palette.accent} />
+                {connectingId === 'mac-dev' ? (
+                  <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.wifiBtnText}>TD-404</Text>
+                  <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>DEV</Text>
                 )}
               </Pressable>
               <Pressable
@@ -812,7 +937,7 @@ export default function PrinterConnectScreen() {
                 {connectingId === 'mac-tez' ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>TEZ YX</Text>
+                  <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>TEZ</Text>
                 )}
               </Pressable>
               <Pressable
@@ -828,6 +953,21 @@ export default function PrinterConnectScreen() {
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
                   <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>JOSH</Text>
+                )}
+              </Pressable>
+              <Pressable
+                onPress={() => void handleMacConnect()}
+                disabled={connectingId !== null}
+                style={({ pressed }) => [
+                  styles.wifiBtn,
+                  { flex: 1 },
+                  connectingId !== null && styles.connectBtnDisabled,
+                  pressed && styles.pressed,
+                ]}>
+                {connectingId === 'mac' ? (
+                  <ActivityIndicator color={Palette.accent} />
+                ) : (
+                  <Text style={styles.wifiBtnText}>TD-404</Text>
                 )}
               </Pressable>
             </View>

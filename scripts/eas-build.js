@@ -23,9 +23,12 @@ const args = [
   '--clear-cache',
 ];
 
-const result = spawnSync('eas', args, {
+const easCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const fullArgs = ['--yes', 'eas-cli', ...args];
+
+const result = spawnSync(easCmd, fullArgs, {
   stdio: 'inherit',
-  shell: true,
+  shell: false,
   cwd: projectRoot,
   env: process.env,
 });

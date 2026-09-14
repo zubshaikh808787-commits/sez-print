@@ -786,6 +786,70 @@ export default function PrintScreen() {
           console.info(
             `[JOSH-PRINT-P5:FINALIZE] page ${page + 1} total: ${Date.now() - pageStart} ms | JOSH LPAPI SDK path`,
           );
+        } else if (manager.isDev) {
+          console.info(
+            `[DEV-PRINT-P1:PREFLIGHT] Label print dispatching via DEV AutoReplyPrint SDK: page=${page + 1}/${pageCount}, size=${paper.widthMm}x${paper.heightMm}mm, copies=${copies}`,
+          );
+          timer.start('sdkFastPrint');
+          try {
+            usedNative = await manager.printDevPngLabelFast({
+              pngBase64: ratTail143Job
+                ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
+                : base64,
+              widthMm: paper.widthMm,
+              heightMm: paper.heightMm,
+              gapMm: gapLength,
+              copies,
+              density: darkness,
+              speed: speed ?? 4,
+              vOffsetMm: vOffset,
+              hOffsetMm: hOffset,
+              media: wantsBline ? 'bline' : media,
+              orientation: ratTail143Job ? 0 : orientationDeg,
+              dpi: jobDpi,
+            });
+            if (usedNative) {
+              console.info(
+                `[print] page ${page + 1} total: ${Date.now() - pageStart} ms | AutoReplyPrint native fast path (DEV)`,
+              );
+            }
+          } catch (err) {
+            console.warn('[print] DEV native print failed, falling back:', err);
+            usedNative = false;
+          }
+          timer.end('sdkFastPrint');
+        } else if (manager.isTez) {
+          console.info(
+            `[TEZ-PRINT-P1:PREFLIGHT] Label print dispatching via TEZ PrintSDK: page=${page + 1}/${pageCount}, size=${paper.widthMm}x${paper.heightMm}mm, copies=${copies}`,
+          );
+          timer.start('sdkFastPrint');
+          try {
+            usedNative = await manager.printTezPngLabelFast({
+              pngBase64: ratTail143Job
+                ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
+                : base64,
+              widthMm: paper.widthMm,
+              heightMm: paper.heightMm,
+              gapMm: gapLength,
+              copies,
+              density: darkness,
+              speed: speed ?? 4,
+              vOffsetMm: vOffset,
+              hOffsetMm: hOffset,
+              media: wantsBline ? 'bline' : media,
+              orientation: ratTail143Job ? 0 : orientationDeg,
+              dpi: jobDpi,
+            });
+            if (usedNative) {
+              console.info(
+                `[print] page ${page + 1} total: ${Date.now() - pageStart} ms | PrintSDK native fast path (TEZ)`,
+              );
+            }
+          } catch (err) {
+            console.warn('[print] TEZ native print failed, falling back:', err);
+            usedNative = false;
+          }
+          timer.end('sdkFastPrint');
         } else if (manager.transport === 'td404-spp' && !artworkPhoto) {
           // Native TD-404 SPP fast path: direct C++/Kotlin 1-bit packing (<15ms)
           timer.start('sdkFastPrint');

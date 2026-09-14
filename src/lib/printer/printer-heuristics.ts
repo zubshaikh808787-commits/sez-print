@@ -8,6 +8,7 @@ export function isLikelyTezName(name: string | null | undefined): boolean {
   const n = name.toLowerCase().trim();
   // CRITICAL: Tejas is TD-404, NOT Tez!
   if (n.includes('tejas')) return false;
+  if (isLikelyDevName(name)) return false;
   return (
     n.includes('tez') ||
     n.includes('seznik') ||
@@ -27,6 +28,7 @@ export function isLikelyShaktiName(name: string | null | undefined): boolean {
   const n = name.toLowerCase().trim();
   // CRITICAL: Tejas is TD-404, NOT Shakti!
   if (n.includes('tejas')) return false;
+  if (isLikelyDevName(name)) return false;
   return (
     n.includes('shakti') ||
     n.startsWith('sh-') ||
@@ -36,10 +38,28 @@ export function isLikelyShaktiName(name: string | null | undefined): boolean {
   );
 }
 
+export function isLikelyDevName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const n = name.toLowerCase().trim();
+  return (
+    n.includes('dev') ||
+    n.includes('2in1') ||
+    n.includes('2-in-1') ||
+    n.includes('2 in 1') ||
+    n.includes('seznik dev') ||
+    n.includes('autoreply') ||
+    n.includes('caysn') ||
+    n.includes('pos-58') ||
+    n.includes('pos-80') ||
+    n.startsWith('dev-') ||
+    n.startsWith('dev_')
+  );
+}
+
 export function isLikelyJoshName(name: string | null | undefined): boolean {
   if (!name) return false;
-  // If the device matches Tez or Shakti, it is NEVER a Josh printer
-  if (isLikelyTezName(name) || isLikelyShaktiName(name)) return false;
+  // If the device matches Tez, Shakti, or Dev, it is NEVER a Josh printer
+  if (isLikelyTezName(name) || isLikelyShaktiName(name) || isLikelyDevName(name)) return false;
   const n = name.toLowerCase().trim();
   // TD404 specific names
   if (
@@ -71,8 +91,8 @@ export function isLikelyJoshName(name: string | null | undefined): boolean {
 
 export function isLikelyTd404Name(name: string | null | undefined): boolean {
   if (!name) return false;
-  // If the device matches Tez, Shakti, or Josh, it is NEVER a TD-404 printer
-  if (isLikelyTezName(name) || isLikelyShaktiName(name) || isLikelyJoshName(name)) return false;
+  // If the device matches Tez, Shakti, Josh, or Dev, it is NEVER a TD-404 printer
+  if (isLikelyTezName(name) || isLikelyShaktiName(name) || isLikelyJoshName(name) || isLikelyDevName(name)) return false;
   const n = name.toLowerCase().trim();
   return (
     n.includes('tejas') ||
@@ -130,6 +150,19 @@ export function shouldUseTsplCommandSet(opts: {
   sdkId: string | null;
   deviceName: string | null;
 }): boolean {
+  if (
+    opts.activeTransport === 'josh-lpapi' ||
+    opts.activeTransport === 'tez-spp' ||
+    opts.activeTransport === 'dev-spp' ||
+    opts.sdkId === 'josh' ||
+    opts.sdkId === 'tez' ||
+    opts.sdkId === 'dev' ||
+    opts.storeTransport === 'josh-lpapi' ||
+    opts.storeTransport === 'tez-spp' ||
+    opts.storeTransport === 'dev-spp'
+  ) {
+    return false;
+  }
   if (
     opts.activeTransport === 'td404-spp' ||
     opts.activeTransport === 'wifi' ||

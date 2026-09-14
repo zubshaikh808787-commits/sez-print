@@ -45,6 +45,7 @@
     "expo-symbols": "~1.0.8",
     "expo-system-ui": "~6.0.9",
     "expo-web-browser": "~15.0.11",
+    "dev-printer": "file:./modules/dev-printer",
     "fast-png": "^8.0.0",
     "josh-printer": "file:./modules/josh-printer",
     "jpeg-js": "^0.4.4",
@@ -81,8 +82,9 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test:print": "npx --yes tsx --tsconfig tsconfig.json src/printing/__tests__/engine.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/josh-print.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/tez-shakti-print.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/bluetooth-guard.test.ts",
+    "test:print": "npx --yes tsx --tsconfig tsconfig.json src/printing/__tests__/engine.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/josh-print.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/tez-shakti-print.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/dev-print.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/bluetooth-guard.test.ts",
     "test:tez": "npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/tez-shakti-print.test.ts",
+    "test:dev": "npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/dev-print.test.ts",
     "test:editor": "npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/engine.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/__tests__/label-geometry.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/canvas-split.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/view-transform.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/drag-layer.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/palette-drop.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/image-ingest.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/resize-policy.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/canvas-chrome.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/canvas-qa.test.ts && npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/skia-prototype.test.ts",
     "test:templates": "npx --yes tsx --tsconfig tsconfig.json src/lib/__tests__/template-schema.test.ts",
     "print:calibration": "npx --yes tsx --tsconfig tsconfig.json scripts/print-calibration-box.ts",
@@ -105,7 +107,8 @@
           "@react-native-ml-kit/text-recognition",
           "td404-printer",
           "josh-printer",
-          "tez-printer"
+          "tez-printer",
+          "dev-printer"
         ],
         "listUnknownPackages": false
       }

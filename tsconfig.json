@@ -17,6 +17,9 @@
       ],
       "tez-printer": [
         "./modules/tez-printer/src/index.ts"
+      ],
+      "dev-printer": [
+        "./modules/dev-printer/src/index.ts"
       ]
     }
   },

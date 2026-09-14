@@ -65,7 +65,8 @@
             "buildToolsVersion": "35.0.0",
             "enableMinifyInReleaseBuilds": false,
             "enableShrinkResourcesInReleaseBuilds": false,
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "reactNativeArchitectures": ["arm64-v8a"]
           }
         }
       ],
