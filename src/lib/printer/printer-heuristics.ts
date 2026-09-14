@@ -3,72 +3,39 @@ function hasTejToken(n: string): boolean {
   return /(^|[^a-z])tej([^a-z]|$)/.test(n);
 }
 
-export function isLikelyTezName(name: string | null | undefined): boolean {
-  if (!name) return false;
-  const n = name.toLowerCase().trim();
-  // CRITICAL: Tejas is TD-404, NOT Tez!
-  if (n.includes('tejas')) return false;
-  if (isLikelyDevName(name)) return false;
-  return (
-    n.includes('tez') ||
-    n.includes('seznik') ||
-    n.includes('seznek') ||
-    hasTejToken(n) ||
-    n.startsWith('tz-') ||
-    n.startsWith('tz_') ||
-    n.includes('tz100') ||
-    n.includes('tz200') ||
-    n.includes('flashlabel') ||
-    n.includes('oem-tez')
-  );
-}
-
-export function isLikelyShaktiName(name: string | null | undefined): boolean {
-  if (!name) return false;
-  const n = name.toLowerCase().trim();
-  // CRITICAL: Tejas is TD-404, NOT Shakti!
-  if (n.includes('tejas')) return false;
-  if (isLikelyDevName(name)) return false;
-  return (
-    n.includes('shakti') ||
-    n.startsWith('sh-') ||
-    n.startsWith('sk-') ||
-    n.startsWith('sh_') ||
-    n.includes('shakti-')
-  );
-}
-
 export function isLikelyDevName(name: string | null | undefined): boolean {
   if (!name) return false;
   const n = name.toLowerCase().trim();
+  // TD-404 / Josh / Tez guards
+  if (n.includes('tejas') || n.includes('rudra') || n.includes('josh')) return false;
   return (
     n.includes('dev') ||
+    n.includes('veer') ||
     n.includes('2in1') ||
     n.includes('2-in-1') ||
     n.includes('2 in 1') ||
-    n.includes('seznik dev') ||
     n.includes('autoreply') ||
     n.includes('caysn') ||
     n.includes('pos-58') ||
     n.includes('pos-80') ||
+    n.includes('printer_58') ||
+    n.includes('printer_80') ||
     n.startsWith('dev-') ||
-    n.startsWith('dev_')
+    n.startsWith('dev_') ||
+    n.startsWith('veer-') ||
+    n.startsWith('veer_')
   );
 }
 
 export function isLikelyJoshName(name: string | null | undefined): boolean {
   if (!name) return false;
-  // If the device matches Tez, Shakti, or Dev, it is NEVER a Josh printer
-  if (isLikelyTezName(name) || isLikelyShaktiName(name) || isLikelyDevName(name)) return false;
   const n = name.toLowerCase().trim();
-  // TD404 specific names
+  // Never match other known models
   if (
     n.includes('tejas') ||
     n.includes('rudra') ||
-    n.includes('sez') ||
-    n.includes('td-404') ||
-    n.includes('td404') ||
-    n.includes('ninestar')
+    isLikelyDevName(name) ||
+    isLikelyShaktiName(name)
   ) {
     return false;
   }
@@ -89,14 +56,69 @@ export function isLikelyJoshName(name: string | null | undefined): boolean {
   );
 }
 
-export function isLikelyTd404Name(name: string | null | undefined): boolean {
+export function isLikelyTezName(name: string | null | undefined): boolean {
   if (!name) return false;
-  // If the device matches Tez, Shakti, Josh, or Dev, it is NEVER a TD-404 printer
-  if (isLikelyTezName(name) || isLikelyShaktiName(name) || isLikelyJoshName(name) || isLikelyDevName(name)) return false;
   const n = name.toLowerCase().trim();
-  return (
+  // CRITICAL: Tejas & Rudra are TD-404, Josh is LPAPI, Dev/Veer is POS — NOT Tez!
+  if (
     n.includes('tejas') ||
     n.includes('rudra') ||
+    n.includes('josh') ||
+    isLikelyDevName(name) ||
+    isLikelyJoshName(name)
+  ) {
+    return false;
+  }
+  return (
+    n.includes('tez') ||
+    hasTejToken(n) ||
+    n.startsWith('tz-') ||
+    n.startsWith('tz_') ||
+    n.includes('tz100') ||
+    n.includes('tz200') ||
+    n.includes('flashlabel') ||
+    n.includes('oem-tez') ||
+    n.includes('y50') ||
+    n.includes('y404') ||
+    n.includes('y468') ||
+    // Standalone Seznik / Seznek brand without any non-Tez model indicator
+    n === 'seznik' ||
+    n === 'seznek' ||
+    n.startsWith('seznik_') ||
+    n.startsWith('seznik-')
+  );
+}
+
+export function isLikelyShaktiName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const n = name.toLowerCase().trim();
+  if (
+    n.includes('tejas') ||
+    n.includes('rudra') ||
+    n.includes('josh') ||
+    isLikelyDevName(name)
+  ) {
+    return false;
+  }
+  return (
+    n.includes('shakti') ||
+    n.startsWith('sh-') ||
+    n.startsWith('sk-') ||
+    n.startsWith('sh_') ||
+    n.includes('shakti-')
+  );
+}
+
+export function isLikelyTd404Name(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const n = name.toLowerCase().trim();
+  // If the device matches Dev, Josh, or Shakti, it is NEVER a TD-404 printer
+  if (isLikelyDevName(name) || isLikelyJoshName(name) || isLikelyShaktiName(name)) return false;
+  // Tejas and Rudra are ALWAYS TD-404 (even if prefixed with Seznik / Sez)
+  if (n.includes('tejas') || n.includes('rudra')) return true;
+  // If it matches Tez explicitly, not TD-404
+  if (isLikelyTezName(name)) return false;
+  return (
     n.includes('sez') ||
     n.includes('td-404') ||
     n.includes('td404') ||
@@ -133,8 +155,8 @@ export function isLikelyTd404Name(name: string | null | undefined): boolean {
     n.includes('citizen') ||
     n.includes('epson') ||
     n.includes('spp') ||
-    n.includes('bt-') ||
-    n.includes('bt_') ||
+    n.startsWith('bt-') ||
+    n.startsWith('bt_') ||
     n.includes('mpt') ||
     n.includes('mtp') ||
     n.includes('rpp') ||

@@ -196,22 +196,63 @@ class DevPrinterModule : Module() {
           @SuppressLint("MissingPermission")
           if (adapter.isDiscovering) {
             adapter.cancelDiscovery()
-            try { Thread.sleep(150) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+            try { Thread.sleep(200) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
           }
           closeHandle()
-          try { Thread.sleep(100) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+          try { Thread.sleep(150) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
 
           val formattedMac = macAddress.uppercase()
-          Log.i(TAG, "Opening AutoReplyPrint SPP port to $formattedMac...")
+          val device = try { adapter.getRemoteDevice(formattedMac) } catch (_: Exception) { null }
+          val isBonded = try {
+            @SuppressLint("MissingPermission")
+            device?.bondState == BluetoothDevice.BOND_BONDED
+          } catch (_: Exception) {
+            false
+          }
 
-          var h = AutoReplyPrint.INSTANCE.CP_Port_OpenBtSpp(formattedMac, 1)
-          if (h == null || Pointer.nativeValue(h) == 0L) {
-            Log.w(TAG, "Mode 1 open failed, trying Mode 0...")
-            h = AutoReplyPrint.INSTANCE.CP_Port_OpenBtSpp(formattedMac, 0)
+          // Prioritize secure (1) for bonded devices, standard (0) for unbonded devices
+          val modeAttempts = if (isBonded) listOf(1, 0) else listOf(0, 1)
+          Log.i(TAG, "Connecting to DEV printer $formattedMac (isBonded=$isBonded, modes=$modeAttempts)...")
+
+          var h: Pointer? = null
+          var lastError: Exception? = null
+          val maxPasses = 2
+
+          for (pass in 1..maxPasses) {
+            for (mode in modeAttempts) {
+              try {
+                Log.i(TAG, "Opening AutoReplyPrint SPP port to $formattedMac (pass $pass, mode $mode)...")
+                val attemptHandle = AutoReplyPrint.INSTANCE.CP_Port_OpenBtSpp(formattedMac, mode)
+                if (attemptHandle != null && Pointer.nativeValue(attemptHandle) != 0L) {
+                  val isValid = try {
+                    AutoReplyPrint.INSTANCE.CP_Port_IsConnectionValid(attemptHandle)
+                  } catch (_: Exception) {
+                    true
+                  }
+                  if (isValid) {
+                    h = attemptHandle
+                    Log.i(TAG, "AutoReplyPrint SPP connected successfully via mode $mode (pass $pass)")
+                    break
+                  } else {
+                    Log.w(TAG, "Handle created via mode $mode but connection validation failed, closing...")
+                    try { AutoReplyPrint.INSTANCE.CP_Port_Close(attemptHandle) } catch (_: Exception) {}
+                  }
+                }
+              } catch (e: Exception) {
+                Log.w(TAG, "Mode $mode attempt failed: ${e.message}")
+                lastError = e
+              }
+              try { Thread.sleep(200) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); break }
+            }
+            if (h != null) break
+            if (pass < maxPasses) {
+              Log.i(TAG, "Retrying SPP connection to $formattedMac after 300ms pause...")
+              try { Thread.sleep(300) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); break }
+            }
           }
 
           if (h == null || Pointer.nativeValue(h) == 0L) {
-            throw Exception("Failed to open Bluetooth connection to DEV printer at $formattedMac")
+            throw (lastError ?: Exception("Failed to establish stable Bluetooth connection to DEV printer at $formattedMac"))
           }
 
           printerHandle = h
@@ -426,11 +467,10 @@ class DevPrinterModule : Module() {
           sdk.CP_Pos_SetPrintDensity(h, density)
           Log.i(TAG, "CP_Pos_SetPrintDensity($density) done")
 
-          // Step 3: Begin label page (x offset, y offset, widthDots, heightDots, rotation)
-          // PageBegin params: (handle, x, y, width, height, rotation)
+          // Step 3: Begin label page (startx, starty, widthDots, heightDots, rotation)
           val gapDots = Math.max(0, Math.round(gapMm * DPM).toInt())
-          val pageOk = sdk.CP_Label_PageBegin(h, widthDots, heightDots + gapDots, 0, 0, 0)
-          Log.i(TAG, "CP_Label_PageBegin(${widthDots}, ${heightDots + gapDots}, 0, 0, 0) = $pageOk")
+          val pageOk = sdk.CP_Label_PageBegin(h, 0, 0, widthDots, heightDots + gapDots, 0)
+          Log.i(TAG, "CP_Label_PageBegin(0, 0, ${widthDots}, ${heightDots + gapDots}, 0) = $pageOk")
 
           // Step 4: Draw the bitmap image
           // CP_Label_DrawImageFromData(handle, x, y, width, height, data, widthBytes, algorithm)
@@ -499,7 +539,7 @@ class DevPrinterModule : Module() {
           sdk.CP_Label_EnableLabelMode(h)
           sdk.CP_Pos_SetPrintDensity(h, 8)
           // 50mm x 30mm label at 8 dots/mm
-          sdk.CP_Label_PageBegin(h, 400, 256, 0, 0, 0)
+          sdk.CP_Label_PageBegin(h, 0, 0, 400, 256, 0)
           sdk.CP_Label_DrawTextInUTF8(h, 30, 20, 24, 0, WString("SEZNIK DEV 2-IN-1"))
           sdk.CP_Label_DrawTextInUTF8(h, 30, 60, 24, 0, WString("TEST PRINT SUCCESS"))
           sdk.CP_Label_DrawBarcode(h, 30, 100, AutoReplyPrint.CP_Label_BarcodeType_CODE128, 50, 2, AutoReplyPrint.CP_Label_BarcodeTextPrintPosition_BelowBarcode, 0, "DEV-7299")
@@ -776,11 +816,14 @@ class DevPrinterModule : Module() {
   private fun isLikelyDev(name: String?): Boolean {
     if (name.isNullOrBlank()) return false
     val n = name.lowercase()
+    if (n.contains("tejas") || n.contains("rudra") || n.contains("josh")) return false
     return n.contains("dev") ||
+      n.contains("veer") ||
       n.contains("2in1") ||
       n.contains("2-in-1") ||
       n.contains("2 in 1") ||
       n.contains("seznik dev") ||
+      n.contains("seznik veer") ||
       n.contains("autoreply") ||
       n.contains("caysn") ||
       n.contains("pos-58") ||

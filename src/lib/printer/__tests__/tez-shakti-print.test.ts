@@ -35,6 +35,10 @@ function testNameClassification() {
   assert.equal(isLikelyTd404Name('Tejas'), true);
   assert.equal(isLikelyTd404Name('tejas-304'), true);
   assert.equal(isLikelyTd404Name('Rudra'), true);
+  assert.equal(isLikelyTd404Name('Seznik Rudra'), true, 'Seznik Rudra must match TD404');
+  assert.equal(isLikelyTezName('Seznik Rudra'), false, 'Seznik Rudra must NOT match Tez');
+  assert.equal(isLikelyTd404Name('Seznik Tejas'), true, 'Seznik Tejas must match TD404');
+  assert.equal(isLikelyTezName('Seznik Tejas'), false, 'Seznik Tejas must NOT match Tez');
   assert.equal(isLikelyTd404Name('SEZ-404'), true);
   assert.equal(isLikelyTd404Name('TD-404'), true);
   assert.equal(isLikelyTd404Name('Tez Printer'), false, 'Tez must NOT be hijacked by TD404');
@@ -44,6 +48,8 @@ function testNameClassification() {
   // Josh devices
   assert.equal(isLikelyJoshName('JOSH-LD08'), true);
   assert.equal(isLikelyJoshName('lpapi-printer'), true);
+  assert.equal(isLikelyJoshName('Seznik Josh'), true, 'Seznik Josh must match Josh');
+  assert.equal(isLikelyTezName('Seznik Josh'), false, 'Seznik Josh must NOT match Tez');
   assert.equal(isLikelyJoshName('Tez Printer'), false);
   assert.equal(isLikelyJoshName('Shakti Printer'), false);
   assert.equal(isLikelyJoshName('Tejas'), false);

@@ -1217,14 +1217,19 @@ class JoshPrinterManager(private val context: Context) {
         val shownName = (address.shownName ?: "").trim()
         val lowerName = shownName.lowercase()
 
-        // Filter: DO NOT claim devices that belong to TD-404, Tejas, Rudra, or SEZ printers!
+        // Filter: DO NOT claim devices that belong to TD-404, Tejas, Rudra, Tez, Shakti, or Dev printers!
+        // NOTE: "sez" or "seznik" is the brand prefix and must NOT be filtered out.
         if (lowerName.contains("tejas") ||
             lowerName.contains("rudra") ||
             lowerName.contains("td-404") ||
             lowerName.contains("td404") ||
-            lowerName.contains("sez")
+            lowerName.contains("tez") ||
+            lowerName.contains("shakti") ||
+            lowerName.contains("dev") ||
+            lowerName.contains("veer") ||
+            lowerName.contains("caysn")
         ) {
-            Log.d(TAG, "[PRINTER_IGNORED_NON_JOSH] Ignoring classic printer in JOSH scan: $shownName ($mac)")
+            Log.d(TAG, "[PRINTER_IGNORED_NON_JOSH] Ignoring non-JOSH printer in JOSH scan: $shownName ($mac)")
             return
         }
 

@@ -81,6 +81,19 @@ class TezPrinterManager private constructor() {
         }
         val lower = deviceName.lowercase().trim()
 
+        // Guard: Never resolve Tez modelKey for other printer families
+        if (lower.contains("tejas") ||
+            lower.contains("rudra") ||
+            lower.contains("josh") ||
+            lower.contains("dev") ||
+            lower.contains("veer") ||
+            lower.contains("caysn") ||
+            lower.contains("td-404") ||
+            lower.contains("td404")
+        ) {
+            return DEFAULT_MODEL_KEY
+        }
+
         return when {
             lower.contains("380") || lower.startsWith("tp3z") || lower.contains("3120") -> "380"
             lower.contains("yc3121") || lower.contains("3121") -> "YC3121"

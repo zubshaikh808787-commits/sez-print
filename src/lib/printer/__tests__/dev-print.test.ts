@@ -15,10 +15,12 @@ import {
 } from '../../../../modules/dev-printer/src/types';
 
 function testNameClassification() {
-  // DEV devices
+  // DEV / VEER devices
   assert.equal(isLikelyDevName('SEZNIK DEV'), true);
   assert.equal(isLikelyDevName('DEV-PRINTER'), true);
   assert.equal(isLikelyDevName('dev_50'), true);
+  assert.equal(isLikelyDevName('SEZNIK VEER'), true);
+  assert.equal(isLikelyDevName('VEER-58'), true);
   assert.equal(isLikelyDevName('autoreply-dev'), true);
   assert.equal(isLikelyDevName('caysn-dev'), true);
   assert.equal(isLikelyDevName('dev_pos'), true);
@@ -29,9 +31,13 @@ function testNameClassification() {
 
   // Negative matches (must not hijack or be hijacked by other models)
   assert.equal(isLikelyDevName('Tejas'), false, 'Tejas must NOT match DEV');
+  assert.equal(isLikelyDevName('Rudra'), false, 'Rudra must NOT match DEV');
+  assert.equal(isLikelyDevName('Seznik Rudra'), false, 'Seznik Rudra must NOT match DEV');
+  assert.equal(isLikelyDevName('Seznik Tejas'), false, 'Seznik Tejas must NOT match DEV');
   assert.equal(isLikelyDevName('Tez Printer'), false, 'Tez must NOT match DEV');
   assert.equal(isLikelyDevName('Shakti-404'), false, 'Shakti must NOT match DEV');
   assert.equal(isLikelyDevName('JOSH-LD08'), false, 'Josh must NOT match DEV');
+  assert.equal(isLikelyDevName('Seznik Josh'), false, 'Seznik Josh must NOT match DEV');
   assert.equal(isLikelyDevName('TD-404'), false, 'TD-404 must NOT match DEV');
 
   // Other model checks with DEV names
@@ -39,6 +45,8 @@ function testNameClassification() {
   assert.equal(isLikelyTezName('SEZNIK DEV'), false, 'DEV must NOT match TEZ');
   assert.equal(isLikelyShaktiName('SEZNIK DEV'), false, 'DEV must NOT match SHAKTI');
   assert.equal(isLikelyJoshName('SEZNIK DEV'), false, 'DEV must NOT match JOSH');
+  assert.equal(isLikelyTd404Name('SEZNIK VEER'), false, 'VEER must NOT match TD-404');
+  assert.equal(isLikelyTezName('SEZNIK VEER'), false, 'VEER must NOT match TEZ');
 
   console.log('ok Device name classification heuristics for DEV validated');
 }

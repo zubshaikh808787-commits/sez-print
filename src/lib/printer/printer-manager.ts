@@ -728,20 +728,21 @@ class PrinterManager {
         await this.ensurePermissions('connect-only');
         const bonded = await td404.getTd404BondedDevices();
         for (const d of bonded) {
-          const isTz = isLikelyTezName(d.name);
-          const isShakti = isLikelyShaktiName(d.name);
-          const isJosh = !isTz && !isShakti && isLikelyJoshName(d.name);
-          const isDev = !isTz && !isShakti && !isJosh && isLikelyDevName(d.name);
-          const isTd = !isTz && !isShakti && !isJosh && !isDev && isLikelyTd404Name(d.name);
-          if (isTz || isShakti) {
+          const isDev = isLikelyDevName(d.name);
+          const isJosh = !isDev && isLikelyJoshName(d.name);
+          const isTd = !isDev && !isJosh && isLikelyTd404Name(d.name);
+          const isTz = !isDev && !isJosh && !isTd && isLikelyTezName(d.name);
+          const isShakti = !isDev && !isJosh && !isTd && !isTz && isLikelyShaktiName(d.name);
+          if (isDev) {
             emit({
               id: d.id,
               name: d.name,
               rssi: null,
-              transport: 'tez-spp',
-              sdkId: 'tez',
-              likelyTez: isTz,
-              likelyShakti: isShakti,
+              transport: 'dev-spp',
+              sdkId: 'dev',
+              likelyTd404: false,
+              likelyJosh: false,
+              likelyDev: true,
               bonded: true,
             });
           } else if (isJosh) {
@@ -755,16 +756,26 @@ class PrinterManager {
               likelyJosh: true,
               bonded: true,
             });
-          } else if (isDev) {
+          } else if (isTd) {
             emit({
               id: d.id,
               name: d.name,
               rssi: null,
-              transport: 'dev-spp',
-              sdkId: 'dev',
-              likelyTd404: false,
+              transport: 'bluetooth-spp',
+              sdkId: 'td404',
+              likelyTd404: true,
               likelyJosh: false,
-              likelyDev: true,
+              bonded: true,
+            });
+          } else if (isTz || isShakti) {
+            emit({
+              id: d.id,
+              name: d.name,
+              rssi: null,
+              transport: 'tez-spp',
+              sdkId: 'tez',
+              likelyTez: isTz,
+              likelyShakti: isShakti,
               bonded: true,
             });
           } else {
@@ -773,8 +784,8 @@ class PrinterManager {
               name: d.name,
               rssi: null,
               transport: 'bluetooth-spp',
-              sdkId: 'td404',
-              likelyTd404: isTd || (!isJosh && !isTz && !isShakti && !isDev),
+              sdkId: 'generic',
+              likelyTd404: false,
               likelyJosh: false,
               bonded: true,
             });
@@ -1161,33 +1172,29 @@ class PrinterManager {
       `[CONN-ROUTE] connectInner called: id=${deviceId}, name=${deviceName ?? 'null'}, transport=${transport ?? 'undefined'}`,
     );
 
-    const isExplicitDev =
+    const isTargetDev =
       transport === 'dev-spp' ||
       isLikelyDevName(deviceName);
 
-    const isExplicitTez =
-      !isExplicitDev &&
+    const isTargetJosh =
+      !isTargetDev &&
+      (transport === 'josh-lpapi' || isLikelyJoshName(deviceName));
+
+    const isTargetTd404 =
+      !isTargetDev &&
+      !isTargetJosh &&
+      (transport === 'bluetooth-spp' || isLikelyTd404Name(deviceName));
+
+    const isTargetTez =
+      !isTargetDev &&
+      !isTargetJosh &&
+      !isTargetTd404 &&
       (transport === 'tez-spp' ||
         isLikelyTezName(deviceName) ||
         isLikelyShaktiName(deviceName));
 
-    const isExplicitTd404 =
-      !isExplicitDev &&
-      !isExplicitTez &&
-      ((transport === 'bluetooth-spp' && !isLikelyShaktiName(deviceName) && !isLikelyTezName(deviceName) && !isLikelyDevName(deviceName)) ||
-        isLikelyTd404Name(deviceName));
-
-    const isTargetDev = isExplicitDev;
-    const isTargetTez = isExplicitTez;
-
-    const isTargetJosh =
-      !isExplicitDev &&
-      !isExplicitTez &&
-      !isExplicitTd404 &&
-      (transport === 'josh-lpapi' || (Boolean(deviceName) && isLikelyJoshName(deviceName)));
-
     console.info(
-      `[CONN-ROUTE] isExplicitTd404=${isExplicitTd404}, isTargetTez=${isTargetTez}, isTargetDev=${isTargetDev}, isTargetJosh=${isTargetJosh}, ` +
+      `[CONN-ROUTE] isTargetTd404=${isTargetTd404}, isTargetTez=${isTargetTez}, isTargetDev=${isTargetDev}, isTargetJosh=${isTargetJosh}, ` +
       `devNameMatch=${isLikelyDevName(deviceName)}, tezNameMatch=${isLikelyTezName(deviceName) || isLikelyShaktiName(deviceName)}, td404NameMatch=${isLikelyTd404Name(deviceName)}, joshNameMatch=${isLikelyJoshName(deviceName)}`,
     );
 
