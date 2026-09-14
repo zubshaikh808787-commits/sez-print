@@ -58,15 +58,21 @@ export function paletteDropTopLeftMm(opts: {
 }): { left: number; top: number; guides: SnapGuide[] } {
   const width = Math.max(MIN_ELEMENT_MM, finiteMm(opts.widthMm, MIN_ELEMENT_MM));
   const height = Math.max(0.1, finiteMm(opts.heightMm, MIN_ELEMENT_MM));
-  const snapped = snapBoxToGuides(
-    opts.pointerMm.x - width / 2,
-    opts.pointerMm.y - height / 2,
-    width,
-    height,
-    opts.others ?? [],
-    opts.canvas,
-    opts.thresholdMm ?? SNAP_THRESHOLD_MM,
-  );
+  const threshold = opts.thresholdMm ?? 0;
+  const rawLeft = opts.pointerMm.x - width / 2;
+  const rawTop = opts.pointerMm.y - height / 2;
+  const snapped =
+    threshold > 0
+      ? snapBoxToGuides(
+          rawLeft,
+          rawTop,
+          width,
+          height,
+          opts.others ?? [],
+          opts.canvas,
+          threshold,
+        )
+      : { left: rawLeft, top: rawTop, guides: [] };
   const clamped = dragBoundMm(snapped.left, snapped.top, width, height, opts.canvas);
   return { left: clamped.left, top: clamped.top, guides: snapped.guides };
 }

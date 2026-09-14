@@ -374,22 +374,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   );
 
   const reportDragMove = useCallback(
-    (windowX: number, windowY: number, fallbackLeftPx: number, fallbackTopPx: number) => {
+    (_windowX: number, _windowY: number, fallbackLeftPx: number, fallbackTopPx: number) => {
       if (!emitMoveRef.current) return;
-      const pointerMm = pointerToMmRef.current?.(windowX, windowY);
-      const grab = grabOffsetRef.current;
-      if (pointerMm && grab) {
-        const next = dropTopLeftMm({
-          pointerMm,
-          grabOffsetMm: grab,
-          widthMm: elementBoxRef.current.width,
-          heightMm: elementBoxRef.current.height,
-          canvas: { widthMm: canvasWidthMm, heightMm: canvasHeightMm },
-        });
-        const snapped = applyMoveSnap(next.left, next.top);
-        dragMovePump.push({ leftMm: snapped.left, topMm: snapped.top });
-        return;
-      }
       snapDxPx.value = 0;
       snapDyPx.value = 0;
       dragMovePump.push({
@@ -397,32 +383,19 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         topMm: pxToMm(fallbackTopPx, pxPerMMSafe),
       });
     },
-    [applyMoveSnap, canvasWidthMm, canvasHeightMm, dragMovePump, pxPerMMSafe, snapDxPx, snapDyPx],
+    [dragMovePump, pxPerMMSafe, snapDxPx, snapDyPx],
   );
 
   const commitDragFromPointer = useCallback(
-    (windowX: number, windowY: number, fallbackLeftPx: number, fallbackTopPx: number) => {
+    (_windowX: number, _windowY: number, fallbackLeftPx: number, fallbackTopPx: number) => {
       dragMovePump.cancel();
-      const pointerMm = pointerToMmRef.current?.(windowX, windowY);
-      const grab = grabOffsetRef.current;
-      grabOffsetRef.current = null;
-      if (pointerMm && grab) {
-        const next = dropTopLeftMm({
-          pointerMm,
-          grabOffsetMm: grab,
-          widthMm: elementBoxRef.current.width,
-          heightMm: elementBoxRef.current.height,
-          canvas: { widthMm: canvasWidthMm, heightMm: canvasHeightMm },
-        });
-        const snapped = applyMoveSnap(next.left, next.top);
-        dispatchDragCommitMm(snapped.left, snapped.top);
-        return;
-      }
       snapDxPx.value = 0;
       snapDyPx.value = 0;
-      dispatchDragCommitMm(pxToMm(fallbackLeftPx, pxPerMMSafe), pxToMm(fallbackTopPx, pxPerMMSafe));
+      const leftMm = pxToMm(fallbackLeftPx, pxPerMMSafe);
+      const topMm = pxToMm(fallbackTopPx, pxPerMMSafe);
+      dispatchDragCommitMm(leftMm, topMm);
     },
-    [applyMoveSnap, canvasWidthMm, canvasHeightMm, dispatchDragCommitMm, dragMovePump, pxPerMMSafe, snapDxPx, snapDyPx],
+    [dispatchDragCommitMm, dragMovePump, pxPerMMSafe, snapDxPx, snapDyPx],
   );
 
   const captureResizeStartFromPx = useCallback(

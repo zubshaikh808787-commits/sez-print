@@ -1164,35 +1164,16 @@ export default function EditScreen() {
 
   const snapMoveMm = useCallback(
     (input: { id: string; leftMm: number; topMm: number; widthMm: number; heightMm: number }) => {
-      const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
-      const others = docRef.current.elements.filter((el) => el.id !== input.id).map(boxOf);
-      const view = editorViewRef.current;
-      const threshold = snapThresholdMm(view?.pxPerMM ?? 0, view?.viewZoom ?? 1);
-      const snapped = snapBoxToGuides(
-        input.leftMm,
-        input.topMm,
-        input.widthMm,
-        input.heightMm,
-        others,
-        canvas,
-        threshold,
-      );
-      publishSnapGuides(snapped.guides);
-      return { leftMm: snapped.left, topMm: snapped.top };
+      return { leftMm: input.leftMm, topMm: input.topMm };
     },
-    [publishSnapGuides],
+    [],
   );
 
   const handleTransformMove = useCallback(
-    (payload: TransformMovePayload) => {
-      setElements((elements) =>
-        applyLiveDragPosition(elements, payload.id, payload.leftMm, payload.topMm, {
-          widthMm: docRef.current.widthMm,
-          heightMm: docRef.current.heightMm,
-        }),
-      );
+    (_payload: TransformMovePayload) => {
+      // Free-motion 1:1 gesture without intermediate React re-renders
     },
-    [setElements],
+    [],
   );
 
   const handleTransformEnd = useCallback(
@@ -1741,16 +1722,7 @@ export default function EditScreen() {
         publishSnapGuides([]);
         return;
       }
-      const view = editorViewRef.current;
-      const placed = paletteDropTopLeftMm({
-        pointerMm: mm,
-        widthMm: ghost.widthMm,
-        heightMm: ghost.heightMm,
-        canvas,
-        others: docRef.current.elements.map(boxOf),
-        thresholdMm: snapThresholdMm(view?.pxPerMM ?? 0, view?.viewZoom ?? 1),
-      });
-      publishSnapGuides(placed.guides);
+      publishSnapGuides([]);
     },
     [publishSnapGuides, windowPointToArtboardMm],
   );
@@ -1765,14 +1737,12 @@ export default function EditScreen() {
       const mm = windowPointToArtboardMm(windowX, windowY);
       const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
       if (!mm || !isPaletteDropOnArtboard(mm, canvas)) return;
-      const view = editorViewRef.current;
       const placed = paletteDropTopLeftMm({
         pointerMm: mm,
         widthMm: ghost.widthMm,
         heightMm: ghost.heightMm,
         canvas,
-        others: docRef.current.elements.map(boxOf),
-        thresholdMm: snapThresholdMm(view?.pxPerMM ?? 0, view?.viewZoom ?? 1),
+        thresholdMm: 0,
       });
       const overrides: Record<string, unknown> = {
         left: placed.left,
