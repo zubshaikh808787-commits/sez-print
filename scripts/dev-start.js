@@ -22,18 +22,34 @@ function lanIp() {
 }
 
 function freePort(port) {
-  if (process.platform !== 'win32') return;
-  const netstat = spawnSync('netstat', ['-ano'], { encoding: 'utf8', shell: true });
-  if (netstat.status !== 0) return;
-  const pids = new Set();
-  for (const line of netstat.stdout.split('\n')) {
-    if (!line.includes(`:${port}`) || !line.includes('LISTENING')) continue;
-    const pid = line.trim().split(/\s+/).pop();
-    if (pid && pid !== '0') pids.add(pid);
-  }
-  for (const pid of pids) {
-    spawnSync('taskkill', ['/PID', pid, '/F'], { shell: true, stdio: 'ignore' });
-    console.log(`Freed port ${port} (stopped PID ${pid})`);
+  if (process.platform === 'win32') {
+    const netstat = spawnSync('netstat', ['-ano'], { encoding: 'utf8', shell: true });
+    if (netstat.status !== 0) return;
+    const pids = new Set();
+    for (const line of netstat.stdout.split('\n')) {
+      if (!line.includes(`:${port}`) || !line.includes('LISTENING')) continue;
+      const pid = line.trim().split(/\s+/).pop();
+      if (pid && pid !== '0') pids.add(pid);
+    }
+    for (const pid of pids) {
+      spawnSync('taskkill', ['/PID', pid, '/F'], { shell: true, stdio: 'ignore' });
+      console.log(`Freed port ${port} (stopped PID ${pid})`);
+    }
+  } else {
+    try {
+      const lsof = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8' });
+      if (lsof.status === 0 && lsof.stdout) {
+        const pids = lsof.stdout.trim().split(/\s+/).filter(Boolean);
+        for (const pid of pids) {
+          if (pid && pid !== String(process.pid)) {
+            spawnSync('kill', ['-9', pid], { stdio: 'ignore' });
+            console.log(`Freed port ${port} (stopped PID ${pid})`);
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 }
 
