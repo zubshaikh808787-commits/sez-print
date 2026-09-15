@@ -674,8 +674,10 @@ export default function PrintScreen() {
             : null;
         const capturePacked = async () => {
           const raw = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
-          // OEM PrintImgHelper needs a normal PNG. TSPL 1bpp packing is TD-404 only.
-          if (manager.isTez) return raw;
+          // OEM SDKs (TEZ PrintImgHelper, DEV AutoReplyPrint DrawImageFromBitmap) need a
+          // normal RGBA PNG — they do their own binarization internally.
+          // TSPL 1bpp grayscale packing is only for the TD-404 raw-TSPL path.
+          if (manager.isTez || manager.isDev) return raw;
           return mapCapturePngToPackedPng(raw, widthMm, heightMm, jobDpi).pngBase64;
         };
         const [connectionResult, base64] = await Promise.all([

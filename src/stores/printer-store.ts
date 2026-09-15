@@ -33,7 +33,9 @@ type PrinterStoreState = {
   lastDeviceId: string | null;
   lastDeviceName: string | null;
   history: PrintHistoryEntry[];
+  devCommandSet: 'tspl' | 'escpos';
   setStatus: (status: PrinterConnectionStatus) => void;
+  setDevCommandSet: (cmd: 'tspl' | 'escpos') => void;
   setConnectedDevice: (
     deviceId: string,
     deviceName: string,
@@ -60,8 +62,10 @@ export const usePrinterStore = create<PrinterStoreState>()(
       lastDeviceId: null,
       lastDeviceName: null,
       history: [],
+      devCommandSet: 'escpos',
 
       setStatus: (status) => set({ status }),
+      setDevCommandSet: (devCommandSet) => set({ devCommandSet }),
 
       setConnectedDevice: (deviceId, deviceName, meta) =>
         set({

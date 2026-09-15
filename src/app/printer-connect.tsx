@@ -76,6 +76,8 @@ export default function PrinterConnectScreen() {
   const transport = usePrinterStore((s) => s.transport);
   const lastDeviceName = usePrinterStore((s) => s.lastDeviceName);
   const lastDeviceId = usePrinterStore((s) => s.lastDeviceId);
+  const devCommandSet = usePrinterStore((s) => s.devCommandSet);
+  const setDevCommandSet = usePrinterStore((s) => s.setDevCommandSet);
 
   const [devices, setDevices] = useState<DiscoveredPrinter[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -517,16 +519,16 @@ export default function PrinterConnectScreen() {
       const isJosh = !isDev && !isTez && getPrinterManager().isJosh;
       console.info(
         isDev
-          ? '[DEV-PRINT] Test print button tapped (routing: AutoReplyPrint SDK)'
+          ? `[DEV-PRINT] Test print button tapped (mode=${devCommandSet})`
           : isTez
             ? '[TEZ-PRINT-P1:PREFLIGHT] Test print button tapped (routing: TEZ PrintSDK)'
             : isJosh
               ? '[JOSH-PRINT-P1:PREFLIGHT] Test print button tapped (routing: JOSH LPAPI)'
               : '[PRINT-P1:PREFLIGHT] Test print button tapped (routing: TD-404 / ESCPOS)',
       );
-      const testName = isDev ? 'Sez Print DEV' : isTez ? 'Sez Print TEZ' : isJosh ? 'Sez Print JOSH' : 'Sez Print TD-404';
+      const testName = isDev ? `Sez Print DEV (${devCommandSet.toUpperCase()})` : isTez ? 'Sez Print TEZ' : isJosh ? 'Sez Print JOSH' : 'Sez Print TD-404';
       await getPrinterManager().printTestLabel(testName);
-      Alert.alert('Test Print Sent', 'Check the printer for a sample label.');
+      Alert.alert('Test Print Sent', `Check the printer for a sample ${isDev ? devCommandSet.toUpperCase() : ''} label.`);
     } catch (error) {
       Alert.alert(
         'Test Print Failed',
@@ -781,6 +783,39 @@ export default function PrinterConnectScreen() {
                   <Text style={styles.disconnectText}>Disconnect</Text>
                 </Pressable>
               </View>
+              {transport === 'dev-spp' || getPrinterManager().isDev ? (
+                <View style={{ marginTop: 10, marginBottom: 8 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: Palette.muted, marginBottom: 6 }}>
+                    Command Engine (2-in-1 Dual Mode):
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Pressable
+                      onPress={() => setDevCommandSet('tspl')}
+                      style={[
+                        { flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: 'center', borderWidth: 1 },
+                        devCommandSet === 'tspl'
+                          ? { backgroundColor: Palette.accent, borderColor: Palette.accent }
+                          : { backgroundColor: Palette.card, borderColor: Palette.hairline },
+                      ]}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: devCommandSet === 'tspl' ? '#fff' : Palette.ink }}>
+                        TSPL (Label Stock)
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setDevCommandSet('escpos')}
+                      style={[
+                        { flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: 'center', borderWidth: 1 },
+                        devCommandSet === 'escpos'
+                          ? { backgroundColor: Palette.accent, borderColor: Palette.accent }
+                          : { backgroundColor: Palette.card, borderColor: Palette.hairline },
+                      ]}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: devCommandSet === 'escpos' ? '#fff' : Palette.ink }}>
+                        ESC/POS (Graphic)
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
               <Pressable
                 onPress={() => void handleTestPrint()}
                 disabled={testing}

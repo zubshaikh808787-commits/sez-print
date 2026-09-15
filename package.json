@@ -22,6 +22,7 @@
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-ml-kit/text-recognition": "^2.0.0",
+    "@vardrz/react-native-bluetooth-escpos-printer": "^0.1.2",
     "dev-printer": "file:./modules/dev-printer",
     "expo": "~54.0.37",
     "expo-build-properties": "~1.0.10",
@@ -49,6 +50,8 @@
     "fast-png": "^8.0.0",
     "josh-printer": "file:./modules/josh-printer",
     "jpeg-js": "^0.4.4",
+    "patch-package": "^8.0.1",
+    "postinstall-postinstall": "^2.1.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -75,6 +78,7 @@
     "typescript": "~5.9.2"
   },
   "scripts": {
+    "postinstall": "patch-package",
     "start": "node ./scripts/dev-start.js",
     "start:usb": "node ./scripts/dev-start.js --usb",
     "connect:usb": "adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8083 tcp:8083",

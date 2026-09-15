@@ -41,6 +41,7 @@ export type DevPrintOptions = {
   gapMm?: number;
   media?: 'gap' | 'bline' | 'continuous' | string;
   speed?: number;
+  commandSet?: 'tspl' | 'escpos' | 'auto';
 };
 
 export type DevPrintResult = {

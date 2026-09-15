@@ -1,0 +1,70 @@
+diff --git a/node_modules/@vardrz/react-native-bluetooth-escpos-printer/android/build.gradle b/node_modules/@vardrz/react-native-bluetooth-escpos-printer/android/build.gradle
+index 0468625..72761e6 100644
+--- a/node_modules/@vardrz/react-native-bluetooth-escpos-printer/android/build.gradle
++++ b/node_modules/@vardrz/react-native-bluetooth-escpos-printer/android/build.gradle
+@@ -1,22 +1,3 @@
+-buildscript {
+-    repositories {
+-        jcenter { url "https://jcenter.bintray.com/" }
+-        maven {url "https://repo.spring.io/plugins-release/"}
+-        mavenCentral()
+-        maven {
+-            // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+-            url "$rootDir/../node_modules/react-native/android"
+-        }
+-        maven {
+-            url 'https://maven.google.com'
+-        }
+-    }
+-
+-    dependencies {
+-        classpath 'com.android.tools.build:gradle:3.1.4'
+-    }
+-}
+-
+ apply plugin: 'com.android.library'
+ 
+ android {
+@@ -42,7 +23,6 @@ android {
+ 
+ repositories {
+     google()
+-    jcenter { url "https://jcenter.bintray.com/" }
+     maven {url "https://repo.spring.io/plugins-release/"}
+     mavenCentral()
+     maven {
+diff --git a/node_modules/@vardrz/react-native-bluetooth-escpos-printer/android/src/main/java/cn/jystudio/bluetooth/escpos/RNBluetoothEscposPrinterModule.java b/node_modules/@vardrz/react-native-bluetooth-escpos-printer/android/src/main/java/cn/jystudio/bluetooth/escpos/RNBluetoothEscposPrinterModule.java
+index 79fa434..2686ea1 100644
+--- a/node_modules/@vardrz/react-native-bluetooth-escpos-printer/android/src/main/java/cn/jystudio/bluetooth/escpos/RNBluetoothEscposPrinterModule.java
++++ b/node_modules/@vardrz/react-native-bluetooth-escpos-printer/android/src/main/java/cn/jystudio/bluetooth/escpos/RNBluetoothEscposPrinterModule.java
+@@ -332,6 +332,11 @@ public class RNBluetoothEscposPrinterModule extends ReactContextBaseJavaModule
+         boolean center = true;
+         int paperSize = 58;
+         int paperWidthDots = WIDTH_58;
++        // Trailing feed after the bitmap. Defaults to 30 dots to preserve the original
++        // receipt behaviour, but die-cut label printing has to control the advance
++        // exactly (bitmap height + gap = one label pitch), and an unconditional 3.75mm
++        // here pushed every label progressively further past its gap.
++        int feed = 30;
+ 
+         if(options!=null){
+             width = options.hasKey("width") ? options.getInt("width") : 0;
+@@ -339,6 +344,7 @@ public class RNBluetoothEscposPrinterModule extends ReactContextBaseJavaModule
+             autoCut = options.hasKey("autoCut") ? options.getBoolean("autoCut") : true;
+             center = options.hasKey("center") ? options.getBoolean("center") : true;
+             paperSize = options.hasKey("paperSize") ? options.getInt("paperSize") : 58;
++            feed = options.hasKey("feed") ? options.getInt("feed") : 30;
+         }
+ 
+         if (paperSize == 80) {
+@@ -373,7 +379,9 @@ public class RNBluetoothEscposPrinterModule extends ReactContextBaseJavaModule
+             sendDataByte(Command.ESC_Init);
+             // sendDataByte(Command.LF);
+             sendDataByte(data);
+-            sendDataByte(PrinterCommand.POS_Set_PrtAndFeedPaper(30));
++            if (feed > 0) {
++                sendDataByte(PrinterCommand.POS_Set_PrtAndFeedPaper(feed));
++            }
+             if (autoCut) {
+                 sendDataByte(PrinterCommand.POS_Set_Cut(1));
+             }

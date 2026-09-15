@@ -26,6 +26,13 @@ import {
   isLikelyDevName,
   shouldUseTsplCommandSet,
 } from '@/lib/printer/printer-heuristics';
+import {
+  isVardrzAvailable,
+  connectVardrz,
+  disconnectVardrz,
+  printVardrzLabel,
+  NativeEscposPrinter,
+} from '@/lib/printer/vardrz-printer';
 import { encodeTscTextSample } from '@/lib/printer/tsc';
 import { usePrinterStore } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
@@ -499,7 +506,7 @@ class PrinterManager {
         printheadWidthDots: headWidthDots,
         maxHeightMm: 1000,
         alignment,
-        commandLanguage: 'tspl',
+        commandLanguage: 'escpos',
       };
     }
 
@@ -1248,6 +1255,26 @@ class PrinterManager {
           this.writableTarget = null;
         }
 
+        if (isVardrzAvailable()) {
+          console.info(`[DEV-CONN] Connecting exclusively via @vardrz BluetoothManager: ${deviceId}`);
+          await connectVardrz(deviceId);
+          this.activeTransport = 'dev-spp';
+          this.connectedDevice = null;
+          this.writableTarget = null;
+          this.backendPrinterId = null;
+          this.bleNegotiatedMtu = 0;
+          this.lastErrorMessage = null;
+          console.info(
+            `[DEV-CONN] DEV connected via @vardrz in ${Date.now() - connectStart} ms → ${deviceId} (${deviceName ?? 'DEV'})`,
+          );
+          usePrinterStore.getState().setConnectedDevice(deviceId, deviceName ?? 'DEV', {
+            transport: 'dev-spp',
+            sdkId: 'dev',
+            backendPrinterId: null,
+          });
+          return;
+        }
+
         console.info(`[DEV-CONN] Submitting DEV connect request → ${deviceId} (${deviceName ?? 'DEV'})`);
         const result = await dev.connectDev(deviceId, deviceName);
         this.activeTransport = 'dev-spp';
@@ -1679,7 +1706,10 @@ class PrinterManager {
     }
     console.info('[printer] disconnect requested, transport:', this.activeTransport);
     if (this.activeTransport === 'dev-spp') {
-      await this.getDev()?.disconnectDev();
+      if (isVardrzAvailable()) {
+        await disconnectVardrz().catch(() => {});
+      }
+      await this.getDev()?.disconnectDev().catch(() => {});
     }
     if (this.activeTransport === 'td404-spp') {
       await this.getTd404()?.disconnectTd404();
@@ -1714,6 +1744,9 @@ class PrinterManager {
 
   get isConnected(): boolean {
     if (this.activeTransport === 'dev-spp') {
+      if (isVardrzAvailable()) {
+        return Boolean(usePrinterStore.getState().deviceId);
+      }
       return Boolean(this.getDev()?.isDevConnected());
     }
     if (this.activeTransport === 'td404-spp') {
@@ -1744,6 +1777,9 @@ class PrinterManager {
    */
   isConnectionHealthy(): boolean {
     if (this.activeTransport === 'dev-spp') {
+      if (isVardrzAvailable()) {
+        return Boolean(usePrinterStore.getState().deviceId);
+      }
       return Boolean(this.getDev()?.isDevConnected());
     }
     if (this.activeTransport === 'td404-spp') {
@@ -1950,6 +1986,23 @@ class PrinterManager {
     if (!this.isConnected) throw new Error('No printer connected.');
 
     if (this.activeTransport === 'dev-spp' || this.isDev) {
+      if (isVardrzAvailable()) {
+        console.info(`[DEV-PRINT] Test print dispatching via @vardrz: "${text}"`);
+        await this.ensureConnected();
+        try {
+          if (typeof NativeEscposPrinter.printerInit === 'function') {
+            await NativeEscposPrinter.printerInit();
+          }
+          if (typeof NativeEscposPrinter.printText === 'function') {
+            await NativeEscposPrinter.printText(`${text}\n\n\n`, {});
+          }
+        } catch (e) {
+          console.warn('[DEV-PRINT] @vardrz test text print error:', e);
+        }
+        console.info('[DEV-PRINT] Dev test print completed successfully via @vardrz');
+        return;
+      }
+
       console.info(`[DEV-PRINT] Test print dispatching via Dev SDK: "${text}"`);
       const dev = this.getDev();
       if (!dev) throw new Error('Dev module not available.');
@@ -1958,8 +2011,10 @@ class PrinterManager {
         const store = usePrinterStore.getState();
         await this.connect(store.deviceId ?? store.lastDeviceId!, store.deviceName ?? store.lastDeviceName, 'dev-spp');
       }
-      console.info('[DEV-PRINT] Submitting test print to Dev hardware...');
-      await dev.testDevPrint();
+      const store = usePrinterStore.getState();
+      const devMode = store.devCommandSet ?? 'escpos';
+      console.info(`[DEV-PRINT] Submitting test print to Dev hardware (mode=${devMode})...`);
+      await dev.testDevPrint(devMode);
       console.info('[DEV-PRINT] Dev test print completed successfully');
       return;
     }
@@ -2140,6 +2195,7 @@ class PrinterManager {
     hOffsetMm?: number;
     vOffsetMm?: number;
     media?: 'gap' | 'bline' | 'continuous';
+    commandSet?: 'tspl' | 'escpos' | 'auto';
   }): Promise<boolean> {
     if (!this.isDev) {
       return false;
@@ -2156,8 +2212,28 @@ class PrinterManager {
       store.setStatus('printing');
       this.connectionState = 'printing';
       try {
+        if (isVardrzAvailable()) {
+          console.info(
+            `[DEV-PRINT] mm-locked PNG print via @vardrz BluetoothEscposPrinter: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1}`,
+          );
+          await this.ensureConnected();
+          const t0 = Date.now();
+          await printVardrzLabel(options.pngBase64, {
+            widthMm: options.widthMm,
+            heightMm: options.heightMm,
+            gapMm: options.gapMm ?? 2,
+            copies: options.copies ?? 1,
+            media: options.media ?? 'gap',
+          });
+          console.info(
+            `[DEV-PRINT] @vardrz print completed in ${Date.now() - t0} ms`,
+          );
+          return;
+        }
+
+        const cmdSet = options.commandSet ?? store.devCommandSet ?? 'escpos';
         console.info(
-          `[DEV-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1}`,
+          `[DEV-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1} engine=${cmdSet}`,
         );
         await this.ensureConnected();
         const t0 = Date.now();
@@ -2170,6 +2246,7 @@ class PrinterManager {
           speed: options.speed ?? 4,
           gapMm: options.gapMm ?? 2,
           media: options.media ?? 'gap',
+          commandSet: cmdSet,
         });
         console.info(
           `[DEV-PRINT] Dev print completed in ${Date.now() - t0} ms |`,

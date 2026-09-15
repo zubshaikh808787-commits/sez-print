@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle, Line } from 'react-native-svg';
 
 const TEAL = '#17A6B8';
 const GRAY = '#7E8B98';
@@ -397,79 +398,32 @@ export function LabelCloneIcon({ color = TEAL, size = 32 }: { color?: string; si
  * 3-node graph icon for Share
  */
 export function ShareNodeIcon({ color = TEAL, size = 24 }: { color?: string; size?: number }) {
-  const scale = size / 24;
-  const nodeSize = 6 * scale;
-  const stroke = 1.6 * scale;
-
   return (
-    <View style={{ width: size, height: size, position: 'relative' }}>
-      {/* Top diagonal connector line */}
-      <View
-        style={{
-          position: 'absolute',
-          top: 6 * scale,
-          left: 6.5 * scale,
-          width: 11 * scale,
-          height: stroke,
-          backgroundColor: color,
-          transform: [{ rotate: '-30deg' }],
-        }}
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Line
+        x1="8.59"
+        y1="13.51"
+        x2="15.42"
+        y2="17.49"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
-      {/* Bottom diagonal connector line */}
-      <View
-        style={{
-          position: 'absolute',
-          bottom: 6 * scale,
-          left: 6.5 * scale,
-          width: 11 * scale,
-          height: stroke,
-          backgroundColor: color,
-          transform: [{ rotate: '30deg' }],
-        }}
+      <Line
+        x1="15.41"
+        y1="6.51"
+        x2="8.59"
+        y2="10.49"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
-      {/* Left Node */}
-      <View
-        style={{
-          position: 'absolute',
-          top: 9 * scale,
-          left: 2 * scale,
-          width: nodeSize,
-          height: nodeSize,
-          borderRadius: nodeSize / 2,
-          borderWidth: stroke,
-          borderColor: color,
-          backgroundColor: '#FFFFFF',
-        }}
-      />
-      {/* Top Right Node */}
-      <View
-        style={{
-          position: 'absolute',
-          top: 2 * scale,
-          right: 2 * scale,
-          width: nodeSize,
-          height: nodeSize,
-          borderRadius: nodeSize / 2,
-          borderWidth: stroke,
-          borderColor: color,
-          backgroundColor: '#FFFFFF',
-        }}
-      />
-      {/* Bottom Right Node */}
-      <View
-        style={{
-          position: 'absolute',
-          bottom: 2 * scale,
-          right: 2 * scale,
-          width: nodeSize,
-          height: nodeSize,
-          borderRadius: nodeSize / 2,
-          borderWidth: stroke,
-          borderColor: color,
-          backgroundColor: '#FFFFFF',
-        }}
-      />
-    </View>
+      <Circle cx="6" cy="12" r="3" stroke={color} strokeWidth="2" fill="none" />
+      <Circle cx="18" cy="5" r="3" stroke={color} strokeWidth="2" fill="none" />
+      <Circle cx="18" cy="19" r="3" stroke={color} strokeWidth="2" fill="none" />
+    </Svg>
   );
 }
 

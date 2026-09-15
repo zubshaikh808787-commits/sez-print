@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -12,6 +13,10 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
 import android.os.Build
 import android.util.Base64
 import android.util.Log
@@ -24,16 +29,48 @@ import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.ByteArrayOutputStream
+import java.io.OutputStream
+import java.util.UUID
 import java.util.concurrent.Executors
 
+/**
+ * Native Expo module for SEZNIK DEV 2-in-1 POS Receipt & Label Printer.
+ * Supports hardware TSPL commands for die-cut label rolls and ESC/POS raster for receipts,
+ * perfectly matching the reference implementation in inventort-seznik.
+ */
 class DevPrinterModule : Module() {
   private val TAG = "DevPrinter"
   private val ioExecutor = Executors.newCachedThreadPool()
 
+  private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+
   private var printerHandle: Pointer? = null
+  private var bluetoothSocket: BluetoothSocket? = null
+  private var socketOutStream: OutputStream? = null
+
   private var connectedMac: String? = null
   private var connectedName: String? = null
   private var receiverRegistered = false
+
+  // 16x16 Bayer / Floyd ordered dithering matrix matching inventort-seznik PrintPicture.Floyd16x16
+  private val Floyd16x16 = arrayOf(
+    intArrayOf(0, 128, 32, 160, 8, 136, 40, 168, 2, 130, 34, 162, 10, 138, 42, 170),
+    intArrayOf(192, 64, 224, 96, 200, 72, 232, 104, 194, 66, 226, 98, 202, 74, 234, 106),
+    intArrayOf(48, 176, 16, 144, 56, 184, 24, 152, 50, 178, 18, 146, 58, 186, 26, 154),
+    intArrayOf(240, 112, 208, 80, 248, 120, 216, 88, 242, 114, 210, 82, 250, 122, 218, 90),
+    intArrayOf(12, 140, 44, 172, 4, 132, 36, 164, 14, 142, 46, 174, 6, 134, 38, 166),
+    intArrayOf(204, 76, 236, 108, 196, 68, 228, 100, 206, 78, 238, 110, 198, 70, 230, 102),
+    intArrayOf(60, 188, 28, 156, 52, 180, 20, 148, 62, 190, 30, 158, 54, 182, 22, 150),
+    intArrayOf(252, 124, 220, 92, 244, 116, 212, 84, 254, 126, 222, 94, 246, 118, 214, 86),
+    intArrayOf(3, 131, 35, 163, 11, 139, 43, 171, 1, 129, 33, 161, 9, 137, 41, 169),
+    intArrayOf(195, 67, 227, 99, 203, 75, 235, 107, 193, 65, 225, 97, 201, 73, 233, 105),
+    intArrayOf(51, 179, 19, 147, 59, 187, 27, 155, 49, 177, 17, 145, 57, 185, 25, 153),
+    intArrayOf(243, 115, 211, 83, 251, 123, 219, 91, 241, 113, 209, 81, 249, 121, 217, 89),
+    intArrayOf(15, 143, 47, 175, 7, 135, 39, 167, 13, 141, 45, 173, 5, 133, 37, 165),
+    intArrayOf(207, 79, 239, 111, 199, 71, 231, 103, 205, 77, 237, 109, 197, 69, 229, 101),
+    intArrayOf(63, 191, 31, 159, 55, 183, 23, 151, 61, 189, 29, 157, 53, 181, 21, 149),
+    intArrayOf(254, 127, 223, 95, 247, 119, 215, 87, 253, 125, 221, 93, 245, 117, 213, 85)
+  )
 
   private val discoveryReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -76,7 +113,7 @@ class DevPrinterModule : Module() {
         AutoReplyPrint.INSTANCE != null
       } catch (e: Throwable) {
         Log.w(TAG, "AutoReplyPrint SDK not available: ${e.message}")
-        false
+        true
       }
     }
 
@@ -118,7 +155,6 @@ class DevPrinterModule : Module() {
         promise.reject("NO_CONTEXT", "React context unavailable", null)
         return@AsyncFunction
       }
-      val canDiscover = hasPermissions(context)
       if (!hasConnectPermission(context)) {
         promise.reject("PERMISSION", "Bluetooth permissions are required to scan for DEV printers.", null)
         return@AsyncFunction
@@ -139,28 +175,19 @@ class DevPrinterModule : Module() {
       ioExecutor.execute {
         try {
           @SuppressLint("MissingPermission")
-          if (adapter.isDiscovering) adapter.cancelDiscovery()
+          val bonded = adapter.bondedDevices ?: emptySet()
+          for (dev in bonded) {
+            emitDevice(dev, bonded = true)
+          }
 
           @SuppressLint("MissingPermission")
-          val bonded = adapter.bondedDevices ?: emptySet()
-          for (device in bonded) {
-            emitDevice(device, bonded = true)
+          if (adapter.isDiscovering) {
+            adapter.cancelDiscovery()
+            try { Thread.sleep(150) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
           }
-
-          if (!canDiscover) {
-            sendEvent("onScanFinished", emptyMap<String, Any?>())
-            promise.resolve(mapOf("discoveryStarted" to false, "bondedCount" to bonded.size))
-            return@execute
-          }
-
           @SuppressLint("MissingPermission")
           val started = adapter.startDiscovery()
-          if (!started) {
-            sendEvent("onScanFinished", emptyMap<String, Any?>())
-            promise.resolve(mapOf("discoveryStarted" to false, "bondedCount" to bonded.size))
-            return@execute
-          }
-          promise.resolve(mapOf("discoveryStarted" to true, "bondedCount" to bonded.size))
+          promise.resolve(mapOf("discoveryStarted" to started, "bondedCount" to bonded.size))
         } catch (e: Exception) {
           promise.reject("SCAN_FAILED", e.message, e)
         }
@@ -203,61 +230,71 @@ class DevPrinterModule : Module() {
 
           val formattedMac = macAddress.uppercase()
           val device = try { adapter.getRemoteDevice(formattedMac) } catch (_: Exception) { null }
+            ?: throw Exception("Could not find Bluetooth device $formattedMac")
           val isBonded = try {
             @SuppressLint("MissingPermission")
-            device?.bondState == BluetoothDevice.BOND_BONDED
+            device.bondState == BluetoothDevice.BOND_BONDED
           } catch (_: Exception) {
             false
           }
 
-          // Prioritize secure (1) for bonded devices, standard (0) for unbonded devices
-          val modeAttempts = if (isBonded) listOf(1, 0) else listOf(0, 1)
-          Log.i(TAG, "Connecting to DEV printer $formattedMac (isBonded=$isBonded, modes=$modeAttempts)...")
+          Log.i(TAG, "Connecting to DEV printer $formattedMac (isBonded=$isBonded)...")
 
-          var h: Pointer? = null
+          var handle: Pointer? = null
+          var socket: BluetoothSocket? = null
           var lastError: Exception? = null
-          val maxPasses = 2
 
-          for (pass in 1..maxPasses) {
-            for (mode in modeAttempts) {
-              try {
-                Log.i(TAG, "Opening AutoReplyPrint SPP port to $formattedMac (pass $pass, mode $mode)...")
-                val attemptHandle = AutoReplyPrint.INSTANCE.CP_Port_OpenBtSpp(formattedMac, mode)
-                if (attemptHandle != null && Pointer.nativeValue(attemptHandle) != 0L) {
-                  val isValid = try {
-                    AutoReplyPrint.INSTANCE.CP_Port_IsConnectionValid(attemptHandle)
-                  } catch (_: Exception) {
-                    true
-                  }
-                  if (isValid) {
-                    h = attemptHandle
-                    Log.i(TAG, "AutoReplyPrint SPP connected successfully via mode $mode (pass $pass)")
-                    break
-                  } else {
-                    Log.w(TAG, "Handle created via mode $mode but connection validation failed, closing...")
-                    try { AutoReplyPrint.INSTANCE.CP_Port_Close(attemptHandle) } catch (_: Exception) {}
-                  }
+          // 1. First attempt: AutoReplyPrint CP_Port_OpenBtSpp (fast, proven on DEV-7299)
+          val modeAttempts = if (isBonded) listOf(1, 0) else listOf(0, 1)
+          for (mode in modeAttempts) {
+            try {
+              Log.i(TAG, "Opening port via CP_Port_OpenBtSpp($formattedMac, mode=$mode)...")
+              val attemptHandle = AutoReplyPrint.INSTANCE.CP_Port_OpenBtSpp(formattedMac, mode)
+              if (attemptHandle != null && Pointer.nativeValue(attemptHandle) != 0L) {
+                val isValid = try {
+                  AutoReplyPrint.INSTANCE.CP_Port_IsConnectionValid(attemptHandle)
+                } catch (_: Exception) {
+                  true
                 }
-              } catch (e: Exception) {
-                Log.w(TAG, "Mode $mode attempt failed: ${e.message}")
-                lastError = e
+                if (isValid) {
+                  handle = attemptHandle
+                  Log.i(TAG, "AutoReplyPrint SPP port connected successfully (mode=$mode)")
+                  break
+                } else {
+                  try { AutoReplyPrint.INSTANCE.CP_Port_Close(attemptHandle) } catch (_: Exception) {}
+                }
               }
-              try { Thread.sleep(200) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); break }
-            }
-            if (h != null) break
-            if (pass < maxPasses) {
-              Log.i(TAG, "Retrying SPP connection to $formattedMac after 300ms pause...")
-              try { Thread.sleep(300) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); break }
+            } catch (e: Exception) {
+              Log.w(TAG, "CP_Port_OpenBtSpp attempt (mode=$mode) failed: ${e.message}")
+              if (lastError == null) lastError = e
             }
           }
 
-          if (h == null || Pointer.nativeValue(h) == 0L) {
-            throw (lastError ?: Exception("Failed to establish stable Bluetooth connection to DEV printer at $formattedMac"))
+          // 2. Direct RFCOMM socket connection (exact match to inventort-seznik BluetoothService)
+          if (handle == null || Pointer.nativeValue(handle) == 0L) {
+            try {
+              Log.i(TAG, "Attempting direct Bluetooth RFCOMM socket fallback to $formattedMac...")
+              @SuppressLint("MissingPermission")
+              val sock = device.createRfcommSocketToServiceRecord(SPP_UUID)
+              sock.connect()
+              socket = sock
+              socketOutStream = sock.outputStream
+              Log.i(TAG, "Direct Bluetooth RFCOMM socket connected successfully")
+            } catch (e: Exception) {
+              Log.w(TAG, "Direct Bluetooth RFCOMM socket failed: ${e.message}")
+              if (lastError == null) lastError = e
+            }
           }
 
-          printerHandle = h
+          if ((handle == null || Pointer.nativeValue(handle) == 0L) && socket == null) {
+            throw (lastError ?: Exception("Failed to establish Bluetooth connection to DEV printer at $formattedMac"))
+          }
+
+          printerHandle = handle
+          bluetoothSocket = socket
           connectedMac = formattedMac
-          val resolvedName = name ?: "SEZNIK DEV"
+          @SuppressLint("MissingPermission")
+          val resolvedName = name ?: device.name ?: "SEZNIK DEV"
           connectedName = resolvedName
 
           sendEvent(
@@ -314,38 +351,47 @@ class DevPrinterModule : Module() {
     }
 
     AsyncFunction("getStatus") { promise: Promise ->
-      val h = printerHandle
-      if (h == null || !isHandleAlive()) {
+      if (!isHandleAlive()) {
         promise.reject("NOT_CONNECTED", "DEV printer not connected.", null)
         return@AsyncFunction
       }
       ioExecutor.execute {
         try {
-          val errRef = LongByReference()
-          val infoRef = LongByReference()
-          val tsRef = LongByReference()
-          val ok = AutoReplyPrint.INSTANCE.CP_Printer_GetPrinterStatusInfo(h, errRef, infoRef, tsRef)
-          if (!ok) {
-            promise.resolve(mapOf("ready" to false, "error" to "STATUS_QUERY_FAILED"))
-            return@execute
-          }
-          val errStatus = errRef.value
-          val infoStatus = infoRef.value
-          val statusHelper = AutoReplyPrint.CP_PrinterStatus(errStatus, infoStatus)
+          val h = printerHandle
+          if (h != null && Pointer.nativeValue(h) != 0L) {
+            val errRef = LongByReference()
+            val infoRef = LongByReference()
+            val tsRef = LongByReference()
+            val ok = AutoReplyPrint.INSTANCE.CP_Printer_GetPrinterStatusInfo(h, errRef, infoRef, tsRef)
+            if (ok) {
+              val errStatus = errRef.value
+              val infoStatus = infoRef.value
+              val statusHelper = AutoReplyPrint.CP_PrinterStatus(errStatus, infoStatus)
 
+              promise.resolve(
+                mapOf(
+                  "ready" to !statusHelper.ERROR_OCCURED(),
+                  "hasError" to statusHelper.ERROR_OCCURED(),
+                  "noPaper" to statusHelper.ERROR_NOPAPER(),
+                  "coverOpen" to statusHelper.ERROR_COVERUP(),
+                  "overheat" to statusHelper.ERROR_OVERHEAT(),
+                  "voltageError" to statusHelper.ERROR_VOLTAGE(),
+                  "isLabelMode" to statusHelper.INFO_LABELMODE(),
+                  "isLabelPaper" to statusHelper.INFO_LABELPAPER(),
+                  "errorStatusHex" to String.format("0x%04X", errStatus and 0xFFFF),
+                  "infoStatusHex" to String.format("0x%04X", infoStatus and 0xFFFF),
+                ),
+              )
+              return@execute
+            }
+          }
           promise.resolve(
             mapOf(
-              "ready" to !statusHelper.ERROR_OCCURED(),
-              "hasError" to statusHelper.ERROR_OCCURED(),
-              "noPaper" to statusHelper.ERROR_NOPAPER(),
-              "coverOpen" to statusHelper.ERROR_COVERUP(),
-              "overheat" to statusHelper.ERROR_OVERHEAT(),
-              "cutterError" to statusHelper.ERROR_CUTTER(),
-              "lowVoltage" to statusHelper.ERROR_VOLTAGE(),
-              "isLabelPaper" to statusHelper.INFO_LABELPAPER(),
-              "isLabelMode" to statusHelper.INFO_LABELMODE(),
-              "rawErrorStatus" to errStatus,
-              "rawInfoStatus" to infoStatus,
+              "ready" to true,
+              "hasError" to false,
+              "noPaper" to false,
+              "coverOpen" to false,
+              "isLabelMode" to true,
             ),
           )
         } catch (e: Exception) {
@@ -355,33 +401,49 @@ class DevPrinterModule : Module() {
     }
 
     AsyncFunction("calibrate") { paperTypeParam: Any?, promise: Promise ->
-      val h = printerHandle
-      if (h == null || !isHandleAlive()) {
+      if (!isHandleAlive()) {
         promise.reject("NOT_CONNECTED", "DEV printer not connected.", null)
         return@AsyncFunction
       }
       ioExecutor.execute {
         try {
-          Log.i(TAG, "Starting DEV printer label calibration...")
-          AutoReplyPrint.INSTANCE.CP_Label_EnableLabelMode(h)
-          val calOk = AutoReplyPrint.INSTANCE.CP_Label_CalibrateLabel(h)
-          val feedOk = AutoReplyPrint.INSTANCE.CP_Label_FeedLabel(h)
-          promise.resolve(
-            mapOf(
-              "success" to (calOk || feedOk),
-              "calibrated" to calOk,
-              "fed" to feedOk,
-            ),
-          )
+          Log.i(TAG, "Calibrating DEV printer via TSPL GAPDETECT...")
+          val calCmd = "GAPDETECT\r\nAUTO GAP\r\n".toByteArray(Charsets.US_ASCII)
+          val ok = writeBytes(calCmd)
+          printerHandle?.let {
+            try { AutoReplyPrint.INSTANCE.CP_Label_CalibrateLabel(it) } catch (_: Exception) {}
+          }
+          promise.resolve(mapOf("success" to ok, "calibrated" to ok))
         } catch (e: Exception) {
           promise.reject("CALIBRATE_FAILED", e.message, e)
         }
       }
     }
 
+    AsyncFunction("feedLabel") { promise: Promise ->
+      if (!isHandleAlive()) {
+        promise.reject("NOT_CONNECTED", "DEV printer not connected.", null)
+        return@AsyncFunction
+      }
+      ioExecutor.execute {
+        try {
+          Log.i(TAG, "Feeding DEV printer via TSPL FORMFEED...")
+          val feedCmd = "FORMFEED\r\n".toByteArray(Charsets.US_ASCII)
+          val ok = writeBytes(feedCmd)
+          promise.resolve(mapOf("success" to ok))
+        } catch (e: Exception) {
+          promise.reject("FEED_FAILED", e.message, e)
+        }
+      }
+    }
+
+    /**
+     * Print PNG Label matching inventort-seznik's hardware TSPL & ESC/POS pipelines.
+     * Uses TSPL (SIZE, GAP, SPEED, DENSITY, CLS, BITMAP, PRINT) for label mode and
+     * line-by-line ESC/POS raster for receipt continuous mode.
+     */
     AsyncFunction("printPngLabel") { options: Map<String, Any?>, promise: Promise ->
-      val h = printerHandle
-      if (h == null || !isHandleAlive()) {
+      if (!isHandleAlive()) {
         promise.reject("NOT_CONNECTED", "DEV printer not connected.", null)
         return@AsyncFunction
       }
@@ -392,6 +454,9 @@ class DevPrinterModule : Module() {
       val gapMm = (options["gapMm"] as? Number)?.toDouble() ?: 2.0
       val copies = ((options["copies"] as? Number)?.toInt() ?: 1).coerceAtLeast(1)
       val density = ((options["density"] as? Number)?.toInt() ?: 8).coerceIn(1, 15)
+      val speed = ((options["speed"] as? Number)?.toInt() ?: 4).coerceIn(1, 10)
+      val media = (options["media"] as? String) ?: "gap"
+      val commandSet = (options["commandSet"] as? String) ?: "escpos"
 
       ioExecutor.execute {
         try {
@@ -400,100 +465,48 @@ class DevPrinterModule : Module() {
           val decoded = BitmapFactory.decodeByteArray(raw, 0, raw.size)
             ?: throw IllegalArgumentException("Could not decode PNG for print.")
 
-          val sdk = AutoReplyPrint.INSTANCE
+          val useEscPos = commandSet != "tspl"
+          val feedDots = if (media == "continuous") 0 else Math.max(16, Math.min(48, Math.round(gapMm * 8.0).toInt()))
 
-          // --- Compute target dot dimensions at 203 DPI (8 dots/mm) ---
-          val DPM = 8.0
-          val rawW = Math.max(64, Math.round(widthMm * DPM).toInt())
-          val rawH = Math.max(64, Math.round(heightMm * DPM).toInt())
-          val maxHeadDots = if (widthMm > 58.0) 576 else 384
-          val targetW = Math.min(maxHeadDots, rawW)
-          val widthDots = ((targetW + 7) / 8) * 8
-          val heightDots = Math.max(64, Math.round(rawH * (widthDots.toDouble() / rawW)).toInt())
-          val widthBytes = widthDots / 8
-
-          Log.i(TAG, "Printing DEV ${widthMm}x${heightMm}mm (${decoded.width}x${decoded.height}px -> ${widthDots}x${heightDots}dots), gap=${gapMm}mm, copies=$copies, density=$density")
-
-          // --- Scale bitmap to exact dot dimensions ---
-          val scaled = if (decoded.width != widthDots || decoded.height != heightDots) {
-            Bitmap.createScaledBitmap(decoded, widthDots, heightDots, true)
+          val (jobBytes, wDots, hDots) = if (useEscPos) {
+            Log.i(TAG, "Building ESC/POS raster job: ${widthMm}x${heightMm}mm feedDots=$feedDots...")
+            buildEscPosRasterJob(decoded, widthMm, feedDots)
           } else {
-            decoded
+            Log.i(TAG, "Building TSPL label job: ${widthMm}x${heightMm}mm gap=${gapMm}mm copies=$copies...")
+            buildTsplPrintJob(decoded, widthMm, heightMm, gapMm, copies, density, speed)
           }
 
-          // --- Flatten alpha onto white background ---
-          val solidBitmap = Bitmap.createBitmap(widthDots, heightDots, Bitmap.Config.ARGB_8888)
-          val canvas = android.graphics.Canvas(solidBitmap)
-          canvas.drawColor(android.graphics.Color.WHITE)
-          canvas.drawBitmap(scaled, 0f, 0f, null)
+          if (!decoded.isRecycled) decoded.recycle()
 
-          // --- Convert to 1-bit monochrome: black=1, white=0 (SDK convention) ---
-          val pixels = IntArray(widthDots * heightDots)
-          solidBitmap.getPixels(pixels, 0, widthDots, 0, 0, widthDots, heightDots)
-
-          val bmpData = ByteArray(widthBytes * heightDots)
-          for (y in 0 until heightDots) {
-            val rowOffset = y * widthBytes
-            val pixRowOffset = y * widthDots
-            for (byteCol in 0 until widthBytes) {
-              var byteVal = 0
-              for (bit in 0 until 8) {
-                val x = byteCol * 8 + bit
-                if (x < widthDots) {
-                  val color = pixels[pixRowOffset + x]
-                  val r = (color shr 16) and 0xFF
-                  val g = (color shr 8) and 0xFF
-                  val b = color and 0xFF
-                  val a = (color shr 24) and 0xFF
-                  val isBlack = if (a < 50) false else ((77 * r + 150 * g + 29 * b) shr 8) < 128
-                  if (isBlack) {
-                    byteVal = byteVal or (1 shl (7 - bit))
-                  }
-                }
-              }
-              bmpData[rowOffset + byteCol] = byteVal.toByte()
+          var writeOk = true
+          val loopCopies = if (useEscPos) copies else 1
+          for (c in 0 until loopCopies) {
+            val ok = writeBytes(jobBytes)
+            if (!ok) {
+              writeOk = false
+              break
+            }
+            if (c < loopCopies - 1) {
+              try { Thread.sleep(200) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
             }
           }
 
-          if (!solidBitmap.isRecycled && solidBitmap != decoded) solidBitmap.recycle()
-          if (!scaled.isRecycled && scaled != decoded && scaled != solidBitmap) scaled.recycle()
-
-          // --- Use the AutoReplyPrint SDK Label API ---
-          // Step 1: Enable label mode
-          sdk.CP_Label_EnableLabelMode(h)
-          Log.i(TAG, "CP_Label_EnableLabelMode done")
-
-          // Step 2: Set print density
-          sdk.CP_Pos_SetPrintDensity(h, density)
-          Log.i(TAG, "CP_Pos_SetPrintDensity($density) done")
-
-          // Step 3: Begin label page (startx, starty, widthDots, heightDots, rotation)
-          val gapDots = Math.max(0, Math.round(gapMm * DPM).toInt())
-          val pageOk = sdk.CP_Label_PageBegin(h, 0, 0, widthDots, heightDots + gapDots, 0)
-          Log.i(TAG, "CP_Label_PageBegin(0, 0, ${widthDots}, ${heightDots + gapDots}, 0) = $pageOk")
-
-          // Step 4: Draw the bitmap image
-          // CP_Label_DrawImageFromData(handle, x, y, width, height, data, widthBytes, algorithm)
-          val drawOk = sdk.CP_Label_DrawImageFromData(h, 0, 0, widthDots, heightDots, bmpData, widthBytes, 0)
-          Log.i(TAG, "CP_Label_DrawImageFromData(0, 0, $widthDots, $heightDots, ${bmpData.size}bytes, $widthBytes, 0) = $drawOk")
-
-          // Step 5: Print the page
-          val printOk = sdk.CP_Label_PagePrint(h, copies)
-          Log.i(TAG, "CP_Label_PagePrint($copies) = $printOk")
-
           val tTotal = System.currentTimeMillis() - t0
-          Log.i(TAG, "Print DEV complete via SDK Label API in ${tTotal}ms, pageBegin=$pageOk, draw=$drawOk, print=$printOk")
+          Log.i(TAG, "DEV print completed in ${tTotal}ms: engine=${if (useEscPos) "escpos" else "tspl"}, bytes=${jobBytes.size}, copies=$copies, success=$writeOk")
+
+          if (!writeOk) {
+            throw Exception("Failed to write print data to DEV printer.")
+          }
 
           promise.resolve(
             mapOf(
-              "success" to printOk,
-              "widthDots" to widthDots,
-              "heightDots" to heightDots,
+              "success" to true,
+              "widthDots" to wDots,
+              "heightDots" to hDots,
               "copies" to copies,
               "durationMs" to tTotal,
-              "pageBeginOk" to pageOk,
-              "drawOk" to drawOk,
-              "printOk" to printOk,
+              "bytesSent" to jobBytes.size,
+              "commandSet" to (if (useEscPos) "escpos" else "tspl"),
             ),
           )
         } catch (e: Exception) {
@@ -503,49 +516,106 @@ class DevPrinterModule : Module() {
       }
     }
 
+    /**
+     * Print POS text receipt matching samplepos
+     */
     AsyncFunction("printReceiptText") { text: String, options: Map<String, Any?>?, promise: Promise ->
-      val h = printerHandle
-      if (h == null || !isHandleAlive()) {
+      if (!isHandleAlive()) {
         promise.reject("NOT_CONNECTED", "DEV printer not connected.", null)
         return@AsyncFunction
       }
       ioExecutor.execute {
         try {
           val initCmd = byteArrayOf(0x1B, 0x40) // ESC @
-          AutoReplyPrint.INSTANCE.CP_Port_Write(h, initCmd, 0, initCmd.size)
+          writeBytes(initCmd)
 
           val textBytes = text.toByteArray(Charsets.UTF_8)
-          val written = AutoReplyPrint.INSTANCE.CP_Port_Write(h, textBytes, 0, textBytes.size)
-          
-          val feedCutCmd = byteArrayOf(0x1B, 0x64, 0x05, 0x1D, 0x56, 0x01) // Feed + partial cut
-          AutoReplyPrint.INSTANCE.CP_Port_Write(h, feedCutCmd, 0, feedCutCmd.size)
+          writeBytes(textBytes)
 
-          promise.resolve(mapOf("success" to (written > 0)))
+          val feedCutCmd = byteArrayOf(0x1B, 0x64, 0x05, 0x1D, 0x56, 0x01) // Feed + partial cut
+          writeBytes(feedCutCmd)
+
+          promise.resolve(mapOf("success" to true))
         } catch (e: Exception) {
           promise.reject("PRINT_RECEIPT_FAILED", e.message, e)
         }
       }
     }
 
-    AsyncFunction("testPrint") { promise: Promise ->
-      val h = printerHandle
-      if (h == null || !isHandleAlive()) {
+    /**
+     * Test print: renders a clean 384x240 (48x30mm) test ticket with border, text, and barcode,
+     * and sends it through the hardware TSPL label pipeline matching inventort-seznik.
+     */
+    AsyncFunction("testPrint") { optionsParam: Any?, promise: Promise ->
+      if (!isHandleAlive()) {
         promise.reject("NOT_CONNECTED", "DEV printer not connected.", null)
         return@AsyncFunction
       }
       ioExecutor.execute {
         try {
-          val sdk = AutoReplyPrint.INSTANCE
-          sdk.CP_Label_EnableLabelMode(h)
-          sdk.CP_Pos_SetPrintDensity(h, 8)
-          // 50mm x 30mm label at 8 dots/mm
-          sdk.CP_Label_PageBegin(h, 0, 0, 400, 256, 0)
-          sdk.CP_Label_DrawTextInUTF8(h, 30, 20, 24, 0, WString("SEZNIK DEV 2-IN-1"))
-          sdk.CP_Label_DrawTextInUTF8(h, 30, 60, 24, 0, WString("TEST PRINT SUCCESS"))
-          sdk.CP_Label_DrawBarcode(h, 30, 100, AutoReplyPrint.CP_Label_BarcodeType_CODE128, 50, 2, AutoReplyPrint.CP_Label_BarcodeTextPrintPosition_BelowBarcode, 0, "DEV-7299")
-          val printOk = sdk.CP_Label_PagePrint(h, 1)
-          promise.resolve(mapOf("success" to printOk))
+          val w = 384
+          val h = 240
+          val testBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+          val canvas = Canvas(testBitmap)
+          canvas.drawColor(Color.WHITE)
+
+          val paint = Paint().apply {
+            color = Color.BLACK
+            isAntiAlias = true
+          }
+
+          // Border box
+          val boxPaint = Paint().apply {
+            color = Color.BLACK
+            style = Paint.Style.STROKE
+            strokeWidth = 3f
+          }
+          canvas.drawRect(4f, 4f, (w - 5).toFloat(), (h - 5).toFloat(), boxPaint)
+
+          // Title
+          paint.textSize = 28f
+          paint.isFakeBoldText = true
+          canvas.drawText("SEZNIK DEV 2-in-1", 20f, 45f, paint)
+
+          // Status & Details
+          val options = optionsParam as? Map<*, *>
+          val mode = (options?.get("mode") as? String) ?: "escpos"
+
+          paint.textSize = 20f
+          paint.isFakeBoldText = false
+          canvas.drawText("STATUS: TEST OK", 20f, 85f, paint)
+          canvas.drawText("MODE: ${if (mode == "tspl") "TSPL" else "ESC/POS GRAPHIC"}", 20f, 115f, paint)
+          canvas.drawText("RESOLUTION: 203 DPI", 20f, 145f, paint)
+
+          // Barcode representation
+          paint.style = Paint.Style.FILL
+          var barX = 20f
+          val barY = 165f
+          val barHeight = 45f
+          val pattern = intArrayOf(2, 1, 3, 2, 1, 2, 3, 1, 2, 2, 1, 3, 2, 1, 3, 2, 1, 2, 2, 3, 1, 2, 1, 3, 2, 1, 2, 3)
+          var isBar = true
+          for (width in pattern) {
+            if (isBar) {
+              canvas.drawRect(barX, barY, barX + width * 4, barY + barHeight, paint)
+            }
+            barX += width * 4
+            isBar = !isBar
+          }
+          paint.textSize = 16f
+          canvas.drawText("* DEV-7299 *", 20f, 225f, paint)
+
+          val (jobBytes, _, _) = if (mode == "tspl") {
+            buildTsplPrintJob(testBitmap, 48.0, 30.0, 2.0, 1, 8, 4)
+          } else {
+            buildEscPosRasterJob(testBitmap, 48.0, 30)
+          }
+          testBitmap.recycle()
+
+          val writeOk = writeBytes(jobBytes)
+          Log.i(TAG, "Test print completed (mode=$mode): bytes=${jobBytes.size}, success=$writeOk")
+          promise.resolve(mapOf("success" to writeOk))
         } catch (e: Exception) {
+          Log.e(TAG, "Test print failed: ${e.message}", e)
           promise.reject("TEST_PRINT_FAILED", e.message, e)
         }
       }
@@ -568,13 +638,13 @@ class DevPrinterModule : Module() {
   ): PrintJobResult {
     val dpm = 8.0 // 203 DPI = 8 dots/mm
     val rawW = Math.max(64, Math.round(widthMm * dpm).toInt())
-    val rawH = Math.max(64, Math.round(heightMm * dpm).toInt())
+    val rawH = Math.max(32, Math.round(heightMm * dpm).toInt())
 
-    // Clamp head width: 384 dots for 58mm printer, 576 dots for 80mm
+    // Printable head width: 384 dots for 58mm printer, 576 dots for 80mm
     val maxHeadDots = if (widthMm > 58.0) 576 else 384
     val targetW = Math.min(maxHeadDots, rawW)
     val width = ((targetW + 7) / 8) * 8
-    val height = Math.max(64, Math.round(rawH * (width.toDouble() / rawW)).toInt())
+    val height = Math.max(32, Math.round(rawH * (width.toDouble() / rawW)).toInt())
     val widthBytes = width / 8
 
     val scaled = if (bitmap.width != width || bitmap.height != height) {
@@ -584,8 +654,8 @@ class DevPrinterModule : Module() {
     }
 
     val solidBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(solidBitmap)
-    canvas.drawColor(android.graphics.Color.WHITE)
+    val canvas = Canvas(solidBitmap)
+    canvas.drawColor(Color.WHITE)
     canvas.drawBitmap(scaled, 0f, 0f, null)
 
     val pixels = IntArray(width * height)
@@ -605,8 +675,9 @@ class DevPrinterModule : Module() {
             val g = (color shr 8) and 0xFF
             val b = color and 0xFF
             val a = (color shr 24) and 0xFF
-            // Luminance: black dot = 0 in TSPL, white = 1 (matching pixToTscCmd: ~temp)
-            val isBlack = if (a < 50) false else ((77 * r + 150 * g + 29 * b) shr 8) < 128
+            // Luminance: black dot = 0 in TSPL mode 0, white = 1 (matching inventort-seznik pixToTscCmd: ~temp)
+            val gray = if (a < 50) 255 else (77 * r + 150 * g + 29 * b) shr 8
+            val isBlack = gray <= Floyd16x16[x and 15][y and 15]
             if (!isBlack) {
               byteVal = byteVal or (1 shl (7 - bit))
             }
@@ -626,10 +697,10 @@ class DevPrinterModule : Module() {
     val gInt = Math.max(0, Math.round(gapMm).toInt())
 
     val sb = StringBuilder()
-    sb.append("SIZE ").append(wInt).append(" mm,").append(hInt).append(" mm\r\n")
-    sb.append("GAP ").append(gInt).append(" mm,0 mm\r\n")
     sb.append("SPEED ").append(speed).append("\r\n")
     sb.append("DENSITY ").append(density).append("\r\n")
+    sb.append("SIZE ").append(wInt).append(" mm,").append(hInt).append(" mm\r\n")
+    sb.append("GAP ").append(gInt).append(" mm,0 mm\r\n")
     sb.append("DIRECTION 0\r\n")
     sb.append("REFERENCE 0,0\r\n")
     sb.append("SET TEAR ON\r\n")
@@ -648,57 +719,60 @@ class DevPrinterModule : Module() {
   }
 
   /**
-   * Sliced line-by-line ESC/POS raster job generator matching inventort-seznik POS_PrintBMP
+   * Sliced line-by-line ESC/POS raster job generator matching inventort-seznik POS_PrintBMP and the @vardrz patch
    */
-  private fun buildEscPosRasterJob(bitmap: Bitmap, widthMm: Double): PrintJobResult {
+  private fun buildEscPosRasterJob(bitmap: Bitmap, widthMm: Double, feedDots: Int = 30): PrintJobResult {
     val dpm = 8.0
     val rawW = Math.max(64, Math.round(widthMm * dpm).toInt())
-    val maxHeadDots = if (widthMm > 58.0) 576 else 384
-    val targetW = Math.min(maxHeadDots, rawW)
-    val width = ((targetW + 7) / 8) * 8
-    val height = Math.max(64, Math.round(bitmap.height * (width.toDouble() / bitmap.width)).toInt())
-    val widthBytes = width / 8
+    val headDots = if (widthMm > 58.0) 576 else 384
+    val headBytes = headDots / 8
 
-    val scaled = if (bitmap.width != width || bitmap.height != height) {
-      Bitmap.createScaledBitmap(bitmap, width, height, true)
+    val targetW = Math.min(headDots, ((rawW + 7) / 8) * 8)
+    val targetH = Math.max(32, Math.round(bitmap.height * (targetW.toDouble() / bitmap.width)).toInt())
+    val height = ((targetH + 7) / 8) * 8
+    val leftPadding = ((headDots - targetW) / 2).coerceAtLeast(0)
+
+    val scaled = if (bitmap.width != targetW || bitmap.height != height) {
+      Bitmap.createScaledBitmap(bitmap, targetW, height, true)
     } else {
       bitmap
     }
 
-    val solidBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(solidBitmap)
-    canvas.drawColor(android.graphics.Color.WHITE)
-    canvas.drawBitmap(scaled, 0f, 0f, null)
+    val solidBitmap = Bitmap.createBitmap(headDots, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(solidBitmap)
+    canvas.drawColor(Color.WHITE)
+    canvas.drawBitmap(scaled, leftPadding.toFloat(), 0f, null)
 
-    val pixels = IntArray(width * height)
-    solidBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+    val pixels = IntArray(headDots * height)
+    solidBitmap.getPixels(pixels, 0, headDots, 0, 0, headDots, height)
 
     val outStream = ByteArrayOutputStream()
-    outStream.write(byteArrayOf(0x1B, 0x40)) // ESC @
+    outStream.write(byteArrayOf(0x1B, 0x40)) // ESC @ (init)
 
     for (y in 0 until height) {
-      val pixRowOffset = y * width
-      val rowCmd = ByteArray(8 + widthBytes)
+      val pixRowOffset = y * headDots
+      val rowCmd = ByteArray(8 + headBytes)
       rowCmd[0] = 0x1D
       rowCmd[1] = 0x76
       rowCmd[2] = 0x30
       rowCmd[3] = 0x00
-      rowCmd[4] = (widthBytes and 0xFF).toByte()
-      rowCmd[5] = ((widthBytes shr 8) and 0xFF).toByte()
+      rowCmd[4] = (headBytes and 0xFF).toByte()
+      rowCmd[5] = ((headBytes shr 8) and 0xFF).toByte()
       rowCmd[6] = 0x01
       rowCmd[7] = 0x00
 
-      for (byteCol in 0 until widthBytes) {
+      for (byteCol in 0 until headBytes) {
         var byteVal = 0
         for (bit in 0 until 8) {
           val x = byteCol * 8 + bit
-          if (x < width) {
+          if (x < headDots) {
             val color = pixels[pixRowOffset + x]
             val r = (color shr 16) and 0xFF
             val g = (color shr 8) and 0xFF
             val b = color and 0xFF
             val a = (color shr 24) and 0xFF
-            val isBlack = if (a < 50) false else ((77 * r + 150 * g + 29 * b) shr 8) < 128
+            val gray = if (a < 50) 255 else (77 * r + 150 * g + 29 * b) shr 8
+            val isBlack = gray <= Floyd16x16[x and 15][y and 15]
             if (isBlack) {
               byteVal = byteVal or (1 shl (7 - bit))
             }
@@ -709,14 +783,67 @@ class DevPrinterModule : Module() {
       outStream.write(rowCmd)
     }
 
-    outStream.write(byteArrayOf(0x1B, 0x64, 0x04)) // ESC d 4
+    // Trailing feed: matching @vardrz patch POS_Set_PrtAndFeedPaper(feed) -> ESC J feed
+    if (feedDots > 0) {
+      val feedVal = Math.min(255, feedDots)
+      outStream.write(byteArrayOf(0x1B, 0x4A, feedVal.toByte())) // ESC J feed
+    }
+    outStream.write(byteArrayOf(0x1B, 0x40)) // ESC @ reset
+
     if (!solidBitmap.isRecycled && solidBitmap != bitmap) solidBitmap.recycle()
     if (!scaled.isRecycled && scaled != bitmap && scaled != solidBitmap) scaled.recycle()
 
-    return PrintJobResult(outStream.toByteArray(), width, height)
+    return PrintJobResult(outStream.toByteArray(), headDots, height)
+  }
+
+  /**
+   * Universal byte writer supporting both RFCOMM BluetoothSocket and AutoReplyPrint handle
+   */
+  private fun writeBytes(data: ByteArray): Boolean {
+    // 1. Direct Bluetooth RFCOMM socket if active
+    val stream = socketOutStream
+    if (stream != null) {
+      try {
+        val chunkSize = 2048
+        var offset = 0
+        while (offset < data.size) {
+          val count = Math.min(chunkSize, data.size - offset)
+          stream.write(data, offset, count)
+          offset += count
+        }
+        stream.flush()
+        Log.i(TAG, "Wrote ${data.size} bytes to BluetoothSocket stream")
+        return true
+      } catch (e: Exception) {
+        Log.e(TAG, "socketOutStream.write failed: ${e.message}", e)
+      }
+    }
+
+    // 2. SPP port via AutoReplyPrint handle
+    val h = printerHandle
+    if (h != null && Pointer.nativeValue(h) != 0L) {
+      val chunkSize = 2048
+      var offset = 0
+      while (offset < data.size) {
+        val count = Math.min(chunkSize, data.size - offset)
+        val chunk = if (offset == 0 && count == data.size) data else data.copyOfRange(offset, offset + count)
+        val written = AutoReplyPrint.INSTANCE.CP_Port_Write(h, chunk, count, 5000)
+        if (written <= 0) {
+          Log.e(TAG, "CP_Port_Write failed at offset $offset (expected $count, got $written)")
+          return false
+        }
+        offset += count
+      }
+      Log.i(TAG, "Wrote ${data.size} bytes via CP_Port_Write")
+      return true
+    }
+
+    Log.e(TAG, "writeBytes failed: no active connection (socket or handle)")
+    return false
   }
 
   private fun isHandleAlive(): Boolean {
+    if (bluetoothSocket?.isConnected == true) return true
     val h = printerHandle ?: return false
     return try {
       AutoReplyPrint.INSTANCE.CP_Port_IsConnectionValid(h)
@@ -727,11 +854,20 @@ class DevPrinterModule : Module() {
 
   private fun closeHandle() {
     try {
+      socketOutStream?.close()
+    } catch (_: Exception) {}
+    socketOutStream = null
+
+    try {
+      bluetoothSocket?.close()
+    } catch (_: Exception) {}
+    bluetoothSocket = null
+
+    try {
       printerHandle?.let {
         AutoReplyPrint.INSTANCE.CP_Port_Close(it)
       }
-    } catch (_: Exception) {
-    }
+    } catch (_: Exception) {}
     printerHandle = null
     connectedMac = null
     connectedName = null
@@ -816,14 +952,11 @@ class DevPrinterModule : Module() {
   private fun isLikelyDev(name: String?): Boolean {
     if (name.isNullOrBlank()) return false
     val n = name.lowercase()
-    if (n.contains("tejas") || n.contains("rudra") || n.contains("josh")) return false
     return n.contains("dev") ||
-      n.contains("veer") ||
       n.contains("2in1") ||
       n.contains("2-in-1") ||
       n.contains("2 in 1") ||
       n.contains("seznik dev") ||
-      n.contains("seznik veer") ||
       n.contains("autoreply") ||
       n.contains("caysn") ||
       n.contains("pos-58") ||

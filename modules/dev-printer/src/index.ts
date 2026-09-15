@@ -23,7 +23,7 @@ type NativeDevPrinter = {
   calibrate(paperType?: number): Promise<DevCalibrationResult>;
   printPngLabel(options: Record<string, unknown>): Promise<DevPrintResult>;
   printReceiptText(text: string, options?: Record<string, unknown>): Promise<{ success: boolean }>;
-  testPrint(): Promise<{ success: boolean }>;
+  testPrint(options?: unknown): Promise<{ success: boolean }>;
   addListener(
     eventName: string,
     listener: (event: unknown) => void,
@@ -213,6 +213,9 @@ export async function printDevPngLabel(options: DevPrintOptions): Promise<DevPri
     gapMm: (options as any).gapMm ?? 2,
     copies: options.copies ?? 1,
     density: options.density ?? 8,
+    speed: options.speed ?? 4,
+    media: options.media ?? 'gap',
+    commandSet: options.commandSet ?? 'escpos',
     rotation: options.rotation ?? 0,
     threshold: options.threshold ?? 128,
   });
@@ -239,8 +242,8 @@ export async function getDevStatus(): Promise<DevStatusResult> {
   return mod.getStatus();
 }
 
-export async function testDevPrint(): Promise<{ success: boolean }> {
+export async function testDevPrint(mode?: 'tspl' | 'escpos'): Promise<{ success: boolean }> {
   const mod = getNative();
   if (!mod) throw new Error('Dev printer module not available');
-  return mod.testPrint();
+  return mod.testPrint(mode ? { mode } : undefined);
 }
