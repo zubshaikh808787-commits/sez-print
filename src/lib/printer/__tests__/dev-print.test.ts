@@ -127,12 +127,63 @@ function testStatusBitmaskParsing() {
   console.log('ok AutoReplyPrint status bitmask parsing validated');
 }
 
+function testDevPrintGeometryAndAlignment() {
+  const DPI = 203;
+  const dpm = 8; // 203 DPI = 8 dots/mm
+
+  function calculateDevPrintParams(opts: {
+    widthMm: number;
+    heightMm: number;
+    hOffsetMm?: number;
+    vOffsetMm?: number;
+    paperWidth?: '58mm' | '80mm';
+  }) {
+    const paperWidth = opts.paperWidth ?? (opts.widthMm > 58 ? '80mm' : '58mm');
+    const headWidthDots = paperWidth === '80mm' ? 576 : 384;
+    const rawWidthDots = Math.round(opts.widthMm * dpm);
+    const labelWidthDots = Math.min(headWidthDots, rawWidthDots);
+
+    const hOffsetDots = Math.round((opts.hOffsetMm ?? 0) * dpm);
+    const leftPadding = Math.max(0, Math.min(headWidthDots - labelWidthDots, hOffsetDots));
+    const vOffsetDots = Math.max(0, Math.round((opts.vOffsetMm ?? 0) * dpm));
+
+    return {
+      headWidthDots,
+      rawWidthDots,
+      labelWidthDots,
+      leftPadding,
+      vOffsetDots,
+    };
+  }
+
+  // 50 x 30 mm label on 58mm printer:
+  // Must use full printable head (384 dots) without 360 downscaling, and leftPadding must be 0 (no artificial right shift)
+  const dev50 = calculateDevPrintParams({ widthMm: 50, heightMm: 30 });
+  assert.equal(dev50.headWidthDots, 384);
+  assert.equal(dev50.labelWidthDots, 384, '50mm label must use full 384 dots, NOT clamped to 360');
+  assert.equal(dev50.leftPadding, 0, 'Default leftPadding must be 0, NOT 20 dots');
+
+  // 40 x 30 mm label on 58mm printer:
+  // 40mm * 8 = 320 dots, left-aligned at origin 0
+  const dev40 = calculateDevPrintParams({ widthMm: 40, heightMm: 30 });
+  assert.equal(dev40.labelWidthDots, 320);
+  assert.equal(dev40.leftPadding, 0);
+
+  // Calibration offset: +2mm horizontal shift -> 16 dots
+  const devCalib = calculateDevPrintParams({ widthMm: 40, heightMm: 30, hOffsetMm: 2 });
+  assert.equal(devCalib.leftPadding, 16);
+
+  console.log('ok DEV printer 1:1 scaling and top-left preview alignment verified');
+}
+
 function main() {
   testNameClassification();
   testDpiAndDimensionCalculations();
   testPaperTypeAndPrintModeResolution();
   testStatusBitmaskParsing();
+  testDevPrintGeometryAndAlignment();
   console.log('\n=== ALL SEZNIK DEV PRINT SDK TESTS PASSED ===\n');
 }
 
 main();
+

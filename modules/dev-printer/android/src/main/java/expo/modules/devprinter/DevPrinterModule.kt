@@ -730,7 +730,7 @@ class DevPrinterModule : Module() {
     val targetW = Math.min(headDots, ((rawW + 7) / 8) * 8)
     val targetH = Math.max(32, Math.round(bitmap.height * (targetW.toDouble() / bitmap.width)).toInt())
     val height = ((targetH + 7) / 8) * 8
-    val leftPadding = ((headDots - targetW) / 2).coerceAtLeast(0)
+    val leftPadding = 0 // Align left with preview origin
 
     val scaled = if (bitmap.width != targetW || bitmap.height != height) {
       Bitmap.createScaledBitmap(bitmap, targetW, height, true)

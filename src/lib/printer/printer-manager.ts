@@ -495,7 +495,7 @@ class PrinterManager {
     // DEV OEM AutoReplyPrint printer
     if (store.sdkId === 'dev' || this.activeTransport === 'dev-spp') {
       const dpi = 203; // Standard Dev printer resolution (8 dots/mm)
-      const alignment = settings.printerAlignment ?? 'center';
+      const alignment = settings.printerAlignment ?? 'left';
       const headWidthMm = settings.printheadWidthMm ?? 50;
       const headWidthDots = mmToDots(headWidthMm, dpi);
       return {
@@ -2222,6 +2222,8 @@ class PrinterManager {
             widthMm: options.widthMm,
             heightMm: options.heightMm,
             gapMm: options.gapMm ?? 2,
+            vOffsetMm: options.vOffsetMm ?? 0,
+            hOffsetMm: options.hOffsetMm ?? 0,
             copies: options.copies ?? 1,
             media: options.media ?? 'gap',
           });
