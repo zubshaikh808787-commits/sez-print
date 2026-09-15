@@ -137,7 +137,7 @@ export function PrintSizeSelector({
           <Text style={styles.title}>Select print size</Text>
           <Text style={styles.subtitle}>
             {intent === 'artwork'
-              ? 'Pick the millimetre size of the roll in the printer — not the photo. 2-up jewellery is 37 × 96 mm; 3-up is 54 × 96 mm. The photo is mapped onto that rectangle so the outline sits on the die-cuts.'
+              ? 'Pick the millimetre size of the roll in the printer — not the photo. 2-up jewellery is 37 × 96 mm; 3-up is 54 × 96 mm (3 mm gaps). The photo is mapped onto that rectangle so the outline sits on the die-cuts.'
               : `Label content is ${formatPrintSize(initialWidthMm, initialHeightMm)}. Choose This label size to match the editor. Other presets scale the design uniformly to fit that paper. Custom paper tiles when both sides are larger than the label.`}
           </Text>
           <ScrollView

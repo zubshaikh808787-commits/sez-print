@@ -235,8 +235,8 @@ function testArtboardRefitsWhenSplitGrows() {
   assert.ok(large.heightPx > small.heightPx);
   assert.ok(large.heightPx <= largeH);
   assert.ok(large.widthPx <= padW);
-  const jewelrySmall = fitEditorPadBoard(54, 96, padW, smallH, 28);
-  const jewelryLarge = fitEditorPadBoard(54, 96, padW, largeH, 28);
+  const jewelrySmall = fitEditorPadBoard(50, 100, padW, smallH, 28);
+  const jewelryLarge = fitEditorPadBoard(50, 100, padW, largeH, 28);
   assert.ok(jewelrySmall.widthPx <= padW);
   assert.ok(jewelryLarge.scale >= jewelrySmall.scale);
   console.log('ok pxPerMm refits and recenters when the split column grows');

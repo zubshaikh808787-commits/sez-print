@@ -33,6 +33,8 @@ class PrintPipeline(
         val density: Int = 8,        // 0..15
         val speed: Float = 4.0f,     // 1.0..8.0
         val threshold: Int = 128,    // 1..254
+        /** Gap/feed in mm. Continuous → printLinedots. Gap/black media: paperType + device LEARN_LABEL. */
+        val gapMm: Float = 0f,
         val hOffsetMm: Float = 0f,
         val vOffsetMm: Float = 0f
     )
@@ -101,7 +103,7 @@ class PrintPipeline(
             "target=${options.widthMm}x${options.heightMm}mm | " +
             "hOffset=${options.hOffsetMm}mm, vOffset=${options.vOffsetMm}mm | " +
             "copies=${options.copies} | paperType=${options.paperType} | " +
-            "density=${options.density} | speed=${options.speed}"
+            "density=${options.density} | speed=${options.speed} | gapMm=${options.gapMm}"
         )
 
         val helper = printer.helper
@@ -156,6 +158,13 @@ class PrintPipeline(
         build.density(options.density.coerceIn(0, 15))
         build.speed(options.speed.coerceIn(1.0f, 8.0f))
         build.printImg(imageName, options.copies.coerceAtLeast(1))
+        // Flashlabel has no setGapLength API. For continuous stock, Gap Length feeds extra dots.
+        // Gap/black media rely on paperType + LEARN_LABEL (calibration) for physical gap sensing.
+        if (options.paperType == 1 /* CONTINUOUS */ && options.gapMm > 0f) {
+            val feedDots = (options.gapMm * OEM_DPM).toInt().coerceAtLeast(1)
+            build.printLinedots(feedDots)
+            Log.i(TAG, "[PrintPipeline] Continuous feed printLinedots($feedDots) for gapMm=${options.gapMm}")
+        }
         build.disenable()
 
         Log.i(TAG, "[PrintPipeline] Submitting PrintBuild to helper.run()")
@@ -191,8 +200,8 @@ class PrintPipeline(
         val scaled = if (bitmap.width == w && bitmap.height == h) {
             bitmap
         } else {
-            Log.i(TAG, "[PrintPipeline] Scaling ${bitmap.width}x${bitmap.height} → ${w}x${h}px (${widthMm}x${heightMm}mm @ ${OEM_DPM} dpm)")
-            Bitmap.createScaledBitmap(bitmap, w, h, true)
+            Log.i(TAG, "[PrintPipeline] Fitting ${bitmap.width}x${bitmap.height} → ${w}x${h}px (${widthMm}x${heightMm}mm @ ${OEM_DPM} dpm)")
+            containFitToPage(bitmap, w, h)
         }
 
         val hOffsetPx = (hOffsetMm * OEM_DPM).toInt()
@@ -208,6 +217,26 @@ class PrintPipeline(
         canvas.drawColor(android.graphics.Color.WHITE)
         canvas.drawBitmap(scaled, hOffsetPx.toFloat(), vOffsetPx.toFloat(), null)
         return target
+    }
+
+    private fun containFitToPage(src: Bitmap, pageW: Int, pageH: Int): Bitmap {
+        val page = Bitmap.createBitmap(pageW, pageH, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(page)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        if (src.width <= 0 || src.height <= 0) return page
+        val scale = minOf(pageW.toFloat() / src.width, pageH.toFloat() / src.height)
+        val dw = src.width * scale
+        val dh = src.height * scale
+        val left = (pageW - dw) / 2f
+        val top = (pageH - dh) / 2f
+        val paint = android.graphics.Paint().apply {
+            // Nearest-neighbor keeps thin text/barcode edges; bilinear bloomed thermal ink.
+            isFilterBitmap = false
+            isDither = false
+            isAntiAlias = false
+        }
+        canvas.drawBitmap(src, null, android.graphics.RectF(left, top, left + dw, top + dh), paint)
+        return page
     }
 
     companion object {

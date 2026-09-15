@@ -189,6 +189,8 @@ export default function HomeScreen() {
   };
 
   const connected = printerStatus === 'connected';
+  const innerWidth = Math.min(width - SCREEN_PAD * 2, MaxContentWidth);
+  const quarterTileWidth = (innerWidth - MENU_GAP * 3) / 4;
 
   return (
     <View style={styles.root}>
@@ -346,44 +348,38 @@ export default function HomeScreen() {
               />
             </View>
 
-            {/* Row 3: 2ups Label, Shipping Label, Jewellery Label, Customize */}
-            <View style={styles.menuRow}>
+            {/* Row 3: same square category tiles — 2ups, Shipping, Jewellery, Customize, Img to Label */}
+            <View style={styles.categoryRow}>
               <Tile
-                style={styles.menuQuarter}
+                style={[styles.menuQuarter, { width: quarterTileWidth }]}
                 iconComponent={<LabelCloneIcon size={30} color={Palette.accent} />}
                 label="2ups Label"
                 href="/new-label-setup?isTwoUps=true"
               />
               <Tile
-                style={styles.menuQuarter}
+                style={[styles.menuQuarter, { width: quarterTileWidth }]}
                 iconComponent={<ShippingLabelIcon size={30} color={Palette.accent} />}
                 label="Shipping"
                 href="/shipping-label"
               />
               <Tile
-                style={styles.menuQuarter}
+                style={[styles.menuQuarter, { width: quarterTileWidth }]}
                 iconComponent={<JewelleryLabelIcon size={30} color={Palette.accent} />}
                 label="Jewellery"
                 href="/jewellery-label"
               />
               <Tile
-                style={styles.menuQuarter}
+                style={[styles.menuQuarter, { width: quarterTileWidth }]}
                 iconComponent={<CustomizeIcon size={30} color={Palette.accent} />}
                 label="Customize"
                 href="/customize-template"
               />
-            </View>
-
-            {/* Row 4: Img to Label */}
-            <View style={styles.menuRow}>
               <Tile
-                variant="wide"
-                style={styles.menuHalf}
-                iconComponent={<ImgToLabelIcon size={26} color={Palette.accent} />}
+                style={[styles.menuQuarter, { width: quarterTileWidth }]}
+                iconComponent={<ImgToLabelIcon size={30} color={Palette.accent} />}
                 label="Img to Label"
                 href="/img-to-label"
               />
-              <View style={styles.menuHalf} />
             </View>
           </View>
         </View>
@@ -539,6 +535,12 @@ const styles = StyleSheet.create({
     gap: MENU_GAP,
     width: '100%',
   },
+  categoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: MENU_GAP,
+    width: '100%',
+  },
   menuHalf: {
     flex: 1,
     minWidth: 0,
@@ -548,8 +550,9 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   menuQuarter: {
-    flex: 1,
     minWidth: 0,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   tileOuter: {
     minWidth: 0,

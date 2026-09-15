@@ -255,7 +255,10 @@ export async function printTezImage(options: TezPrintOptions): Promise<TezPrintR
     density: options.density ?? 8,
     speed: options.speed ?? 4.0,
     paperType: paperTypeInt,
+    gapMm: options.gapMm ?? 0,
     threshold: options.threshold ?? 128,
+    hOffsetMm: options.hOffsetMm ?? 0,
+    vOffsetMm: options.vOffsetMm ?? 0,
   });
 }
 

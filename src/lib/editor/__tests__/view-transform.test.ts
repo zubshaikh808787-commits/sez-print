@@ -166,7 +166,7 @@ function testPointerToMmRoundTrip() {
     { x: 0, y: 0 },
     { x: 10, y: 20 },
     { x: 50, y: 30 },
-    { x: 14, y: 96 },
+    { x: 14, y: 100 },
   ];
   for (const viewCase of cases) {
     const view = sampleView({ viewZoom: viewCase.zoom, panX: viewCase.panX, panY: viewCase.panY });
@@ -209,7 +209,7 @@ function testJewelryAndCableMmUnchanged() {
   const pad = fitEditorPadBoard(54, 96, 360, 400, 28);
   assert.ok(Math.abs(pad.widthPx / pad.scale - 54) < 1.01);
   assert.ok(Math.abs(pad.heightPx / pad.scale - 96) < 1.01);
-  console.log('ok jewelry 54×96 and cable 50×73 millimetres survive the view transform');
+  console.log('ok jewelry 50×100 and cable 50×73 millimetres survive the view transform');
 }
 
 function testArtboardOriginAccountsForRulersAndPad() {

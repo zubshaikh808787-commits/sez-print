@@ -43,10 +43,41 @@ export function blitGray(
   let oy = boxY;
 
   if (mode === 'original') {
-    dwOut = src.width;
-    dhOut = src.height;
-    ox = boxX + Math.floor((boxW - dwOut) / 2);
-    oy = boxY + Math.floor((boxH - dhOut) / 2);
+    const srcOffX = src.width > boxW ? Math.floor((src.width - boxW) / 2) : 0;
+    const srcOffY = src.height > boxH ? Math.floor((src.height - boxH) / 2) : 0;
+    dwOut = Math.min(src.width, boxW);
+    dhOut = Math.min(src.height, boxH);
+    ox = boxX + (src.width < boxW ? Math.floor((boxW - src.width) / 2) : 0);
+    oy = boxY + (src.height < boxH ? Math.floor((boxH - src.height) / 2) : 0);
+    const xMap = new Int32Array(dwOut);
+    const yMap = new Int32Array(dhOut);
+    const srcW = src.width;
+    const srcGray = src.gray;
+    const destGray = dest.gray;
+    const mapAxis = (destSize: number, srcSize: number, srcStart: number, out: Int32Array) => {
+      if (destSize <= 1 || srcSize <= 1) {
+        out.fill(srcStart);
+        return;
+      }
+      const last = srcStart + srcSize - 1;
+      for (let i = 0; i < destSize; i++) {
+        out[i] = Math.min(last, srcStart + Math.round((i * (srcSize - 1)) / (destSize - 1)));
+      }
+    };
+    mapAxis(dwOut, srcW - srcOffX, srcOffX, xMap);
+    mapAxis(dhOut, src.height - srcOffY, srcOffY, yMap);
+    for (let y = 0; y < dhOut; y++) {
+      const py = oy + y;
+      if (py < 0 || py >= destH) continue;
+      const srcRow = yMap[y] * srcW;
+      const destRow = py * destW;
+      for (let x = 0; x < dwOut; x++) {
+        const px = ox + x;
+        if (px < 0 || px >= destW) continue;
+        destGray[destRow + px] = srcGray[srcRow + xMap[x]];
+      }
+    }
+    return;
   } else if (mode === 'fit') {
     const scale = Math.min(boxW / Math.max(src.width, 1), boxH / Math.max(src.height, 1));
     dwOut = Math.max(1, Math.round(src.width * scale));
@@ -253,8 +284,10 @@ export function cropGrayRight(src: GrayBitmap, widthDots: number, heightDots: nu
   const out = createWhiteGray(w, h);
   const copyW = Math.min(src.width, w);
   const copyH = Math.min(src.height, h);
+  const sx = Math.max(0, Math.floor((src.width - copyW) / 2));
+  const sy = Math.max(0, Math.floor((src.height - copyH) / 2));
   for (let y = 0; y < copyH; y++) {
-    out.gray.set(src.gray.subarray(y * src.width, y * src.width + copyW), y * w);
+    out.gray.set(src.gray.subarray((sy + y) * src.width + sx, (sy + y) * src.width + sx + copyW), y * w);
   }
   return out;
 }

@@ -5,20 +5,30 @@ import {
   DEFAULT_SHAPE_STATE,
 } from '@/components/editor/types';
 import {
+  classifyJewelryDieCutField,
+  extractJewelryFirstColumnDocument,
+  isJewelryDieCutDocument,
+  isJewelryDieCutPreviewType,
+  isNearMm,
   JEWELRY_DIECUT,
+  JEWELRY_DIECUT_PREVIEW_SHEET,
   JEWELRY_DIECUT_TYPE,
   jewelryDieCutColumnX,
+  jewelryDieCutContentIsSingleTag,
   jewelryDieCutFieldTops,
+  migrateJewelrySheetToCanonicalSize,
+  softFitJewelryDieCutDocument,
+  type JewelryDieCutField,
 } from '@/constants/jewelry-diecut';
 import { clampElementToLabel, templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
-import { generateId, type LabelElement } from '@/lib/label-document';
+import { createLabelDocument, generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { buildRatTail143Elements } from '@/constants/rat-tail-143';
 import {
   hasStockSilhouette,
   JEWEL_STOCK,
   jewHangTabLayout,
-  jewThreeUpLayout,
 } from '@/lib/stock-silhouette';
+import { emptyBackground } from '@/lib/template-schema';
 
 type Frame = { left: number; top: number; width: number; height?: number };
 
@@ -179,16 +189,19 @@ function buildDieCutTagElements(colX: number, item: DieCutItemData = DEFAULT_DIE
   const priceH = textBlockHeightMm(type.pricePt, 1);
   const skuH = textBlockHeightMm(type.skuPt, 1);
   const huidH = textBlockHeightMm(type.huidPt, 1);
-  const tops = jewelryDieCutFieldTops({
-    title: titleH,
-    karat: karatH,
-    gr: bodyH,
-    nt: bodyH,
-    price: priceH,
-    barcode: type.barcodeHeightMm,
-    sku: skuH,
-    huid: huidH,
-  });
+  const tops = jewelryDieCutFieldTops(
+    {
+      title: titleH,
+      karat: karatH,
+      gr: bodyH,
+      nt: bodyH,
+      price: priceH,
+      barcode: type.barcodeHeightMm,
+      sku: skuH,
+      huid: huidH,
+    },
+    ['title', 'karat', 'gr', 'nt', 'price', 'barcode', 'sku', 'huid'],
+  );
 
   const title = textEl({ left, top: tops.title, width: innerW }, item.title, type.titlePt, {
     ...dieCutLine,
@@ -293,28 +306,6 @@ function jewP50Faces(h: number, smallPt: number) {
     faceLabel(0.5, 0.35, faceW, h - 0.7, 'Jewelry label', smallPt),
     faceLabel(JEWEL_STOCK.p50.foldX + 0.2, 0.35, faceW, h - 0.7, 'Jewelry label', smallPt),
   ];
-}
-
-function buildThreeUpRatTailContent(w: number, h: number, smallPt: number): LabelElement[] {
-  const { cols, tagW, gap, bodyH, sideMargin } = jewThreeUpLayout(w, h);
-  const foldY = bodyH / 2;
-  const inner = tagW - 1.0;
-  const els: LabelElement[] = [];
-  const typePt = Math.max(4.8, Math.min(6.2, smallPt * 0.82));
-  for (let i = 0; i < cols; i++) {
-    const colX = sideMargin + i * (tagW + gap);
-    const left = colX + 0.5;
-    els.push(textEl({ left, top: 1.6, width: inner }, 'GOLD RING', typePt, { align: 'center', bold: true }));
-    els.push(textEl({ left, top: 7.0, width: inner }, '22K (916)', typePt * 0.88, { align: 'center' }));
-    els.push(textEl({ left, top: 12.2, width: inner }, '₹ 24,950', typePt * 0.9, { align: 'center', bold: true }));
-    els.push(
-      barcodeEl({ left: colX + 0.8, top: foldY + 2.2, width: tagW - 1.6, height: Math.min(10, foldY - 4) }, '91603450', {
-        fontSize: typePt * 0.7,
-      }),
-    );
-    els.push(textEl({ left, top: foldY + 13.4, width: inner }, 'RNG-450', typePt * 0.82, { align: 'center' }));
-  }
-  return els;
 }
 
 export function buildJewelryTemplateElements(previewType: string, w: number, h: number): LabelElement[] {
@@ -464,8 +455,17 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
     case 'jew-label-46x100':
     case 'jew-rattail-3row-14x100':
     case 'jew-rattail-3row-55x80':
-      return buildThreeUpRatTailContent(w, h, smallPt);
-
+    case 'jew-rattail-3row-54x100': {
+      const allEls: LabelElement[] = [];
+      const itemData: DieCutItemData = {
+        ...DEFAULT_DIECUT_ITEM,
+        huid: 'HUID: A916B2',
+      };
+      for (let i = 0; i < JEWELRY_DIECUT.columns; i++) {
+        allEls.push(...buildDieCutTagElements(jewelryDieCutColumnX(i), itemData));
+      }
+      return allEls;
+    }
 
     case 'jew-rattail-single-14x100': {
       const bodyH = h * 0.58;
@@ -516,18 +516,6 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
       return buildDieCutTagElements(0);
     }
 
-    case 'jew-rattail-3row-54x100': {
-      const allEls: LabelElement[] = [];
-      const itemData: DieCutItemData = {
-        ...DEFAULT_DIECUT_ITEM,
-        huid: 'HUID: A916B2',
-      };
-      for (let i = 0; i < JEWELRY_DIECUT.columns; i++) {
-        allEls.push(...buildDieCutTagElements(jewelryDieCutColumnX(i), itemData));
-      }
-      return allEls;
-    }
-
     default:
       return [
         textEl({ left: pad, top: h * 0.12, width: w - pad * 2 }, 'Au750 · 2.35g', smallPt, { bold: true }),
@@ -549,4 +537,147 @@ export function buildJewelryTemplateElements(previewType: string, w: number, h: 
     : els;
 
   return printable.map((el) => clampElementToLabel(el, { widthMm: w, heightMm: h }));
+}
+
+/** Legacy catalog types that used 46×100 mm + spread layout math. */
+const LEGACY_JEWELRY_SHEET_TYPES = new Set([
+  'jew-label-46x100',
+  'jew-rattail-3row-14x100',
+  'jew-rattail-3row-55x80',
+]);
+
+function mergeJewelryInk(source: LabelDocument, target: LabelDocument): LabelDocument {
+  const byField = new Map<JewelryDieCutField, LabelElement>();
+  for (const el of source.elements) {
+    if (el.needPrinting === false) continue;
+    const field = classifyJewelryDieCutField(el);
+    if (field) byField.set(field, el);
+  }
+  const elements = target.elements.map((el) => {
+    const field = classifyJewelryDieCutField(el);
+    if (!field) return el;
+    const src = byField.get(field);
+    if (!src) return el;
+    if (el.type === 'text' && src.type === 'text') {
+      return { ...el, text: src.text, fontSize: src.fontSize ?? el.fontSize };
+    }
+    if (el.type === 'barcode' && src.type === 'barcode') {
+      return { ...el, content: src.content, encodeMode: src.encodeMode ?? el.encodeMode };
+    }
+    return el;
+  });
+  return {
+    ...target,
+    id: source.id,
+    name: source.name,
+    groupId: source.groupId,
+    orientation: source.orientation,
+    paperType: source.paperType,
+    elements,
+    updatedAt: Date.now(),
+  };
+}
+
+function buildCanonicalThreeUpSheet(name: string, category?: string | null, id?: string): LabelDocument {
+  const elements = buildJewelryTemplateElements(
+    JEWELRY_DIECUT_PREVIEW_SHEET,
+    JEWELRY_DIECUT.sheetWidthMm,
+    JEWELRY_DIECUT.sheetHeightMm,
+  );
+  const doc = createLabelDocument({
+    name,
+    widthMm: JEWELRY_DIECUT.sheetWidthMm,
+    heightMm: JEWELRY_DIECUT.sheetHeightMm,
+    elements,
+    mediaShape: 'diecut',
+    background: emptyBackground(),
+  });
+  return {
+    ...doc,
+    id: id ?? doc.id,
+    templatePreviewType: JEWELRY_DIECUT_PREVIEW_SHEET,
+    templateCategory: category ?? 'Jewelry',
+  };
+}
+
+/** True when a saved sheet needs size migrate or full rebuild (not already 54×96). */
+export function jewelrySheetNeedsCanonicalRebuild(doc: LabelDocument): boolean {
+  if (!isJewelryDieCutDocument(doc)) return false;
+  if (jewelryDieCutContentIsSingleTag(doc)) return false;
+  // Already on vendor schematic 54×96 — freeze author tops/lefts (WYSIWYG).
+  if (
+    isNearMm(doc.widthMm, JEWELRY_DIECUT.sheetWidthMm) &&
+    isNearMm(doc.heightMm, JEWELRY_DIECUT.sheetHeightMm)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * One canonical 54×96 die-cut sheet for browse → edit → print.
+ * Always column-centres printable ink so catalog templates land on the die-cuts.
+ */
+export function canonicalizeJewelryDieCutDocument(doc: LabelDocument): LabelDocument {
+  if (!isJewelryDieCutDocument(doc)) return doc;
+
+  if (jewelryDieCutContentIsSingleTag(doc)) {
+    let next = doc;
+    if (
+      isNearMm(doc.widthMm, JEWELRY_DIECUT.tagWidthMm) &&
+      !isNearMm(doc.heightMm, JEWELRY_DIECUT.tagHeightMm)
+    ) {
+      const sy = JEWELRY_DIECUT.tagHeightMm / Math.max(doc.heightMm, 0.01);
+      const elements = doc.elements.map((el) => {
+        const scaled = { ...el, top: Number((el.top * sy).toFixed(3)) };
+        if ('height' in el && typeof el.height === 'number') {
+          (scaled as { height: number }).height = Number((el.height * sy).toFixed(3));
+        }
+        return scaled;
+      });
+      next = {
+        ...doc,
+        heightMm: JEWELRY_DIECUT.tagHeightMm,
+        elements,
+        updatedAt: Date.now(),
+      };
+    }
+    return softFitJewelryDieCutDocument(next);
+  }
+
+  if (!jewelrySheetNeedsCanonicalRebuild(doc)) {
+    // Size already 54×96 — still re-centre columns (stored templates often drift left).
+    return softFitJewelryDieCutDocument(doc);
+  }
+
+  // Known multi-column sheet sizes → snap columns, keep relative Y, then centre.
+  const looksLikeSheet =
+    doc.widthMm >= JEWELRY_DIECUT.tagWidthMm * 2.5 ||
+    (doc.templatePreviewType != null && LEGACY_JEWELRY_SHEET_TYPES.has(doc.templatePreviewType));
+  if (looksLikeSheet) {
+    const barcode = doc.elements.find((el) => el.type === 'barcode' && el.needPrinting !== false);
+    const oldFold = Math.min(doc.heightMm * 0.34, 34);
+    const isSpread = barcode != null && barcode.top > oldFold + 4;
+    if (!isSpread) {
+      return softFitJewelryDieCutDocument(migrateJewelrySheetToCanonicalSize(doc));
+    }
+  }
+
+  const fresh = buildCanonicalThreeUpSheet(doc.name, doc.templateCategory, doc.id);
+  return softFitJewelryDieCutDocument(mergeJewelryInk(doc, fresh));
+}
+
+/**
+ * Print prepare: freeze positions; tile or extract for the chosen mode.
+ * Callers that need tiling should prefer print.tsx helpers; this keeps a
+ * single-entry canonicalize for edit + simple print.
+ */
+export function prepareJewelryPrintDocument(
+  doc: LabelDocument,
+  mode: '3up' | '2up' | 'single' = '3up',
+): LabelDocument {
+  if (!isJewelryDieCutDocument(doc)) return doc;
+  const frozen = canonicalizeJewelryDieCutDocument(doc);
+  if (mode === 'single') return extractJewelryFirstColumnDocument(frozen);
+  return frozen;
 }

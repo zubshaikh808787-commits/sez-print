@@ -193,7 +193,11 @@ function LabelElements({
               top: topPx,
               width: widthPx,
               height: heightPx,
-              overflow: 'hidden',
+              // Borders/shapes draw stroke inside the box — don't clip half the ink.
+              overflow:
+                element.type === 'border' || element.type === 'shape' || element.type === 'line'
+                  ? 'visible'
+                  : 'hidden',
               opacity: element.opacity ?? 1,
               zIndex: element.zIndex ?? 0,
               transform: [{ rotate: `${element.rotation}deg` }],
@@ -204,6 +208,7 @@ function LabelElements({
               heightPx={heightPx}
               scale={contentScale}
               forPrint={printDpi != null}
+              mediaShape={document.mediaShape}
             />
           </View>
         );
@@ -289,7 +294,9 @@ function HiFiCatalogCanvas({
     document.mediaShape === 'diecut' ||
     templateUsesDieCutBackground(document.templatePreviewType ?? '');
   if (density <= 1.01) {
-        <LabelCanvas document={document} fitted={fitted} showBorder={!diecut || document.mediaShape === 'circle'} />
+    return (
+      <LabelCanvas document={document} fitted={fitted} showBorder={!diecut || document.mediaShape === 'circle'} />
+    );
   }
   const hiFi = {
     widthPx: fitted.widthPx * density,

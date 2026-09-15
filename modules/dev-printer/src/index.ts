@@ -210,14 +210,15 @@ export async function printDevPngLabel(options: DevPrintOptions): Promise<DevPri
     pngBase64: options.pngBase64,
     widthMm: options.widthMm ?? 50,
     heightMm: options.heightMm ?? 30,
-    gapMm: (options as any).gapMm ?? 2,
+    gapMm: options.gapMm ?? 2,
     copies: options.copies ?? 1,
     density: options.density ?? 8,
-    speed: options.speed ?? 4,
     media: options.media ?? 'gap',
-    commandSet: options.commandSet ?? 'escpos',
+    commandSet: options.commandSet ?? 'auto',
     rotation: options.rotation ?? 0,
     threshold: options.threshold ?? 128,
+    hOffsetMm: options.hOffsetMm ?? 0,
+    vOffsetMm: options.vOffsetMm ?? 0,
   });
 }
 

@@ -307,7 +307,7 @@ class JoshPrinterModule : Module() {
       val gapLength = (options["gapLength"] as? Number)?.toInt() ?: 3
       val hOffsetMm = (options["hOffsetMm"] as? Number)?.toDouble() ?: 0.0
       val vOffsetMm = (options["vOffsetMm"] as? Number)?.toDouble() ?: 0.0
-      val alignment = (options["alignment"] as? String) ?: "left"
+      val alignment = (options["alignment"] as? String) ?: "center"
 
       ioExecutor.execute {
         try {

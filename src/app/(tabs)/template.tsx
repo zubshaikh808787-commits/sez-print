@@ -905,11 +905,11 @@ export const TEMPLATES: TemplateItem[] = [
   {
     id: 'cir-3',
     name: '403-Circle',
-    nameLine2: 'Label-52x52-φ50',
-    dimensions: '52 x 52',
+    nameLine2: 'Label-50x50-φ50',
+    dimensions: '50 x 50',
     category: 'Circle',
-    width: 52,
-    height: 52,
+    width: 50,
+    height: 50,
     previewType: 'circle-50',
   },
   {
@@ -1043,12 +1043,12 @@ export const TEMPLATES: TemplateItem[] = [
   {
     id: 'jwl-diecut-46x100',
     name: 'Jewelry',
-    nameLine2: 'Label 46x100',
-    dimensions: '46 x 100',
+    nameLine2: 'Label 54×96 (3-Up)',
+    dimensions: '54 x 96',
     category: 'Jewelry',
-    width: 46,
-    height: 100,
-    previewType: 'jew-label-46x100',
+    width: JEWELRY_DIECUT.sheetWidthMm,
+    height: JEWELRY_DIECUT.sheetHeightMm,
+    previewType: 'jew-rattail-3row-54x100',
   },
   {
     id: 'jwl-1',

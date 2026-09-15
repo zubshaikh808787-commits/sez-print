@@ -190,6 +190,78 @@ export function grayToPngBase64(raster: GrayRaster): string {
   return bytesToBase64(png);
 }
 
+export type BinarizeGrayOptions = {
+  threshold: number;
+  dither?: boolean;
+  /** Pull ink darker and paper whiter before thresholding (helps thin label text). */
+  stretchContrast?: boolean;
+};
+
+/**
+ * Stretch luminance so faint ink reads darker and paper reads whiter.
+ * Uses 2nd–98th percentile sampling to ignore outliers.
+ */
+export function stretchGrayContrastForPrint(src: GrayRaster): GrayRaster {
+  const { width, height, gray } = src;
+  const n = gray.length;
+  if (n === 0) return src;
+
+  const sampleCount = Math.min(n, 8192);
+  const step = Math.max(1, Math.floor(n / sampleCount));
+  const samples = new Uint16Array(sampleCount);
+  let si = 0;
+  for (let i = 0; i < n && si < sampleCount; i += step) samples[si++] = gray[i];
+  const sorted = Array.from(samples.subarray(0, si)).sort((a, b) => a - b);
+  if (sorted.length === 0) return src;
+
+  const lo = sorted[Math.floor(sorted.length * 0.02)] ?? 0;
+  const hi = sorted[Math.floor(sorted.length * 0.98)] ?? 255;
+  if (hi - lo < 20) return src;
+
+  const out = new Uint8Array(n);
+  const span = hi - lo;
+  for (let i = 0; i < n; i++) {
+    const v = gray[i];
+    const stretched = Math.round(((v - lo) * 255) / span);
+    out[i] = stretched < 0 ? 0 : stretched > 255 ? 255 : stretched;
+  }
+  return { width, height, gray: out };
+}
+
+/** Expand packed 1-bit raster back to 0/255 gray (for PNG export to native SDKs). */
+export function bitsToGrayRaster(bits: BitRaster, width: number): GrayRaster {
+  const height = bits.height;
+  const gray = new Uint8Array(width * height);
+  gray.fill(255);
+  const { data, bytesPerRow } = bits;
+  for (let y = 0; y < height; y++) {
+    const outRow = y * width;
+    const bitRow = y * bytesPerRow;
+    for (let x = 0; x < width; x++) {
+      const byte = data[bitRow + (x >> 3)];
+      if (byte & (0x80 >> (x & 7))) gray[outRow + x] = 0;
+    }
+  }
+  return { width, height, gray };
+}
+
+/**
+ * Prepare label artwork for thermal print: optional contrast stretch, then 1-bit
+ * conversion to pure black/white so native SDK thresholding cannot fade strokes.
+ */
+export function binarizeGrayForPrint(
+  src: GrayRaster,
+  options: BinarizeGrayOptions,
+): GrayRaster {
+  const prepared =
+    options.stretchContrast === false ? src : stretchGrayContrastForPrint(src);
+  const bits = grayToBits(prepared, {
+    threshold: options.threshold,
+    dither: Boolean(options.dither),
+  });
+  return bitsToGrayRaster(bits, prepared.width);
+}
+
 /**
  * Decode a PNG (base64) into a luminance raster. Transparent pixels become white.
  *
@@ -389,15 +461,42 @@ export function cropGrayToSize(src: GrayRaster, destW: number, destH: number): G
   out.fill(255);
   const copyW = Math.min(src.width, width);
   const copyH = Math.min(src.height, height);
+  // Center-crop when TSPL pack-down trims 0–7 columns so content stays visually centered.
+  const sx = Math.max(0, Math.floor((src.width - copyW) / 2));
+  const sy = Math.max(0, Math.floor((src.height - copyH) / 2));
   const srcGray = src.gray;
   for (let y = 0; y < copyH; y++) {
-    const srcRow = y * src.width;
+    const srcRow = (sy + y) * src.width + sx;
     const outRow = y * width;
     for (let x = 0; x < copyW; x++) {
       out[outRow + x] = srcGray[srcRow + x];
     }
   }
   return { width, height, gray: out };
+}
+
+/** Place a gray raster on a white canvas, centered. Crops if larger than dest. */
+export function padGrayCentered(src: GrayRaster, destW: number, destH: number): GrayRaster {
+  const width = Math.max(1, Math.round(destW));
+  const height = Math.max(1, Math.round(destH));
+  if (src.width === width && src.height === height) return src;
+  if (src.width > width || src.height > height) return cropGrayToSize(src, width, height);
+  const out = new Uint8Array(width * height);
+  out.fill(255);
+  const ox = Math.floor((width - src.width) / 2);
+  const oy = Math.floor((height - src.height) / 2);
+  for (let y = 0; y < src.height; y++) {
+    out.set(
+      src.gray.subarray(y * src.width, (y + 1) * src.width),
+      (oy + y) * width + ox,
+    );
+  }
+  return { width, height, gray: out };
+}
+
+/** Force raster to exact label canvas dots — clip or pad, never overflow. */
+export function lockGrayToCanvas(src: GrayRaster, destW: number, destH: number): GrayRaster {
+  return padGrayCentered(src, destW, destH);
 }
 
 /**

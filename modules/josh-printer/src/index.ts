@@ -278,7 +278,7 @@ export async function printJoshPngLabel(
     gapLength: options.gapLength ?? 3,
     hOffsetMm: options.hOffsetMm ?? 0,
     vOffsetMm: options.vOffsetMm ?? 0,
-    alignment: options.alignment ?? 'left',
+    alignment: options.alignment ?? 'center',
   });
 }
 

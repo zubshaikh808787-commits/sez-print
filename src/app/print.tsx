@@ -29,9 +29,12 @@ import {
   JEWELRY_DIECUT,
   JEWELRY_DIECUT_PRINT_PRESET_2UP,
   JEWELRY_DIECUT_PRINT_PRESET_3UP,
+  JEWELRY_DIECUT_PRINT_PRESET_SINGLE,
+  extractJewelryFirstColumnDocument,
   isJewelryDieCutDocument,
-  refitJewelryDieCutDocument,
 } from '@/constants/jewelry-diecut';
+import { canonicalizeJewelryDieCutDocument } from '@/constants/jewelry-template-elements';
+import { resolvePrintQuality } from '@/lib/printer/print-quality';
 import {
   CABLE_FLAG_DIECUT,
   CABLE_FLAG_PRINT_PRESET_SINGLE,
@@ -58,7 +61,6 @@ import {
   PRINT_CAPTURE_OPTIONS,
   encodeConnectedPrinterJob,
   formatPrintFailure,
-  mapCapturePngToPackedPng,
   orientedPrintSize,
   printCaptureLayout,
   printJobSizeError,
@@ -387,7 +389,7 @@ export default function PrintScreen() {
     if (jewelryDieCutJob || cableFlagJob || ratTail143Job) return sourceDocument;
     return sourceDocument.ups ? composeUpsDocument(sourceDocument) : sourceDocument;
   }, [sourceDocument, jewelryDieCutJob, cableFlagJob, ratTail143Job]);
-  const jewelryJobDpi = jewelryDieCutJob ? JEWELRY_DIECUT.printDpi : null;
+  const jewelryJobDpi = null; // Use connected printer DPI — forced 304 blurred Tez/Dev 203 heads.
   const cableJobDpi = cableFlagJob ? CABLE_FLAG_DIECUT.printDpi : null;
   const ratTailJobDpi = ratTail143Job ? RAT_TAIL_143_PRINT.printDpi : null;
 
@@ -476,13 +478,16 @@ export default function PrintScreen() {
       return cableFlagPrintDocument(previewDocument);
     }
     if (jewelryDieCutJob && sourceDocument) {
-      const tiled =
-        printPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP
-          ? tileDocumentThreeUpDieCut54(sourceDocument)
-          : printPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_2UP
-            ? tileDocumentTwoUpDieCut37(sourceDocument)
-            : sourceDocument;
-      return refitJewelryDieCutDocument(tiled);
+      // Freeze author mm positions — no softFit/refit on the print path.
+      const frozen = canonicalizeJewelryDieCutDocument(sourceDocument);
+      if (printPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP) {
+        return tileDocumentThreeUpDieCut54(frozen);
+      }
+      if (printPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_2UP) {
+        return tileDocumentTwoUpDieCut37(frozen);
+      }
+      // Single Label Tag: crop leftmost 14×96 column (not full sheet SIZE).
+      return extractJewelryFirstColumnDocument(frozen);
     }
     return applyPrintSize(previewDocument, printPreset, printSize);
   }, [
@@ -643,16 +648,18 @@ export default function PrintScreen() {
 
     try {
       const dieCutJob = jewelryDieCutJob || cableFlagJob || ratTail143Job;
-      const dither = dieCutJob ? false : defaults.colorMode === 'Halftone';
-      const threshold = dieCutJob
-        ? Math.min(
-            200,
-            Math.max(160, defaults.grayThreshold + (darkness != null ? (darkness - 8) * 8 : 40)),
-          )
-        : Math.min(
-            250,
-            Math.max(10, defaults.grayThreshold + (darkness != null ? (darkness - 8) * 10 : 0)),
-          );
+      const quality = resolvePrintQuality({
+        darkness,
+        speed,
+        grayThreshold: defaults.grayThreshold,
+        colorMode: defaults.colorMode,
+        dieCut: dieCutJob,
+        jewelry: jewelryDieCutJob,
+      });
+      const { density: printDensity, threshold, speed: printSpeed, dither } = quality;
+      console.info(
+        `[print] Advanced params → density=${printDensity} speed=${printSpeed} threshold=${threshold} gap=${gapLength}mm hOffset=${hOffset}mm vOffset=${vOffset}mm darknessUI=${darkness ?? 'Auto'} speedUI=${speed ?? 'Auto'}`,
+      );
 
       for (let page = 0; page < pageCount; page++) {
         const pageStart = Date.now();
@@ -672,13 +679,10 @@ export default function PrintScreen() {
           pageCount === 1 && printRasterRef.current?.key === printRasterKey
             ? printRasterRef.current.base64
             : null;
-        const capturePacked = async () => {
-          const raw = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
-          // OEM SDKs (TEZ PrintImgHelper, DEV AutoReplyPrint DrawImageFromBitmap) need a
-          // normal RGBA PNG — they do their own binarization internally.
-          // TSPL 1bpp grayscale packing is only for the TD-404 raw-TSPL path.
-          if (manager.isTez || manager.isDev) return raw;
-          return mapCapturePngToPackedPng(raw, widthMm, heightMm, jobDpi).pngBase64;
+          // All native printer modules (TD-404, Josh LPAPI, Tez PrintSDK, Dev AutoReplyPrint)
+          // accept raw PNG base64 and perform hardware-accelerated 1-bit packing natively.
+          // Skipping the pure-JS PNG decode→re-encode saves ~2–3s per label on mobile.
+          return captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
         };
         const [connectionResult, base64] = await Promise.all([
           manager.ensureConnected().catch((err) => {
@@ -749,13 +753,14 @@ export default function PrintScreen() {
             heightMm: paper.heightMm,
             gapMm: gapLength,
             copies,
-            density: darkness,
-            speed: speed ?? 4,
+            density: printDensity,
+            speed: printSpeed,
             orientation: ratTail143Job ? 0 : orientationDeg,
             dpi: jobDpi,
             hOffsetMm: hOffset,
             vOffsetMm: vOffset,
             media: wantsBline ? 'bline' : media,
+            threshold: jewelryDieCutJob ? Math.max(threshold, 168) : threshold,
           });
           usedNative = true;
           timer.end('transmit');
@@ -775,14 +780,14 @@ export default function PrintScreen() {
             heightMm: paper.heightMm,
             gapMm: gapLength,
             copies: copies,
-            density: darkness,
-            speed: speed,
+            density: printDensity,
+            speed: printSpeed,
             orientation: ratTail143Job ? 0 : orientationDeg,
             dpi: jobDpi,
             hOffsetMm: hOffset,
             vOffsetMm: vOffset,
             media: wantsBline ? 'bline' : media,
-            alignment: manager.getActivePrinterProfile().alignment,
+            alignment: manager.isJosh ? 'center' : manager.getActivePrinterProfile().alignment,
           });
           timer.end('transmit');
           console.info(
@@ -802,8 +807,8 @@ export default function PrintScreen() {
               heightMm: paper.heightMm,
               gapMm: gapLength,
               copies,
-              density: darkness,
-              speed: speed ?? 4,
+              density: printDensity,
+              speed: printSpeed,
               vOffsetMm: vOffset,
               hOffsetMm: hOffset,
               media: wantsBline ? 'bline' : media,
@@ -834,13 +839,14 @@ export default function PrintScreen() {
               heightMm: paper.heightMm,
               gapMm: gapLength,
               copies,
-              density: darkness,
-              speed: speed ?? 4,
+              density: printDensity,
+              speed: printSpeed,
               vOffsetMm: vOffset,
               hOffsetMm: hOffset,
               media: wantsBline ? 'bline' : media,
               orientation: ratTail143Job ? 0 : orientationDeg,
               dpi: jobDpi,
+              threshold: jewelryDieCutJob ? Math.max(threshold, 168) : threshold,
             });
             if (usedNative) {
               console.info(
@@ -852,8 +858,8 @@ export default function PrintScreen() {
             usedNative = false;
           }
           timer.end('sdkFastPrint');
-        } else if (manager.transport === 'td404-spp' && !artworkPhoto) {
-          // Native TD-404 SPP fast path: direct C++/Kotlin 1-bit packing (<15ms)
+        } else if (manager.usesTd404CommandSet) {
+          // Native TD-404 SPP fast path (Tejas / Rudra): direct Kotlin 1-bit packing (<15ms)
           timer.start('sdkFastPrint');
           try {
             usedNative = await tryNativeSdkPngPrint({
@@ -864,8 +870,8 @@ export default function PrintScreen() {
               heightMm: paper.heightMm,
               gapMm: gapLength,
               copies,
-              density: darkness,
-              speed: speed ?? 6,
+              density: printDensity,
+              speed: printSpeed,
               vOffsetMm: vOffset,
               hOffsetMm: hOffset,
               media: wantsBline ? 'bline' : media,
@@ -884,7 +890,7 @@ export default function PrintScreen() {
           timer.end('sdkFastPrint');
         }
 
-        if (!manager.isJosh && !manager.isTez && !usedNative) {
+        if (!manager.isJosh && !manager.isTez && !manager.isDev && !usedNative) {
           timer.start('rasterize');
           const bits = rasterizePngForPrint(base64, {
             widthMm,
@@ -904,8 +910,8 @@ export default function PrintScreen() {
             heightMm: paper.heightMm,
             gapMm: gapLength,
             copies: 1,
-            density: darkness,
-            speed: speed ?? 6,
+            density: printDensity,
+            speed: printSpeed,
             vOffsetMm: vOffset,
             hOffsetMm: hOffset,
             media: wantsBline ? 'bline' : media,
@@ -1019,6 +1025,7 @@ export default function PrintScreen() {
                 width={cardWidth}
                 maxHeight={cardHeight}
                 showArtboardBorder={false}
+                hideNonPrinting
               />
             ) : params.imageUri ? (
               <View style={[styles.previewCard, { width: cardWidth, height: cardHeight }]}>
@@ -1164,18 +1171,21 @@ export default function PrintScreen() {
                         heightMm: JEWELRY_DIECUT.sheetHeightMm,
                       });
                     } else {
-                      setPrintPreset(null);
+                      setPrintPreset(
+                        PRINT_SIZE_PRESETS.find((preset) => preset.id === JEWELRY_DIECUT_PRINT_PRESET_SINGLE) ??
+                          null,
+                      );
                       setPrintSize({
-                        widthMm: sourceDocument?.widthMm ?? JEWELRY_DIECUT.tagWidthMm,
-                        heightMm: sourceDocument?.heightMm ?? JEWELRY_DIECUT.tagHeightMm,
+                        widthMm: JEWELRY_DIECUT.tagWidthMm,
+                        heightMm: JEWELRY_DIECUT.tagHeightMm,
                       });
                     }
                   }}
                 />
                 <Text style={styles.helperText}>
                   {printPreset?.id === JEWELRY_DIECUT_PRINT_PRESET_3UP
-                    ? 'Prints across all 3 labels on the 54 × 96 mm backing sheet.'
-                    : `Prints exact single tag dimensions (${sourceDocument?.widthMm ?? JEWELRY_DIECUT.tagWidthMm} × ${sourceDocument?.heightMm ?? JEWELRY_DIECUT.tagHeightMm} mm).`}
+                    ? 'Prints across all 3 labels on the 54 × 96 mm backing sheet (3 mm gaps).'
+                    : `Prints one 14 × 96 mm tag (left column). SIZE 14.00 mm,96.00 mm.`}
                 </Text>
               </View>
             ) : null}
@@ -1249,26 +1259,38 @@ export default function PrintScreen() {
                 <StepperRow
                   label="Print Darkness"
                   value={darkness == null ? 'Auto' : String(darkness)}
-                  minusDisabled={darkness == null}
+                  minusDisabled={darkness != null && darkness <= 1}
                   plusDisabled={darkness != null && darkness >= 15}
-                  onMinus={() => setDarkness((d) => (d == null || d <= 1 ? null : d - 1))}
+                  onMinus={() =>
+                    setDarkness((d) => {
+                      if (d == null) return 7;
+                      if (d <= 1) return null;
+                      return d - 1;
+                    })
+                  }
                   onPlus={() => setDarkness((d) => (d == null ? 8 : Math.min(15, d + 1)))}
                   bordered
                 />
                 <StepperRow
                   label="Print Speed"
                   value={speed == null ? 'Auto' : String(speed)}
-                  minusDisabled={speed == null}
-                  plusDisabled={speed != null && speed >= 5}
-                  onMinus={() => setSpeed((s) => (s == null || s <= 1 ? null : s - 1))}
-                  onPlus={() => setSpeed((s) => (s == null ? 3 : Math.min(5, s + 1)))}
+                  minusDisabled={speed != null && speed <= 1}
+                  plusDisabled={speed != null && speed >= 8}
+                  onMinus={() =>
+                    setSpeed((s) => {
+                      if (s == null) return 2;
+                      if (s <= 1) return null;
+                      return s - 1;
+                    })
+                  }
+                  onPlus={() => setSpeed((s) => (s == null ? 3 : Math.min(8, s + 1)))}
                   bordered
                 />
                 <StepperRow
                   label="Gap Length"
                   value={`${gapLength.toFixed(2)} mm`}
-                  minusDisabled={gapLength <= -10}
-                  onMinus={() => setGapLength((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
+                  minusDisabled={gapLength <= 0}
+                  onMinus={() => setGapLength((v) => Math.max(0, Math.round((v - 0.5) * 100) / 100))}
                   onPlus={() => setGapLength((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
                   bordered
                 />
@@ -1283,8 +1305,8 @@ export default function PrintScreen() {
                 <StepperRow
                   label="Vertical Offset"
                   value={`${vOffset.toFixed(2)} mm`}
-                  minusDisabled={vOffset <= 0}
-                  onMinus={() => setVOffset((v) => Math.max(0, Math.round((v - 0.5) * 100) / 100))}
+                  minusDisabled={vOffset <= -10}
+                  onMinus={() => setVOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
                   onPlus={() => setVOffset((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
                 />
               </View>

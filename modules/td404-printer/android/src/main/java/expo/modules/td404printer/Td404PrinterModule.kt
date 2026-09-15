@@ -480,6 +480,25 @@ class Td404PrinterModule : Module() {
 
     val sizeCmd = "SIZE ${formatMm(widthMm)} mm,${formatMm(heightMm)} mm\r\n"
 
+    // TSPL BITMAP x,y must be >= 0. Bake any negative (or mixed) offset into pixels.
+    var bitmapX = xDots
+    var bitmapY = yDots
+    if (xDots < 0 || yDots < 0) {
+      val shifted = Bitmap.createBitmap(packedW, packedH, Bitmap.Config.ARGB_8888)
+      shifted.eraseColor(Color.WHITE)
+      Canvas(shifted).drawBitmap(bitmap, xDots.toFloat(), yDots.toFloat(), null)
+      if (shifted !== bitmap) {
+        bitmap.recycle()
+        bitmap = shifted
+      }
+      bitmapX = 0
+      bitmapY = 0
+      android.util.Log.i(
+        "Td404Printer",
+        "PRINT-TRACE OFFSET_BAKED raw=${xDots},${yDots} → BITMAP 0,0",
+      )
+    }
+
     val contentW = bitmap.width
     val contentH = bitmap.height
     val bytesPerRow = packedW / 8
@@ -520,7 +539,7 @@ class Td404PrinterModule : Module() {
       "DIRECTION 0\r\n" +
       "REFERENCE 0,0\r\n" +
       "CLS\r\n" +
-      "BITMAP $xDots,$yDots,$bytesPerRow,$contentH,0,"
+      "BITMAP $bitmapX,$bitmapY,$bytesPerRow,$contentH,0,"
     val footer = "\r\nPRINT 1,1\r\n"
 
     val headerBytes = header.toByteArray(Charsets.US_ASCII)

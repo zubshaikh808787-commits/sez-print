@@ -139,6 +139,7 @@ class TezPrinterModule : Module() {
             val density = (options["density"] as? Number)?.toInt() ?: 8
             val speed = (options["speed"] as? Number)?.toFloat() ?: 4.0f
             val threshold = (options["threshold"] as? Number)?.toInt() ?: 128
+            val gapMm = (options["gapMm"] as? Number)?.toFloat() ?: 0f
             val hOffsetMm = (options["hOffsetMm"] as? Number)?.toFloat() ?: 0f
             val vOffsetMm = (options["vOffsetMm"] as? Number)?.toFloat() ?: 0f
 
@@ -151,6 +152,7 @@ class TezPrinterModule : Module() {
                 density = density,
                 speed = speed,
                 threshold = threshold,
+                gapMm = gapMm,
                 hOffsetMm = hOffsetMm,
                 vOffsetMm = vOffsetMm
             )

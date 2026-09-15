@@ -11,8 +11,15 @@
  * that the existing universal-bridge sends to the connected printer.
  */
 
-import { createPrintGeometry, type PrintGeometry } from '@/lib/printer/print-spec';
-import { fitGrayToSize, rotateGray, type GrayRaster } from '@/lib/printer/escpos';
+import { createPrintGeometry, mmToDots, type PrintGeometry } from '@/lib/printer/print-spec';
+import {
+  binarizeGrayForPrint,
+  fitGrayToSize,
+  lockGrayToCanvas,
+  rotateGray,
+  trimGrayInkBounds,
+  type GrayRaster,
+} from '@/lib/printer/escpos';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -38,6 +45,10 @@ export interface ImgToLabelConfig {
   hAlign: HAlign;
   /** Vertical alignment within the label. Default: center. */
   vAlign: VAlign;
+  /** Trim empty photo margins before fit (label photos / scans). Default: true. */
+  trimBorder?: boolean;
+  /** Inset from label edge in mm so ink stays inside the die-cut. Default: 0. */
+  safeMarginMm?: number;
 }
 
 export interface PrintLabelResult {
@@ -238,7 +249,15 @@ function applyCoverWithAlignment(
   return { width, height, gray: out };
 }
 
-// ─── Main Render Function ──────────────────────────────────────────────────
+function insetDots(totalDots: number, marginDots: number): number {
+  return Math.max(1, totalDots - Math.max(0, marginDots) * 2);
+}
+
+function prepareSourceGray(gray: GrayRaster, trimBorder: boolean): GrayRaster {
+  if (!trimBorder) return gray;
+  const trimmed = trimGrayInkBounds(gray);
+  return trimmed.width > 0 && trimmed.height > 0 ? trimmed : gray;
+}
 
 /**
  * Render an imported image into a label-sized print bitmap.
@@ -256,11 +275,15 @@ export function renderImgToLabel(
   sourceGray: GrayRaster,
   config: ImgToLabelConfig,
 ): PrintLabelResult {
+  const trimBorder = config.trimBorder !== false;
+  const safeMarginMm = Math.max(0, config.safeMarginMm ?? 0);
+
   // 1. Apply image rotation (independent of label orientation)
   let gray = sourceGray;
   if (config.imageRotationDeg) {
     gray = rotateGray(gray, config.imageRotationDeg);
   }
+  gray = prepareSourceGray(gray, trimBorder);
 
   // 2. Resolve orientation
   const oriented = resolveOrientation(
@@ -273,40 +296,32 @@ export function renderImgToLabel(
 
   // 3. Calculate print canvas from physical dimensions + DPI
   const canvas = calcPrintCanvas(oriented.widthMm, oriented.heightMm, config.dpi);
+  const marginDotsX = mmToDots(safeMarginMm, config.dpi);
+  const marginDotsY = mmToDots(safeMarginMm, config.dpi);
+  const innerW = insetDots(canvas.widthPx, marginDotsX);
+  const innerH = insetDots(canvas.heightPx, marginDotsY);
 
-  // 4. Apply fit mode with alignment
-  let result: GrayRaster;
+  // 4. Apply fit mode with alignment inside the safe inner rect, then lock to full canvas
+  let inner: GrayRaster;
   switch (config.fitMode) {
     case 'contain':
-      result = applyContainWithAlignment(
-        gray,
-        canvas.widthPx,
-        canvas.heightPx,
-        config.hAlign,
-        config.vAlign,
-      );
+      inner = applyContainWithAlignment(gray, innerW, innerH, config.hAlign, config.vAlign);
       break;
     case 'cover':
-      result = applyCoverWithAlignment(
-        gray,
-        canvas.widthPx,
-        canvas.heightPx,
-        config.hAlign,
-        config.vAlign,
-      );
+      inner = applyCoverWithAlignment(gray, innerW, innerH, config.hAlign, config.vAlign);
       break;
     case 'stretch':
-      result = fitGrayToSize(gray, canvas.widthPx, canvas.heightPx, 'stretch');
+      inner = fitGrayToSize(gray, innerW, innerH, 'stretch');
       break;
     default:
-      result = applyContainWithAlignment(
-        gray,
-        canvas.widthPx,
-        canvas.heightPx,
-        config.hAlign,
-        config.vAlign,
-      );
+      inner = applyContainWithAlignment(gray, innerW, innerH, config.hAlign, config.vAlign);
   }
+
+  let result = inner;
+  if (safeMarginMm > 0) {
+    result = padInnerOnCanvas(inner, canvas.widthPx, canvas.heightPx, marginDotsX, marginDotsY);
+  }
+  result = lockGrayToCanvas(result, canvas.widthPx, canvas.heightPx);
 
   return {
     widthMm: oriented.widthMm,
@@ -318,6 +333,47 @@ export function renderImgToLabel(
     fitMode: config.fitMode,
     geometry: canvas.geometry,
   };
+}
+
+/** Place inner raster onto full label canvas with symmetric margin. */
+function padInnerOnCanvas(
+  inner: GrayRaster,
+  canvasW: number,
+  canvasH: number,
+  marginDotsX: number,
+  marginDotsY: number,
+): GrayRaster {
+  const width = Math.max(1, Math.round(canvasW));
+  const height = Math.max(1, Math.round(canvasH));
+  const out = new Uint8Array(width * height);
+  out.fill(255);
+  const ox = Math.max(0, marginDotsX);
+  const oy = Math.max(0, marginDotsY);
+  const copyW = Math.min(inner.width, width - ox);
+  const copyH = Math.min(inner.height, height - oy);
+  for (let y = 0; y < copyH; y++) {
+    out.set(
+      inner.gray.subarray(y * inner.width, y * inner.width + copyW),
+      (oy + y) * width + ox,
+    );
+  }
+  return { width, height, gray: out };
+}
+
+/**
+ * Apply contrast stretch + 1-bit conversion for thermal print and WYSIWYG preview.
+ * Output is pure black/white so native SDK re-threshold cannot fade thin strokes.
+ */
+export function finalizeImgToLabelForPrint(
+  result: PrintLabelResult,
+  options: { threshold: number; dither?: boolean },
+): PrintLabelResult {
+  const gray = binarizeGrayForPrint(result.gray, {
+    threshold: options.threshold,
+    dither: options.dither ?? false,
+    stretchContrast: true,
+  });
+  return { ...result, gray };
 }
 
 // ─── Preview helpers ───────────────────────────────────────────────────────
@@ -366,5 +422,7 @@ export function defaultImgToLabelConfig(
     imageRotationDeg: 0,
     hAlign: 'center',
     vAlign: 'center',
+    trimBorder: true,
+    safeMarginMm: 0,
   };
 }

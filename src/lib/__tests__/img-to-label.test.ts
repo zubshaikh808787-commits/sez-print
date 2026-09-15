@@ -107,6 +107,7 @@ import {
   defaultImgToLabelConfig,
   type ImgToLabelConfig,
 } from '@/lib/img-to-label-engine';
+import { cropGrayToSize } from '@/lib/printer/escpos';
 import type { GrayRaster } from '@/lib/printer/escpos';
 
 function makeGray(w: number, h: number, value = 128): GrayRaster {
@@ -198,6 +199,72 @@ group('img-to-label-engine: renderImgToLabel with rotation', () => {
   // After 90° rotation, the source is 200×100 but output should still be label-sized
   assert(result.gray.width === result.widthPx, 'rotated: width matches');
   assert(result.gray.height === result.heightPx, 'rotated: height matches');
+});
+
+group('escpos: cropGrayToSize centers pack-down crop', () => {
+  const srcGray = new Uint8Array(40).fill(255);
+  srcGray[5] = 0;
+  const cropped = cropGrayToSize({ width: 10, height: 4, gray: srcGray }, 8, 4);
+  assert(cropped.width === 8, 'packed width is 8 dots');
+  assert(cropped.gray[4] === 0, 'ink dot stays centered after symmetric crop');
+});
+
+group('img-to-label-engine: lockGrayToCanvas exact size', () => {
+  const src = makeGray(90, 110, 50);
+  const config = defaultImgToLabelConfig(50, 30, 203);
+  const result = renderImgToLabel(src, config);
+  assert(result.gray.width === result.widthPx, 'canvas width locked');
+  assert(result.gray.height === result.heightPx, 'canvas height locked');
+  assert(result.geometry.sizeDotsW === result.widthPx, 'geometry width matches canvas');
+  assert(result.geometry.sizeDotsH === result.heightPx, 'geometry height matches canvas');
+});
+
+group('img-to-label-engine: trimBorder removes white margins', () => {
+  const gray = new Uint8Array(20 * 20).fill(255);
+  for (let y = 8; y < 12; y++) {
+    for (let x = 8; x < 12; x++) {
+      gray[y * 20 + x] = 0;
+    }
+  }
+  const src = { width: 20, height: 20, gray };
+  const config = defaultImgToLabelConfig(50, 30, 203);
+  config.trimBorder = true;
+  config.fitMode = 'stretch';
+  const result = renderImgToLabel(src, config);
+  assert(result.gray.width === result.widthPx, 'trim: output width locked');
+  assert(result.gray.height === result.heightPx, 'trim: output height locked');
+});
+
+group('img-to-label-engine: safeMarginMm insets content', () => {
+  const src = makeGray(100, 100, 0);
+  const config = defaultImgToLabelConfig(50, 30, 203);
+  config.fitMode = 'stretch';
+  config.safeMarginMm = 2;
+  const result = renderImgToLabel(src, config);
+  assert(result.gray.width === result.widthPx, 'margin: width locked');
+  assert(result.gray.height === result.heightPx, 'margin: height locked');
+  // Top-left corner should stay white due to margin inset
+  assert(result.gray.gray[0] === 255, 'margin: top-left stays white');
+});
+
+group('escpos: binarizeGrayForPrint preserves thin strokes', () => {
+  const { binarizeGrayForPrint, stretchGrayContrastForPrint } = require('@/lib/printer/escpos') as typeof import('@/lib/printer/escpos');
+  const { calcLabelImageThreshold } = require('@/lib/printer/print-quality') as typeof import('@/lib/printer/print-quality');
+
+  const gray = new Uint8Array(40 * 10).fill(255);
+  for (let x = 10; x < 30; x++) gray[5 * 40 + x] = 210;
+  const src = { width: 40, height: 10, gray };
+  const stretched = stretchGrayContrastForPrint(src);
+  assert(stretched.gray[5 * 40 + 20] < src.gray[5 * 40 + 20], 'contrast stretch darkens faint ink');
+
+  const threshold = calcLabelImageThreshold(128, null);
+  const bin = binarizeGrayForPrint(src, { threshold, stretchContrast: true });
+  const row = 5 * 40 + 10;
+  let blackCount = 0;
+  for (let x = 10; x < 30; x++) {
+    if (bin.gray[row + x] === 0) blackCount++;
+  }
+  assert(blackCount >= 8, 'binarize keeps faint line visible');
 });
 
 group('img-to-label-engine: same config = same output', () => {

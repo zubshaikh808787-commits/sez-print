@@ -552,6 +552,8 @@ function testJewelry3UpTilesAllThreeColumns() {
   assert.equal(jewelryDieCutColumnX(1), 20);
   assert.equal(jewelryDieCutColumnX(2), 37);
   assert.equal(JEWELRY_DIECUT.sheetWidthMm, 54);
+  assert.equal(JEWELRY_DIECUT.gapMm, 3);
+  assert.equal(JEWELRY_DIECUT.sideMarginMm, 3);
   assert.equal(3 + 14 + 3 + 14 + 3 + 14 + 3, 54);
 
   const sheet = createPrintGeometry(54, 96, 304);
@@ -600,7 +602,7 @@ function testJewelry3UpTilesAllThreeColumns() {
   assert.equal(tiledHalf.elements.length, 3);
   const halfLefts = tiledHalf.elements.map((el) => Math.round(el.left * 100) / 100).sort((a, b) => a - b);
   assert.deepEqual(halfLefts, [3.95, 20.95, 37.95]);
-  console.log('ok jewellery 3-up columns 3 / 20 / 37 mm on 54×96', sheet.sizeCommand);
+  console.log('ok jewellery 3-up columns 3 / 20 / 37 mm on 54×96 (3 mm gaps)', sheet.sizeCommand);
 }
 
 function testEditorFinalizeIntegerDownsample() {

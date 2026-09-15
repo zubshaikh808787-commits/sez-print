@@ -152,10 +152,74 @@ export default function PrinterConnectScreen() {
           const idx = prev.findIndex((d) => d.id.toUpperCase() === key);
           if (idx === -1) return [...prev, device];
           const next = [...prev];
+          const existing = next[idx];
+
+          const nameToCheck = device.name || existing.name;
+          const isJosh = isLikelyJoshName(nameToCheck);
+          const isTez = !isJosh && isLikelyTezName(nameToCheck);
+          const isShakti = !isJosh && !isTez && isLikelyShaktiName(nameToCheck);
+          const isTd = !isJosh && !isTez && !isShakti && isLikelyTd404Name(nameToCheck);
+          const isDev = !isJosh && !isTez && !isShakti && !isTd && isLikelyDevName(nameToCheck);
+
+          let finalTransport = device.transport;
+          let finalSdkId = device.sdkId;
+          let finalLikelyJosh = device.likelyJosh;
+          let finalLikelyTez = (device as any).likelyTez;
+          let finalLikelyShakti = (device as any).likelyShakti;
+          let finalLikelyTd404 = device.likelyTd404;
+          let finalLikelyDev = (device as any).likelyDev;
+
+          if (isJosh) {
+            finalTransport = 'josh-lpapi';
+            finalSdkId = 'josh';
+            finalLikelyJosh = true;
+            finalLikelyDev = false;
+            finalLikelyTd404 = false;
+          } else if (isTez || isShakti) {
+            finalTransport = 'tez-spp';
+            finalSdkId = 'tez';
+            finalLikelyTez = isTez;
+            finalLikelyShakti = isShakti;
+            finalLikelyDev = false;
+            finalLikelyTd404 = false;
+          } else if (isTd) {
+            finalTransport = 'bluetooth-spp';
+            finalSdkId = 'td404';
+            finalLikelyTd404 = true;
+            finalLikelyDev = false;
+            finalLikelyJosh = false;
+          } else if (isDev) {
+            finalTransport = 'dev-spp';
+            finalSdkId = 'dev';
+            finalLikelyDev = true;
+            finalLikelyTd404 = false;
+            finalLikelyJosh = false;
+          } else {
+            // Unidentified name — if existing device had an explicit SDK and incoming is generic, keep existing
+            const SPECIFIC_SDKS = new Set(['td404', 'josh', 'tez', 'dev']);
+            if (SPECIFIC_SDKS.has(existing.sdkId ?? '') && !SPECIFIC_SDKS.has(device.sdkId ?? '')) {
+              finalTransport = existing.transport;
+              finalSdkId = existing.sdkId;
+              finalLikelyTd404 = existing.likelyTd404;
+              finalLikelyJosh = existing.likelyJosh;
+              finalLikelyTez = (existing as any).likelyTez;
+              finalLikelyShakti = (existing as any).likelyShakti;
+              finalLikelyDev = (existing as any).likelyDev;
+            }
+          }
+
           next[idx] = {
-            ...next[idx],
+            ...existing,
             ...device,
-            bonded: Boolean(next[idx].bonded || device.bonded),
+            name: device.name || existing.name,
+            transport: finalTransport,
+            sdkId: finalSdkId,
+            likelyTd404: finalLikelyTd404,
+            likelyJosh: finalLikelyJosh,
+            likelyTez: finalLikelyTez,
+            likelyShakti: finalLikelyShakti,
+            likelyDev: finalLikelyDev,
+            bonded: Boolean(existing.bonded || device.bonded),
           };
           return next;
         });
@@ -276,35 +340,47 @@ export default function PrinterConnectScreen() {
     }
     setConnectingId(device.id);
     try {
-      const isDev =
-        device.transport === 'dev-spp' ||
-        device.likelyDev ||
-        isLikelyDevName(device.name);
+      const name = device.name;
+      const isJosh =
+        isLikelyJoshName(name) ||
+        device.transport === 'josh-lpapi' ||
+        (device.likelyJosh && !isLikelyDevName(name));
       const isTez =
-        !isDev &&
-        (device.transport === 'tez-spp' ||
-          device.likelyTez ||
-          device.likelyShakti ||
-          isLikelyTezName(device.name) ||
-          isLikelyShaktiName(device.name));
-      const isJosh = !isDev && !isTez && (device.transport === 'josh-lpapi' || device.likelyJosh || isLikelyJoshName(device.name));
-      const isTd404 = !isDev && !isTez && !isJosh && (device.likelyTd404 || isLikelyTd404Name(device.name));
-      const transport = isDev
-        ? 'dev-spp'
+        !isJosh &&
+        (isLikelyTezName(name) ||
+          isLikelyShaktiName(name) ||
+          device.transport === 'tez-spp' ||
+          ((device as any).likelyTez && !isLikelyDevName(name)) ||
+          ((device as any).likelyShakti && !isLikelyDevName(name)));
+      const isTd404 =
+        !isJosh &&
+        !isTez &&
+        (isLikelyTd404Name(name) || (device.likelyTd404 && !isLikelyDevName(name)));
+      const isDev =
+        !isJosh &&
+        !isTez &&
+        !isTd404 &&
+        (isLikelyDevName(name) || (device.transport === 'dev-spp' && (device as any).likelyDev));
+      const transport = isJosh
+        ? 'josh-lpapi'
         : isTez
           ? 'tez-spp'
-          : isJosh
-            ? 'josh-lpapi'
-            : (device.transport === 'wifi' ? 'wifi' : 'bluetooth-spp');
+          : isTd404
+            ? 'bluetooth-spp'
+            : isDev
+              ? 'dev-spp'
+              : (device.transport === 'wifi' ? 'wifi' : 'bluetooth-spp');
 
       console.info(
-        isDev
-          ? `[DEV-CONN] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to AutoReplyPrint SDK`
+        isJosh
+          ? `[JOSH-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to JOSH LPAPI`
           : isTez
             ? `[TEZ-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to TEZ OEM PrintSDK`
-            : isJosh
-              ? `[JOSH-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to JOSH LPAPI`
-              : `[CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to classic BT SPP`,
+            : isTd404
+              ? `[TD404-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to TD-404 BT SPP`
+              : isDev
+                ? `[DEV-CONN] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to AutoReplyPrint SDK`
+                : `[CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to ${transport}`,
       );
       await getPrinterManager().connect(
         device.id,
@@ -574,11 +650,32 @@ export default function PrinterConnectScreen() {
   };
 
   const renderDevice = (device: DiscoveredPrinter, index: number, total: number) => {
-    const isDev = device.likelyDev || isLikelyDevName(device.name);
-    const isTez = !isDev && (device.likelyTez || isLikelyTezName(device.name));
-    const isShakti = !isDev && !isTez && (device.likelyShakti || isLikelyShaktiName(device.name));
-    const td404 = !isDev && !isTez && !isShakti && (device.likelyTd404 || isLikelyTd404Name(device.name));
-    const isJosh = !isDev && !isTez && !isShakti && !td404 && (device.likelyJosh || isLikelyJoshName(device.name) || device.transport === 'josh-lpapi');
+    const name = device.name;
+    const isJosh =
+      isLikelyJoshName(name) ||
+      device.transport === 'josh-lpapi' ||
+      (device.likelyJosh && !isLikelyDevName(name));
+    const isTez =
+      !isJosh &&
+      (isLikelyTezName(name) ||
+        device.transport === 'tez-spp' ||
+        ((device as any).likelyTez && !isLikelyDevName(name)));
+    const isShakti =
+      !isJosh &&
+      !isTez &&
+      (isLikelyShaktiName(name) ||
+        ((device as any).likelyShakti && !isLikelyDevName(name)));
+    const td404 =
+      !isJosh &&
+      !isTez &&
+      !isShakti &&
+      (isLikelyTd404Name(name) || (device.likelyTd404 && !isLikelyDevName(name)));
+    const isDev =
+      !isJosh &&
+      !isTez &&
+      !isShakti &&
+      !td404 &&
+      (isLikelyDevName(name) || (device.transport === 'dev-spp' && (device as any).likelyDev));
     const iconTint = isDev
       ? '#0284C7'
       : isTez

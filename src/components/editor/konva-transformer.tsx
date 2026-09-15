@@ -116,6 +116,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const baseHeightPx = Math.max(element.type === 'line' ? 2 : 1, mmToPx(sizeMm.height, pxPerMMSafe));
   const minResizePx = Math.max(2, resizePolicy.minMm * pxPerMMSafe);
   const baseRotation = element.rotation ?? 0;
+  const circularBorder =
+    element.type === 'border' &&
+    Math.abs(canvasWidthMm - canvasHeightMm) < 0.75 &&
+    Math.abs((element.width ?? canvasWidthMm) - canvasWidthMm) < 1.25 &&
+    Math.abs((element.height ?? canvasHeightMm) - canvasHeightMm) < 1.25;
 
   const transX = useSharedValue(0);
   const transY = useSharedValue(0);
@@ -926,6 +931,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           widthPx={baseWidthPx}
           heightPx={baseHeightPx}
           scale={pxPerMMSafe}
+          mediaShape={circularBorder ? 'circle' : undefined}
         />
       </View>
     );
@@ -943,6 +949,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               widthPx={baseWidthPx}
               heightPx={baseHeightPx}
               scale={pxPerMMSafe}
+              mediaShape={circularBorder ? 'circle' : undefined}
             />
           </View>
         </Animated.View>

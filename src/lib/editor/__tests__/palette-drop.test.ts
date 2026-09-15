@@ -96,7 +96,7 @@ function testJewelryAndCableDropStayMillimetres() {
   });
   assert.equal(cable.left, 6);
   assert.equal(cable.top, 6);
-  console.log('ok jewelry 54×96 and cable 50×73 palette drops stay millimetres');
+  console.log('ok jewelry 50×100 and cable 50×73 palette drops stay millimetres');
 }
 
 function testOffArtboardDropIsRejected() {

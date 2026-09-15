@@ -50,6 +50,7 @@ import {
   defaultImgToLabelConfig,
   resolveOrientation,
   calcPrintCanvas,
+  finalizeImgToLabelForPrint,
   type FitMode,
   type Orientation,
   type HAlign,
@@ -58,12 +59,9 @@ import {
 } from '@/lib/img-to-label-engine';
 import { formatPrintPixels } from '@/lib/unit-conversion';
 import { decodeGalleryImage } from '@/lib/printer/gallery-decode';
-import { rotateGray, type GrayRaster } from '@/lib/printer/escpos';
-import { createPrintGeometry } from '@/lib/printer/print-spec';
-import {
-  formatPrintFailure,
-  printJobSizeError,
-} from '@/lib/printer/print-job';
+import { grayToPngBase64, type GrayRaster } from '@/lib/printer/escpos';
+import { formatPrintFailure, printJobSizeError } from '@/lib/printer/print-job';
+import { calcLabelImageThreshold } from '@/lib/printer/print-quality';
 import { printArtworkJob } from '@/lib/printer/universal-bridge';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
 import { logPrintTrace } from '@/printing';
@@ -367,6 +365,12 @@ export default function ImgToLabelScreen() {
   const [darkness, setDarkness] = useState<number | null>(null);
   const [speed, setSpeed] = useState<number | null>(null);
   const [printing, setPrinting] = useState(false);
+  const [sourceGray, setSourceGray] = useState<GrayRaster | null>(null);
+  const [hOffset, setHOffset] = useState(0);
+  const [vOffset, setVOffset] = useState(0);
+  const [trimBorder, setTrimBorder] = useState(true);
+  const [safeMarginMm, setSafeMarginMm] = useState(0);
+  const [decoding, setDecoding] = useState(false);
 
   // ─── Image Pick ────────────────────────────────────────────────────────
   const pickImage = useCallback(async () => {
@@ -380,6 +384,7 @@ export default function ImgToLabelScreen() {
       if (res.canceled || !res.assets?.[0]) return;
       const asset = res.assets[0];
       setImageUri(asset.uri);
+      setSourceGray(null);
       if (asset.width && asset.height) {
         setImagePixels({ width: asset.width, height: asset.height });
       } else {
@@ -403,6 +408,29 @@ export default function ImgToLabelScreen() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!imageUri) {
+      setSourceGray(null);
+      setDecoding(false);
+      return;
+    }
+    let cancelled = false;
+    setDecoding(true);
+    decodeGalleryImage(imageUri)
+      .then((decoded) => {
+        if (!cancelled) setSourceGray(decoded.gray);
+      })
+      .catch(() => {
+        if (!cancelled) setSourceGray(null);
+      })
+      .finally(() => {
+        if (!cancelled) setDecoding(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [imageUri]);
+
   // ─── Derived values ────────────────────────────────────────────────────
   const dpi = getPrinterManager().getPrintDpi();
   const oriented = useMemo(
@@ -421,6 +449,39 @@ export default function ImgToLabelScreen() {
     [oriented, dpi],
   );
 
+  const renderConfig = useMemo(
+    (): ImgToLabelConfig => ({
+      widthMm: oriented.widthMm,
+      heightMm: oriented.heightMm,
+      dpi,
+      fitMode,
+      orientation: 'portrait',
+      imageRotationDeg: rotation,
+      hAlign,
+      vAlign,
+      trimBorder,
+      safeMarginMm,
+    }),
+    [oriented, dpi, fitMode, rotation, hAlign, vAlign, trimBorder, safeMarginMm],
+  );
+
+  const printThreshold = useMemo(
+    () => calcLabelImageThreshold(defaults.grayThreshold, darkness),
+    [defaults.grayThreshold, darkness],
+  );
+
+  const printPreview = useMemo(() => {
+    if (!sourceGray) return null;
+    const rendered = renderImgToLabel(sourceGray, renderConfig);
+    return finalizeImgToLabelForPrint(rendered, { threshold: printThreshold, dither: false });
+  }, [sourceGray, renderConfig, printThreshold]);
+
+  const previewDataUri = useMemo(() => {
+    if (!printPreview) return null;
+    const base64 = grayToPngBase64(printPreview.gray);
+    return `data:image/png;base64,${base64}`;
+  }, [printPreview]);
+
   const previewPadding = 48;
   const maxPreviewW = contentWidth - previewPadding * 2;
   const maxPreviewH = 300;
@@ -428,6 +489,11 @@ export default function ImgToLabelScreen() {
     () => calcPreviewScale(oriented.widthMm, oriented.heightMm, maxPreviewW, maxPreviewH),
     [oriented, maxPreviewW, maxPreviewH],
   );
+  const previewInnerInset = useMemo(() => {
+    if (safeMarginMm <= 0) return 0;
+    const marginRatio = safeMarginMm / Math.max(oriented.widthMm, oriented.heightMm);
+    return Math.max(2, Math.round(preview.previewWidth * marginRatio));
+  }, [safeMarginMm, oriented, preview.previewWidth]);
 
   // ─── Size Selection ────────────────────────────────────────────────────
   const handleSizeSelect = (size: LabelSizeMm) => {
@@ -465,8 +531,11 @@ export default function ImgToLabelScreen() {
       timer.start('decode');
       const jobDpi = manager.getPrintDpi();
       await manager.ensureConnected();
-      const decoded = await decodeGalleryImage(imageUri);
-      let gray = decoded.gray;
+      let gray = sourceGray;
+      if (!gray) {
+        const decoded = await decodeGalleryImage(imageUri);
+        gray = decoded.gray;
+      }
       timer.end('decode');
 
       logPrintTrace('IMG_TO_LABEL_CONFIG', {
@@ -478,22 +547,18 @@ export default function ImgToLabelScreen() {
         rotation,
         hAlign,
         vAlign,
+        trimBorder,
+        safeMarginMm,
         sourceW: gray.width,
         sourceH: gray.height,
       });
 
       timer.start('render');
-      const config: ImgToLabelConfig = {
-        widthMm: oriented.widthMm,
-        heightMm: oriented.heightMm,
-        dpi: jobDpi,
-        fitMode,
-        orientation: 'portrait', // already resolved
-        imageRotationDeg: rotation,
-        hAlign,
-        vAlign,
-      };
-      const result = renderImgToLabel(gray, config);
+      const rendered = renderImgToLabel(gray, renderConfig);
+      const result = finalizeImgToLabelForPrint(rendered, {
+        threshold: printThreshold,
+        dither: false,
+      });
 
       logPrintTrace('IMG_TO_LABEL_RENDER', {
         resultWidthPx: result.widthPx,
@@ -502,6 +567,7 @@ export default function ImgToLabelScreen() {
         resultHeightMm: result.heightMm,
         fitMode: result.fitMode,
         dpi: result.dpi,
+        threshold: printThreshold,
       });
       timer.end('render');
 
@@ -513,12 +579,12 @@ export default function ImgToLabelScreen() {
             ? 'bline'
             : 'gap';
 
-      const threshold = 180;
+      const threshold = printThreshold;
       const printed = await printArtworkJob({
         widthMm: result.widthMm,
         heightMm: result.heightMm,
         gray: result.gray,
-        fit: 'stretch', // already fitted by engine — stretch to fill the canvas exactly
+        fit: 'original',
         dither: false,
         threshold,
         flipY: false,
@@ -527,8 +593,9 @@ export default function ImgToLabelScreen() {
         mediaType: media,
         density: darkness,
         speed: speed ?? 6,
-        offsetXmm: 0,
-        offsetYmm: 0,
+        offsetXmm: hOffset,
+        offsetYmm: vOffset,
+        preparedGeometry: result.geometry,
       });
 
       logPrintTrace('IMG_TO_LABEL_PRINTED', {
@@ -568,6 +635,13 @@ export default function ImgToLabelScreen() {
     rotation,
     hAlign,
     vAlign,
+    hOffset,
+    vOffset,
+    trimBorder,
+    safeMarginMm,
+    printThreshold,
+    renderConfig,
+    sourceGray,
     copies,
     gapLength,
     paperType,
@@ -662,26 +736,97 @@ export default function ImgToLabelScreen() {
                 subtitle={`${formatPrintSize(oriented.widthMm, oriented.heightMm)} • ${formatPrintPixels(printCanvas.widthPx, printCanvas.heightPx, dpi)}`}
               />
 
-              <View style={[styles.previewContainer, { height: preview.previewHeight + 24 }]}>
+              {printPreview && (
+                <View style={styles.previewBadgeRow}>
+                  <View style={styles.previewBadge}>
+                    <Text style={styles.previewBadgeText}>Print-accurate preview</Text>
+                  </View>
+                  <Text style={styles.previewBadgeHint}>
+                    B&W preview · threshold {printThreshold} @ {dpi} DPI
+                  </Text>
+                </View>
+              )}
+
+              <View style={[styles.previewContainer, { height: preview.previewHeight + 32 }]}>
                 <View
                   style={[
-                    styles.previewCanvas,
+                    styles.previewFrame,
                     {
-                      width: preview.previewWidth,
-                      height: preview.previewHeight,
+                      width: preview.previewWidth + 8,
+                      height: preview.previewHeight + 8,
                     },
                   ]}>
-                  <Image
-                    source={{ uri: imageUri }}
-                    style={StyleSheet.absoluteFill}
-                    contentFit={fitMode === 'stretch' ? 'fill' : fitMode === 'cover' ? 'cover' : 'contain'}
-                  />
+                  <View
+                    style={[
+                      styles.previewCanvas,
+                      {
+                        width: preview.previewWidth,
+                        height: preview.previewHeight,
+                      },
+                    ]}>
+                    {decoding || !previewDataUri ? (
+                      <View style={styles.previewLoading}>
+                        <ActivityIndicator color={Palette.accent} size="small" />
+                        <Text style={styles.previewLoadingText}>
+                          {decoding ? 'Preparing print preview…' : 'Rendering preview…'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Image
+                        source={{ uri: previewDataUri }}
+                        style={StyleSheet.absoluteFill}
+                        contentFit="fill"
+                      />
+                    )}
+                    {previewInnerInset > 0 && (
+                      <View
+                        pointerEvents="none"
+                        style={[
+                          styles.previewSafeMargin,
+                          {
+                            top: previewInnerInset,
+                            left: previewInnerInset,
+                            right: previewInnerInset,
+                            bottom: previewInnerInset,
+                          },
+                        ]}
+                      />
+                    )}
+                  </View>
                 </View>
               </View>
 
               {/* Fit mode */}
               {step === 'edit' && (
                 <>
+                  <Text style={styles.labelLabel}>Image Cleanup</Text>
+                  <Pressable
+                    onPress={() => setTrimBorder((v) => !v)}
+                    style={({ pressed }) => [
+                      styles.toggleRow,
+                      pressed && styles.pressed,
+                    ]}>
+                    <Text style={styles.toggleLabel}>Trim photo borders</Text>
+                    <View style={[styles.togglePill, trimBorder && styles.togglePillOn]}>
+                      <Text style={[styles.togglePillText, trimBorder && styles.togglePillTextOn]}>
+                        {trimBorder ? 'On' : 'Off'}
+                      </Text>
+                    </View>
+                  </Pressable>
+
+                  <StepperRow
+                    label="Safe margin (mm)"
+                    value={safeMarginMm.toFixed(1)}
+                    onMinus={() =>
+                      setSafeMarginMm(Math.max(0, Math.round((safeMarginMm - 0.5) * 10) / 10))
+                    }
+                    onPlus={() =>
+                      setSafeMarginMm(Math.min(5, Math.round((safeMarginMm + 0.5) * 10) / 10))
+                    }
+                    minusDisabled={safeMarginMm <= 0}
+                    plusDisabled={safeMarginMm >= 5}
+                  />
+
                   <Text style={styles.labelLabel}>Scaling Mode</Text>
                   <ChipGroup
                     options={FIT_MODES}
@@ -768,12 +913,46 @@ export default function ImgToLabelScreen() {
                 />
 
                 <StepperRow
+                  label="Darkness"
+                  value={darkness == null ? 'Auto' : String(darkness)}
+                  onMinus={() => {
+                    if (darkness == null) setDarkness(8);
+                    else if (darkness > 0) setDarkness(darkness - 1);
+                    else setDarkness(null);
+                  }}
+                  onPlus={() => {
+                    if (darkness == null) setDarkness(9);
+                    else if (darkness < 15) setDarkness(darkness + 1);
+                  }}
+                  minusDisabled={darkness != null && darkness <= 0}
+                  plusDisabled={darkness != null && darkness >= 15}
+                />
+
+                <StepperRow
                   label="Gap (mm)"
                   value={String(gapLength)}
                   onMinus={() => setGapLength(Math.max(0, gapLength - 1))}
                   onPlus={() => setGapLength(Math.min(10, gapLength + 1))}
                   minusDisabled={gapLength <= 0}
                   plusDisabled={gapLength >= 10}
+                />
+
+                <StepperRow
+                  label="H Offset (mm)"
+                  value={hOffset.toFixed(2)}
+                  onMinus={() => setHOffset(Math.max(-10, Math.round((hOffset - 0.5) * 100) / 100))}
+                  onPlus={() => setHOffset(Math.min(10, Math.round((hOffset + 0.5) * 100) / 100))}
+                  minusDisabled={hOffset <= -10}
+                  plusDisabled={hOffset >= 10}
+                />
+
+                <StepperRow
+                  label="V Offset (mm)"
+                  value={vOffset.toFixed(2)}
+                  onMinus={() => setVOffset(Math.max(-10, Math.round((vOffset - 0.5) * 100) / 100))}
+                  onPlus={() => setVOffset(Math.min(10, Math.round((vOffset + 0.5) * 100) / 100))}
+                  minusDisabled={vOffset <= -10}
+                  plusDisabled={vOffset >= 10}
                 />
 
                 <Text style={styles.labelLabel}>Media Type</Text>
@@ -810,10 +989,10 @@ export default function ImgToLabelScreen() {
             </Pressable>
             <Pressable
               onPress={handlePrint}
-              disabled={printing || !imageUri}
+              disabled={printing || !imageUri || decoding || !printPreview}
               style={({ pressed }) => [
                 styles.bottomPrimary,
-                (printing || !imageUri) && styles.bottomPrimaryDisabled,
+                (printing || !imageUri || decoding || !printPreview) && styles.bottomPrimaryDisabled,
                 pressed && !printing && styles.pressed,
               ]}>
               {printing ? (
@@ -1009,13 +1188,90 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
+  previewBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  previewBadge: {
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  previewBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#2E7D32',
+  },
+  previewBadgeHint: {
+    fontSize: 11,
+    color: Palette.muted,
+  },
+  previewFrame: {
+    padding: 4,
+    borderRadius: 6,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   previewCanvas: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 4,
+    borderColor: '#CBD5E1',
+    borderRadius: 2,
     overflow: 'hidden',
-    ...cardShadow,
+  },
+  previewLoading: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#F8FAFC',
+  },
+  previewLoadingText: {
+    fontSize: 12,
+    color: Palette.muted,
+  },
+  previewSafeMargin: {
+    position: 'absolute',
+    borderWidth: 1,
+    borderColor: '#94A3B8',
+    borderStyle: 'dashed',
+    borderRadius: 1,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#F4F6F9',
+    marginBottom: 4,
+  },
+  toggleLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Palette.ink,
+  },
+  togglePill: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#E2E8F0',
+  },
+  togglePillOn: {
+    backgroundColor: Palette.accent,
+  },
+  togglePillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Palette.muted,
+  },
+  togglePillTextOn: {
+    color: '#FFFFFF',
   },
 
   // Chips

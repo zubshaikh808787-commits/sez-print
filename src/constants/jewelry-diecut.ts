@@ -1,8 +1,9 @@
 /**
- * Measured jewellery die-cut stock: 14 × 96 mm tags, 3 across a 54 mm sheet.
+ * Measured jewellery die-cut stock (vendor schematic):
+ * 14 × 96 mm tags, 3 across a 54 × 96 mm sheet.
  *
  * Layout: 3 mm margin + 14 mm + 3 mm gap + 14 mm + 3 mm gap + 14 mm + 3 mm margin = 54 mm.
- * Printable body is the 64 mm rectangle (fold at 32 mm). Tail is die-cut only.
+ * Printable body is the 64 mm rectangle (fold at 32 mm). Tail is 32 mm die-cut only.
  *
  * Preview type ids stay `jew-rattail-single-12x100` / `jew-rattail-3row-54x100`
  * so saved labels still resolve; geometry comes from these constants.
@@ -19,10 +20,11 @@ export const JEWELRY_DIECUT = {
   tailWidthMm: 2.5,
   sheetWidthMm: 54,
   sheetHeightMm: 96,
+  /** Inter-column gap from schematic (not 0.3 — 3 + 14×3 + 3×2 margins = 54). */
   gapMm: 3,
   sideMarginMm: 3,
   columns: 3,
-  /** Capture and print at 304 DPI / 12 dots/mm (54 mm → 648 dots, 96 mm → 1152). */
+  /** Prefer printer native DPI for capture. 304 is retained for high-res heads only. */
   printDpi: 304,
 } as const;
 
@@ -41,11 +43,12 @@ export const JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM =
  *   fold → SKU → HUID (packed against the midline) → empty space → tail
  */
 export const JEWELRY_DIECUT_TYPE = {
-  insetXMm: 0.95,
-  frontInsetMm: 3.2,
-  foldClearanceMm: 2.1,
-  lineGapMm: 1.05,
-  blockGapMm: 1.45,
+  insetXMm: 1.15,
+  /** Keep title clear of the rounded die-cut tip (preview + physical). */
+  frontInsetMm: 5.5,
+  foldClearanceMm: 2.2,
+  lineGapMm: 1.1,
+  blockGapMm: 1.55,
   backLineGapMm: 1.05,
   contentBottomMm: 60,
   titlePt: 6.5,
@@ -54,7 +57,7 @@ export const JEWELRY_DIECUT_TYPE = {
   pricePt: 6.5,
   skuPt: 6,
   huidPt: 5.75,
-  barcodeHeightMm: 7.5,
+  barcodeHeightMm: 7.2,
 } as const;
 
 export type JewelryDieCutField =
@@ -66,6 +69,18 @@ export type JewelryDieCutField =
   | 'barcode'
   | 'sku'
   | 'huid';
+
+/** Front-of-fold stack order (product face). */
+const FRONT_FIELD_ORDER: JewelryDieCutField[] = [
+  'title',
+  'karat',
+  'gr',
+  'nt',
+  'price',
+  'barcode',
+];
+/** Back-of-fold stack order (tail face). */
+const BACK_FIELD_ORDER: JewelryDieCutField[] = ['sku', 'huid'];
 
 export const JEWELRY_DIECUT_PREVIEW_SINGLE = 'jew-rattail-single-12x100';
 export const JEWELRY_DIECUT_PREVIEW_SHEET = 'jew-rattail-3row-54x100';
@@ -80,7 +95,7 @@ export function jewelryDieCutComposedWidthMm(): number {
   return tagWidthMm * columns + gapMm * (columns - 1);
 }
 
-/** Left edge of column `index` (0–2) on the 54 mm sheet. */
+/** Left edge of column `index` (0–2) on the 54 mm sheet (3 / 20 / 37 mm). */
 export function jewelryDieCutColumnX(index: number): number {
   const { sideMarginMm, tagWidthMm, gapMm } = JEWELRY_DIECUT;
   return sideMarginMm + index * (tagWidthMm + gapMm);
@@ -152,42 +167,89 @@ export function classifyJewelryDieCutField(el: LabelElement): JewelryDieCutField
   return null;
 }
 
-export function jewelryDieCutFieldTops(heights: Record<JewelryDieCutField, number>) {
+export function jewelryDieCutFieldTops(
+  heights: Record<JewelryDieCutField, number>,
+  presentFields?: readonly JewelryDieCutField[],
+) {
   const fold = JEWELRY_DIECUT.foldYMm;
   const t = JEWELRY_DIECUT_TYPE;
+  const present = presentFields?.length ? new Set(presentFields) : null;
 
-  // Barcode sits in the front half, just above the fold (below the dotted line
-  // when the tail is viewed at the top of the hang tag).
-  const barcodeTop = fold - t.foldClearanceMm - heights.barcode;
-  let y = barcodeTop - t.blockGapMm - heights.price;
-  const price = y;
-  y -= t.lineGapMm + heights.nt;
-  const nt = y;
-  y -= t.lineGapMm + heights.gr;
-  const gr = y;
-  y -= t.lineGapMm + heights.karat;
-  const karat = y;
-  y -= t.lineGapMm + heights.title;
-  const title = y;
-  const shift = Math.max(0, t.frontInsetMm - title);
-
-  const sku = fold + t.foldClearanceMm;
-  const huid = sku + heights.sku + t.backLineGapMm;
-  const usedShift = Math.min(
-    shift,
-    Math.max(0, fold - t.foldClearanceMm - heights.barcode - barcodeTop),
+  const front = FRONT_FIELD_ORDER.filter(
+    (f) => (!present || present.has(f)) && (heights[f] ?? 0) > 0,
+  );
+  const back = BACK_FIELD_ORDER.filter(
+    (f) => (!present || present.has(f)) && (heights[f] ?? 0) > 0,
   );
 
-  return {
-    title: title + usedShift,
-    karat: karat + usedShift,
-    gr: gr + usedShift,
-    nt: nt + usedShift,
-    price: price + usedShift,
-    barcode: barcodeTop + usedShift,
-    sku,
-    huid,
+  const tops: Record<JewelryDieCutField, number> = {
+    title: t.frontInsetMm,
+    karat: t.frontInsetMm,
+    gr: t.frontInsetMm,
+    nt: t.frontInsetMm,
+    price: t.frontInsetMm,
+    barcode: fold - t.foldClearanceMm - (heights.barcode || t.barcodeHeightMm),
+    sku: fold + t.foldClearanceMm,
+    huid: fold + t.foldClearanceMm,
   };
+
+  // Front face: stack only fields that exist, then center the block in the
+  // printable head so preview and physical die-cut share the same padding.
+  const frontUsableTop = t.frontInsetMm;
+  const frontUsableBottom = fold - t.foldClearanceMm;
+  const frontUsableH = Math.max(0, frontUsableBottom - frontUsableTop);
+
+  const gapBetween = (prev: JewelryDieCutField, next: JewelryDieCutField, scale: number) =>
+    (prev === 'price' && next === 'barcode' ? t.blockGapMm : t.lineGapMm) * scale;
+
+  let gapScale = 1;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let contentH = 0;
+    for (let i = 0; i < front.length; i++) {
+      contentH += heights[front[i]];
+      if (i > 0) contentH += gapBetween(front[i - 1], front[i], gapScale);
+    }
+    if (contentH <= frontUsableH || gapScale <= 0.45) break;
+    gapScale = Math.max(0.45, gapScale * 0.85);
+  }
+
+  let frontContentH = 0;
+  for (let i = 0; i < front.length; i++) {
+    frontContentH += heights[front[i]];
+    if (i > 0) frontContentH += gapBetween(front[i - 1], front[i], gapScale);
+  }
+  const frontFree = Math.max(0, frontUsableH - frontContentH);
+  let y = frontUsableTop + frontFree * 0.42;
+  for (let i = 0; i < front.length; i++) {
+    const field = front[i];
+    tops[field] = y;
+    y += heights[field];
+    if (i < front.length - 1) {
+      y += gapBetween(field, front[i + 1], gapScale);
+    }
+  }
+  if (front.includes('barcode')) {
+    const maxBarcodeTop = fold - t.foldClearanceMm - heights.barcode;
+    if (tops.barcode > maxBarcodeTop) {
+      const shift = tops.barcode - maxBarcodeTop;
+      for (const field of front) tops[field] -= shift;
+      if (tops[front[0]!] < frontUsableTop - 0.01) {
+        // Prefer keeping tip inset; accept tighter gaps already applied.
+        const restore = frontUsableTop - tops[front[0]!];
+        for (const field of front) tops[field] += restore;
+        tops.barcode = Math.min(tops.barcode, maxBarcodeTop);
+      }
+    }
+  }
+
+  // Back face: pack against the fold (SKU then HUID).
+  let by = fold + t.foldClearanceMm;
+  for (let i = 0; i < back.length; i++) {
+    tops[back[i]] = by;
+    by += heights[back[i]] + (i < back.length - 1 ? t.backLineGapMm : 0);
+  }
+
+  return tops;
 }
 
 function textWidthMm(text: string, fontSizePt: number, bold?: boolean) {
@@ -248,6 +310,115 @@ export function jewelryDieCutColumnOriginMm(centerX: number, docWidthMm: number)
   return best;
 }
 
+/** Prior incorrect 50×100 sheet (2 mm gaps): 2 + 14 + 2 + 14 + 2 + 14 + 2 = 50. */
+const LEGACY_50_COLUMN = { sideMarginMm: 2, gapMm: 2, tagWidthMm: 14, heightMm: 100 } as const;
+
+function legacy50ColumnX(index: number): number {
+  const { sideMarginMm, tagWidthMm, gapMm } = LEGACY_50_COLUMN;
+  return sideMarginMm + index * (tagWidthMm + gapMm);
+}
+
+function nearestColumnIndex(centerX: number, origins: number[], tagWidthMm: number): number {
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < origins.length; i++) {
+    const origin = origins[i] ?? 0;
+    const dist = Math.abs(centerX - (origin + tagWidthMm / 2));
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * Map a legacy multi-column sheet onto the vendor schematic 54×96 stock
+ * while snapping each element into column 3 / 20 / 37 (not uniform scale).
+ * Tops scale with height so relative stack order stays stable.
+ */
+export function migrateJewelrySheetToCanonicalSize(doc: LabelDocument): LabelDocument {
+  const toW = JEWELRY_DIECUT.sheetWidthMm;
+  const toH = JEWELRY_DIECUT.sheetHeightMm;
+  if (isNearMm(doc.widthMm, toW) && isNearMm(doc.heightMm, toH)) return doc;
+
+  const fromW = doc.widthMm;
+  const fromH = doc.heightMm;
+  const sy = toH / Math.max(fromH, 0.01);
+  const useLegacy50 =
+    Math.abs(fromW - 50) < 1.5 && Math.abs(fromH - 100) < 2.5;
+  const oldOrigins = useLegacy50
+    ? [0, 1, 2].map(legacy50ColumnX)
+    : [0, 1, 2].map((i) => {
+        // Proportional columns on unknown sheet widths (e.g. 46 mm UPS strip).
+        const composed = JEWELRY_DIECUT.tagWidthMm * 3 + JEWELRY_DIECUT.gapMm * 2;
+        const side = Math.max(0, (fromW - composed) / 2);
+        return side + i * (JEWELRY_DIECUT.tagWidthMm + JEWELRY_DIECUT.gapMm);
+      });
+
+  const elements = doc.elements.map((el) => {
+    const center = el.left + el.width / 2;
+    const col = nearestColumnIndex(center, oldOrigins, JEWELRY_DIECUT.tagWidthMm);
+    const oldOx = oldOrigins[col] ?? 0;
+    const newOx = jewelryDieCutColumnX(col);
+    const localLeft = el.left - oldOx;
+    const next: LabelElement = {
+      ...el,
+      left: Number((newOx + localLeft).toFixed(3)),
+      top: Number((el.top * sy).toFixed(3)),
+    };
+    if ('height' in el && typeof el.height === 'number') {
+      (next as { height: number }).height = Number((el.height * sy).toFixed(3));
+    }
+    return next;
+  });
+
+  return {
+    ...doc,
+    widthMm: toW,
+    heightMm: toH,
+    elements,
+    updatedAt: Date.now(),
+  };
+}
+
+/**
+ * Crop the leftmost 14 mm tag from a 3-across sheet for Single Tag print.
+ * Preserves local mm positions inside the tag (no restack).
+ */
+export function extractJewelryFirstColumnDocument(doc: LabelDocument): LabelDocument {
+  const { tagWidthMm, tagHeightMm } = JEWELRY_DIECUT;
+  if (jewelryDieCutContentIsSingleTag(doc)) {
+    return {
+      ...doc,
+      widthMm: tagWidthMm,
+      heightMm: isNearMm(doc.heightMm, tagHeightMm) ? doc.heightMm : tagHeightMm,
+    };
+  }
+
+  const ox = jewelryDieCutColumnX(0);
+  const elements = doc.elements
+    .filter((el) => {
+      const mid = el.left + el.width / 2;
+      return mid >= ox - 0.75 && mid < ox + tagWidthMm + 0.75;
+    })
+    .map((el) => ({
+      ...el,
+      left: Number((el.left - ox).toFixed(3)),
+    }));
+
+  return {
+    ...doc,
+    id: doc.id,
+    name: doc.name,
+    widthMm: tagWidthMm,
+    heightMm: tagHeightMm,
+    ups: undefined,
+    elements,
+    updatedAt: Date.now(),
+  };
+}
+
 function centeredInColumn(el: LabelElement, docWidthMm: number) {
   const origin = jewelryDieCutColumnOriginMm(el.left + el.width / 2, docWidthMm);
   const inset = JEWELRY_DIECUT_TYPE.insetXMm;
@@ -256,21 +427,31 @@ function centeredInColumn(el: LabelElement, docWidthMm: number) {
 }
 
 /**
- * Fit type to the 14 mm tag, center every printable field, and restack
- * so SKU/HUID sit on the tail side of the fold and the barcode sits just
- * below the dotted line on the product side.
+ * Force every printable field into the centre of its 14 mm column.
+ * Fits font size so glyphs don't clip the die edge. Preserves tops (Y).
+ * Catalog templates + stored labels must run this so print matches the die-cuts.
  */
-export function refitJewelryDieCutDocument(doc: LabelDocument): LabelDocument {
+export function softFitJewelryDieCutDocument(doc: LabelDocument): LabelDocument {
   const { tagWidthMm } = JEWELRY_DIECUT;
   const t = JEWELRY_DIECUT_TYPE;
-  const prepared = doc.elements.map((el) => {
+  const elements = doc.elements.map((el) => {
     if (el.needPrinting === false) return el;
     if (el.width > tagWidthMm + 0.6) return el;
     const box = centeredInColumn(el, doc.widthMm);
-    const field = classifyJewelryDieCutField(el);
+
+    if (el.type === 'barcode') {
+      return {
+        ...el,
+        left: box.left,
+        width: box.width,
+        height: Math.min(el.height || t.barcodeHeightMm, t.barcodeHeightMm),
+        textFlag: 'Hide' as const,
+      };
+    }
 
     if (el.type === 'text' || el.type === 'degrees' || el.type === 'time') {
       const raw = elementText(el);
+      const field = classifyJewelryDieCutField(el);
       const maxPt =
         field === 'title' || field === 'price'
           ? t.titlePt
@@ -278,7 +459,9 @@ export function refitJewelryDieCutDocument(doc: LabelDocument): LabelDocument {
             ? t.karatPt
             : field === 'huid'
               ? t.huidPt
-              : 6.5;
+              : field === 'sku'
+                ? t.skuPt
+                : t.bodyPt;
       const fontSize = jewelryDieCutFontToFit(
         raw,
         box.width,
@@ -289,27 +472,47 @@ export function refitJewelryDieCutDocument(doc: LabelDocument): LabelDocument {
       );
       return {
         ...el,
-        ...box,
+        left: box.left,
+        width: box.width,
         fontSize,
-        height: lineHeightMm(fontSize),
+        height: Math.max(lineHeightMm(fontSize), el.height || 0),
         align: 'center' as const,
         autoWrapping: 'Close' as const,
         bold: true,
       };
     }
 
-    if (el.type === 'barcode') {
+    if (el.type === 'qrcode') {
+      // Keep QR square and centered in the column.
+      const side = Math.min(el.width, el.height, box.width);
       return {
         ...el,
-        ...box,
-        height: t.barcodeHeightMm,
-        textFlag: 'Hide' as const,
+        left: box.left + (box.width - side) / 2,
+        width: side,
+        height: side,
       };
     }
 
-    return { ...el, ...box };
+    return { ...el, left: box.left, width: box.width };
   });
 
+  return { ...doc, elements };
+}
+
+/**
+ * Fit type to the 14 mm tag, center every printable field, and restack
+ * so SKU/HUID sit on the tail side of the fold and the barcode sits just
+ * below the dotted line on the product side.
+ *
+ * Prefer softFitJewelryDieCutDocument for edit/print WYSIWYG. Full refit is
+ * for template generation and explicit "Reset layout" only.
+ */
+export function refitJewelryDieCutDocument(doc: LabelDocument): LabelDocument {
+  const soft = softFitJewelryDieCutDocument(doc);
+  const { tagWidthMm } = JEWELRY_DIECUT;
+  const t = JEWELRY_DIECUT_TYPE;
+
+  const present: JewelryDieCutField[] = [];
   const heights: Record<JewelryDieCutField, number> = {
     title: lineHeightMm(t.titlePt),
     karat: lineHeightMm(t.karatPt),
@@ -320,9 +523,13 @@ export function refitJewelryDieCutDocument(doc: LabelDocument): LabelDocument {
     sku: lineHeightMm(t.skuPt),
     huid: lineHeightMm(t.huidPt),
   };
-  for (const el of prepared) {
+
+  for (const el of soft.elements) {
+    if (el.needPrinting === false) continue;
+    if (el.width > tagWidthMm + 0.6) continue;
     const field = classifyJewelryDieCutField(el);
     if (!field) continue;
+    present.push(field);
     const h =
       field === 'barcode'
         ? t.barcodeHeightMm
@@ -331,13 +538,13 @@ export function refitJewelryDieCutDocument(doc: LabelDocument): LabelDocument {
           : heights[field];
     heights[field] = h;
   }
-  const tops = jewelryDieCutFieldTops(heights);
 
-  const elements = prepared.map((el) => {
+  const tops = jewelryDieCutFieldTops(heights, present);
+  const elements = soft.elements.map((el) => {
     const field = classifyJewelryDieCutField(el);
     if (!field) return el;
     return { ...el, top: tops[field] };
   });
 
-  return { ...doc, elements };
+  return { ...soft, elements };
 }

@@ -42,6 +42,8 @@ export type DevPrintOptions = {
   media?: 'gap' | 'bline' | 'continuous' | string;
   speed?: number;
   commandSet?: 'tspl' | 'escpos' | 'auto';
+  hOffsetMm?: number;
+  vOffsetMm?: number;
 };
 
 export type DevPrintResult = {

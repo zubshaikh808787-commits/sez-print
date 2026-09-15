@@ -79,8 +79,8 @@ export const DEFAULT_PROPERTY_SETTINGS: DefaultPropertySettings = {
   qrErrorLevel: 'L',
   qrZoneSize: '0',
   tileImage: false,
-  colorMode: 'Halftone',
-  grayThreshold: 128,
+  colorMode: 'B & W',
+  grayThreshold: 160,
   barcodeEncodeMode: 'CODE-128',
 };
 

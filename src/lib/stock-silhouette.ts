@@ -76,8 +76,20 @@ export function jewHangTabLayout(w: number, h: number) {
 }
 
 export function jewThreeUpLayout(w: number, h: number) {
+  // Prefer measured die-cut constants when the canvas is the current 54×96 sheet.
+  if (Math.abs(w - JEWELRY_DIECUT.sheetWidthMm) < 1 && Math.abs(h - JEWELRY_DIECUT.sheetHeightMm) < 1.5) {
+    return {
+      cols: JEWELRY_DIECUT.columns,
+      tagW: JEWELRY_DIECUT.tagWidthMm,
+      gap: JEWELRY_DIECUT.gapMm,
+      bodyH: JEWELRY_DIECUT.bodyHeightMm,
+      tailW: JEWELRY_DIECUT.tailWidthMm,
+      tailH: JEWELRY_DIECUT.tailHeightMm,
+      sideMargin: JEWELRY_DIECUT.sideMarginMm,
+    };
+  }
   const { cols, tagW, bodyRatio, tailW } = JEWEL_STOCK.threeUp;
-  const sideMargin = w >= 50 ? Math.max(2.0, (w - 46) / 2 + 1.0) : Math.max(1.0, (w - tagW * cols) / 4);
+  const sideMargin = w >= 50 ? Math.max(2.0, (w - tagW * cols) / 2) : Math.max(1.0, (w - tagW * cols) / 4);
   const printableW = Math.max(tagW * cols, w - sideMargin * 2);
   const gap = (printableW - tagW * cols) / Math.max(1, cols - 1);
   const bodyH = h * bodyRatio;

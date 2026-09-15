@@ -19,6 +19,7 @@ import {
   grayToPngBase64,
   cropGrayToSize,
   layoutImportedArtwork,
+  padBitsCentered,
   pngBase64ToGray,
   prepareEditorGrayForPrint,
   rotateGray,
@@ -171,7 +172,11 @@ export function finalizeGrayForPrint(
     dpm: geometry.dotsPerMm,
   });
 
-  const bits = grayToBits(fitted, { threshold: options.threshold, dither: options.dither });
+  let bits = grayToBits(fitted, { threshold: options.threshold, dither: options.dither });
+
+  if (bits.bytesPerRow * 8 !== geometry.bitmapDotsW || bits.height !== geometry.bitmapDotsH) {
+    bits = padBitsCentered(bits, geometry.bitmapDotsW, geometry.bitmapDotsH);
+  }
 
   if (bits.bytesPerRow * 8 !== geometry.bitmapDotsW || bits.height !== geometry.bitmapDotsH) {
     logPrintTrace('BITMAP_PACK_MISMATCH', {

@@ -537,7 +537,7 @@ class PrinterManager {
     // JOSH / LPAPI printer
     if (store.sdkId === 'josh' || this.activeTransport === 'josh-lpapi') {
       const dpi = joshEffectiveDpi(settings.printerDpi);
-      const alignment = settings.printerAlignment ?? 'left';
+      const alignment = 'center';
       const headWidthMm = settings.printheadWidthMm === 108 ? 50 : (settings.printheadWidthMm ?? 50);
       const headWidthDots = mmToDots(headWidthMm, dpi);
       return {
@@ -700,6 +700,13 @@ class PrinterManager {
 
     await this.ensurePermissions('full');
     this.stopScan();
+    // If a background connection attempt is in progress, cancel it so discovery is never blocked
+    if (this.connectionState === 'connecting' && this.connectInFlight) {
+      console.info('[printer] startScan() cancelling in-progress background connection');
+      this.connectInFlight = null;
+      this.connectInFlightDeviceId = null;
+      void this.disconnect().catch(() => {});
+    }
     usePrinterStore.getState().setStatus('scanning');
 
     const td404 = this.getTd404();
@@ -735,24 +742,12 @@ class PrinterManager {
         await this.ensurePermissions('connect-only');
         const bonded = await td404.getTd404BondedDevices();
         for (const d of bonded) {
+          const isJosh = isLikelyJoshName(d.name);
+          const isTd = isLikelyTd404Name(d.name);
+          const isTz = isLikelyTezName(d.name);
+          const isShakti = isLikelyShaktiName(d.name);
           const isDev = isLikelyDevName(d.name);
-          const isJosh = !isDev && isLikelyJoshName(d.name);
-          const isTd = !isDev && !isJosh && isLikelyTd404Name(d.name);
-          const isTz = !isDev && !isJosh && !isTd && isLikelyTezName(d.name);
-          const isShakti = !isDev && !isJosh && !isTd && !isTz && isLikelyShaktiName(d.name);
-          if (isDev) {
-            emit({
-              id: d.id,
-              name: d.name,
-              rssi: null,
-              transport: 'dev-spp',
-              sdkId: 'dev',
-              likelyTd404: false,
-              likelyJosh: false,
-              likelyDev: true,
-              bonded: true,
-            });
-          } else if (isJosh) {
+          if (isJosh) {
             emit({
               id: d.id,
               name: d.name,
@@ -761,6 +756,7 @@ class PrinterManager {
               sdkId: 'josh',
               likelyTd404: false,
               likelyJosh: true,
+              likelyDev: false,
               bonded: true,
             });
           } else if (isTd) {
@@ -772,6 +768,7 @@ class PrinterManager {
               sdkId: 'td404',
               likelyTd404: true,
               likelyJosh: false,
+              likelyDev: false,
               bonded: true,
             });
           } else if (isTz || isShakti) {
@@ -781,8 +778,23 @@ class PrinterManager {
               rssi: null,
               transport: 'tez-spp',
               sdkId: 'tez',
+              likelyTd404: false,
+              likelyJosh: false,
               likelyTez: isTz,
               likelyShakti: isShakti,
+              likelyDev: false,
+              bonded: true,
+            });
+          } else if (isDev) {
+            emit({
+              id: d.id,
+              name: d.name,
+              rssi: null,
+              transport: 'dev-spp',
+              sdkId: 'dev',
+              likelyTd404: false,
+              likelyJosh: false,
+              likelyDev: true,
               bonded: true,
             });
           } else {
@@ -794,6 +806,7 @@ class PrinterManager {
               sdkId: 'generic',
               likelyTd404: false,
               likelyJosh: false,
+              likelyDev: false,
               bonded: true,
             });
           }
@@ -864,7 +877,39 @@ class PrinterManager {
       try {
         const handle = dev.startDevScan(
           (device) => {
-            const isTd = isLikelyTd404Name(device.name);
+            // Full heuristic checks — don't blindly claim non-TD404 devices as DEV
+            const isDev = isLikelyDevName(device.name);
+            const isJosh = !isDev && isLikelyJoshName(device.name);
+            const isTez = !isDev && !isJosh && isLikelyTezName(device.name);
+            const isShakti = !isDev && !isJosh && !isTez && isLikelyShaktiName(device.name);
+            const isTd = !isDev && !isJosh && !isTez && !isShakti && isLikelyTd404Name(device.name);
+            if (isJosh) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'josh-lpapi',
+                sdkId: 'josh',
+                likelyJosh: true,
+                likelyTd404: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
+            if (isTez || isShakti) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'tez-spp',
+                sdkId: 'tez',
+                likelyTez: isTez,
+                likelyShakti: isShakti,
+                likelyTd404: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
             if (isTd) {
               onDevice({
                 id: device.id,
@@ -878,13 +923,28 @@ class PrinterManager {
               });
               return;
             }
+            if (isDev) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'dev-spp',
+                sdkId: 'dev',
+                likelyDev: true,
+                likelyTd404: false,
+                likelyJosh: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
+            // Generic / unidentified device — NEVER label as DEV!
             onDevice({
               id: device.id,
               name: device.name,
               rssi: null,
-              transport: 'dev-spp',
-              sdkId: 'dev',
-              likelyDev: true,
+              transport: 'bluetooth-spp',
+              sdkId: 'generic',
+              likelyDev: false,
               likelyTd404: false,
               likelyJosh: false,
               bonded: device.bonded ?? false,
@@ -918,7 +978,26 @@ class PrinterManager {
       try {
         const handle = tez.startTezScan(
           (device) => {
+            // Full heuristic checks — don't blindly claim non-TD404 devices as TEZ
+            const isJosh = isLikelyJoshName(device.name);
             const isTd = isLikelyTd404Name(device.name);
+            const isDev = isLikelyDevName(device.name);
+            const isShakti = isLikelyShaktiName(device.name);
+            const isTez = isLikelyTezName(device.name);
+
+            if (isJosh) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'josh-lpapi',
+                sdkId: 'josh',
+                likelyJosh: true,
+                likelyTd404: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
             if (isTd) {
               onDevice({
                 id: device.id,
@@ -932,18 +1011,43 @@ class PrinterManager {
               });
               return;
             }
-            const isShakti = isLikelyShaktiName(device.name);
-            const isTez = isLikelyTezName(device.name) || !isShakti;
+            if (isDev) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'dev-spp',
+                sdkId: 'dev',
+                likelyDev: true,
+                likelyTd404: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
+            if (isTez || isShakti) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'tez-spp',
+                sdkId: 'tez',
+                likelyTez: isTez,
+                likelyShakti: isShakti,
+                likelyTd404: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
+            // Generic / unidentified device
             onDevice({
               id: device.id,
               name: device.name,
               rssi: null,
-              transport: 'tez-spp',
-              sdkId: 'tez',
-              likelyTez: isTez,
-              likelyShakti: isShakti,
+              transport: 'bluetooth-spp',
+              sdkId: 'generic',
               likelyTd404: false,
               likelyJosh: false,
+              likelyDev: false,
               bonded: device.bonded ?? false,
             });
           },
@@ -975,7 +1079,39 @@ class PrinterManager {
       try {
         const handle = josh.startJoshDiscovery(
           (device) => {
+            const isDev = isLikelyDevName(device.name);
+            const isTez = !isDev && isLikelyTezName(device.name);
+            const isShakti = !isDev && !isTez && isLikelyShaktiName(device.name);
             const isTd = isLikelyTd404Name(device.name);
+            const isJosh = isLikelyJoshName(device.name);
+
+            if (isDev) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'dev-spp',
+                sdkId: 'dev',
+                likelyDev: true,
+                likelyTd404: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
+            if (isTez || isShakti) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'tez-spp',
+                sdkId: 'tez',
+                likelyTez: isTez,
+                likelyShakti: isShakti,
+                likelyTd404: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
             if (isTd) {
               onDevice({
                 id: device.id,
@@ -989,14 +1125,29 @@ class PrinterManager {
               });
               return;
             }
+            if (isJosh) {
+              onDevice({
+                id: device.id,
+                name: device.name,
+                rssi: null,
+                transport: 'josh-lpapi',
+                sdkId: 'josh',
+                likelyJosh: true,
+                likelyTd404: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
+            // Generic / unidentified device
             onDevice({
               id: device.id,
               name: device.name,
               rssi: null,
-              transport: 'josh-lpapi',
-              sdkId: 'josh',
-              likelyJosh: true,
+              transport: 'bluetooth-spp',
+              sdkId: 'generic',
               likelyTd404: false,
+              likelyJosh: false,
+              likelyDev: false,
               bonded: device.bonded ?? false,
             });
           },
@@ -1114,6 +1265,8 @@ class PrinterManager {
     this.joshScanStop = null;
     void this.tezScanStop?.().catch(() => {});
     this.tezScanStop = null;
+    void this.devScanStop?.().catch(() => {});
+    this.devScanStop = null;
     try {
       this.ble?.stopDeviceScan();
     } catch {
@@ -1134,6 +1287,21 @@ class PrinterManager {
     ) {
       console.info('[printer] connect() deduped — sharing existing flight for', deviceId);
       return this.connectInFlight;
+    }
+
+    // If a connect is in flight to a DIFFERENT device (e.g. background auto-reconnect),
+    // abort/disconnect it immediately so the user's manual selection takes priority!
+    if (
+      this.connectInFlight &&
+      this.connectInFlightDeviceId &&
+      this.connectInFlightDeviceId !== deviceId
+    ) {
+      console.info(
+        `[printer] connect() switching target from ${this.connectInFlightDeviceId} to ${deviceId} — cancelling previous flight`,
+      );
+      this.connectInFlight = null;
+      this.connectInFlightDeviceId = null;
+      await this.disconnect().catch(() => {});
     }
 
     // If already connected to this device, no-op.
@@ -1179,26 +1347,35 @@ class PrinterManager {
       `[CONN-ROUTE] connectInner called: id=${deviceId}, name=${deviceName ?? 'null'}, transport=${transport ?? 'undefined'}`,
     );
 
-    const isTargetDev =
-      transport === 'dev-spp' ||
-      isLikelyDevName(deviceName);
-
+    // Specific model identification by authoritative name heuristics FIRST:
+    // Josh (LD08, LP08, etc.) must NEVER be hijacked by a stale or generic 'dev-spp' transport!
     const isTargetJosh =
-      !isTargetDev &&
-      (transport === 'josh-lpapi' || isLikelyJoshName(deviceName));
-
-    const isTargetTd404 =
-      !isTargetDev &&
-      !isTargetJosh &&
-      (transport === 'bluetooth-spp' || isLikelyTd404Name(deviceName));
+      isLikelyJoshName(deviceName) ||
+      (!isLikelyDevName(deviceName) &&
+        !isLikelyTezName(deviceName) &&
+        !isLikelyTd404Name(deviceName) &&
+        transport === 'josh-lpapi');
 
     const isTargetTez =
-      !isTargetDev &&
       !isTargetJosh &&
+      (isLikelyTezName(deviceName) ||
+        isLikelyShaktiName(deviceName) ||
+        (!isLikelyDevName(deviceName) &&
+          !isLikelyTd404Name(deviceName) &&
+          transport === 'tez-spp'));
+
+    const isTargetTd404 =
+      !isTargetJosh &&
+      !isTargetTez &&
+      (isLikelyTd404Name(deviceName) ||
+        (!isLikelyDevName(deviceName) &&
+          (transport === 'bluetooth-spp' || !transport)));
+
+    const isTargetDev =
+      !isTargetJosh &&
+      !isTargetTez &&
       !isTargetTd404 &&
-      (transport === 'tez-spp' ||
-        isLikelyTezName(deviceName) ||
-        isLikelyShaktiName(deviceName));
+      (isLikelyDevName(deviceName) || transport === 'dev-spp');
 
     console.info(
       `[CONN-ROUTE] isTargetTd404=${isTargetTd404}, isTargetTez=${isTargetTez}, isTargetDev=${isTargetDev}, isTargetJosh=${isTargetJosh}, ` +
@@ -1410,11 +1587,10 @@ class PrinterManager {
         );
 
         // PHASE 2: Clean up any active connections before LPAPI opens RFCOMM
-        // Pre-disconnect any lingering JOSH SDK session
-        if (josh.isJoshConnected()) {
-          console.info('[JOSH-CONN-P2:PREPARE] Closing lingering JOSH SDK session');
-          await josh.disconnectJosh().catch(() => {});
-        }
+        // Pre-disconnect any lingering JOSH SDK session or in-progress connecting attempt
+        console.info('[JOSH-CONN-P2:PREPARE] Ensuring JOSH SDK is idle before opening connection');
+        await josh.disconnectJosh().catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 150));
         const dev = this.getDev();
         if (dev?.isDevConnected()) {
           console.info('[JOSH-CONN-P2:PREPARE] Closing active DEV session before opening JOSH');
@@ -1797,6 +1973,28 @@ class PrinterManager {
     if (this.activeTransport === 'ble') {
       return this.connectedDevice !== null && this.writableTarget !== null;
     }
+    // activeTransport is null — probe native modules to auto-restore.
+    // This avoids a full reconnect cycle (150–1500ms) when the socket is actually alive.
+    if (this.getDev()?.isDevConnected?.()) {
+      console.info('[printer] isConnectionHealthy: auto-restoring dev-spp');
+      this.activeTransport = 'dev-spp';
+      return true;
+    }
+    if (this.getTd404()?.isTd404Connected?.()) {
+      console.info('[printer] isConnectionHealthy: auto-restoring td404-spp');
+      this.activeTransport = 'td404-spp';
+      return true;
+    }
+    if (this.getTez()?.isTezConnected?.()) {
+      console.info('[printer] isConnectionHealthy: auto-restoring tez-spp');
+      this.activeTransport = 'tez-spp';
+      return true;
+    }
+    if (this.getJosh()?.isJoshConnected?.()) {
+      console.info('[printer] isConnectionHealthy: auto-restoring josh-lpapi');
+      this.activeTransport = 'josh-lpapi';
+      return true;
+    }
     return false;
   }
 
@@ -1963,15 +2161,27 @@ class PrinterManager {
             : (store.transport ?? 'bluetooth-spp');
       // For Wi-Fi, skip — requires explicit IP entry.
       if (transport === 'wifi') return false;
-      await this.connect(
-        store.lastDeviceId,
-        store.lastDeviceName,
-        transport as DiscoveredPrinter['transport'],
-      );
-      return true;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Auto-reconnect timeout (6s)')), 6000);
+      });
+      try {
+        await Promise.race([
+          this.connect(
+            store.lastDeviceId,
+            store.lastDeviceName,
+            transport as DiscoveredPrinter['transport'],
+          ),
+          timeoutPromise,
+        ]);
+        return true;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     } catch (error) {
       console.warn('[printer] auto-reconnect failed:', error);
       this.lastErrorMessage = error instanceof Error ? error.message : String(error);
+      usePrinterStore.getState().clearConnection();
       return false;
     }
   }
@@ -2235,7 +2445,7 @@ class PrinterManager {
 
         const cmdSet = options.commandSet ?? store.devCommandSet ?? 'escpos';
         console.info(
-          `[DEV-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1} engine=${cmdSet}`,
+          `[DEV-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1} engine=${cmdSet} density=${options.density ?? 8} speed=${options.speed ?? 4} gap=${options.gapMm ?? 2} offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
         );
         await this.ensureConnected();
         const t0 = Date.now();
@@ -2249,6 +2459,8 @@ class PrinterManager {
           gapMm: options.gapMm ?? 2,
           media: options.media ?? 'gap',
           commandSet: cmdSet,
+          hOffsetMm: options.hOffsetMm ?? 0,
+          vOffsetMm: options.vOffsetMm ?? 0,
         });
         console.info(
           `[DEV-PRINT] Dev print completed in ${Date.now() - t0} ms |`,
@@ -2317,9 +2529,9 @@ class PrinterManager {
         const dpi = joshEffectiveDpi(options.dpi ?? profile.dpi);
         const gapType = joshGapTypeFromMedia(options.media ?? 'gap');
         const gapLength =
-          options.gapMm != null && options.gapMm > 0 ? Math.round(options.gapMm) : 3;
+          options.gapMm != null ? Math.max(0, Math.round(options.gapMm)) : 3;
         console.info(
-          `[JOSH-PRINT-P1:PREFLIGHT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm dpi=${dpi} gapType=${gapType} gap=${gapLength}mm offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
+          `[JOSH-PRINT-P1:PREFLIGHT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm dpi=${dpi} gapType=${gapType} gap=${gapLength}mm density=${options.density ?? 'auto'} speed=${options.speed ?? 'auto'} offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
         );
         await this.ensureConnected();
         const t0 = Date.now();
@@ -2385,6 +2597,7 @@ class PrinterManager {
     hOffsetMm?: number;
     vOffsetMm?: number;
     media?: 'gap' | 'bline' | 'continuous';
+    threshold?: number;
   }): Promise<boolean> {
     if (!this.isTez) {
       throw new Error('Connected printer is not a Tez/Shakti printer.');
@@ -2402,7 +2615,7 @@ class PrinterManager {
       try {
         const paperType = options.media === 'continuous' ? 1 : options.media === 'bline' ? 2 : 0;
         console.info(
-          `[TEZ-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm paperType=${paperType} copies=${options.copies ?? 1}`,
+          `[TEZ-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm paperType=${paperType} copies=${options.copies ?? 1} density=${options.density ?? 8} speed=${options.speed ?? 4} gapMm=${options.gapMm ?? 'n/a'} offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
         );
         await this.ensureTezTransport();
         const t0 = Date.now();
@@ -2414,8 +2627,11 @@ class PrinterManager {
           density: options.density ?? 8,
           speed: options.speed ?? 4,
           paperType,
+          gapMm: options.gapMm,
           hOffsetMm: options.hOffsetMm ?? 0,
           vOffsetMm: options.vOffsetMm ?? 0,
+          // Prefer caller threshold; 168 keeps borders/text solid after OEM setImgData.
+          threshold: options.threshold ?? 168,
         });
         console.info(
           `[TEZ-PRINT] Tez print completed in ${Date.now() - t0} ms |`,

@@ -33,7 +33,7 @@ const JEWELRY_SKUS: FactorySku[] = [
   { previewType: 'jew-label-20x20-right', name: 'Label-20x20+30', category: 'Jewelry', widthMm: 50, heightMm: 20 },
   { previewType: 'jew-label-20x20-left', name: 'Label-20x20+30-1', category: 'Jewelry', widthMm: 50, heightMm: 20 },
   { previewType: 'jew-label-50x13-horizontal', name: 'Label-50x13+30', category: 'Jewelry', widthMm: 80, heightMm: 13 },
-  { previewType: 'jew-label-46x100', name: 'Label 46x100', category: 'Jewelry', widthMm: 46, heightMm: 100 },
+  { previewType: 'jew-label-46x100', name: 'Label 54x96', category: 'Jewelry', widthMm: 54, heightMm: 96 },
   { previewType: 'jew-dumbell-13x85', name: 'Dumbell 13x85', category: 'Jewelry', widthMm: 85, heightMm: 13 },
   { previewType: 'jew-dumbell-15x85', name: 'Dumbell 15x85', category: 'Jewelry', widthMm: 85, heightMm: 15 },
   { previewType: 'jew-hangtag-159x413', name: 'Hangtag-15.9x41.3', category: 'Jewelry', widthMm: 41.3, heightMm: 15.9 },
@@ -177,11 +177,13 @@ function testPrintGeometryUnchanged() {
   assert.equal(JEWELRY_DIECUT.tagHeightMm, 96);
   assert.equal(JEWELRY_DIECUT.bodyHeightMm, 64);
   assert.equal(JEWELRY_DIECUT.foldYMm, 32);
+  assert.equal(JEWELRY_DIECUT.gapMm, 3);
+  assert.equal(JEWELRY_DIECUT.sideMarginMm, 3);
   assert.equal(JEWELRY_DIECUT.printDpi, 304);
   assert.equal(CABLE_FLAG_DIECUT.widthMm, 50);
   assert.equal(CABLE_FLAG_DIECUT.heightMm, 73);
   assert.equal(CABLE_FLAG_DIECUT.printDpi, 304);
-  console.log('ok jewelry 54×96 / 14×96 and cable 50×73 print mm unchanged');
+  console.log('ok jewelry 54×96 / 14×96 (3 mm gaps) and cable 50×73 print mm unchanged');
 }
 
 function testRatTail143Geometry() {

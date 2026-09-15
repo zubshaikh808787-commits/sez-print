@@ -20,6 +20,8 @@ export type TezPrintOptions = {
   density?: number;
   speed?: number;
   paperType?: 'gap' | 'continuous' | 'black' | 'tattoo' | number;
+  /** Inter-label gap in mm. Continuous media uses printLinedots feed; gap/black use paperType + LEARN_LABEL. */
+  gapMm?: number;
   threshold?: number;
   hOffsetMm?: number;
   vOffsetMm?: number;

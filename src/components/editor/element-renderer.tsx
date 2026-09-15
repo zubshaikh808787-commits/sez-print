@@ -92,6 +92,8 @@ type ContentProps = {
   scale: number;
   /** Print capture: decode at printer-dot size so import photos match template sharpness. */
   forPrint?: boolean;
+  /** Host label media — circular borders draw as rings. */
+  mediaShape?: string | null;
 };
 
 function textStyleFor(
@@ -303,7 +305,7 @@ function BarcodeContent({
               key={i}
               x={bar.x * widthPx}
               y={0}
-              width={Math.max(0.35, bar.width * widthPx)}
+              width={Math.max(bar.width * widthPx, widthPx > 80 ? 0.85 : 0.55)}
               height={Math.max(2, barsHeight)}
               fill={color}
             />
@@ -473,15 +475,18 @@ function ShapeContent({
   widthPx,
   heightPx,
   scale,
+  forPrint = false,
 }: {
   element: ShapeElementState;
   widthPx: number;
   heightPx: number;
   scale: number;
+  forPrint?: boolean;
 }) {
   const color = inkColor(element.drawingColorIndex);
   const strokeWidth = Math.max(1, element.lineWidth * scale);
-  const safePad = Math.max(1, Math.round(scale * 0.4));
+  // Preview: tiny pad vs AA clip. Print: half-stroke only so rings match millimetres.
+  const safePad = forPrint ? 0 : Math.max(0, Math.round(scale * 0.2));
   const inset = strokeWidth / 2 + safePad;
   const fill = shapeFillColor(element);
   const innerW = Math.max(1, widthPx - strokeWidth - safePad * 2);
@@ -633,7 +638,14 @@ function ArcTextContent({
   );
 }
 
-export function ElementContentView({ element, widthPx, heightPx, scale, forPrint }: ContentProps) {
+export function ElementContentView({
+  element,
+  widthPx,
+  heightPx,
+  scale,
+  forPrint,
+  mediaShape,
+}: ContentProps) {
   switch (element.type) {
     case 'text':
       return <TextContent element={element} scale={scale} widthPx={widthPx} />;
@@ -651,7 +663,13 @@ export function ElementContentView({ element, widthPx, heightPx, scale, forPrint
       return <LineContent element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />;
     case 'shape':
       return (
-        <ShapeContent element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />
+        <ShapeContent
+          element={element}
+          widthPx={widthPx}
+          heightPx={heightPx}
+          scale={scale}
+          forPrint={forPrint}
+        />
       );
     case 'table':
       return (
@@ -712,10 +730,17 @@ export function ElementContentView({ element, widthPx, heightPx, scale, forPrint
       );
     }
     case 'border': {
-      const inset = Math.max(1.5, Math.round(scale * 1.0));
+      const circular = mediaShape === 'circle' || mediaShape === 'ellipse';
       return (
-        <View style={[styles.fill, { padding: inset }]}>
-          <BorderPreview styleId={element.borderStyle} />
+        <View style={styles.fillVisible}>
+          <BorderPreview
+            styleId={element.borderStyle}
+            scale={scale}
+            lineWidthMm={element.lineWidth || 0.55}
+            circular={circular}
+            widthPx={widthPx}
+            heightPx={heightPx}
+          />
         </View>
       );
     }
@@ -735,6 +760,11 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     overflow: 'hidden',
+  },
+  fillVisible: {
+    width: '100%',
+    height: '100%',
+    overflow: 'visible',
   },
   center: {
     alignItems: 'center',

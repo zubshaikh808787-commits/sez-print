@@ -3,14 +3,27 @@ function hasTejToken(n: string): boolean {
   return /(^|[^a-z])tej([^a-z]|$)/.test(n);
 }
 
+/** Word-boundary `dev` — matches "DEV-001", "Seznik_Dev" but NOT "device", "development". */
+function hasDevToken(n: string): boolean {
+  return /(^|[^a-z])dev([^a-z]|$)/.test(n);
+}
+
+/** Word-boundary `veer` — matches "Veer-001" but NOT "veerendra" etc. */
+function hasVeerToken(n: string): boolean {
+  return /(^|[^a-z])veer([^a-z]|$)/.test(n);
+}
+
 export function isLikelyDevName(name: string | null | undefined): boolean {
   if (!name) return false;
   const n = name.toLowerCase().trim();
-  // TD-404 / Josh / Tez guards
+  // TD-404 / Josh / Tez / Shakti guards — these printers are NEVER Dev
+  // NOTE: Do NOT call isLikelyTezName/isLikelyShaktiName here — they call isLikelyDevName (circular)
   if (n.includes('tejas') || n.includes('rudra') || n.includes('josh')) return false;
+  if (n.includes('tez') || n.includes('shakti') || n.includes('flashlabel') || hasTejToken(n)) return false;
+  if (n.startsWith('seznik_') || n.startsWith('seznik-') || n === 'seznik' || n === 'seznek') return false;
   return (
-    n.includes('dev') ||
-    n.includes('veer') ||
+    hasDevToken(n) ||
+    hasVeerToken(n) ||
     n.includes('2in1') ||
     n.includes('2-in-1') ||
     n.includes('2 in 1') ||

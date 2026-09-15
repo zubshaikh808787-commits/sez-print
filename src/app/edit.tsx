@@ -145,7 +145,11 @@ import { clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { textBlockHeightMm } from '@/lib/element-sizing';
-import { isJewelryDieCutDocument, JEWELRY_DIECUT, refitJewelryDieCutDocument } from '@/constants/jewelry-diecut';
+import {
+  isJewelryDieCutDocument,
+  JEWELRY_DIECUT,
+} from '@/constants/jewelry-diecut';
+import { canonicalizeJewelryDieCutDocument } from '@/constants/jewelry-template-elements';
 import { isRatTail143Document, refitRatTail143Document } from '@/constants/rat-tail-143';
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
 import { isRatTailGeometry, ratTailBodyRectMm } from '@/lib/media-geometry';
@@ -372,7 +376,9 @@ export default function EditScreen() {
       if (existing) {
         const copy = JSON.parse(JSON.stringify(existing)) as LabelDocument;
         const normalized = { ...copy, elements: normalizeDocumentElements(copy) };
-        if (isJewelryDieCutDocument(normalized)) return refitJewelryDieCutDocument(normalized);
+        if (isJewelryDieCutDocument(normalized)) {
+          return canonicalizeJewelryDieCutDocument(normalized);
+        }
         if (isRatTail143Document(normalized)) return refitRatTail143Document(normalized);
         return normalized;
       }
@@ -1009,7 +1015,7 @@ export default function EditScreen() {
             id: base.id,
             type: 'border',
             borderStyle: 'solid-medium',
-            lineWidth: 0.75,
+            lineWidth: 0.55,
             rotation: 0,
             left: 0,
             top: 0,

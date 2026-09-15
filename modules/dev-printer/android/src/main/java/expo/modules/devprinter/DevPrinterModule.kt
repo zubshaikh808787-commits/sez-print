@@ -457,6 +457,8 @@ class DevPrinterModule : Module() {
       val speed = ((options["speed"] as? Number)?.toInt() ?: 4).coerceIn(1, 10)
       val media = (options["media"] as? String) ?: "gap"
       val commandSet = (options["commandSet"] as? String) ?: "escpos"
+      val hOffsetMm = (options["hOffsetMm"] as? Number)?.toDouble() ?: 0.0
+      val vOffsetMm = (options["vOffsetMm"] as? Number)?.toDouble() ?: 0.0
 
       ioExecutor.execute {
         try {
@@ -490,7 +492,6 @@ class DevPrinterModule : Module() {
               try { Thread.sleep(200) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
             }
           }
-
           val tTotal = System.currentTimeMillis() - t0
           Log.i(TAG, "DEV print completed in ${tTotal}ms: engine=${if (useEscPos) "escpos" else "tspl"}, bytes=${jobBytes.size}, copies=$copies, success=$writeOk")
 

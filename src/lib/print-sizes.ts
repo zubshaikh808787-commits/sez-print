@@ -14,6 +14,7 @@ import {
   jewelryDieCutComposedWidthMm,
   jewelryDieCutContentIsSingleTag,
   isNearMm,
+  migrateJewelrySheetToCanonicalSize,
 } from '@/constants/jewelry-diecut';
 import { generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import {
@@ -140,7 +141,7 @@ export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
   {
     id: 'jewellery-3up-diecut-54x100',
     label: 'Jewellery 3-Up — 54 × 96 mm',
-    detail: '3 labels (14 mm × 96 mm), 3 mm gaps, 3 mm margins',
+    detail: '3 labels (14 mm × 96 mm), 3 mm gaps, 3 mm margins (vendor schematic)',
     widthMm: JEWELRY_DIECUT.sheetWidthMm,
     heightMm: JEWELRY_DIECUT.sheetHeightMm,
     labelsPerRow: JEWELRY_DIECUT.columns,
@@ -468,6 +469,17 @@ export function tileDocumentThreeUpDieCut54(source: LabelDocument): LabelDocumen
   const composedW = jewelryDieCutComposedWidthMm();
   const singleTag = jewelryDieCutContentIsSingleTag(source);
 
+  // Already a 3-across sheet — never triple-copy columns; remap if not 54×96.
+  if (!singleTag && source.widthMm >= JEWELRY_DIECUT.tagWidthMm * 2.5) {
+    const maxRight = source.elements.reduce((m, el) => Math.max(m, el.left + el.width), 0);
+    if (maxRight <= source.widthMm + 1.5) {
+      if (isNearMm(source.widthMm, sheetWidthMm) && isNearMm(source.heightMm, sheetHeightMm)) {
+        return source;
+      }
+      return migrateJewelrySheetToCanonicalSize(source);
+    }
+  }
+
   if (isNearMm(source.widthMm, sheetWidthMm) && !singleTag) {
     if (isNearMm(source.heightMm, sheetHeightMm)) return source;
     return {
@@ -525,7 +537,7 @@ export function tileDocumentThreeUpDieCut54(source: LabelDocument): LabelDocumen
 }
 
 /**
- * Place jewellery die-cut content onto the 37 × 96 mm 2-up sheet without
+ * Place jewellery die-cut content onto the 34 × 100 mm 2-up sheet without
  * center-letterboxing a single tag.
  */
 export function tileDocumentTwoUpDieCut37(source: LabelDocument): LabelDocument {

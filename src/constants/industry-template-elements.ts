@@ -142,7 +142,8 @@ function circleAt(
 }
 
 function circle(widthMm: number, heightMm: number): LabelElement {
-  const d = Math.min(widthMm, heightMm) - 1.6;
+  // Canvas = die: keep a hairline inset so the stroke stays inside the artboard.
+  const d = Math.max(2, Math.min(widthMm, heightMm) - 0.8);
   return circleAt((widthMm - d) / 2, (heightMm - d) / 2, d, { lockMovement: true });
 }
 
@@ -201,8 +202,9 @@ function contentRect(w: number, h: number): LabelElement[] {
 }
 
 function outline(w: number, h: number, radius = 1.2) {
+  // Half-stroke (~0.4 mm) inset keeps rectangle borders on 50×30 inside the die.
   return [
-    box(0.7, 0.7, w - 1.4, h - 1.4, { radius, lockMovement: true }),
+    box(0.5, 0.5, w - 1.0, h - 1.0, { radius, lockMovement: true, lineWidth: 0.45 }),
     ...contentRect(w, h),
   ];
 }

@@ -20,8 +20,15 @@ import {
 import { createTd404Adapter, createTd404Capabilities } from '@/printing/adapters/td404/TD404Adapter';
 import { defaultPrintQueue } from '@/printing/printer/PrintQueue';
 import { encodeTscBitmapJob, inspectTsplJob } from '@/lib/printer/tsc';
+import { createPrintGeometry, type PrintGeometry } from '@/lib/printer/print-spec';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
-import { grayToPngBase64, type BitRaster } from '@/lib/printer/escpos';
+import {
+  grayToBits,
+  grayToPngBase64,
+  padBitsCentered,
+  binarizeGrayForPrint,
+  type BitRaster,
+} from '@/lib/printer/escpos';
 
 export type ArtworkPrintInput = {
   widthMm: number;
@@ -39,6 +46,8 @@ export type ArtworkPrintInput = {
   speed?: number | null;
   offsetXmm?: number;
   offsetYmm?: number;
+  /** When set, raster was already rendered at geometry.sizeDots — skip UniversalRenderer resize. */
+  preparedGeometry?: PrintGeometry;
 };
 
 function capabilitiesFromManager() {
@@ -151,7 +160,144 @@ export function renderArtworkToJob(input: ArtworkPrintInput): RenderedPrintJob {
   return job;
 }
 
+/**
+ * Print a gray raster that is already locked to label SIZE dots.
+ * Skips UniversalRenderer re-fit so WYSIWYG matches img-to-label preview.
+ */
+export async function printPreparedGrayJob(
+  input: ArtworkPrintInput & { preparedGeometry: PrintGeometry },
+): Promise<RenderedPrintJob> {
+  const manager = getPrinterManager();
+  const geometry = input.preparedGeometry;
+  const { gray } = input;
+
+  if (gray.width !== geometry.sizeDotsW || gray.height !== geometry.sizeDotsH) {
+    throw new Error(
+      `Prepared raster ${gray.width}×${gray.height} does not match label canvas ${geometry.sizeDotsW}×${geometry.sizeDotsH} dots.`,
+    );
+  }
+
+  const threshold = input.threshold ?? 165;
+  const printGray = binarizeGrayForPrint(gray, {
+    threshold,
+    dither: Boolean(input.dither),
+    stretchContrast: true,
+  });
+  let bits = grayToBits(printGray, { threshold: 254, dither: false });
+  if (bits.bytesPerRow * 8 !== geometry.bitmapDotsW || bits.height !== geometry.bitmapDotsH) {
+    bits = padBitsCentered(bits, geometry.bitmapDotsW, geometry.bitmapDotsH);
+  }
+
+  const job: RenderedPrintJob = {
+    documentId: 'prepared-artwork',
+    widthMm: input.widthMm,
+    heightMm: input.heightMm,
+    widthDots: geometry.sizeDotsW,
+    heightDots: geometry.sizeDotsH,
+    dpiX: manager.getPrintDpi(),
+    dpiY: manager.getPrintDpi(),
+    bitmap: {
+      widthDots: geometry.bitmapDotsW,
+      heightDots: geometry.bitmapDotsH,
+      dpiX: manager.getPrintDpi(),
+      dpiY: manager.getPrintDpi(),
+      pixelFormat: '1bpp',
+      data: bits.data,
+      bytesPerRow: bits.bytesPerRow,
+    },
+    copies: Math.max(1, input.copies ?? 1),
+  };
+
+  logPrintTrace('PREPARED_GRAY', {
+    widthMm: input.widthMm,
+    heightMm: input.heightMm,
+    sizeDotsW: geometry.sizeDotsW,
+    sizeDotsH: geometry.sizeDotsH,
+    bitmapDotsW: geometry.bitmapDotsW,
+    grayW: gray.width,
+    grayH: gray.height,
+    threshold,
+  });
+
+  const pngBase64 = grayToPngBase64(printGray);
+
+  if (manager.isDev) {
+    await defaultPrintQueue.enqueue(async () => {
+      await manager.printDevPngLabelFast({
+        pngBase64,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        gapMm: input.gapMm,
+        copies: input.copies ?? 1,
+        density: input.density,
+        speed: input.speed,
+        hOffsetMm: input.offsetXmm,
+        vOffsetMm: input.offsetYmm,
+        media: input.mediaType ?? 'gap',
+      });
+    });
+    return job;
+  }
+  if (manager.isTez) {
+    await defaultPrintQueue.enqueue(async () => {
+      await manager.printTezPngLabelFast({
+        pngBase64,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        gapMm: input.gapMm,
+        copies: input.copies ?? 1,
+        density: input.density,
+        speed: input.speed,
+        hOffsetMm: input.offsetXmm,
+        vOffsetMm: input.offsetYmm,
+        media: input.mediaType ?? 'gap',
+        threshold: 254,
+      });
+    });
+    return job;
+  }
+  if (manager.isJosh) {
+    const profile = manager.getActivePrinterProfile();
+    await defaultPrintQueue.enqueue(async () => {
+      await manager.printJoshPngLabelFast({
+        pngBase64,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        gapMm: input.gapMm,
+        copies: input.copies ?? 1,
+        density: input.density,
+        speed: input.speed,
+        hOffsetMm: input.offsetXmm,
+        vOffsetMm: input.offsetYmm,
+        media: input.mediaType ?? 'gap',
+        alignment: profile.alignment,
+      });
+    });
+    return job;
+  }
+
+  const adapter = adapterFromManager();
+  const bytes = await adapter.encode(job, {
+    gapMm: input.gapMm,
+    mediaType: input.mediaType,
+    density: input.density,
+    speed: input.speed,
+    offsetXmm: input.offsetXmm,
+    offsetYmm: input.offsetYmm,
+  });
+  await defaultPrintQueue.enqueue(async () => {
+    const copies = Math.max(1, input.copies ?? 1);
+    for (let i = 0; i < copies; i++) {
+      await adapter.send(bytes);
+    }
+  });
+  return job;
+}
+
 export async function printArtworkJob(input: ArtworkPrintInput): Promise<RenderedPrintJob> {
+  if (input.preparedGeometry) {
+    return printPreparedGrayJob({ ...input, preparedGeometry: input.preparedGeometry });
+  }
   const manager = getPrinterManager();
   const job = renderArtworkToJob(input);
 

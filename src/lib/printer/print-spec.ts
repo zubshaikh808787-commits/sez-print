@@ -335,8 +335,9 @@ export function createPrintSpec(options: CreatePrintSpecOptions): PrintSpec {
   const calibXOffsetDots = mmToDots(options.calibration?.horizontalOffsetMm ?? 0, dpi);
   const calibYOffsetDots = mmToDots(options.calibration?.verticalOffsetMm ?? 0, dpi);
 
-  const xOffsetDots = Math.max(0, centeringOffsetDots + calibXOffsetDots);
-  const yOffsetDots = Math.max(0, calibYOffsetDots);
+  // Allow negative calibration — TD404/Dev bake negatives into the bitmap.
+  const xOffsetDots = centeringOffsetDots + calibXOffsetDots;
+  const yOffsetDots = calibYOffsetDots;
 
   return {
     widthMm: effectiveWidthMm,

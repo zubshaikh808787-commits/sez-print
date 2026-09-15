@@ -8,7 +8,8 @@ import {
   createTableState,
 } from '@/components/editor/types';
 import { buildIndustryPreviewElements } from '@/constants/industry-template-elements';
-import { buildJewelryTemplateElements } from '@/constants/jewelry-template-elements';
+import { buildJewelryTemplateElements, canonicalizeJewelryDieCutDocument } from '@/constants/jewelry-template-elements';
+import { isJewelryDieCutPreviewType } from '@/constants/jewelry-diecut';
 import { buildRatTail143Elements } from '@/constants/rat-tail-143';
 import { templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
 import { generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
@@ -129,7 +130,7 @@ function frameShape(widthMm: number, heightMm: number, rounded = true): LabelEle
 }
 
 function circleShape(widthMm: number, heightMm: number): LabelElement {
-  const d = Math.min(widthMm, heightMm) - 1.6;
+  const d = Math.max(2, Math.min(widthMm, heightMm) - 0.8);
   return {
     ...DEFAULT_SHAPE_STATE,
     id: generateId(),
@@ -139,7 +140,7 @@ function circleShape(widthMm: number, heightMm: number): LabelElement {
     top: (heightMm - d) / 2,
     width: d,
     height: d,
-    lineWidth: 0.4,
+    lineWidth: 0.45,
     fill: true,
     fillColor: '#FFFFFF',
     drawingColorIndex: 1,
@@ -422,6 +423,13 @@ export function createIndustryTemplateDocument(params: {
     document.widthMm = params.widthMm;
     document.heightMm = params.heightMm;
     document.background = emptyBackground();
+  }
+  if (isJewelryDieCutPreviewType(params.previewType)) {
+    document.mediaShape = 'diecut';
+    document.templatePreviewType = params.previewType;
+    document.templateCategory = params.category;
+    // Centres ink in each 14 mm column (fixes left-shifted catalog prints).
+    return canonicalizeJewelryDieCutDocument(document);
   }
   return document;
 }
