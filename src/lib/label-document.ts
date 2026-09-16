@@ -5,6 +5,7 @@ import type {
   EditorElementState,
   LineElementState,
   QrcodeElementState,
+  LineSpacing,
   Rotation,
   ShapeElementState,
   TableElementState,
@@ -13,6 +14,7 @@ import type {
 import type { SignatureStroke } from '@/components/editor/signature-drawing-board';
 import type { BorderStyleId } from '@/constants/border-library';
 import type { MediaGeometry } from '@/lib/media-geometry';
+import { computeTextElementHeightMm } from '@/lib/text-metrics';
 
 export type TemplateBackground =
   | { type: 'none' }
@@ -386,23 +388,63 @@ function clampPanelElement(
   return { ...element, left, top, width };
 }
 
-export function textBlockHeightMm(fontSizePt: number, lines: number) {
-  return Math.max(2.4, ptToMm(fontSizePt) * 1.25 * Math.max(1, lines));
+export function ptToMm(pt: number) {
+  return (pt * 25.4) / 72;
 }
 
-/** Bounding box of an element in mm. Text/degrees/time height prefers explicit height or derives from fontSize. */
+export function mmToPt(mm: number) {
+  return (mm * 72) / 25.4;
+}
+
+export function textBlockHeightMm(fontSizePt: number, lines: number, lineSpacing: LineSpacing = '1.0') {
+  const mult = lineSpacing === '1.5' ? 1.5 : lineSpacing === '2.0' ? 2.0 : lineSpacing === 'Custom' ? 1.75 : 1.0;
+  return Math.max(2.4, ptToMm(fontSizePt) * 1.25 * mult * Math.max(1, lines));
+}
+
+/** Bounding box of an element in mm. Text/degrees height derives dynamically from wrapped lines unless explicitly fixed. */
 export function elementSizeMm(element: LabelElement): { width: number; height: number } {
   switch (element.type) {
-    case 'text':
-    case 'degrees': {
-      if (typeof element.height === 'number' && element.height > 0) {
+    case 'text': {
+      const isAutoHeight = element.autoTextHeight !== false && element.autoWrapping !== 'Close';
+      if (!isAutoHeight && typeof element.height === 'number' && element.height > 0) {
         return { width: element.width, height: element.height };
       }
-      const lines = ('text' in element ? element.text : element.content).split('\n').length;
-      return {
-        width: element.width,
-        height: textBlockHeightMm(element.fontSize, lines),
-      };
+      const rawText =
+        element.contentType === 'Data Source' && element.columnNameContent
+          ? `{${element.columnNameContent}}`
+          : element.text;
+      const height = computeTextElementHeightMm({
+        text: rawText,
+        fontSize: element.fontSize,
+        widthMm: element.width,
+        autoWrapping: element.autoWrapping ?? 'Word',
+        lineSpacing: element.lineSpacing ?? '1.0',
+        charSpacing: element.charSpacing ?? 0,
+        bold: element.bold ?? false,
+        verticalDisplay: element.verticalDisplay ?? false,
+      });
+      return { width: element.width, height };
+    }
+    case 'degrees': {
+      const isAutoHeight = element.autoTextHeight !== false && element.autoWrapping !== 'Close';
+      if (!isAutoHeight && typeof element.height === 'number' && element.height > 0) {
+        return { width: element.width, height: element.height };
+      }
+      const rawText =
+        element.contentType === 'Data Source' && element.columnNameContent
+          ? `{${element.columnNameContent}}`
+          : element.content;
+      const height = computeTextElementHeightMm({
+        text: rawText,
+        fontSize: element.fontSize,
+        widthMm: element.width,
+        autoWrapping: element.autoWrapping ?? 'Word',
+        lineSpacing: element.lineSpacing ?? '1.0',
+        charSpacing: element.charSpacing ?? 0,
+        bold: element.bold ?? false,
+        verticalDisplay: element.verticalDisplay ?? false,
+      });
+      return { width: element.width, height };
     }
     case 'time':
       if (typeof element.height === 'number' && element.height > 0) {
@@ -415,12 +457,4 @@ export function elementSizeMm(element: LabelElement): { width: number; height: n
     default:
       return { width: element.width, height: element.height };
   }
-}
-
-export function ptToMm(pt: number) {
-  return (pt * 25.4) / 72;
-}
-
-export function mmToPt(mm: number) {
-  return (mm * 72) / 25.4;
 }

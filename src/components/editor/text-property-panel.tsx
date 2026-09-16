@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { PositionControls } from '@/components/editor/position-controls';
+import { fitFontSizeToLabel } from '@/lib/editor/label-bounds';
 
 import {
   DRAWING_COLORS,
@@ -282,6 +283,26 @@ export function TextPropertyPanel({
       requestAnimationFrame(() => contentInputRef.current?.focus());
     }
   }, [activeTab, contentFocusRequest]);
+
+  const handleFitToLabel = useCallback(() => {
+    const rawText =
+      state.contentType === 'Data Source' && state.columnNameContent
+        ? `{${state.columnNameContent}}`
+        : state.text;
+    const targetMaxH = Math.max(2, labelHeightMm - Math.max(0, state.top));
+    const fittedFs = fitFontSizeToLabel({
+      text: rawText,
+      widthMm: state.width,
+      maxHeightMm: targetMaxH,
+      initialFontSize: state.fontSize,
+      autoWrapping: state.autoWrapping,
+      lineSpacing: state.lineSpacing,
+      charSpacing: state.charSpacing,
+      bold: state.bold,
+      verticalDisplay: state.verticalDisplay,
+    });
+    patch({ fontSize: fittedFs });
+  }, [state, labelHeightMm, patch]);
   const positionSteppers = (
     <>
       <StepperRow
@@ -388,7 +409,12 @@ export function TextPropertyPanel({
             />
             <Divider />
             <View style={styles.block}>
-              <Text style={styles.rowLabel}>Font Size</Text>
+              <View style={styles.rowHeaderWithAction}>
+                <Text style={styles.rowLabel}>Font Size</Text>
+                <Pressable onPress={handleFitToLabel} style={styles.fitChip}>
+                  <Text style={styles.fitChipText}>Fit to Label</Text>
+                </Pressable>
+              </View>
               <FontSlider value={state.fontSize} onChange={(fontSize) => patch({ fontSize })} />
             </View>
             <Divider />
@@ -947,5 +973,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#EEF1F5',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  rowHeaderWithAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  fitChip: {
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  fitChipText: {
+    color: '#0369A1',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

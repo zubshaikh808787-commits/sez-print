@@ -1,5 +1,8 @@
-import { mmToPt, ptToMm, type LabelDocument, type LabelElement } from '@/lib/label-document';
+import { elementSizeMm, mmToPt, ptToMm, textBlockHeightMm, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { isRatTailGeometry, ratTailBodyRectMm, scaleMediaGeometry } from '@/lib/media-geometry';
+import { clampToLabelBounds } from '@/lib/editor/label-bounds';
+export { computeTextElementHeightMm, computeWrappedLines, measureTextWidthMm } from '@/lib/text-metrics';
+export { textBlockHeightMm } from '@/lib/label-document';
 
 const PAD_RATIO = 0.05;
 const MIN_PAD_MM = 0.5;
@@ -17,29 +20,12 @@ function padMm(widthMm: number, heightMm: number) {
 }
 
 function bboxOf(element: LabelElement) {
-  if (element.type === 'text' || element.type === 'degrees') {
-    const source = 'text' in element ? element.text : element.content;
-    const lines = Math.max(1, source.split('\n').length);
-    return {
-      left: element.left,
-      top: element.top,
-      width: element.width,
-      height: textBlockHeightMm(element.fontSize, lines),
-    };
-  }
-  if (element.type === 'time') {
-    return {
-      left: element.left,
-      top: element.top,
-      width: element.width,
-      height: textBlockHeightMm(element.fontSize, 1),
-    };
-  }
+  const size = elementSizeMm(element);
   return {
     left: element.left,
     top: element.top,
-    width: element.width,
-    height: element.height,
+    width: size.width,
+    height: size.height,
   };
 }
 
@@ -211,10 +197,7 @@ export function fitClipartDefaults(widthMm: number, heightMm: number, existing: 
   };
 }
 
-/** Height in mm for a text-like element (matches renderer line metrics). */
-export function textBlockHeightMm(fontSizePt: number, lines: number) {
-  return Math.max(2.4, ptToMm(fontSizePt) * 1.25 * Math.max(1, lines));
-}
+
 
 /** Clamp element position/size so it stays inside the label (paddle only on rat-tail). */
 export function clampElementToLabel(
@@ -248,40 +231,51 @@ export function clampElementToLabel(
   const bounds = isRatTailGeometry(doc.mediaGeometry)
     ? ratTailBodyRectMm(doc.mediaGeometry)
     : { left: 0, top: 0, width: maxW, height: maxH };
-  const minW = element.type === 'line' ? 0.1 : 0.5;
-  const minH = element.type === 'line' ? 0.1 : 0.5;
+  const minMm = element.type === 'line' ? 0.1 : 0.5;
 
-  const rawW = finiteSize(element.width, minW);
-  const rawH =
-    'height' in element && typeof element.height === 'number'
-      ? finiteSize(element.height, minH)
-      : 0;
+  const currentSize = elementSizeMm(element);
+  const rawLeft = finiteSize(element.left, 0);
+  const rawTop = finiteSize(element.top, 0);
+  const rawWidth = finiteSize(element.width, minMm);
+  const hasExplicitHeight = 'height' in element && typeof element.height === 'number';
+  const rawHeight = hasExplicitHeight
+    ? finiteSize(element.height, minMm)
+    : currentSize.height;
 
-  const width = Math.min(Math.max(minW, rawW), bounds.width);
-  const height =
-    'height' in element && typeof element.height === 'number'
-      ? Math.min(Math.max(minH, rawH), bounds.height)
-      : 0;
-
-  const left = Math.min(
-    Math.max(bounds.left, finiteSize(element.left, 0)),
-    Math.max(bounds.left, bounds.left + bounds.width - width),
-  );
-  const top = Math.min(
-    Math.max(bounds.top, finiteSize(element.top, 0)),
-    Math.max(bounds.top, bounds.top + bounds.height - (height || minH)),
+  const clamped = clampToLabelBounds(
+    {
+      left: rawLeft - bounds.left,
+      top: rawTop - bounds.top,
+      width: rawWidth,
+      height: rawHeight,
+    },
+    { widthMm: bounds.width, heightMm: bounds.height },
+    { anchor: 'body', minMm, naturalHeight: rawHeight },
   );
 
-  const heightMatches =
-    !('height' in element && typeof element.height === 'number') || element.height === height;
-  if (element.left === left && element.top === top && element.width === width && heightMatches) {
+  const finalLeft = bounds.left + clamped.left;
+  const finalTop = bounds.top + clamped.top;
+  const finalWidth = clamped.width;
+  const finalHeight = hasExplicitHeight ? Math.min(Math.max(minMm, rawHeight), bounds.height) : clamped.height;
+  const heightMatches = !hasExplicitHeight || element.height === finalHeight;
+
+  if (
+    element.left === finalLeft &&
+    element.top === finalTop &&
+    element.width === finalWidth &&
+    heightMatches
+  ) {
     return element;
   }
 
-  const patch: Record<string, unknown> = { left, top, width };
+  const patch: Record<string, unknown> = {
+    left: finalLeft,
+    top: finalTop,
+    width: finalWidth,
+  };
 
-  if ('height' in element && typeof element.height === 'number') {
-    patch.height = height;
+  if (hasExplicitHeight) {
+    patch.height = finalHeight;
   }
 
   return { ...element, ...patch } as LabelElement;

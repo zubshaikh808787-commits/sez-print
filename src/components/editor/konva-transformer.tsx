@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -14,6 +15,8 @@ import Svg, { Path as SvgPath, Line as SvgLine } from 'react-native-svg';
 import { AppIcon } from '@/components/app-icon';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, textBlockHeightMm, type LabelElement } from '@/lib/label-document';
+import { computeTextElementHeightMm } from '@/lib/text-metrics';
+import { clampToLabelBounds, fitFontSizeToLabel } from '@/lib/editor/label-bounds';
 import { DIVIDER_HIT_SIZE_PX } from '@/lib/editor/canvas-split';
 import { finiteMm, roundMm } from '@/lib/editor/engine';
 import { mmToPx, pxToMm } from '@/lib/label-coordinate-system';
@@ -150,6 +153,31 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const animRot = useSharedValue<number>(baseRotation);
   const minResizeMmSv = useSharedValue(resizePolicy.minMm);
   const aspectSv = useSharedValue(aspectRatio);
+
+  const isTextElement = element.type === 'text' || element.type === 'degrees';
+  const isAutoHeight = isTextElement && element.autoTextHeight !== false && element.autoWrapping !== 'Close';
+  const textContent =
+    element.type === 'text'
+      ? (element.contentType === 'Data Source' && element.columnNameContent ? `{${element.columnNameContent}}` : element.text)
+      : element.type === 'degrees'
+        ? (element.contentType === 'Data Source' && element.columnNameContent ? `{${element.columnNameContent}}` : element.content)
+        : '';
+  const textFontSize = 'fontSize' in element && typeof element.fontSize === 'number' ? element.fontSize : 12;
+  const textAutoWrapping = 'autoWrapping' in element ? element.autoWrapping ?? 'Word' : 'Word';
+  const textLineSpacing = 'lineSpacing' in element ? element.lineSpacing ?? '1.0' : '1.0';
+  const textCharSpacing = 'charSpacing' in element && typeof element.charSpacing === 'number' ? element.charSpacing : 0;
+  const textBold = 'bold' in element ? element.bold ?? false : false;
+  const textVerticalDisplay = 'verticalDisplay' in element ? element.verticalDisplay ?? false : false;
+
+  const isAutoTextSv = useSharedValue(isAutoHeight);
+  const textContentSv = useSharedValue(textContent);
+  const textFontSizeSv = useSharedValue(textFontSize);
+  const autoWrappingSv = useSharedValue(textAutoWrapping);
+  const lineSpacingSv = useSharedValue(textLineSpacing);
+  const charSpacingSv = useSharedValue(textCharSpacing);
+  const boldSv = useSharedValue(textBold);
+  const verticalDisplaySv = useSharedValue(textVerticalDisplay);
+
   const isInteracting = useSharedValue(false);
   const pendingCommit = useSharedValue(false);
   const liftSv = useSharedValue(1);
@@ -185,6 +213,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     sySv.value = sy;
     minResizeMmSv.value = resizePolicy.minMm;
     aspectSv.value = aspectRatio;
+    isAutoTextSv.value = isAutoHeight;
+    textContentSv.value = textContent;
+    textFontSizeSv.value = textFontSize;
+    autoWrappingSv.value = textAutoWrapping;
+    lineSpacingSv.value = textLineSpacing;
+    charSpacingSv.value = textCharSpacing;
+    boldSv.value = textBold;
+    verticalDisplaySv.value = textVerticalDisplay;
   }, [
     padZoom,
     sizeMm.width,
@@ -195,6 +231,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     sy,
     resizePolicy.minMm,
     aspectRatio,
+    isAutoHeight,
+    textContent,
+    textFontSize,
+    textAutoWrapping,
+    textLineSpacing,
+    textCharSpacing,
+    textBold,
+    textVerticalDisplay,
     padZoomSv,
     sizeWMmSv,
     sizeHMmSv,
@@ -204,6 +248,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     sySv,
     minResizeMmSv,
     aspectSv,
+    isAutoTextSv,
+    textContentSv,
+    textFontSizeSv,
+    autoWrappingSv,
+    lineSpacingSv,
+    charSpacingSv,
+    boldSv,
+    verticalDisplaySv,
   ]);
 
   useEffect(() => {
@@ -453,10 +505,46 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
       let fontSize: number | undefined;
       let finalHeightMm = next.height;
-      if (element.type === 'text' || element.type === 'degrees' || element.type === 'time') {
-        const lines = ('text' in element ? element.text : 'content' in element ? element.content : '').split('\n').length || 1;
+      if (element.type === 'text' || element.type === 'degrees') {
+        const rawText =
+          element.contentType === 'Data Source' && element.columnNameContent
+            ? `{${element.columnNameContent}}`
+            : 'text' in element
+              ? element.text
+              : element.content;
         const fs = 'fontSize' in element && typeof element.fontSize === 'number' ? element.fontSize : 12;
-        finalHeightMm = textBlockHeightMm(fs, lines);
+        const naturalHeightMm = computeTextElementHeightMm({
+          text: rawText,
+          fontSize: fs,
+          widthMm: next.width,
+          autoWrapping: element.autoWrapping ?? 'Word',
+          lineSpacing: element.lineSpacing ?? '1.0',
+          charSpacing: element.charSpacing ?? 0,
+          bold: element.bold ?? false,
+          verticalDisplay: element.verticalDisplay ?? false,
+        });
+        const clamped = clampToLabelBounds(
+          { left: next.left, top: next.top, width: next.width, height: naturalHeightMm },
+          { widthMm: canvasWidthMm, heightMm: canvasHeightMm },
+          { anchor: handle === 's' ? 's' : 'e', minMm: resizePolicy.minMm, naturalHeight: naturalHeightMm },
+        );
+        next.left = clamped.left;
+        next.top = clamped.top;
+        next.width = clamped.width;
+        finalHeightMm = clamped.height;
+        fontSize = fs;
+      } else if (element.type === 'time') {
+        const fs = 'fontSize' in element && typeof element.fontSize === 'number' ? element.fontSize : 12;
+        const naturalHeightMm = textBlockHeightMm(fs, 1);
+        const clamped = clampToLabelBounds(
+          { left: next.left, top: next.top, width: next.width, height: naturalHeightMm },
+          { widthMm: canvasWidthMm, heightMm: canvasHeightMm },
+          { anchor: handle === 's' ? 's' : 'e', minMm: resizePolicy.minMm, naturalHeight: naturalHeightMm },
+        );
+        next.left = clamped.left;
+        next.top = clamped.top;
+        next.width = clamped.width;
+        finalHeightMm = clamped.height;
         fontSize = fs;
       }
 
@@ -590,17 +678,22 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           const dx = e.translationX / z;
           const dy = e.translationY / z;
 
-          const maxLeftPx = Math.max(0, (canvasWMmSv.value - sizeWMmSv.value) * sxSv.value);
-          const maxTopPx = Math.max(0, (canvasHMmSv.value - sizeHMmSv.value) * sySv.value);
+          const curLeftMm = (originLeftSv.value + dx) / sxSv.value;
+          const curTopMm = (originTopSv.value + dy) / sySv.value;
+          const curWMm = animW.value / sxSv.value;
+          const curHMm = animH.value / sySv.value;
 
-          const targetLeft = originLeftSv.value + dx;
-          const targetTop = originTopSv.value + dy;
+          const clamped = clampToLabelBounds(
+            { left: curLeftMm, top: curTopMm, width: curWMm, height: curHMm },
+            { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
+            { anchor: 'body' },
+          );
 
-          const clampedLeft = Math.max(0, Math.min(maxLeftPx, targetLeft));
-          const clampedTop = Math.max(0, Math.min(maxTopPx, targetTop));
+          const targetLeftPx = clamped.left * sxSv.value;
+          const targetTopPx = clamped.top * sySv.value;
 
-          transX.value = clampedLeft - originLeftSv.value;
-          transY.value = clampedTop - originTopSv.value;
+          transX.value = targetLeftPx - originLeftSv.value;
+          transY.value = targetTopPx - originTopSv.value;
         })
         .onEnd((e) => {
           'worklet';
@@ -626,16 +719,16 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       originTopSv,
       transX,
       transY,
+      animW,
+      animH,
       isInteracting,
       pendingCommit,
       liftSv,
       selectedSv,
       padZoomSv,
       canvasWMmSv,
-      sizeWMmSv,
-      sxSv,
       canvasHMmSv,
-      sizeHMmSv,
+      sxSv,
       sySv,
     ],
   );
@@ -728,19 +821,57 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           let top = originTop;
 
           if (behavior === 'width' && handle === 'e') {
-            const maxW = Math.max(minPx, canvasWPx - originLeft);
-            const proposedW = originW + dx;
-            nw = Math.max(minPx, Math.min(maxW, proposedW));
-            nh = originH;
-            left = originLeft;
-            top = originTop;
+            const proposedWPx = originW + dx;
+            const proposedWMm = Math.max(minResizeMmSv.value, proposedWPx / sxSv.value);
+            let naturalHMm: number | undefined;
+
+            if (isAutoTextSv.value) {
+              naturalHMm = computeTextElementHeightMm({
+                text: textContentSv.value,
+                fontSize: textFontSizeSv.value,
+                widthMm: proposedWMm,
+                autoWrapping: autoWrappingSv.value,
+                lineSpacing: lineSpacingSv.value,
+                charSpacing: charSpacingSv.value,
+                bold: boldSv.value,
+                verticalDisplay: verticalDisplaySv.value,
+              });
+            }
+
+            const clamped = clampToLabelBounds(
+              {
+                left: originLeft / sxSv.value,
+                top: originTop / sySv.value,
+                width: proposedWMm,
+                height: originH / sySv.value,
+              },
+              { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
+              { anchor: 'e', minMm: minResizeMmSv.value, naturalHeight: naturalHMm },
+            );
+
+            nw = clamped.width * sxSv.value;
+            nh = clamped.height * sySv.value;
+            left = clamped.left * sxSv.value;
+            top = clamped.top * sySv.value;
           } else if (behavior === 'height' && handle === 's') {
-            const maxH = Math.max(minPx, canvasHPx - originTop);
-            const proposedH = originH + dy;
-            nh = Math.max(minPx, Math.min(maxH, proposedH));
-            nw = originW;
-            left = originLeft;
-            top = originTop;
+            const proposedHPx = originH + dy;
+            const proposedHMm = Math.max(minResizeMmSv.value, proposedHPx / sySv.value);
+
+            const clamped = clampToLabelBounds(
+              {
+                left: originLeft / sxSv.value,
+                top: originTop / sySv.value,
+                width: originW / sxSv.value,
+                height: proposedHMm,
+              },
+              { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
+              { anchor: 's', minMm: minResizeMmSv.value },
+            );
+
+            nw = clamped.width * sxSv.value;
+            nh = clamped.height * sySv.value;
+            left = clamped.left * sxSv.value;
+            top = clamped.top * sySv.value;
           } else if (behavior === 'aspect' || behavior === 'square') {
             const effectiveAspect = behavior === 'square' ? 1 : aspect;
             if (handle === 'e') {
@@ -837,33 +968,44 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       sySv,
       minResizeMmSv,
       aspectSv,
+      isAutoTextSv,
+      textContentSv,
+      textFontSizeSv,
+      autoWrappingSv,
+      lineSpacingSv,
+      charSpacingSv,
+      boldSv,
+      verticalDisplaySv,
     ],
   );
 
   const handleGestures = useMemo(() => {
-    const next: Partial<Record<ResizeAnchor, ReturnType<typeof Gesture.Pan>>> = {};
+    const map: Partial<Record<HandlePosition, ReturnType<typeof createHandleGesture>>> = {};
     for (const anchor of resizePolicy.anchors) {
-      const behavior = resizePolicy.behavior[anchor];
-      if (behavior) next[anchor] = createHandleGesture(anchor, behavior);
+      const b = resizePolicy.behavior[anchor];
+      if (b) map[anchor] = createHandleGesture(anchor, b);
     }
-    return next;
+    return map;
   }, [createHandleGesture, resizePolicy]);
 
-  const containerStyle = useAnimatedStyle(() => ({
-    position: 'absolute' as const,
-    left: 0,
-    top: 0,
-    width: animW.value,
-    height: animH.value,
-    transform: [
-      { translateX: originLeftSv.value + transX.value },
-      { translateY: originTopSv.value + transY.value },
-      { rotate: `${animRot.value}deg` },
-    ],
-    zIndex: selected ? 99 : element.zIndex ?? 1,
-    opacity: hidden ? 0.28 : (element.opacity ?? 1) * liftSv.value,
-    overflow: 'visible' as const,
-  }));
+  const containerStyle = useAnimatedStyle(() => {
+    const liveW = Math.max(1, animW.value);
+    const liveH = Math.max(1, animH.value);
+    const liveLeft = originLeftSv.value + transX.value;
+    const liveTop = originTopSv.value + transY.value;
+    const liveRot = animRot.value;
+
+    return {
+      position: 'absolute',
+      left: liveLeft,
+      top: liveTop,
+      width: liveW,
+      height: liveH,
+      transform: [{ rotate: `${liveRot}deg` }],
+      opacity: (element.opacity ?? 1) * liftSv.value,
+      zIndex: selectedSv.value ? 10 : 1,
+    };
+  });
 
   if (element.type === 'border' || element.needPrinting === false) {
     return (
@@ -890,7 +1032,64 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     );
   }
 
-  const borderStrokeColor = selectionColor || CHROME_SELECTION_STROKE;
+  if (hidden) return null;
+
+  const naturalTextHeightMm = isTextElement && isAutoHeight
+    ? computeTextElementHeightMm({
+        text: textContent,
+        fontSize: textFontSize,
+        widthMm: sizeMm.width,
+        autoWrapping: textAutoWrapping,
+        lineSpacing: textLineSpacing,
+        charSpacing: textCharSpacing,
+        bold: textBold,
+        verticalDisplay: textVerticalDisplay,
+      })
+    : sizeMm.height;
+
+  const boundsCheck = clampToLabelBounds(
+    { left: element.left, top: element.top, width: sizeMm.width, height: naturalTextHeightMm },
+    { widthMm: canvasWidthMm, heightMm: canvasHeightMm },
+    { anchor: 'body', naturalHeight: naturalTextHeightMm },
+  );
+  const isOverflowed = isTextElement && boundsCheck.overflowed;
+
+  const handleFitToLabelAction = () => {
+    if (!isTextElement) return;
+    const targetMaxH = Math.max(2, canvasHeightMm - Math.max(0, element.top));
+    const fittedFs = fitFontSizeToLabel({
+      text: textContent,
+      widthMm: sizeMm.width,
+      maxHeightMm: targetMaxH,
+      initialFontSize: textFontSize,
+      autoWrapping: textAutoWrapping,
+      lineSpacing: textLineSpacing,
+      charSpacing: textCharSpacing,
+      bold: textBold,
+      verticalDisplay: textVerticalDisplay,
+    });
+    const fittedHMm = computeTextElementHeightMm({
+      text: textContent,
+      fontSize: fittedFs,
+      widthMm: sizeMm.width,
+      autoWrapping: textAutoWrapping,
+      lineSpacing: textLineSpacing,
+      charSpacing: textCharSpacing,
+      bold: textBold,
+      verticalDisplay: textVerticalDisplay,
+    });
+    callbacksRef.current.onTransformEnd({
+      id: element.id,
+      leftMm: roundMm(element.left),
+      topMm: roundMm(element.top),
+      widthMm: roundMm(sizeMm.width),
+      heightMm: roundMm(fittedHMm),
+      rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
+      fontSize: fittedFs,
+    });
+  };
+
+  const borderStrokeColor = isOverflowed ? '#EF4444' : selectionColor || CHROME_SELECTION_STROKE;
 
   return (
     <Animated.View style={containerStyle} collapsable={false}>
@@ -915,10 +1114,22 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             style={[
               styles.selectionOutline,
               { borderColor: borderStrokeColor },
+              isOverflowed && styles.selectionOutlineOverflow,
             ]}
           />
 
           <ResizeTooltip tooltipRef={tooltipRef} />
+
+          {isOverflowed && !moving ? (
+            <Pressable
+              onPress={handleFitToLabelAction}
+              style={styles.overflowBadge}>
+              <AppIcon name="exclamationmark.triangle.fill" tintColor="#FFFFFF" size={11} />
+              <Text style={styles.overflowBadgeText}>
+                Overflow: text exceeds label height • <Text style={styles.overflowBadgeAction}>Fit</Text>
+              </Text>
+            </Pressable>
+          ) : null}
 
           {element.lockMovement || moving ? null : (
             <>
@@ -1000,7 +1211,7 @@ const styles = StyleSheet.create({
   fillContainer: {
     width: '100%',
     height: '100%',
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   selectionOutline: {
     ...StyleSheet.absoluteFillObject,
@@ -1048,6 +1259,39 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.2,
+  },
+  selectionOutlineOverflow: {
+    borderColor: '#EF4444',
+    borderWidth: 2,
+    borderStyle: 'dashed',
+  },
+  overflowBadge: {
+    position: 'absolute',
+    top: -36,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    zIndex: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.25,
+    shadowRadius: 2,
+    elevation: 4,
+  },
+  overflowBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  overflowBadgeAction: {
+    color: '#FEF08A',
+    fontWeight: '800',
+    textDecorationLine: 'underline',
   },
   lockBadge: {
     position: 'absolute',

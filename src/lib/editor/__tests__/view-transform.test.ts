@@ -35,6 +35,8 @@ function textEl(id: string, left: number, top: number, width: number, height: nu
     top,
     width,
     height,
+    autoTextHeight: false,
+    autoWrapping: 'Close',
     zIndex: 0,
   };
 }

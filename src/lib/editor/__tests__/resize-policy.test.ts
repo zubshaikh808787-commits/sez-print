@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { DEFAULT_BARCODE_STATE, DEFAULT_ELEMENT_STATE, DEFAULT_QRCODE_STATE } from '../../../components/editor/types';
 import type { LabelElement } from '../../label-document';
 import { MIN_ELEMENT_MM } from '../engine';
+import { clampToLabelBounds, roundMm } from '../label-bounds';
+import { computeTextElementHeightMm } from '../../text-metrics';
 import {
   aspectRatioOf,
   boundBoxMm,
@@ -361,6 +363,160 @@ function testTextMultiCycleResizeStability() {
   console.log('ok multi-cycle width resize maintains stable dimensions and fontSize without drift');
 }
 
+function testRightResizeNeverExceedsBoundaryAndLeftNeverChanges() {
+  const start = { left: 15, top: 5, width: 20, height: 10 };
+  const canvas = { widthMm: 50, heightMm: 30 };
+
+  // Propose dragging width past the right edge (e.g. 50mm width starting at 15mm = 65mm total)
+  const result = boundBoxMm({
+    anchor: 'e',
+    behavior: 'width',
+    start,
+    proposed: { width: 50, height: 10 },
+    aspect: 2,
+    minMm: MIN_ELEMENT_MM,
+    canvas,
+  });
+
+  // Left must remain strictly unchanged at 15
+  assert.equal(result.left, 15);
+  // Width must be clamped to 50 - 15 = 35mm
+  assert.equal(result.width, 35);
+  assert.equal(result.left + result.width, 50);
+  console.log('ok e resize near right boundary never exceeds canvasWidth - left, and left never changes');
+}
+
+function testWrapDrivenHeightGrowthNudgesOnlyWhenNeeded() {
+  const canvas = { widthMm: 50, heightMm: 30 };
+  const start = { left: 5, top: 18, width: 30, height: 8 };
+
+  // 1. Text height expands from 8mm to 15mm (total 18 + 15 = 33 > 30mm). Headroom: top nudged to 30 - 15 = 15mm
+  const r1 = clampToLabelBounds(
+    start,
+    canvas,
+    { anchor: 'e', naturalHeight: 15 },
+  );
+  assert.equal(r1.left, 5);
+  assert.equal(r1.top, 15);
+  assert.equal(r1.height, 15);
+  assert.equal(r1.top + r1.height, 30);
+  assert.equal(r1.overflowed, false);
+
+  // 2. Text height grows to 40mm (exceeds total canvas height 30mm)
+  const r2 = clampToLabelBounds(
+    start,
+    canvas,
+    { anchor: 'e', naturalHeight: 40 },
+  );
+  assert.equal(r2.left, 5);
+  assert.equal(r2.top, 0);
+  assert.equal(r2.height, 30); // Hard clamped to canvas
+  assert.equal(r2.overflowed, true);
+
+  console.log('ok wrap-driven height growth never exceeds canvasHeight, nudging only as needed and capping at 0');
+}
+
+function testWrapAndNudgeCycleStabilityZeroDrift() {
+  const canvas = { widthMm: 50, heightMm: 30 };
+  const text = 'Amazon Basics mouse with 2000DPI';
+  const initialWidth = 45;
+  const initialFontSize = 14;
+  const initialHeight = roundMm(computeTextElementHeightMm({
+    text,
+    fontSize: initialFontSize,
+    widthMm: initialWidth,
+    autoWrapping: 'Word',
+  }));
+  const initialTop = 10;
+  const initialLeft = 2;
+
+  let state = {
+    left: initialLeft,
+    top: initialTop,
+    width: initialWidth,
+    height: initialHeight,
+    fontSize: initialFontSize,
+  };
+
+  // Perform 5 complete cycles of narrow (forces wrap + height growth + upward nudge) then widen back
+  for (let cycle = 0; cycle < 5; cycle++) {
+    // 1. Narrow width to 20mm (forces 3+ lines, height expands to ~22mm, top nudges up from 10 to 8)
+    const narrowedWidth = 20;
+    const wrappedHeight = computeTextElementHeightMm({
+      text,
+      fontSize: state.fontSize,
+      widthMm: narrowedWidth,
+      autoWrapping: 'Word',
+    });
+    const narrowed = clampToLabelBounds(
+      { left: state.left, top: state.top, width: narrowedWidth, height: wrappedHeight },
+      canvas,
+      { anchor: 'e', naturalHeight: wrappedHeight },
+    );
+    state = {
+      left: narrowed.left,
+      top: narrowed.top,
+      width: narrowed.width,
+      height: narrowed.height,
+      fontSize: state.fontSize,
+    };
+    assert.equal(state.left, initialLeft);
+    assert.equal(state.width, 20);
+    assert.ok(state.top + state.height <= canvas.heightMm);
+
+    // 2. Widen width back to 45mm (height returns to initialHeight, top returns to headroom)
+    const restoredHeight = computeTextElementHeightMm({
+      text,
+      fontSize: state.fontSize,
+      widthMm: initialWidth,
+      autoWrapping: 'Word',
+    });
+    const widened = clampToLabelBounds(
+      { left: state.left, top: initialTop, width: initialWidth, height: restoredHeight },
+      canvas,
+      { anchor: 'e', naturalHeight: restoredHeight },
+    );
+    state = {
+      left: widened.left,
+      top: widened.top,
+      width: widened.width,
+      height: widened.height,
+      fontSize: state.fontSize,
+    };
+  }
+
+  assert.equal(state.left, initialLeft);
+  assert.equal(state.top, initialTop);
+  assert.equal(state.width, initialWidth);
+  assert.equal(state.height, initialHeight);
+  assert.equal(state.fontSize, initialFontSize);
+  console.log('ok 5-cycle narrow/widen test preserves top, height, fontSize with zero drift');
+}
+
+function testOverflowedStateWhenTallerThanCanvas() {
+  const canvas = { widthMm: 50, heightMm: 30 };
+  const text = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7';
+  const fontSize = 28; // Huge font size -> height will be ~60mm > 30mm canvas
+  const naturalHeight = computeTextElementHeightMm({
+    text,
+    fontSize,
+    widthMm: 45,
+    autoWrapping: 'Word',
+  });
+  assert.ok(naturalHeight > canvas.heightMm);
+
+  const clamped = clampToLabelBounds(
+    { left: 2, top: 5, width: 45, height: naturalHeight },
+    canvas,
+    { anchor: 'body', naturalHeight },
+  );
+
+  assert.equal(clamped.top, 0);
+  assert.equal(clamped.height, 30); // Hard clamped to canvas
+  assert.equal(clamped.overflowed, true);
+  console.log('ok overflowed flag is true while box height stays hard-clamped to canvas bounds');
+}
+
 function main() {
   testImageShowsTwoAnchors();
   testRightHandleKeepsAspect();
@@ -370,6 +526,10 @@ function main() {
   testBarcodeWidthAndHeightIndependent();
   testTextWidthOnly();
   testTextMultiCycleResizeStability();
+  testRightResizeNeverExceedsBoundaryAndLeftNeverChanges();
+  testWrapDrivenHeightGrowthNudgesOnlyWhenNeeded();
+  testWrapAndNudgeCycleStabilityZeroDrift();
+  testOverflowedStateWhenTallerThanCanvas();
   testJewelryAndCableStayOnTheLabel();
   testUnlockedImageIsAxisResize();
   testPolicyCatalog();

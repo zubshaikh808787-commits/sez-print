@@ -3,18 +3,17 @@ import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect } from 'react-native-svg';
 
 import { rulerTicksFor, type RulerTick } from '@/lib/editor/ruler-ticks';
+import { Palette } from '@/constants/ui';
 
 export const RULER_SIZE = 28;
 
-const TRACK = '#141B24';
-const BEVEL = '#2C3642';
-const GROOVE = '#0B1016';
-const TICK_MINOR = '#6B7C8D';
-const TICK_MID = '#A8B6C4';
-const TICK_MAJOR = '#E8EEF4';
-const TICK_END = '#5EEAD4';
-const LABEL = '#D5DEE8';
-const LABEL_END = '#5EEAD4';
+const RULER_BG = '#F0F4F9';
+const BRAND_BLUE = Palette.header; // #214668
+const TICK_MINOR = '#C4CDD6';
+const TICK_MID = '#A0AEC0';
+const TICK_MAJOR = BRAND_BLUE;
+const LABEL_COLOR = '#8A94A6';
+const DIVIDER_COLOR = BRAND_BLUE;
 
 type Tick = RulerTick;
 
@@ -47,62 +46,124 @@ function tickLen(kind: Tick['kind'], major: number, mid: number, minor: number) 
   return minor;
 }
 
-/** Stable millimetre scale along the main canvas. Ticks align to the nested artboard. */
+/** Stable millimetre scale along the main canvas. Ticks align flush to the nested artboard. */
 export function HorizontalRuler({
   trackWidthPx,
   originPx,
   contentWidthPx,
   lengthMm,
+  selectedRangeMm,
 }: {
   trackWidthPx: number;
   originPx: number;
   contentWidthPx: number;
   lengthMm: number;
+  selectedRangeMm?: { start: number; end: number } | null;
 }) {
   const track = Math.max(1, trackWidthPx);
   const content = Math.max(1, contentWidthPx);
   const origin = Math.max(0, originPx);
   const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
-  const labels = useMemo(() => spacedMajor(ticks, 20), [ticks]);
+  const labels = useMemo(() => spacedMajor(ticks, 22), [ticks]);
+
+  // Selected element projection on horizontal ruler
+  const selectionProjection = useMemo(() => {
+    if (!selectedRangeMm || lengthMm <= 0) return null;
+    const x1 = Math.max(0, Math.min(track, origin + (selectedRangeMm.start / lengthMm) * content));
+    const x2 = Math.max(0, Math.min(track, origin + (selectedRangeMm.end / lengthMm) * content));
+    const left = Math.min(x1, x2);
+    const width = Math.max(1, Math.abs(x2 - x1));
+    return { x1, x2, left, width };
+  }, [selectedRangeMm, lengthMm, content, origin, track]);
 
   return (
     <View style={[styles.hTrack, { width: track }]}>
       <Svg width={track} height={RULER_SIZE} style={StyleSheet.absoluteFill}>
-        <Rect x={0} y={0} width={track} height={RULER_SIZE} fill={TRACK} />
-        <Rect x={0} y={1} width={track} height={1} fill="#3A4654" opacity={0.85} />
-        <Rect x={0} y={0} width={track} height={1} fill={BEVEL} />
-        <Rect x={0} y={RULER_SIZE - 5} width={track} height={2} fill="#1C2430" />
-        <Rect x={0} y={RULER_SIZE - 3} width={track} height={3} fill={GROOVE} />
-        <Rect x={0} y={RULER_SIZE - 2} width={track} height={2} fill={TICK_END} opacity={0.88} />
+        {/* Light blue-grey background */}
+        <Rect x={0} y={0} width={track} height={RULER_SIZE} fill={RULER_BG} />
+
+        {/* Selected element projection band & edge indicators */}
+        {selectionProjection && (
+          <>
+            <Rect
+              x={selectionProjection.left}
+              y={0}
+              width={selectionProjection.width}
+              height={RULER_SIZE - 1}
+              fill={BRAND_BLUE}
+              opacity={0.12}
+            />
+            <Line
+              x1={selectionProjection.x1}
+              y1={0}
+              x2={selectionProjection.x1}
+              y2={RULER_SIZE - 1}
+              stroke={BRAND_BLUE}
+              strokeWidth={1}
+              strokeDasharray="2,2"
+            />
+            <Line
+              x1={selectionProjection.x2}
+              y1={0}
+              x2={selectionProjection.x2}
+              y2={RULER_SIZE - 1}
+              stroke={BRAND_BLUE}
+              strokeWidth={1}
+              strokeDasharray="2,2"
+            />
+          </>
+        )}
+
+        {/* Ticks: touching the bottom divider line at y = RULER_SIZE - 1 */}
         {ticks.map((tick) => {
           const x = origin + tick.px;
-          const h = tickLen(tick.kind, 16, 11, 6);
+          const h = tickLen(tick.kind, 10, 7, 4);
           const end = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
+          const isMajor = tick.kind === 'major' || end;
+          const stroke = isMajor
+            ? TICK_MAJOR
+            : tick.kind === 'mid'
+              ? TICK_MID
+              : TICK_MINOR;
           return (
             <Line
               key={`h-${tick.mm}`}
               x1={x}
-              y1={0}
+              y1={RULER_SIZE - 1 - h}
               x2={x}
-              y2={h}
-              stroke={end ? TICK_END : tick.kind === 'major' ? TICK_MAJOR : tick.kind === 'mid' ? TICK_MID : TICK_MINOR}
-              strokeWidth={tick.kind === 'major' ? 1.25 : 1}
+              y2={RULER_SIZE - 1}
+              stroke={stroke}
+              strokeWidth={isMajor ? 1.25 : 1}
               strokeLinecap="square"
             />
           );
         })}
+
+        {/* Thin 1px divider seam line in brand blue connecting ruler flush to canvas */}
+        <Line
+          x1={0}
+          y1={RULER_SIZE - 0.5}
+          x2={track}
+          y2={RULER_SIZE - 0.5}
+          stroke={DIVIDER_COLOR}
+          strokeWidth={1}
+        />
       </Svg>
-      {labels.map((tick) => (
-        <Text
-          key={`hl-${tick.mm}`}
-          style={[
-            styles.hLabel,
-            tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01 ? styles.endLabel : null,
-            { left: Math.min(origin + tick.px + 3, Math.max(0, track - 22)) },
-          ]}>
-          {formatTick(tick.mm)}
-        </Text>
-      ))}
+
+      {labels.map((tick) => {
+        const isEnd = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
+        return (
+          <Text
+            key={`hl-${tick.mm}`}
+            style={[
+              styles.hLabel,
+              isEnd ? styles.endLabel : null,
+              { left: Math.min(origin + tick.px + 2, Math.max(0, track - 22)) },
+            ]}>
+            {formatTick(tick.mm)}
+          </Text>
+        );
+      })}
     </View>
   );
 }
@@ -112,56 +173,118 @@ export function VerticalRuler({
   originPx,
   contentHeightPx,
   lengthMm,
+  selectedRangeMm,
 }: {
   trackHeightPx: number;
   originPx: number;
   contentHeightPx: number;
   lengthMm: number;
+  selectedRangeMm?: { start: number; end: number } | null;
 }) {
   const track = Math.max(1, trackHeightPx);
   const content = Math.max(1, contentHeightPx);
   const origin = Math.max(0, originPx);
   const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
-  const labels = useMemo(() => spacedMajor(ticks, 14), [ticks]);
+  const labels = useMemo(() => spacedMajor(ticks, 16), [ticks]);
+
+  // Selected element projection on vertical ruler
+  const selectionProjection = useMemo(() => {
+    if (!selectedRangeMm || lengthMm <= 0) return null;
+    const y1 = Math.max(0, Math.min(track, origin + (selectedRangeMm.start / lengthMm) * content));
+    const y2 = Math.max(0, Math.min(track, origin + (selectedRangeMm.end / lengthMm) * content));
+    const top = Math.min(y1, y2);
+    const height = Math.max(1, Math.abs(y2 - y1));
+    return { y1, y2, top, height };
+  }, [selectedRangeMm, lengthMm, content, origin, track]);
 
   return (
     <View style={[styles.vTrack, { height: track }]}>
       <Svg width={RULER_SIZE} height={track} style={StyleSheet.absoluteFill}>
-        <Rect x={0} y={0} width={RULER_SIZE} height={track} fill={TRACK} />
-        <Rect x={1} y={0} width={1} height={track} fill="#3A4654" opacity={0.85} />
-        <Rect x={0} y={0} width={1} height={track} fill={BEVEL} />
-        <Rect x={RULER_SIZE - 5} y={0} width={2} height={track} fill="#1C2430" />
-        <Rect x={RULER_SIZE - 3} y={0} width={3} height={track} fill={GROOVE} />
-        <Rect x={RULER_SIZE - 2} y={0} width={2} height={track} fill={TICK_END} opacity={0.88} />
+        {/* Light blue-grey background */}
+        <Rect x={0} y={0} width={RULER_SIZE} height={track} fill={RULER_BG} />
+
+        {/* Selected element projection band & edge indicators */}
+        {selectionProjection && (
+          <>
+            <Rect
+              x={0}
+              y={selectionProjection.top}
+              width={RULER_SIZE - 1}
+              height={selectionProjection.height}
+              fill={BRAND_BLUE}
+              opacity={0.12}
+            />
+            <Line
+              x1={0}
+              y1={selectionProjection.y1}
+              x2={RULER_SIZE - 1}
+              y2={selectionProjection.y1}
+              stroke={BRAND_BLUE}
+              strokeWidth={1}
+              strokeDasharray="2,2"
+            />
+            <Line
+              x1={0}
+              y1={selectionProjection.y2}
+              x2={RULER_SIZE - 1}
+              y2={selectionProjection.y2}
+              stroke={BRAND_BLUE}
+              strokeWidth={1}
+              strokeDasharray="2,2"
+            />
+          </>
+        )}
+
+        {/* Ticks: touching the right divider line at x = RULER_SIZE - 1 */}
         {ticks.map((tick) => {
           const y = origin + tick.px;
-          const w = tickLen(tick.kind, 16, 11, 6);
+          const w = tickLen(tick.kind, 10, 7, 4);
           const end = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
+          const isMajor = tick.kind === 'major' || end;
+          const stroke = isMajor
+            ? TICK_MAJOR
+            : tick.kind === 'mid'
+              ? TICK_MID
+              : TICK_MINOR;
           return (
             <Line
               key={`v-${tick.mm}`}
-              x1={0}
+              x1={RULER_SIZE - 1 - w}
               y1={y}
-              x2={w}
+              x2={RULER_SIZE - 1}
               y2={y}
-              stroke={end ? TICK_END : tick.kind === 'major' ? TICK_MAJOR : tick.kind === 'mid' ? TICK_MID : TICK_MINOR}
-              strokeWidth={tick.kind === 'major' ? 1.25 : 1}
+              stroke={stroke}
+              strokeWidth={isMajor ? 1.25 : 1}
               strokeLinecap="square"
             />
           );
         })}
+
+        {/* Thin 1px divider seam line in brand blue connecting ruler flush to canvas */}
+        <Line
+          x1={RULER_SIZE - 0.5}
+          y1={0}
+          x2={RULER_SIZE - 0.5}
+          y2={track}
+          stroke={DIVIDER_COLOR}
+          strokeWidth={1}
+        />
       </Svg>
-      {labels.map((tick) => (
-        <Text
-          key={`vl-${tick.mm}`}
-          style={[
-            styles.vLabel,
-            tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01 ? styles.endLabel : null,
-            { top: Math.min(origin + tick.px + 2, Math.max(0, track - 12)) },
-          ]}>
-          {formatTick(tick.mm)}
-        </Text>
-      ))}
+
+      {labels.map((tick) => {
+        const isEnd = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
+        return (
+          <Text
+            key={`vl-${tick.mm}`}
+            style={[
+              styles.vLabel,
+              isEnd ? styles.endLabel : null,
+              { top: Math.min(origin + tick.px + 2, Math.max(0, track - 12)) },
+            ]}>
+            {formatTick(tick.mm)}
+          </Text>
+        );
+      })}
     </View>
   );
 }
@@ -177,48 +300,49 @@ export function RulerCorner() {
 const styles = StyleSheet.create({
   hTrack: {
     height: RULER_SIZE,
-    backgroundColor: TRACK,
+    backgroundColor: RULER_BG,
     overflow: 'hidden',
   },
   vTrack: {
     width: RULER_SIZE,
-    backgroundColor: TRACK,
+    backgroundColor: RULER_BG,
     overflow: 'hidden',
   },
   hLabel: {
     position: 'absolute',
-    top: 12,
+    top: 3,
     fontSize: 8,
-    fontWeight: '700',
-    letterSpacing: 0.35,
-    color: LABEL,
+    fontWeight: '600',
+    letterSpacing: 0.1,
+    color: LABEL_COLOR,
   },
   vLabel: {
     position: 'absolute',
-    left: 1,
-    fontSize: 7,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-    color: LABEL,
+    left: 2,
+    fontSize: 7.5,
+    fontWeight: '600',
+    letterSpacing: 0.1,
+    color: LABEL_COLOR,
   },
   endLabel: {
-    color: LABEL_END,
+    color: BRAND_BLUE,
+    fontWeight: '700',
   },
   corner: {
     width: RULER_SIZE,
     height: RULER_SIZE,
-    backgroundColor: GROOVE,
+    backgroundColor: RULER_BG,
     alignItems: 'center',
     justifyContent: 'center',
     borderRightWidth: 1,
     borderBottomWidth: 1,
-    borderColor: BEVEL,
+    borderColor: DIVIDER_COLOR,
   },
   cornerText: {
-    color: TICK_END,
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
+    color: BRAND_BLUE,
+    fontSize: 8.5,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'lowercase',
   },
 });

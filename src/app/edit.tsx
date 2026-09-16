@@ -39,6 +39,7 @@ import {
   normalizeDocumentElements,
   scaleDocumentToSize,
 } from '@/lib/element-sizing';
+import { clampToLabelBounds } from '@/lib/editor/label-bounds';
 import {
   DEFAULT_CANVAS_SPLIT_RATIO,
   NUDGE_PAD_SPLIT_EXTRA_PX,
@@ -144,7 +145,7 @@ import {
 import { clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
-import { textBlockHeightMm } from '@/lib/element-sizing';
+import { computeTextElementHeightMm, textBlockHeightMm } from '@/lib/element-sizing';
 import {
   isJewelryDieCutDocument,
   JEWELRY_DIECUT,
@@ -1210,25 +1211,56 @@ export default function EditScreen() {
             const resized =
               Math.abs(prevSize.width - clean.widthMm) > 0.04 ||
               Math.abs(prevSize.height - clean.heightMm) > 0.04;
+            let targetHeight = clean.heightMm;
+            const fs = clean.fontSize ?? ('fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : undefined);
+
+            if (el.type === 'text' || el.type === 'degrees') {
+              const rawText =
+                el.contentType === 'Data Source' && el.columnNameContent
+                  ? `{${el.columnNameContent}}`
+                  : 'text' in el
+                    ? el.text
+                    : el.content;
+              const effectiveFs = fs ?? 12;
+              targetHeight = computeTextElementHeightMm({
+                text: rawText,
+                fontSize: effectiveFs,
+                widthMm: clean.widthMm,
+                autoWrapping: el.autoWrapping ?? 'Word',
+                lineSpacing: el.lineSpacing ?? '1.0',
+                charSpacing: el.charSpacing ?? 0,
+                bold: el.bold ?? false,
+                verticalDisplay: el.verticalDisplay ?? false,
+              });
+            } else if (el.type === 'time') {
+              const effectiveFs = fs ?? 12;
+              targetHeight = textBlockHeightMm(effectiveFs, 1);
+            }
+
+            const clamped = clampToLabelBounds(
+              { left: clean.leftMm, top: clean.topMm, width: clean.widthMm, height: targetHeight },
+              { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm },
+              { anchor: 'body', naturalHeight: targetHeight },
+            );
+
             const next: LabelElement = {
               ...el,
-              left: clean.leftMm,
-              top: clean.topMm,
-              width: clean.widthMm,
+              left: clamped.left,
+              top: clamped.top,
+              width: clamped.width,
               rotation: clean.rotation,
             };
-            if (clean.fontSize !== undefined && 'fontSize' in next) {
-              (next as { fontSize: number }).fontSize = clean.fontSize;
+            if (fs !== undefined && 'fontSize' in next) {
+              (next as { fontSize: number }).fontSize = fs;
             }
-            if (el.type === 'text' || el.type === 'degrees' || el.type === 'time') {
-              const lines = ('text' in el ? el.text : 'content' in el ? el.content : '').split('\n').length || 1;
-              const fs = clean.fontSize ?? (el as { fontSize?: number }).fontSize ?? 12;
-              (next as { height: number }).height = textBlockHeightMm(fs, lines);
-            } else if (resized || typeof (el as { height?: number }).height === 'number') {
-              (next as { height: number }).height = clean.heightMm;
-            }
-            if (resized && 'autoTextHeight' in next) {
-              (next as { autoTextHeight: boolean }).autoTextHeight = false;
+            if (
+              el.type === 'text' ||
+              el.type === 'degrees' ||
+              el.type === 'time' ||
+              resized ||
+              typeof (el as { height?: number }).height === 'number'
+            ) {
+              (next as { height: number }).height = clamped.height;
             }
             return next;
           }),
@@ -1992,29 +2024,52 @@ export default function EditScreen() {
                 height: RULER_SIZE + innerHeightPx,
               },
             ]}>
-            <View style={styles.rulerTopRow}>
-              <RulerCorner />
-              <HorizontalRuler
-                trackWidthPx={rulerView.innerWidthPx}
-                originPx={rulerView.boardOffsetXPx}
-                contentWidthPx={rulerView.canvasWidthPx || 1}
-                lengthMm={doc.widthMm}
-              />
-            </View>
-            <View style={styles.rulerBodyRow}>
-              <VerticalRuler
-                trackHeightPx={rulerView.innerHeightPx}
-                originPx={rulerView.boardOffsetYPx}
-                contentHeightPx={rulerView.canvasHeightPx || 1}
-                lengthMm={doc.heightMm}
-              />
-              <View style={[styles.innerDesk, { width: innerWidthPx, height: innerHeightPx }]}>
+            <View
+              style={[
+                styles.flushCanvasAssembly,
+                {
+                  left: boardOffsetXPx,
+                  top: boardOffsetYPx,
+                  width: RULER_SIZE + (canvasWidthPx || 1),
+                  height: RULER_SIZE + (canvasHeightPx || 1),
+                },
+              ]}>
+              <View style={styles.rulerTopRow}>
+                <RulerCorner />
+                <HorizontalRuler
+                  trackWidthPx={canvasWidthPx || 1}
+                  originPx={0}
+                  contentWidthPx={canvasWidthPx || 1}
+                  lengthMm={doc.widthMm}
+                  selectedRangeMm={
+                    selectedElement
+                      ? {
+                          start: selectedElement.left,
+                          end: selectedElement.left + selectedElement.width,
+                        }
+                      : null
+                  }
+                />
+              </View>
+              <View style={styles.rulerBodyRow}>
+                <VerticalRuler
+                  trackHeightPx={canvasHeightPx || 1}
+                  originPx={0}
+                  contentHeightPx={canvasHeightPx || 1}
+                  lengthMm={doc.heightMm}
+                  selectedRangeMm={
+                    selectedElement
+                      ? {
+                          start: selectedElement.top,
+                          end: selectedElement.top + selectedElementHeightMm,
+                        }
+                      : null
+                  }
+                />
                 <View
                   style={[
                     styles.artboardSlot,
                     {
-                      left: boardOffsetXPx,
-                      top: boardOffsetYPx,
                       width: canvasWidthPx || 1,
                       height: canvasHeightPx || 1,
                     },
@@ -2842,24 +2897,28 @@ const styles = StyleSheet.create({
     paddingBottom: EDITOR_WORKSPACE_PAD_BOTTOM_PX,
   },
   rulerFrame: {
+    position: 'relative',
+    overflow: 'visible',
+    backgroundColor: 'transparent',
+  },
+  flushCanvasAssembly: {
+    position: 'absolute',
     flexDirection: 'column',
     overflow: 'visible',
-    backgroundColor: EDITOR_WORKSPACE_COLOR,
-  },
-  innerDesk: {
-    position: 'relative',
-    backgroundColor: EDITOR_WORKSPACE_COLOR,
-    overflow: 'visible',
-  },
-  artboardSlot: {
-    position: 'absolute',
-    overflow: 'visible',
-    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
     shadowColor: '#0B1F33',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.08,
     shadowRadius: 6,
-    elevation: 3,
+    elevation: 2,
+  },
+  artboardSlot: {
+    position: 'relative',
+    overflow: 'visible',
+    backgroundColor: '#FFFFFF',
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#E2E8F0',
   },
   rulerTopRow: {
     flexDirection: 'row',

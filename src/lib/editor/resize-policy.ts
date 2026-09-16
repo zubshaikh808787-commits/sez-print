@@ -10,6 +10,7 @@
 
 import { elementSizeMm, type ElementType, type LabelElement } from '@/lib/label-document';
 import { finiteMm, MAX_ELEMENT_MM, MIN_ELEMENT_MM, roundMm, type CanvasBounds } from '@/lib/editor/engine';
+import { clampToLabelBounds } from '@/lib/editor/label-bounds';
 
 /** Spec 5.2: proportional types cannot collapse below ~5mm. */
 export const RESIZE_MIN_PROPORTIONAL_MM = 5;
@@ -72,14 +73,34 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
         comment: 'Barcode: two independent single-axis handles (e = width only, s = height only) matching canvas.md §3.1.',
       };
     case 'text':
-    case 'degrees':
+    case 'degrees': {
+      const autoTextHeight = 'autoTextHeight' in element ? element.autoTextHeight !== false : true;
+      const autoWrapping = 'autoWrapping' in element ? element.autoWrapping : 'Word';
+      const isAutoHeight = autoTextHeight && autoWrapping !== 'Close';
+      if (!isAutoHeight) {
+        return {
+          anchors: ['e', 's'],
+          behavior: { e: 'width', s: 'height' },
+          rotateHandle: false,
+          minMm: MIN_ELEMENT_MM,
+          comment: 'Text/degrees with auto-wrapping off / fixed height allows independent width and height resizing.',
+        };
+      }
+      return {
+        anchors: ['e'],
+        behavior: { e: 'width' },
+        rotateHandle: false,
+        minMm: MIN_ELEMENT_MM,
+        comment: 'Text/degrees: width only (wrap width). Vertical handle is hidden while auto wrapping is active; height is resized only by font size setting and wrapped lines.',
+      };
+    }
     case 'time':
       return {
         anchors: ['e'],
         behavior: { e: 'width' },
         rotateHandle: false,
         minMm: MIN_ELEMENT_MM,
-        comment: 'Text/degrees/time: width only (wrap width). No vertical resizing; height is resized only by font size setting.',
+        comment: 'Time: width only (wrap width). No vertical resizing; height is resized only by font size setting.',
       };
     case 'line':
       return {
@@ -143,41 +164,68 @@ export function boundBoxMm(opts: {
     height: Math.max(minMm, finiteMm(opts.start.height, minMm)),
   };
 
+  const proposedW = Math.max(minMm, finiteMm(opts.proposed.width, start.width));
+  const proposedH = Math.max(minMm, finiteMm(opts.proposed.height, start.height));
+
+  if (opts.behavior === 'width' && opts.anchor === 'e') {
+    const clamped = clampToLabelBounds(
+      { left: start.left, top: start.top, width: proposedW, height: start.height },
+      opts.canvas,
+      { anchor: 'e', minMm },
+    );
+    return {
+      left: clamped.left,
+      top: clamped.top,
+      width: clamped.width,
+      height: clamped.height,
+    };
+  }
+
+  if (opts.behavior === 'height' && opts.anchor === 's') {
+    const clamped = clampToLabelBounds(
+      { left: start.left, top: start.top, width: start.width, height: proposedH },
+      opts.canvas,
+      { anchor: 's', minMm },
+    );
+    return {
+      left: clamped.left,
+      top: clamped.top,
+      width: clamped.width,
+      height: clamped.height,
+    };
+  }
+
   let width = start.width;
   let height = start.height;
   let left = start.left;
   let top = start.top;
 
-  const proposedW = Math.max(minMm, finiteMm(opts.proposed.width, start.width));
-  const proposedH = Math.max(minMm, finiteMm(opts.proposed.height, start.height));
-
   if (opts.behavior === 'square') {
     const driving = opts.anchor === 'e' ? proposedW : proposedH;
-    const side = clamp(driving, minMm, Math.min(maxW, maxH, MAX_ELEMENT_MM));
+    const maxSide = opts.anchor === 'e'
+      ? Math.min(maxW - start.left, maxH, MAX_ELEMENT_MM)
+      : Math.min(maxW, maxH - start.top, MAX_ELEMENT_MM);
+    const side = clamp(driving, minMm, Math.max(minMm, maxSide));
     width = side;
     height = side;
   } else if (opts.behavior === 'aspect') {
     if (opts.anchor === 'e') {
-      width = clamp(proposedW, minMm, Math.min(maxW, MAX_ELEMENT_MM));
+      const maxAvailW = Math.max(minMm, maxW - start.left);
+      width = clamp(proposedW, minMm, Math.min(maxAvailW, MAX_ELEMENT_MM));
       height = width / aspect;
       if (height > maxH) {
         height = maxH;
         width = height * aspect;
       }
     } else {
-      height = clamp(proposedH, minMm, Math.min(maxH, MAX_ELEMENT_MM));
+      const maxAvailH = Math.max(minMm, maxH - start.top);
+      height = clamp(proposedH, minMm, Math.min(maxAvailH, MAX_ELEMENT_MM));
       width = height * aspect;
       if (width > maxW) {
         width = maxW;
         height = width / aspect;
       }
     }
-  } else if (opts.behavior === 'width' && opts.anchor === 'e') {
-    width = clamp(proposedW, minMm, Math.min(maxW, MAX_ELEMENT_MM));
-    height = start.height;
-  } else if (opts.behavior === 'height' && opts.anchor === 's') {
-    height = clamp(proposedH, minMm, Math.min(maxH, MAX_ELEMENT_MM));
-    width = start.width;
   }
 
   if (opts.behavior === 'aspect' || opts.behavior === 'square') {
@@ -191,17 +239,14 @@ export function boundBoxMm(opts: {
       width *= shrink;
       height *= shrink;
     }
-  } else {
-    width = clamp(width, minMm, maxW);
-    height = clamp(height, minMm, maxH);
   }
 
   if (opts.anchor === 'e') {
     left = start.left;
-    top = start.top + (start.height - height) / 2;
+    top = Math.max(0, Math.min(maxH - height, start.top + (start.height - height) / 2));
   } else {
     top = start.top;
-    left = start.left + (start.width - width) / 2;
+    left = Math.max(0, Math.min(maxW - width, start.left + (start.width - width) / 2));
   }
 
   left = clamp(left, 0, Math.max(0, maxW - width));
