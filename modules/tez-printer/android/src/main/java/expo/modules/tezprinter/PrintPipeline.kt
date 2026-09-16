@@ -151,23 +151,37 @@ class PrintPipeline(
             }
         })
 
+        val isGap = options.paperType == 0 || options.paperType == 2 // 0=GAP, 2=BLACK
+        val copies = options.copies.coerceAtLeast(1)
+
         build.cls()
         build.enable()
         build.CreatePage(options.widthMm, options.heightMm)
         build.paperType(options.paperType)
         build.density(options.density.coerceIn(0, 15))
         build.speed(options.speed.coerceIn(1.0f, 8.0f))
-        build.printImg(imageName, options.copies.coerceAtLeast(1))
-        // Flashlabel has no setGapLength API. For continuous stock, Gap Length feeds extra dots.
-        // Gap/black media rely on paperType + LEARN_LABEL (calibration) for physical gap sensing.
-        if (options.paperType == 1 /* CONTINUOUS */ && options.gapMm > 0f) {
-            val feedDots = (options.gapMm * OEM_DPM).toInt().coerceAtLeast(1)
-            build.printLinedots(feedDots)
-            Log.i(TAG, "[PrintPipeline] Continuous feed printLinedots($feedDots) for gapMm=${options.gapMm}")
+        for (i in 1..copies) {
+            if (i == 1 && isGap) {
+                build.backoffPaper()
+            }
+            build.printImg(imageName, 1)
+            if (isGap) {
+                build.fixedPoint()
+                if (i == copies) {
+                    build.forwardPaper()
+                }
+            } else {
+                if (options.gapMm > 0f) {
+                    val feedDots = (options.gapMm * OEM_DPM).toInt().coerceAtLeast(1)
+                    build.printLinedots(feedDots)
+                } else {
+                    build.printLinedots(16) // 2mm feed at 8 dpm
+                }
+            }
         }
         build.disenable()
 
-        Log.i(TAG, "[PrintPipeline] Submitting PrintBuild to helper.run()")
+        Log.i(TAG, "[PrintPipeline] Submitting PrintBuild (isGap=$isGap, copies=$copies) to helper.run()")
         helper.run(build)
 
         // Safety fallback timer if OEM readCall doesn't fire

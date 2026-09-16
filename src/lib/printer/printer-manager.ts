@@ -1378,7 +1378,7 @@ class PrinterManager {
       (isLikelyDevName(deviceName) || transport === 'dev-spp');
 
     console.info(
-      `[CONN-ROUTE] isTargetTd404=${isTargetTd404}, isTargetTez=${isTargetTez}, isTargetDev=${isTargetDev}, isTargetJosh=${isTargetJosh}, ` +
+      `[CONN-ROUTE] isTargetTez=${isTargetTez}, isTargetTd404=${isTargetTd404}, isTargetDev=${isTargetDev}, isTargetJosh=${isTargetJosh}, ` +
       `devNameMatch=${isLikelyDevName(deviceName)}, tezNameMatch=${isLikelyTezName(deviceName) || isLikelyShaktiName(deviceName)}, td404NameMatch=${isLikelyTd404Name(deviceName)}, joshNameMatch=${isLikelyJoshName(deviceName)}`,
     );
 

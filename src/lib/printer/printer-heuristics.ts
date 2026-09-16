@@ -94,6 +94,12 @@ export function isLikelyTezName(name: string | null | undefined): boolean {
     n.includes('y50') ||
     n.includes('y404') ||
     n.includes('y468') ||
+    n.includes('yx') ||
+    n.includes('z212') ||
+    n.includes('ge920') ||
+    n.includes('tp3z') ||
+    n.includes('3121') ||
+    n.includes('yc3121') ||
     // Standalone Seznik / Seznek brand without any non-Tez model indicator
     n === 'seznik' ||
     n === 'seznek' ||
