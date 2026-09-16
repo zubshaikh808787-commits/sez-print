@@ -299,7 +299,11 @@ function BarcodeContent({
     <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
       {element.textFlag === 'Top' ? label : null}
       {bars ? (
-        <Svg width={widthPx} height={Math.max(2, barsHeight)}>
+        <Svg
+          width="100%"
+          height={Math.max(2, barsHeight)}
+          viewBox={`0 0 ${widthPx} ${Math.max(2, barsHeight)}`}
+          preserveAspectRatio="none">
           {bars.map((bar, i) => (
             <Rect
               key={i}
@@ -374,7 +378,7 @@ function QrcodeContent({
   const cellW = widthPx / cols;
   const cellH = heightPx / rows;
   return (
-    <Svg width={widthPx} height={heightPx}>
+    <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
       {cells.map((on, i) =>
         on ? (
           <Rect
@@ -418,7 +422,7 @@ function LineContent({
     const count = Math.ceil(widthPx / gap) + 2;
     const slashHeight = Math.min(heightPx, Math.max(6, strokeWidth * 4));
     return (
-      <Svg width={widthPx} height={heightPx}>
+      <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
         {Array.from({ length: count }).map((_, i) => {
           const x = i * gap;
           const up = element.lineStyle === 'slash';
@@ -441,7 +445,7 @@ function LineContent({
   if (vertical) {
     const midX = widthPx / 2;
     return (
-      <Svg width={widthPx} height={heightPx}>
+      <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
         <Line
           x1={midX}
           y1={0}
@@ -456,7 +460,7 @@ function LineContent({
   }
 
   return (
-    <Svg width={widthPx} height={heightPx}>
+    <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
       <Line
         x1={0}
         y1={midY}
@@ -502,7 +506,7 @@ function ShapeContent({
         ? Math.min(widthPx, heightPx) / 2 - inset
         : heightPx / 2 - inset;
     return (
-      <Svg width={widthPx} height={heightPx}>
+      <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
         <Ellipse
           cx={widthPx / 2}
           cy={heightPx / 2}
@@ -518,7 +522,7 @@ function ShapeContent({
 
   const radius = element.figureShape === 'roundedRectangle' ? element.roundRadius * scale : 0;
   return (
-    <Svg width={widthPx} height={heightPx}>
+    <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
       <Rect
         x={inset}
         y={inset}
@@ -567,7 +571,7 @@ function TableContent({
   }
 
   return (
-    <Svg width={widthPx} height={heightPx}>
+    <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
       {rowLines.map((y, i) => (
         <Line
           key={`r${i}`}
@@ -620,7 +624,7 @@ function ArcTextContent({
 
   return (
     <View style={[styles.fill, element.antiColor && styles.antiBg]}>
-      <Svg width={widthPx} height={heightPx}>
+      <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
         <Defs>
           <Path id={pathId} d={d} />
         </Defs>

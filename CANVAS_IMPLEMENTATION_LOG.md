@@ -145,7 +145,15 @@
   - Set constant static `left: 0, top: 0` and drive positioning purely through continuous `translateX = originLeftSv.value + transX.value` and `translateY = originTopSv.value + transY.value`. This provides 100% frame-by-frame mathematical continuity with zero layout shifts or race conditions.
   - Reanimated zIndex (`containerStyle.zIndex`) handles visual layering on the GPU seamlessly.
 
-### 8. Test Suite & Verification Results
+### 8. Resize Flickering & Dimension Sync Root-Cause Resolution (2026-09-16)
+- **Root-Cause Diagnosed**:
+  1. In `useEffect`, the `committedRef.current` condition had a strict float equality check (`Math.abs(sizeMm.height - committed.heightMm) <= 0.05`). When resizing elements whose layout height is dynamically derived (such as multiline text or wrapped items), `sizeMm.height` did not match `committed.heightMm`, leaving `committedRef.current` stuck and causing the component to revert to its pre-drag dimensions on subsequent renders.
+  2. `createHandleGesture` was sampling `startAbsX` after `minDistance(1)` rather than using pure continuous `e.translationX / z`.
+- **Fix Applied**:
+  - Replaced handle translation sampling with continuous `e.translationX / z` and `e.translationY / z` starting at `minDistance(0)`.
+  - Streamlined `useEffect` prop synchronization to immediately sync `animW.value = baseWidthPx` and `animH.value = baseHeightPx` on the next prop update after a commit, eliminating any size mismatch flash or bounce.
+
+### 9. Test Suite & Verification Results
 - All unit tests and regression suites pass with 0 errors:
   - `npm run test:editor` (12 test suites, all passed)
   - `npm run test:print` (All Print Engine & SDK tests passed)

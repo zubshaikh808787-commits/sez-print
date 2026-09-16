@@ -1,4 +1,4 @@
-import React, { forwardRef, memo, useCallback, useMemo, useState } from 'react';
+import React, { forwardRef, memo, useMemo } from 'react';
 import { Image } from 'expo-image';
 import { StyleSheet, Text, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
@@ -16,7 +16,7 @@ import { isCableFlagDieCutDocument } from '@/constants/cable-flag-diecut';
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
 import { isRatTailGeometry, ratTailBodyRectMm } from '@/lib/media-geometry';
 import { sortLayers } from '@/lib/template-schema';
-import { idleElementRefsUnchanged, splitCanvasLayers } from '@/lib/editor/drag-layer';
+import { idleElementRefsUnchanged } from '@/lib/editor/drag-layer';
 import { SNAP_GUIDE_COLOR, SNAP_GUIDE_STROKE_PX } from '@/lib/editor/canvas-chrome';
 import type { SnapGuide } from '@/lib/editor/engine';
 
@@ -134,7 +134,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   },
   ref,
 ) {
-  const [activeId, setActiveId] = useState<string | null>(null);
   const w = Math.max(1, canvasWidthPx);
   const h = Math.max(1, canvasHeightPx);
   const shapeClip = mediaShapeClipStyle(doc.mediaShape, w, h);
@@ -273,22 +272,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     [onDeselectAll],
   );
 
-  const handleLiftStart = useCallback(
-    (id: string) => {
-      setActiveId(id);
-      onTransformStart?.(id);
-    },
-    [onTransformStart],
-  );
-
-  const handleLiftEnd = useCallback(
-    (payload: TransformCommitPayload) => {
-      setActiveId(null);
-      onTransformEnd(payload);
-    },
-    [onTransformEnd],
-  );
-
   const canvasWidthMm = isRatTailGeometry(doc.mediaGeometry)
     ? ratTailBodyRectMm(doc.mediaGeometry).width
     : doc.widthMm;
@@ -297,10 +280,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     : doc.heightMm;
 
   const sortedElements = useMemo(() => sortLayers(doc.elements), [doc.elements]);
-  const { content, active } = useMemo(
-    () => splitCanvasLayers(sortedElements, activeId),
-    [sortedElements, activeId],
-  );
 
   const chrome = useMemo<ElementChrome>(
     () => ({
@@ -313,9 +292,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       onSelect,
       onOpenPanel,
       onEditText,
-      onTransformStart: handleLiftStart,
+      onTransformStart,
       onTransformMove,
-      onTransformEnd: handleLiftEnd,
+      onTransformEnd,
       onQuickRotate,
       pointerToMm,
       snapMoveMm,
@@ -330,9 +309,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       onSelect,
       onOpenPanel,
       onEditText,
-      handleLiftStart,
+      onTransformStart,
       onTransformMove,
-      handleLiftEnd,
+      onTransformEnd,
       onQuickRotate,
       pointerToMm,
       snapMoveMm,

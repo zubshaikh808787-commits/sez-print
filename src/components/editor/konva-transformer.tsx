@@ -137,6 +137,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const animW = useSharedValue(baseWidthPx);
   const animH = useSharedValue(baseHeightPx);
   const animRot = useSharedValue<number>(baseRotation);
+  const minResizeMmSv = useSharedValue(resizePolicy.minMm);
+  const aspectSv = useSharedValue(aspectRatio);
   const isInteracting = useSharedValue(false);
   const pendingCommit = useSharedValue(false);
   const liftSv = useSharedValue(1);
@@ -144,6 +146,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const [moving, setMoving] = React.useState(false);
   const [tooltipText, setTooltipText] = React.useState<string | null>(null);
   const lastTooltipAt = useRef(0);
+  const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (commitTimeoutRef.current) clearTimeout(commitTimeoutRef.current);
+  }, []);
 
   const committedRef = useRef<{
     leftMm: number;
@@ -165,6 +172,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     canvasHMmSv.value = canvasHeightMm;
     sxSv.value = sx;
     sySv.value = sy;
+    minResizeMmSv.value = resizePolicy.minMm;
+    aspectSv.value = aspectRatio;
   }, [
     padZoom,
     sizeMm.width,
@@ -173,6 +182,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     canvasHeightMm,
     sx,
     sy,
+    resizePolicy.minMm,
+    aspectRatio,
     padZoomSv,
     sizeWMmSv,
     sizeHMmSv,
@@ -180,19 +191,30 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     canvasHMmSv,
     sxSv,
     sySv,
+    minResizeMmSv,
+    aspectSv,
   ]);
 
   useEffect(() => {
     if (committedRef.current) {
-      const committed = committedRef.current;
-      const posOk =
-        Math.abs(element.left - committed.leftMm) <= 0.05 &&
-        Math.abs(element.top - committed.topMm) <= 0.05;
-      const sizeOk =
-        Math.abs(sizeMm.width - committed.widthMm) <= 0.05 &&
-        Math.abs(sizeMm.height - committed.heightMm) <= 0.05;
-      const rotOk = Math.abs(((element.rotation ?? 0) % 360) - committed.rotation) <= 0.5;
-      if (posOk && sizeOk && rotOk) {
+      const c = committedRef.current;
+      const curLeftMm = finiteMm(element.left);
+      const curTopMm = finiteMm(element.top);
+      const curWMm = sizeMm.width;
+      const curHMm = sizeMm.height;
+      const curRot = ((Math.round(element.rotation ?? 0) % 360) + 360) % 360;
+      const isCommitted =
+        Math.abs(curLeftMm - c.leftMm) < 0.25 &&
+        Math.abs(curTopMm - c.topMm) < 0.25 &&
+        Math.abs(curWMm - c.widthMm) < 0.25 &&
+        Math.abs(curHMm - c.heightMm) < 0.25 &&
+        Math.abs(curRot - c.rotation) < 2;
+
+      if (isCommitted) {
+        if (commitTimeoutRef.current) {
+          clearTimeout(commitTimeoutRef.current);
+          commitTimeoutRef.current = null;
+        }
         committedRef.current = null;
         transX.value = 0;
         transY.value = 0;
@@ -208,7 +230,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       return;
     }
 
-    if (isInteracting.value) return;
+    if (isInteracting.value || pendingCommit.value) return;
 
     transX.value = 0;
     transY.value = 0;
@@ -217,8 +239,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     animW.value = baseWidthPx;
     animH.value = baseHeightPx;
     animRot.value = baseRotation;
-    isInteracting.value = false;
-    pendingCommit.value = false;
     liftSv.value = 1;
   }, [
     element.left,
@@ -326,6 +346,19 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
       };
 
+      if (commitTimeoutRef.current) clearTimeout(commitTimeoutRef.current);
+      commitTimeoutRef.current = setTimeout(() => {
+        committedRef.current = null;
+        pendingCommit.value = false;
+        isInteracting.value = false;
+        transX.value = 0;
+        transY.value = 0;
+        originLeftSv.value = baseLeftPx;
+        originTopSv.value = baseTopPx;
+        animW.value = baseWidthPx;
+        animH.value = baseHeightPx;
+      }, 500);
+
       callbacksRef.current.onTransformEnd({
         id: element.id,
         leftMm: roundedLeft,
@@ -335,7 +368,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
       });
     },
-    [sizeMm.width, sizeMm.height, canvasWidthMm, canvasHeightMm, element.id, element.left, element.top, baseRotation, transX, transY, isInteracting, pendingCommit, liftSv],
+    [sizeMm.width, sizeMm.height, canvasWidthMm, canvasHeightMm, element.id, element.left, element.top, baseRotation, baseLeftPx, baseTopPx, baseWidthPx, baseHeightPx, transX, transY, originLeftSv, originTopSv, animW, animH, isInteracting, pendingCommit, liftSv],
   );
 
   const captureDragGrab = useCallback((windowX: number, windowY: number) => {
@@ -421,6 +454,19 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         rotation,
       };
 
+      if (commitTimeoutRef.current) clearTimeout(commitTimeoutRef.current);
+      commitTimeoutRef.current = setTimeout(() => {
+        committedRef.current = null;
+        pendingCommit.value = false;
+        isInteracting.value = false;
+        transX.value = 0;
+        transY.value = 0;
+        originLeftSv.value = baseLeftPx;
+        originTopSv.value = baseTopPx;
+        animW.value = baseWidthPx;
+        animH.value = baseHeightPx;
+      }, 500);
+
       callbacksRef.current.onTransformEnd({
         id: element.id,
         leftMm: next.left,
@@ -431,7 +477,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         fontSize,
       });
     },
-    [pxPerMMSafe, canvasWidthMm, canvasHeightMm, element, resizePolicy],
+    [pxPerMMSafe, canvasWidthMm, canvasHeightMm, element, resizePolicy, baseLeftPx, baseTopPx, baseWidthPx, baseHeightPx, transX, transY, originLeftSv, originTopSv, animW, animH, isInteracting, pendingCommit],
   );
 
   /** Committed rotate: alters rotation angle only. */
@@ -446,6 +492,20 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         heightMm: roundMm(sizeMm.height),
         rotation,
       };
+
+      if (commitTimeoutRef.current) clearTimeout(commitTimeoutRef.current);
+      commitTimeoutRef.current = setTimeout(() => {
+        committedRef.current = null;
+        pendingCommit.value = false;
+        isInteracting.value = false;
+        transX.value = 0;
+        transY.value = 0;
+        originLeftSv.value = baseLeftPx;
+        originTopSv.value = baseTopPx;
+        animW.value = baseWidthPx;
+        animH.value = baseHeightPx;
+      }, 500);
+
       callbacksRef.current.onTransformEnd({
         id: element.id,
         leftMm: roundMm(element.left),
@@ -455,7 +515,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         rotation,
       });
     },
-    [element.id, element.left, element.top, sizeMm.width, sizeMm.height],
+    [element.id, element.left, element.top, sizeMm.width, sizeMm.height, baseLeftPx, baseTopPx, baseWidthPx, baseHeightPx, transX, transY, originLeftSv, originTopSv, animW, animH, isInteracting, pendingCommit],
   );
 
   const updateTooltipJS = useCallback(
@@ -495,7 +555,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     () =>
       Gesture.Pan()
         .enabled(!element.lockMovement)
-        .minDistance(0)
+        .minDistance(2)
         .maxPointers(1)
         .shouldCancelWhenOutside(false)
         .hitSlop(bodyHitSlop)
@@ -593,10 +653,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const createHandleGesture = useCallback(
     (handle: HandlePosition, behavior: ResizeBehavior) =>
       Gesture.Pan()
-        .minDistance(1)
+        .minDistance(0)
         .maxPointers(1)
         .shouldCancelWhenOutside(false)
-        .onStart((e) => {
+        .onStart((_e) => {
           'worklet';
           isInteracting.value = true;
           pendingCommit.value = false;
@@ -609,8 +669,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           startTX.value = 0;
           startTY.value = 0;
           startRot.value = animRot.value;
-          startAbsX.value = e.absoluteX;
-          startAbsY.value = e.absoluteY;
           runOnJS(captureResizeStartFromPx)(
             originLeftSv.value,
             originTopSv.value,
@@ -623,12 +681,12 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         })
         .onUpdate((e) => {
           'worklet';
-          const z = padZoom > 0 ? padZoom : 1;
+          const z = padZoomSv.value > 0 ? padZoomSv.value : 1;
           const rad = (startRot.value * Math.PI) / 180;
           const cos = Math.cos(rad);
           const sin = Math.sin(rad);
-          const rawDx = (e.absoluteX - startAbsX.value) / z;
-          const rawDy = (e.absoluteY - startAbsY.value) / z;
+          const rawDx = e.translationX / z;
+          const rawDy = e.translationY / z;
           const dx = rawDx * cos + rawDy * sin;
           const dy = -rawDx * sin + rawDy * cos;
 
@@ -636,8 +694,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           const originH = startH.value;
           const originLeft = originLeftSv.value;
           const originTop = originTopSv.value;
-          const canvasWPx = canvasWidthMm * sx;
-          const canvasHPx = canvasHeightMm * sy;
+          const canvasWPx = canvasWMmSv.value * sxSv.value;
+          const canvasHPx = canvasHMmSv.value * sySv.value;
+          const minPx = Math.max(2, minResizeMmSv.value * sxSv.value);
+          const aspect = aspectSv.value > 0 ? aspectSv.value : 1;
           const proposedW = originW + (handle === 'e' ? dx : 0);
           const proposedH = originH + (handle === 's' ? dy : 0);
 
@@ -645,35 +705,35 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           let nh = originH;
           if (behavior === 'square') {
             const driving = handle === 'e' ? proposedW : proposedH;
-            const side = Math.min(Math.min(canvasWPx, canvasHPx), Math.max(minResizePx, driving));
+            const side = Math.min(Math.min(canvasWPx, canvasHPx), Math.max(minPx, driving));
             nw = side;
             nh = side;
           } else if (behavior === 'aspect') {
             if (handle === 'e') {
-              nw = Math.min(canvasWPx, Math.max(minResizePx, proposedW));
-              nh = nw / aspectRatio;
+              nw = Math.min(canvasWPx, Math.max(minPx, proposedW));
+              nh = nw / aspect;
               if (nh > canvasHPx) {
                 nh = canvasHPx;
-                nw = nh * aspectRatio;
+                nw = nh * aspect;
               }
             } else {
-              nh = Math.min(canvasHPx, Math.max(minResizePx, proposedH));
-              nw = nh * aspectRatio;
+              nh = Math.min(canvasHPx, Math.max(minPx, proposedH));
+              nw = nh * aspect;
               if (nw > canvasWPx) {
                 nw = canvasWPx;
-                nh = nw / aspectRatio;
+                nh = nw / aspect;
               }
             }
           } else if (behavior === 'width' && handle === 'e') {
-            nw = Math.min(canvasWPx, Math.max(minResizePx, proposedW));
+            nw = Math.min(canvasWPx, Math.max(minPx, proposedW));
             nh = originH;
           } else if (behavior === 'height' && handle === 's') {
-            nh = Math.min(canvasHPx, Math.max(minResizePx, proposedH));
+            nh = Math.min(canvasHPx, Math.max(minPx, proposedH));
             nw = originW;
           }
 
           if (behavior === 'aspect' || behavior === 'square') {
-            const grow = Math.max(minResizePx / Math.max(nw, 1e-6), minResizePx / Math.max(nh, 1e-6));
+            const grow = Math.max(minPx / Math.max(nw, 1e-6), minPx / Math.max(nh, 1e-6));
             if (grow > 1) {
               nw *= grow;
               nh *= grow;
@@ -710,7 +770,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         })
         .blocksExternalGesture(bodyDragGesture),
     [
-      padZoom,
       originLeftSv,
       originTopSv,
       animW,
@@ -723,21 +782,20 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       startTX,
       startTY,
       startRot,
-      startAbsX,
-      startAbsY,
       isInteracting,
       pendingCommit,
       element.id,
       dispatchResizeCommit,
       captureResizeStartFromPx,
       updateTooltipJS,
-      minResizePx,
-      aspectRatio,
       bodyDragGesture,
-      canvasWidthMm,
-      canvasHeightMm,
-      sx,
-      sy,
+      padZoomSv,
+      canvasWMmSv,
+      canvasHMmSv,
+      sxSv,
+      sySv,
+      minResizeMmSv,
+      aspectSv,
     ],
   );
 
@@ -767,20 +825,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     opacity: hidden ? 0.28 : (element.opacity ?? 1) * liftSv.value,
     overflow: 'visible' as const,
   }));
-
-  const contentScaleStyle = useAnimatedStyle(() => {
-    const bw = Math.max(1, baseWidthPx);
-    const bh = Math.max(1, baseHeightPx);
-    return {
-      position: 'absolute' as const,
-      left: 0,
-      top: 0,
-      width: bw,
-      height: bh,
-      transformOrigin: 'top left' as const,
-      transform: [{ scaleX: animW.value / bw }, { scaleY: animH.value / bh }],
-    };
-  });
 
   if (element.type === 'border' || element.needPrinting === false) {
     return (
@@ -812,8 +856,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   return (
     <Animated.View style={containerStyle} collapsable={false}>
       <GestureDetector gesture={combinedBodyGesture}>
-        <Animated.View collapsable={false} style={contentScaleStyle}>
-          <View pointerEvents="none" style={{ width: baseWidthPx, height: baseHeightPx }}>
+        <View collapsable={false} style={styles.fillContainer}>
+          <View pointerEvents="none" style={styles.fillContainer}>
             <ElementContentView
               element={element}
               widthPx={baseWidthPx}
@@ -822,7 +866,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               mediaShape={circularBorder ? 'circle' : undefined}
             />
           </View>
-        </Animated.View>
+        </View>
       </GestureDetector>
 
       {selected ? (
@@ -874,26 +918,34 @@ const EdgeResizeHandle = memo(function EdgeResizeHandle({
     <GestureDetector gesture={gesture}>
       <View
         collapsable={false}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         style={[styles.handleCircle, position === 'e' ? styles.handleE : styles.handleS]}>
-        {position === 'e' ? (
-          <Svg width={16} height={16} viewBox="-8 -8 16 16">
-            <SvgPath d="M -2 -4 L -6.5 0 L -2 4 Z" fill="#FFFFFF" />
-            <SvgPath d="M 2 -4 L 6.5 0 L 2 4 Z" fill="#FFFFFF" />
-            <SvgLine x1={-3} y1={0} x2={3} y2={0} stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" />
-          </Svg>
-        ) : (
-          <Svg width={16} height={16} viewBox="-8 -8 16 16">
-            <SvgPath d="M -4 -2 L 0 -6.5 L 4 -2 Z" fill="#FFFFFF" />
-            <SvgPath d="M -4 2 L 0 6.5 L 4 2 Z" fill="#FFFFFF" />
-            <SvgLine x1={0} y1={-3} x2={0} y2={3} stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" />
-          </Svg>
-        )}
+        <View pointerEvents="none">
+          {position === 'e' ? (
+            <Svg width={16} height={16} viewBox="-8 -8 16 16">
+              <SvgPath d="M -2 -4 L -6.5 0 L -2 4 Z" fill="#FFFFFF" />
+              <SvgPath d="M 2 -4 L 6.5 0 L 2 4 Z" fill="#FFFFFF" />
+              <SvgLine x1={-3} y1={0} x2={3} y2={0} stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" />
+            </Svg>
+          ) : (
+            <Svg width={16} height={16} viewBox="-8 -8 16 16">
+              <SvgPath d="M -4 -2 L 0 -6.5 L 4 -2 Z" fill="#FFFFFF" />
+              <SvgPath d="M -4 2 L 0 6.5 L 4 2 Z" fill="#FFFFFF" />
+              <SvgLine x1={0} y1={-3} x2={0} y2={3} stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" />
+            </Svg>
+          )}
+        </View>
       </View>
     </GestureDetector>
   );
 });
 
 const styles = StyleSheet.create({
+  fillContainer: {
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+  },
   selectionOutline: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: 1.5,

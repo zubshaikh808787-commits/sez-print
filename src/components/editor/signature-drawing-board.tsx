@@ -256,7 +256,13 @@ export function SignaturePreview({ strokes, width, height }: SignaturePreviewPro
   if (pixelStrokes.length === 0) return null;
 
   return (
-    <Svg width={width} height={height} style={StyleSheet.absoluteFillObject} pointerEvents="none">
+    <Svg
+      width="100%"
+      height="100%"
+      viewBox={`0 0 ${width} ${height}`}
+      style={StyleSheet.absoluteFillObject}
+      pointerEvents="none"
+      preserveAspectRatio="none">
       {pixelStrokes.map((stroke, index) => (
         <Path
           key={`preview-stroke-${index}`}
