@@ -273,16 +273,11 @@ class PrinterManager {
     if (this.activeTransport === 'td404-spp' || this.activeTransport === 'josh-lpapi' || this.activeTransport === 'dev-spp') return false;
     if (this.activeTransport === 'tez-spp') return true;
     const store = usePrinterStore.getState();
+    if (store.sdkId === 'tez' || store.transport === 'tez-spp') return true;
+    if (this.activeTransport === null && Boolean(this.getTez()?.isTezConnected?.())) return true;
     const name = store.deviceName ?? store.lastDeviceName;
-    if (isLikelyTd404Name(name) || isLikelyJoshName(name) || isLikelyDevName(name)) return false;
-    // Name wins over a stale TD-404/Josh session. Seznik_Tej is Flashlabel OEM, not TSPL.
     if (isLikelyTezName(name) || isLikelyShaktiName(name)) return true;
-    if (store.sdkId === 'tez' || store.transport === 'tez-spp') {
-      return true;
-    }
-    if (this.activeTransport === null && Boolean(this.getTez()?.isTezConnected?.())) {
-      return true;
-    }
+    if (isLikelyTd404Name(name) || isLikelyJoshName(name) || isLikelyDevName(name)) return false;
     return false;
   }
 

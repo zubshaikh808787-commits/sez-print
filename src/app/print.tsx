@@ -789,6 +789,7 @@ export default function PrintScreen() {
             media: wantsBline ? 'bline' : media,
             alignment: manager.isJosh ? 'center' : manager.getActivePrinterProfile().alignment,
           });
+          usedNative = true;
           timer.end('transmit');
           console.info(
             `[JOSH-PRINT-P5:FINALIZE] page ${page + 1} total: ${Date.now() - pageStart} ms | JOSH LPAPI SDK path`,
@@ -821,8 +822,8 @@ export default function PrintScreen() {
               );
             }
           } catch (err) {
-            console.warn('[print] DEV native print failed, falling back:', err);
-            usedNative = false;
+            console.warn('[print] DEV native print failed:', err);
+            throw err;
           }
           timer.end('sdkFastPrint');
         } else if (manager.isTez) {
@@ -854,8 +855,8 @@ export default function PrintScreen() {
               );
             }
           } catch (err) {
-            console.warn('[print] TEZ native print failed, falling back:', err);
-            usedNative = false;
+            console.warn('[print] TEZ native print failed:', err);
+            throw err;
           }
           timer.end('sdkFastPrint');
         } else if (manager.usesTd404CommandSet) {
