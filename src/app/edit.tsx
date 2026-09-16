@@ -1087,6 +1087,16 @@ export default function EditScreen() {
         }
         return [id];
       });
+      if (!multipleMode) {
+        if (element.type === 'signature') {
+          setShowSignatureBoard(true);
+        } else if (element.type === 'image') {
+          setImageTab('Regular');
+          setPanelOpen(true);
+        } else {
+          setPanelOpen(true);
+        }
+      }
     },
     [multipleMode],
   );

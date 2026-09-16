@@ -113,9 +113,10 @@ export async function printVardrzTscLabel(
   const rawWidthDots = Math.round(widthMm * 8);
   const labelWidthDots = Math.min(headWidthDots, rawWidthDots);
 
-  // User calibration trim offsets (0 by default to match top-left (0,0) preview alignment):
+  // Center horizontally within printable head width so left & right borders are perfectly symmetric:
   const hOffsetDots = Math.round((opts.hOffsetMm ?? 0) * 8);
-  const leftPadding = Math.max(0, Math.min(headWidthDots - labelWidthDots, hOffsetDots));
+  const centerOffset = Math.max(0, Math.floor((headWidthDots - labelWidthDots) / 2));
+  const leftPadding = Math.max(0, Math.min(headWidthDots - labelWidthDots, centerOffset + hOffsetDots));
   const vOffsetDots = Math.max(0, Math.round((opts.vOffsetMm ?? 0) * 8));
 
   for (let i = 0; i < copies; i++) {
@@ -206,11 +207,12 @@ export async function printVardrzLabel(
     ? Math.max(0, Math.min(255, Math.round((opts.gapMm || 0) * 8)))
     : Math.max(0, Math.min(255, totalPitchDots - printedHeightDots));
 
-  // Horizontal offset trim (0 by default to match top-left (0,0) preview alignment):
+  // Horizontal offset trim (centered on roll by default to prevent right-edge clipping):
   const hOffsetDots = Math.round((opts.hOffsetMm ?? 0) * 8);
+  const centerOffset = Math.max(0, Math.floor((paperSizeDots - labelWidthDots) / 2));
   const leftPadding = Math.max(
     0,
-    Math.min(paperSizeDots - labelWidthDots, hOffsetDots),
+    Math.min(paperSizeDots - labelWidthDots, centerOffset + hOffsetDots),
   );
 
   const copies = Math.max(1, Math.round(opts.copies ?? 1));
@@ -237,7 +239,7 @@ export async function printVardrzLabel(
   for (let i = 0; i < copies; i++) {
     await printVardrzPic(base64Png, {
       width: labelWidthDots,
-      center: false,
+      center: true,
       left: leftPadding,
       autoCut: false,
       paperSize,
