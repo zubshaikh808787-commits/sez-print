@@ -1922,6 +1922,12 @@ export default function EditScreen() {
         onPress={() => setLockOnSelection(false)}
       />
       <ToolbarItem
+        icon="arrow.clockwise"
+        label="Rotate"
+        disabled={selectedIds.length === 0}
+        onPress={() => rotateSelectedBy(90)}
+      />
+      <ToolbarItem
         icon="square.on.square"
         label="Duplicate"
         disabled={selectedIds.length === 0}

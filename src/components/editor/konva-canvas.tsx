@@ -392,19 +392,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         </GestureDetector>
 
         <View pointerEvents="box-none" collapsable={false} style={StyleSheet.absoluteFillObject}>
-          {/* contentLayer: idle elements. Images use expo-image memory-disk cache
-              (Konva node `.cache()` equivalent) so drag does not re-decode. */}
-          <CanvasElementNodes elements={content} chrome={chrome} />
+          {/* Stable single-layer element rendering: preserves component instances across drag without flicker */}
+          <CanvasElementNodes elements={sortedElements} chrome={chrome} />
         </View>
-        {active ? (
-          <View
-            pointerEvents="box-none"
-            collapsable={false}
-            style={[StyleSheet.absoluteFillObject, styles.activeLayer]}>
-            {/* activeLayer: the moving node, including full-bleed photos */}
-            <CanvasElementNodes elements={[active]} chrome={chrome} />
-          </View>
-        ) : null}
       </ViewShot>
       {cableFlagOutline}
       {snapGuides.length > 0 ? (

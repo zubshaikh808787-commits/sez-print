@@ -147,10 +147,12 @@ function testMinSizeFiveMm() {
   console.log('ok proportional resize cannot collapse below 5mm');
 }
 
-function testBarcodeWidthOnly() {
+function testBarcodeWidthAndHeightIndependent() {
   const policy = resizePolicyFor(barcodeEl());
-  assert.deepEqual(policy.anchors, ['e']);
+  assert.deepEqual(policy.anchors, ['e', 's']);
   assert.equal(policy.behavior.e, 'width');
+  assert.equal(policy.behavior.s, 'height');
+  assert.equal(policy.rotateHandle, false);
   const next = boundBoxMm({
     anchor: 'e',
     behavior: 'width',
@@ -163,7 +165,7 @@ function testBarcodeWidthOnly() {
   assert.equal(next.width, 40);
   assert.equal(next.height, 10);
   assert.equal(next.top, 8);
-  console.log('ok barcode right-handle changes width only');
+  console.log('ok barcode right-handle changes width only, bottom-handle changes height only');
 }
 
 function testTextWidthAndHeightIndependent() {
@@ -251,22 +253,23 @@ function testPolicyCatalog() {
   assert.equal(qr.rotateHandle, false);
 
   const barcode = resizePolicyFor(barcodeEl());
-  assert.deepEqual(barcode.anchors, ['e']);
-  assert.equal(barcode.rotateHandle, true);
+  assert.deepEqual(barcode.anchors, ['e', 's']);
+  assert.equal(barcode.rotateHandle, false);
 
   const text = resizePolicyFor(textEl());
   assert.ok(text.comment.includes('fontSize'));
-  assert.equal(text.rotateHandle, true);
+  assert.equal(text.rotateHandle, false);
 
   const line = resizePolicyFor(stub('line'));
   assert.deepEqual(line.anchors, ['e']);
   assert.equal(line.behavior.e, 'width');
+  assert.equal(line.rotateHandle, false);
 
   const shape = resizePolicyFor(stub('shape'));
   assert.deepEqual(shape.anchors, ['e', 's']);
   assert.equal(shape.behavior.e, 'width');
   assert.equal(shape.behavior.s, 'height');
-  assert.equal(shape.rotateHandle, true);
+  assert.equal(shape.rotateHandle, false);
 
   const border = resizePolicyFor(stub('border'));
   assert.deepEqual(border.anchors, []);
@@ -299,7 +302,7 @@ function main() {
   testBottomHandleKeepsAspect();
   testQrStaysSquare();
   testMinSizeFiveMm();
-  testBarcodeWidthOnly();
+  testBarcodeWidthAndHeightIndependent();
   testTextWidthAndHeightIndependent();
   testJewelryAndCableStayOnTheLabel();
   testUnlockedImageIsAxisResize();

@@ -56,9 +56,9 @@ export function drawQrCode(
 // Minimal QR Code encoder — byte mode, error correction L
 // ---------------------------------------------------------------------------
 
-type QrMatrix = { size: number; data: Uint8Array };
+export type QrMatrix = { size: number; data: Uint8Array };
 
-function generateQrMatrix(text: string): QrMatrix | null {
+export function generateQrMatrix(text: string): QrMatrix | null {
   const data = encodeUtf8(text);
   const version = selectVersion(data.length);
   if (version < 1) return null;

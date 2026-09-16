@@ -65,11 +65,11 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
       };
     case 'barcode':
       return {
-        anchors: ['e'],
-        behavior: { e: 'width' },
-        rotateHandle: true,
+        anchors: ['e', 's'],
+        behavior: { e: 'width', s: 'height' },
+        rotateHandle: false,
         minMm: MIN_ELEMENT_MM,
-        comment: 'Barcode: width-only. Tall bars stay put so density/scannability is not coupled to stretch.',
+        comment: 'Barcode: two independent single-axis handles (e = width only, s = height only) matching canvas.md §3.1.',
       };
     case 'text':
     case 'degrees':
@@ -77,7 +77,7 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
       return {
         anchors: ['e', 's'],
         behavior: { e: 'width', s: 'height' },
-        rotateHandle: true,
+        rotateHandle: false,
         minMm: MIN_ELEMENT_MM,
         comment: 'Text: right handle changes wrap width; bottom handle changes box height and scales fontSize on commit.',
       };
@@ -85,7 +85,7 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
       return {
         anchors: ['e'],
         behavior: { e: 'width' },
-        rotateHandle: true,
+        rotateHandle: false,
         minMm: 0.1,
         comment: 'Line: length only. Stroke thickness is a property, not a drag axis.',
       };
@@ -95,7 +95,7 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
       return {
         anchors: ['e', 's'],
         behavior: { e: 'width', s: 'height' },
-        rotateHandle: true,
+        rotateHandle: false,
         minMm: MIN_ELEMENT_MM,
         comment: 'Shape/arc-text/table: independent width and height. Not photos, so aspect is not forced.',
       };

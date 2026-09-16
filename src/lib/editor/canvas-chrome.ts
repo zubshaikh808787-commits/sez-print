@@ -14,7 +14,17 @@ export const CHROME_STROKE_LIGHT = 'rgba(23, 166, 184, 0.85)';
 /** Higher-luminance teal so the same 1px line holds on a dark label fill. */
 export const CHROME_STROKE_DARK = 'rgba(153, 246, 228, 0.92)';
 
-export const CHROME_HANDLE_COLOR = '#64748B';
+/** Selection bounding box border per canvas.md §3.1 (dashed red/orange #E8543C). */
+export const CHROME_SELECTION_STROKE = '#E8543C';
+export const CHROME_SELECTION_DASH = [6, 4];
+
+/** Circular resize handle per canvas.md §3.1 (#2FB6B2 teal, 28px diameter). */
+export const CHROME_HANDLE_FILL = '#2FB6B2';
+export const CHROME_HANDLE_COLOR = '#2FB6B2';
+export const CHROME_HANDLE_SIZE_PX = 28;
+export const CHROME_HANDLE_RADIUS_PX = 14;
+export const CHROME_HANDLE_ICON_COLOR = '#FFFFFF';
+export const CHROME_HANDLE_ICON_SIZE = 16;
 
 /** Task 6.1: no drop shadow on the transformer border or anchors. */
 export const CHROME_HAS_SHADOW = false;

@@ -200,6 +200,48 @@ function testPasteTinyStaysOnCanvas() {
   console.log('ok paste of 0.5 mm content stays inside the label');
 }
 
+import { normalizeRotation } from '../../../components/editor/types';
+
+function testRotateToolbarCycling() {
+  const elA = { ...textEl('a', 10, 10), rotation: 0 };
+  const elB = { ...textEl('b', 20, 20), rotation: 90 };
+  const elLocked = { ...textEl('c', 30, 30), rotation: 0, lockMovement: true };
+  let elements = [elA, elB, elLocked];
+
+  const applyRotateToolbar = (selectedIds: string[]) => {
+    return elements.map((el) => {
+      if (!selectedIds.includes(el.id) || el.lockMovement || el.type === 'border') return el;
+      return {
+        ...el,
+        rotation: normalizeRotation((el.rotation ?? 0) + 90),
+      };
+    });
+  };
+
+  // 1st click on 'a': 0 -> 90
+  elements = applyRotateToolbar(['a']);
+  assert.equal(elements.find((e) => e.id === 'a')!.rotation, 90);
+  assert.equal(elements.find((e) => e.id === 'b')!.rotation, 90, 'unselected element B stays at 90');
+
+  // 2nd click on 'a': 90 -> 180
+  elements = applyRotateToolbar(['a']);
+  assert.equal(elements.find((e) => e.id === 'a')!.rotation, 180);
+
+  // 3rd click on 'a': 180 -> 270
+  elements = applyRotateToolbar(['a']);
+  assert.equal(elements.find((e) => e.id === 'a')!.rotation, 270);
+
+  // 4th click on 'a': 270 -> 0 (full cycle back)
+  elements = applyRotateToolbar(['a']);
+  assert.equal(elements.find((e) => e.id === 'a')!.rotation, 0);
+
+  // Rotate locked element: remains unchanged
+  elements = applyRotateToolbar(['c']);
+  assert.equal(elements.find((e) => e.id === 'c')!.rotation, 0, 'locked element does not rotate');
+
+  console.log('ok 90° rotate toolbar cycles 0->90->180->270->0 on selected element');
+}
+
 function main() {
   testFiniteMm();
   testHistoryTransactions();
@@ -210,6 +252,7 @@ function main() {
   testSanitizeTransform();
   testSmallContentCanSitAnywhere();
   testPasteTinyStaysOnCanvas();
+  testRotateToolbarCycling();
   console.log('ALL EDITOR ENGINE TESTS PASSED');
 }
 

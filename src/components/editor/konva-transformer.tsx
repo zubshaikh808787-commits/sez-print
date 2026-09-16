@@ -10,6 +10,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
+import Svg, { Path as SvgPath, Line as SvgLine } from 'react-native-svg';
 import { AppIcon } from '@/components/app-icon';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelElement } from '@/lib/label-document';
@@ -26,9 +27,12 @@ import {
   type ResizeBehavior,
 } from '@/lib/editor/resize-policy';
 import {
-  CHROME_HANDLE_COLOR,
-  CHROME_STROKE_LIGHT,
-  CHROME_STROKE_PX,
+  CHROME_HANDLE_FILL,
+  CHROME_HANDLE_ICON_COLOR,
+  CHROME_HANDLE_ICON_SIZE,
+  CHROME_HANDLE_RADIUS_PX,
+  CHROME_HANDLE_SIZE_PX,
+  CHROME_SELECTION_STROKE,
   DRAG_LIFT_OPACITY,
 } from '@/lib/editor/canvas-chrome';
 
@@ -75,9 +79,6 @@ type KonvaTransformerProps = {
   }) => { leftMm: number; topMm: number };
 };
 
-const EDGE_HIT_PX = DIVIDER_HIT_SIZE_PX;
-const ROTATE_HANDLE_SIZE = 20;
-const ROTATE_STEM = 22;
 const HIT_TARGET_PX = 36;
 const DOUBLE_TAP_MS = 350;
 const TOOLTIP_MS = 80;
@@ -124,8 +125,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
   const transX = useSharedValue(0);
   const transY = useSharedValue(0);
-  const snapDxPx = useSharedValue(0);
-  const snapDyPx = useSharedValue(0);
   const originLeftSv = useSharedValue(baseLeftPx);
   const originTopSv = useSharedValue(baseTopPx);
   const padZoomSv = useSharedValue(padZoom > 0 ? padZoom : 1);
@@ -197,8 +196,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         committedRef.current = null;
         transX.value = 0;
         transY.value = 0;
-        snapDxPx.value = 0;
-        snapDyPx.value = 0;
         originLeftSv.value = baseLeftPx;
         originTopSv.value = baseTopPx;
         animW.value = baseWidthPx;
@@ -215,8 +212,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
     transX.value = 0;
     transY.value = 0;
-    snapDxPx.value = 0;
-    snapDyPx.value = 0;
     originLeftSv.value = baseLeftPx;
     originTopSv.value = baseTopPx;
     animW.value = baseWidthPx;
@@ -238,8 +233,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     baseRotation,
     transX,
     transY,
-    snapDxPx,
-    snapDyPx,
     originLeftSv,
     originTopSv,
     animW,
@@ -273,8 +266,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   };
   const pointerToMmRef = useRef(pointerToMm);
   pointerToMmRef.current = pointerToMm;
-  const snapMoveMmRef = useRef(snapMoveMm);
-  snapMoveMmRef.current = snapMoveMm;
   const elementBoxRef = useRef({
     left: finiteMm(element.left),
     top: finiteMm(element.top),
@@ -320,8 +311,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         committedRef.current = null;
         transX.value = 0;
         transY.value = 0;
-        snapDxPx.value = 0;
-        snapDyPx.value = 0;
         isInteracting.value = false;
         pendingCommit.value = false;
         liftSv.value = 1;
@@ -361,46 +350,25 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     });
   }, []);
 
-  const applyMoveSnap = useCallback(
-    (leftMm: number, topMm: number): { left: number; top: number } => {
-      const snapped = snapMoveMmRef.current?.({
-        id: element.id,
-        leftMm,
-        topMm,
-        widthMm: elementBoxRef.current.width,
-        heightMm: elementBoxRef.current.height,
-      });
-      const next = snapped ? { left: snapped.leftMm, top: snapped.topMm } : { left: leftMm, top: topMm };
-      snapDxPx.value = mmToPx(next.left - leftMm, pxPerMMSafe);
-      snapDyPx.value = mmToPx(next.top - topMm, pxPerMMSafe);
-      return next;
-    },
-    [element.id, pxPerMMSafe, snapDxPx, snapDyPx],
-  );
-
   const reportDragMove = useCallback(
     (_windowX: number, _windowY: number, fallbackLeftPx: number, fallbackTopPx: number) => {
       if (!emitMoveRef.current) return;
-      snapDxPx.value = 0;
-      snapDyPx.value = 0;
       dragMovePump.push({
         leftMm: pxToMm(fallbackLeftPx, pxPerMMSafe),
         topMm: pxToMm(fallbackTopPx, pxPerMMSafe),
       });
     },
-    [dragMovePump, pxPerMMSafe, snapDxPx, snapDyPx],
+    [dragMovePump, pxPerMMSafe],
   );
 
   const commitDragFromPointer = useCallback(
     (_windowX: number, _windowY: number, fallbackLeftPx: number, fallbackTopPx: number) => {
       dragMovePump.cancel();
-      snapDxPx.value = 0;
-      snapDyPx.value = 0;
       const leftMm = pxToMm(fallbackLeftPx, pxPerMMSafe);
       const topMm = pxToMm(fallbackTopPx, pxPerMMSafe);
       dispatchDragCommitMm(leftMm, topMm);
     },
-    [dispatchDragCommitMm, dragMovePump, pxPerMMSafe, snapDxPx, snapDyPx],
+    [dispatchDragCommitMm, dragMovePump, pxPerMMSafe],
   );
 
   const captureResizeStartFromPx = useCallback(
@@ -502,19 +470,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     [pxPerMMSafe],
   );
 
-  const updateRotateTooltipJS = useCallback((deg: number) => {
-    const now = Date.now();
-    if (now - lastTooltipAt.current < TOOLTIP_MS) return;
-    lastTooltipAt.current = now;
-    setTooltipText(`${Math.round(deg)}°`);
-  }, []);
-
   const startTX = useSharedValue(0);
   const startTY = useSharedValue(0);
   const startW = useSharedValue(0);
   const startH = useSharedValue(0);
   const startRot = useSharedValue(0);
-  const startAngle = useSharedValue(0);
   const startAbsX = useSharedValue(0);
   const startAbsY = useSharedValue(0);
   const setMoveLift = useCallback((on: boolean) => {
@@ -535,11 +495,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     () =>
       Gesture.Pan()
         .enabled(!element.lockMovement)
-        .minDistance(2)
+        .minDistance(0)
         .maxPointers(1)
         .shouldCancelWhenOutside(false)
         .hitSlop(bodyHitSlop)
-        .onStart((e) => {
+        .onStart((_e) => {
           'worklet';
           isInteracting.value = true;
           pendingCommit.value = false;
@@ -547,12 +507,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           originTopSv.value = originTopSv.value + transY.value;
           transX.value = 0;
           transY.value = 0;
-          snapDxPx.value = 0;
-          snapDyPx.value = 0;
-          startTX.value = 0;
-          startTY.value = 0;
-          startAbsX.value = e.absoluteX;
-          startAbsY.value = e.absoluteY;
           liftSv.value = DRAG_LIFT_OPACITY;
           runOnJS(setMoveLift)(true);
           if (!selectedSv.value) {
@@ -561,42 +515,43 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           if (callbacksRef.current.onTransformStart) {
             runOnJS(callbacksRef.current.onTransformStart)(element.id);
           }
-          runOnJS(captureDragGrab)(e.absoluteX, e.absoluteY);
         })
         .onUpdate((e) => {
           'worklet';
           const z = padZoomSv.value > 0 ? padZoomSv.value : 1;
-          const rawLeft = originLeftSv.value + startTX.value + (e.absoluteX - startAbsX.value) / z;
-          const rawTop = originTopSv.value + startTY.value + (e.absoluteY - startAbsY.value) / z;
+          const dx = e.translationX / z;
+          const dy = e.translationY / z;
 
           const maxLeftPx = Math.max(0, (canvasWMmSv.value - sizeWMmSv.value) * sxSv.value);
           const maxTopPx = Math.max(0, (canvasHMmSv.value - sizeHMmSv.value) * sySv.value);
 
-          const clampedLeft = Math.max(0, Math.min(maxLeftPx, rawLeft));
-          const clampedTop = Math.max(0, Math.min(maxTopPx, rawTop));
+          const targetLeft = originLeftSv.value + dx;
+          const targetTop = originTopSv.value + dy;
+
+          const clampedLeft = Math.max(0, Math.min(maxLeftPx, targetLeft));
+          const clampedTop = Math.max(0, Math.min(maxTopPx, targetTop));
 
           transX.value = clampedLeft - originLeftSv.value;
           transY.value = clampedTop - originTopSv.value;
-          runOnJS(reportDragMove)(e.absoluteX, e.absoluteY, clampedLeft, clampedTop);
         })
         .onEnd((e) => {
           'worklet';
           pendingCommit.value = true;
           liftSv.value = 1;
           runOnJS(setMoveLift)(false);
+          const finalLeftPx = originLeftSv.value + transX.value;
+          const finalTopPx = originTopSv.value + transY.value;
           runOnJS(commitDragFromPointer)(
             e.absoluteX,
             e.absoluteY,
-            originLeftSv.value + transX.value,
-            originTopSv.value + transY.value,
+            finalLeftPx,
+            finalTopPx,
           );
         }),
     [
       element.lockMovement,
       bodyHitSlop,
-      captureDragGrab,
       commitDragFromPointer,
-      reportDragMove,
       setMoveLift,
       element.id,
     ],
@@ -795,104 +750,19 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     return next;
   }, [createHandleGesture, resizePolicy]);
 
-  const rotateGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .minDistance(2)
-        .maxPointers(1)
-        .onStart((e) => {
-          'worklet';
-          isInteracting.value = true;
-          pendingCommit.value = false;
-          startRot.value = animRot.value;
-          startAbsX.value = e.absoluteX;
-          startAbsY.value = e.absoluteY;
-          const cy = animH.value / 2;
-          startAngle.value = Math.atan2(-ROTATE_STEM - cy, 0);
-          if (callbacksRef.current.onTransformStart) {
-            runOnJS(callbacksRef.current.onTransformStart)(element.id);
-          }
-        })
-        .onUpdate((e) => {
-          'worklet';
-          const z = padZoom > 0 ? padZoom : 1;
-          const cx = animW.value / 2;
-          const cy = animH.value / 2;
-          const touchX = cx + (e.absoluteX - startAbsX.value) / z;
-          const touchY = -ROTATE_STEM + (e.absoluteY - startAbsY.value) / z;
-          const currentAngle = Math.atan2(touchY - cy, touchX - cx);
-          let deg =
-            startRot.value + ((currentAngle - startAngle.value) * 180) / Math.PI;
-          deg = ((deg % 360) + 360) % 360;
 
-          const snapThreshold = 3.5;
-          const cardinalThreshold = 5.0;
-          for (let s = 0; s <= 360; s += 15) {
-            const thresh = s % 90 === 0 ? cardinalThreshold : snapThreshold;
-            if (
-              Math.abs(deg - s) < thresh ||
-              Math.abs(deg - s + 360) < thresh ||
-              Math.abs(deg - s - 360) < thresh
-            ) {
-              deg = s % 360;
-              break;
-            }
-          }
-          const roundedDeg = Math.round(deg);
-          animRot.value = roundedDeg;
-          runOnJS(updateRotateTooltipJS)(roundedDeg);
-        })
-        .onEnd(() => {
-          'worklet';
-          pendingCommit.value = true;
-          runOnJS(dispatchRotateCommit)(animRot.value);
-        }),
-    [
-      padZoom,
-      animW,
-      animH,
-      animRot,
-      baseLeftPx,
-      baseTopPx,
-      transX,
-      transY,
-      startRot,
-      startAngle,
-      isInteracting,
-      pendingCommit,
-      element.id,
-      dispatchRotateCommit,
-      updateRotateTooltipJS,
-    ],
-  );
-
-  const fireQuickRotate = useCallback(() => {
-    callbacksRef.current.onQuickRotate?.(element.id);
-  }, [element.id]);
-
-  const rotateTapGesture = useMemo(
-    () =>
-      Gesture.Tap()
-        .maxDuration(250)
-        .maxDistance(12)
-        .onEnd((_e, success) => {
-          if (success) runOnJS(fireQuickRotate)();
-        }),
-    [fireQuickRotate],
-  );
-
-  const combinedRotateGesture = useMemo(
-    () => Gesture.Exclusive(rotateGesture, rotateTapGesture),
-    [rotateGesture, rotateTapGesture],
-  );
 
   const containerStyle = useAnimatedStyle(() => ({
     position: 'absolute' as const,
-    left: originLeftSv.value + transX.value + snapDxPx.value,
-    top: originTopSv.value + transY.value + snapDyPx.value,
+    left: 0,
+    top: 0,
     width: animW.value,
     height: animH.value,
-    transform: [{ rotate: `${animRot.value}deg` }],
+    transform: [
+      { translateX: originLeftSv.value + transX.value },
+      { translateY: originTopSv.value + transY.value },
+      { rotate: `${animRot.value}deg` },
+    ],
     zIndex: selected ? 99 : element.zIndex ?? 1,
     opacity: hidden ? 0.28 : (element.opacity ?? 1) * liftSv.value,
     overflow: 'visible' as const,
@@ -937,7 +807,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     );
   }
 
-  const borderStrokeColor = selectionColor || CHROME_STROKE_LIGHT;
+  const borderStrokeColor = selectionColor || CHROME_SELECTION_STROKE;
 
   return (
     <Animated.View style={containerStyle} collapsable={false}>
@@ -961,7 +831,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             pointerEvents="none"
             style={[
               styles.selectionOutline,
-              { borderColor: borderStrokeColor, borderWidth: CHROME_STROKE_PX },
+              { borderColor: borderStrokeColor },
             ]}
           />
 
@@ -973,22 +843,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
           {element.lockMovement || moving ? null : (
             <>
-              {resizePolicy.rotateHandle ? (
-                <View pointerEvents="box-none" style={styles.rotateWrap}>
-                  <View style={[styles.rotateStem, { backgroundColor: borderStrokeColor }]} />
-                  <GestureDetector gesture={combinedRotateGesture}>
-                    <View
-                      hitSlop={{ top: 14, left: 14, right: 14, bottom: 0 }}
-                      style={[
-                        styles.rotateAnchor,
-                        { borderColor: borderStrokeColor },
-                      ]}>
-                      <AppIcon name="arrow.clockwise" tintColor={borderStrokeColor} size={11} weight="light" />
-                    </View>
-                  </GestureDetector>
-                </View>
-              ) : null}
-
               {handleGestures.e ? (
                 <EdgeResizeHandle position="e" gesture={handleGestures.e} />
               ) : null}
@@ -1016,15 +870,24 @@ const EdgeResizeHandle = memo(function EdgeResizeHandle({
   position: HandlePosition;
   gesture: ReturnType<typeof Gesture.Pan>;
 }) {
-  const icon = position === 'e' ? 'arrow.left.and.right' : 'arrow.up.and.down';
   return (
     <GestureDetector gesture={gesture}>
       <View
         collapsable={false}
-        style={[styles.edgeHit, position === 'e' ? styles.handleE : styles.handleS]}>
-        <View pointerEvents="none" style={styles.edgeGlyph}>
-          <AppIcon name={icon} tintColor={CHROME_HANDLE_COLOR} size={14} weight="light" />
-        </View>
+        style={[styles.handleCircle, position === 'e' ? styles.handleE : styles.handleS]}>
+        {position === 'e' ? (
+          <Svg width={16} height={16} viewBox="-8 -8 16 16">
+            <SvgPath d="M -2 -4 L -6.5 0 L -2 4 Z" fill="#FFFFFF" />
+            <SvgPath d="M 2 -4 L 6.5 0 L 2 4 Z" fill="#FFFFFF" />
+            <SvgLine x1={-3} y1={0} x2={3} y2={0} stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" />
+          </Svg>
+        ) : (
+          <Svg width={16} height={16} viewBox="-8 -8 16 16">
+            <SvgPath d="M -4 -2 L 0 -6.5 L 4 -2 Z" fill="#FFFFFF" />
+            <SvgPath d="M -4 2 L 0 6.5 L 4 2 Z" fill="#FFFFFF" />
+            <SvgLine x1={0} y1={-3} x2={0} y2={3} stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" />
+          </Svg>
+        )}
       </View>
     </GestureDetector>
   );
@@ -1033,54 +896,34 @@ const EdgeResizeHandle = memo(function EdgeResizeHandle({
 const styles = StyleSheet.create({
   selectionOutline: {
     ...StyleSheet.absoluteFillObject,
-    borderWidth: CHROME_STROKE_PX,
-    borderStyle: 'solid',
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: CHROME_SELECTION_STROKE,
   },
-  edgeHit: {
+  handleCircle: {
     position: 'absolute',
-    width: EDGE_HIT_PX,
-    height: EDGE_HIT_PX,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#54C8C8',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
-    backgroundColor: 'transparent',
-  },
-  edgeGlyph: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
   },
   handleS: {
-    bottom: -EDGE_HIT_PX / 2,
+    bottom: -14,
     left: '50%',
-    marginLeft: -EDGE_HIT_PX / 2,
+    marginLeft: -14,
   },
   handleE: {
     top: '50%',
-    right: -EDGE_HIT_PX / 2,
-    marginTop: -EDGE_HIT_PX / 2,
-  },
-  rotateWrap: {
-    position: 'absolute',
-    top: -ROTATE_STEM,
-    left: '50%',
-    marginLeft: -ROTATE_HANDLE_SIZE / 2,
-    alignItems: 'center',
-    zIndex: 15,
-  },
-  rotateStem: {
-    position: 'absolute',
-    top: ROTATE_HANDLE_SIZE - 2,
-    width: CHROME_STROKE_PX,
-    height: 14,
-  },
-  rotateAnchor: {
-    width: ROTATE_HANDLE_SIZE,
-    height: ROTATE_HANDLE_SIZE,
-    borderRadius: ROTATE_HANDLE_SIZE / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: CHROME_STROKE_PX,
-    backgroundColor: 'rgba(255, 255, 255, 0.65)',
+    right: -14,
+    marginTop: -14,
   },
   tooltipPill: {
     position: 'absolute',

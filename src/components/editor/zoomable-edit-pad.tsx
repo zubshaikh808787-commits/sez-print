@@ -151,12 +151,6 @@ export function ZoomableEditPad({
           }
           panX.value = x;
           panY.value = y;
-
-          const now = Date.now();
-          if (now - lastZoomReportAt.value >= ZOOM_REPORT_MS) {
-            lastZoomReportAt.value = now;
-            runOnJS(reportView)(next, x, y);
-          }
         })
         .onEnd(() => {
           'worklet';
@@ -208,17 +202,12 @@ export function ZoomableEditPad({
           const y = Math.min(limitY, Math.max(-limitY, panStartY.value + e.translationY));
           panX.value = x;
           panY.value = y;
-          const now = Date.now();
-          if (now - lastZoomReportAt.value >= ZOOM_REPORT_MS) {
-            lastZoomReportAt.value = now;
-            runOnJS(reportView)(z, x, y);
-          }
         })
         .onEnd(() => {
           'worklet';
           runOnJS(reportView)(zoomSv.value, panX.value, panY.value);
         }),
-    [lastZoomReportAt, panStartX, panStartY, panX, panY, pinchActive, reportView, viewH, viewW, zoomSv],
+    [panStartX, panStartY, panX, panY, pinchActive, reportView, viewH, viewW, zoomSv],
   );
 
   const oneFingerPan = useMemo(
@@ -244,17 +233,12 @@ export function ZoomableEditPad({
           const y = Math.min(limitY, Math.max(-limitY, panStartY.value + e.translationY));
           panX.value = x;
           panY.value = y;
-          const now = Date.now();
-          if (now - lastZoomReportAt.value >= ZOOM_REPORT_MS) {
-            lastZoomReportAt.value = now;
-            runOnJS(reportView)(z, x, y);
-          }
         })
         .onEnd(() => {
           'worklet';
           runOnJS(reportView)(zoomSv.value, panX.value, panY.value);
         }),
-    [lastZoomReportAt, oneFingerPanEnabled, zoom, panStartX, panStartY, panX, panY, reportView, viewH, viewW, zoomSv],
+    [oneFingerPanEnabled, zoom, panStartX, panStartY, panX, panY, reportView, viewH, viewW, zoomSv],
   );
 
   const composed = useMemo(
