@@ -140,7 +140,6 @@ function textStyleFor(
 function TextContent({
   element,
   scale,
-  widthPx,
 }: {
   element: EditorElementState & { verticalDisplay?: boolean; charSpacing?: number };
   scale: number;
@@ -158,9 +157,6 @@ function TextContent({
       style={[
         styles.fill,
         {
-          width: widthPx,
-          minWidth: widthPx,
-          flexShrink: 0,
           justifyContent: 'center',
           alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
         },
@@ -171,7 +167,7 @@ function TextContent({
         style={[
           style,
           styles.textFill,
-          { width: widthPx, minWidth: widthPx, flexShrink: 0, textAlign: align },
+          { textAlign: align },
           element.charSpacing ? { letterSpacing: element.charSpacing } : null,
         ]}
         numberOfLines={element.verticalDisplay ? undefined : element.autoWrapping === 'Close' ? 1 : undefined}>
@@ -184,7 +180,6 @@ function TextContent({
 function DegreesContent({
   element,
   scale,
-  widthPx,
 }: {
   element: DegreesElementState;
   scale: number;
@@ -206,9 +201,6 @@ function DegreesContent({
       style={[
         styles.fill,
         {
-          width: widthPx,
-          minWidth: widthPx,
-          flexShrink: 0,
           justifyContent: 'center',
           alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
         },
@@ -216,7 +208,7 @@ function DegreesContent({
       ]}>
       <Text
         allowFontScaling={false}
-        style={[style, { width: widthPx, minWidth: widthPx, flexShrink: 0, textAlign: align }]}>
+        style={[style, styles.textFill, { textAlign: align }]}>
         {text}
       </Text>
     </View>
@@ -226,7 +218,6 @@ function DegreesContent({
 function TimeContent({
   element,
   scale,
-  widthPx,
 }: {
   element: TimeElementState;
   scale: number;
@@ -241,9 +232,6 @@ function TimeContent({
       style={[
         styles.fill,
         {
-          width: widthPx,
-          minWidth: widthPx,
-          flexShrink: 0,
           justifyContent: 'center',
           alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
         },
@@ -251,7 +239,7 @@ function TimeContent({
       ]}>
       <Text
         allowFontScaling={false}
-        style={[style, { width: widthPx, minWidth: widthPx, flexShrink: 0, textAlign: align }]}>
+        style={[style, styles.textFill, { textAlign: align }]}>
         {`${formatLiveDate(adjusted)} ${formatLiveTime(adjusted)}`}
       </Text>
     </View>

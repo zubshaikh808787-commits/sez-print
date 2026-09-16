@@ -75,11 +75,11 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
     case 'degrees':
     case 'time':
       return {
-        anchors: ['e', 's'],
-        behavior: { e: 'aspect', s: 'aspect' },
+        anchors: ['e'],
+        behavior: { e: 'width' },
         rotateHandle: false,
         minMm: MIN_ELEMENT_MM,
-        comment: 'Text/degrees/time: proportional resize like image — scales uniform block and updates fontSize on commit.',
+        comment: 'Text/degrees/time: width only (wrap width). No vertical resizing; height is resized only by font size setting.',
       };
     case 'line':
       return {

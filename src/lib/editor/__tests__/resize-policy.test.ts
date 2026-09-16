@@ -168,15 +168,17 @@ function testBarcodeWidthAndHeightIndependent() {
   console.log('ok barcode right-handle changes width only, bottom-handle changes height only');
 }
 
-function testTextWidthAndHeightIndependent() {
-  const policy = resizePolicyFor(textEl());
-  assert.deepEqual(policy.anchors, ['e', 's']);
-  assert.equal(policy.behavior.e, 'aspect');
-  assert.equal(policy.behavior.s, 'aspect');
-  assert.ok(policy.comment.includes('fontSize'));
+function testTextWidthOnly() {
+  for (const el of [textEl(), stub('degrees'), stub('time')]) {
+    const policy = resizePolicyFor(el);
+    assert.deepEqual(policy.anchors, ['e']);
+    assert.equal(policy.behavior.e, 'width');
+    assert.equal(policy.behavior.s, undefined);
+    assert.ok(policy.comment.includes('font size setting') || policy.comment.includes('fontSize'));
+  }
   const wider = boundBoxMm({
     anchor: 'e',
-    behavior: 'aspect',
+    behavior: 'width',
     start: { left: 2, top: 2, width: 20, height: 8 },
     proposed: { width: 30, height: 8 },
     aspect: 2.5,
@@ -184,8 +186,8 @@ function testTextWidthAndHeightIndependent() {
     canvas: { widthMm: 50, heightMm: 30 },
   });
   assert.equal(wider.width, 30);
-  assert.equal(wider.height, 12);
-  console.log('ok text right-handle scales aspect proportionally without wrapping or clipping');
+  assert.equal(wider.height, 8);
+  console.log('ok text/degrees/time right-handle changes wrap width only; no vertical resizing');
 }
 
 function testJewelryAndCableStayOnTheLabel() {
@@ -257,7 +259,7 @@ function testPolicyCatalog() {
   assert.equal(barcode.rotateHandle, false);
 
   const text = resizePolicyFor(textEl());
-  assert.ok(text.comment.includes('fontSize'));
+  assert.ok(text.comment.includes('font size') || text.comment.includes('fontSize'));
   assert.equal(text.rotateHandle, false);
 
   const line = resizePolicyFor(stub('line'));
@@ -308,57 +310,55 @@ function testTextMultiCycleResizeStability() {
     fontSize: initialFontSize,
   };
 
-  // Repeatedly cycle scale down (0.5x) and scale up (2.0x) 10 times
+  // Repeatedly cycle width down and up 10 times
   for (let i = 0; i < 10; i++) {
-    // Scale down
+    // Width down
     const scaledDown = boundBoxMm({
       anchor: 'e',
-      behavior: 'aspect',
+      behavior: 'width',
       start: current,
       proposed: { width: 25, height: current.height },
       aspect: current.width / current.height,
       minMm: MIN_ELEMENT_MM,
       canvas: { widthMm: 60, heightMm: 40 },
     });
-    const downRatio = scaledDown.width / current.width;
-    const downFontSize = Math.max(3, Math.min(72, Math.round(current.fontSize * downRatio * 2) / 2));
     current = {
+      ...current,
       left: scaledDown.left,
       top: scaledDown.top,
       width: scaledDown.width,
       height: scaledDown.height,
-      fontSize: downFontSize,
     };
     assert.equal(current.width, 25);
-    assert.equal(current.fontSize, 12);
+    assert.equal(current.height, 10);
+    assert.equal(current.fontSize, 24);
 
-    // Scale back up
+    // Width back up
     const scaledUp = boundBoxMm({
       anchor: 'e',
-      behavior: 'aspect',
+      behavior: 'width',
       start: current,
       proposed: { width: 50, height: current.height },
       aspect: current.width / current.height,
       minMm: MIN_ELEMENT_MM,
       canvas: { widthMm: 60, heightMm: 40 },
     });
-    const upRatio = scaledUp.width / current.width;
-    const upFontSize = Math.max(3, Math.min(72, Math.round(current.fontSize * upRatio * 2) / 2));
     current = {
+      ...current,
       left: scaledUp.left,
       top: scaledUp.top,
       width: scaledUp.width,
       height: scaledUp.height,
-      fontSize: upFontSize,
     };
     assert.equal(current.width, 50);
+    assert.equal(current.height, 10);
     assert.equal(current.fontSize, 24);
   }
 
   assert.equal(current.width, initialWidth);
   assert.equal(current.height, initialHeight);
   assert.equal(current.fontSize, initialFontSize);
-  console.log('ok multi-cycle resize down and up maintains stable dimensions and fontSize without drift');
+  console.log('ok multi-cycle width resize maintains stable dimensions and fontSize without drift');
 }
 
 function main() {
@@ -368,7 +368,7 @@ function main() {
   testQrStaysSquare();
   testMinSizeFiveMm();
   testBarcodeWidthAndHeightIndependent();
-  testTextWidthAndHeightIndependent();
+  testTextWidthOnly();
   testTextMultiCycleResizeStability();
   testJewelryAndCableStayOnTheLabel();
   testUnlockedImageIsAxisResize();

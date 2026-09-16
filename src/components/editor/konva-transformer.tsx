@@ -85,6 +85,10 @@ const TOOLTIP_MS = 80;
 
 type HandlePosition = ResizeAnchor;
 
+type TooltipHandle = {
+  setText: (text: string | null) => void;
+};
+
 export const KonvaTransformer = memo(function KonvaTransformer({
   element,
   pxPerMM,
@@ -134,6 +138,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const canvasHMmSv = useSharedValue(canvasHeightMm);
   const sxSv = useSharedValue(sx);
   const sySv = useSharedValue(sy);
+  const startTX = useSharedValue(0);
+  const startTY = useSharedValue(0);
+  const startW = useSharedValue(baseWidthPx);
+  const startH = useSharedValue(baseHeightPx);
+  const startRot = useSharedValue(0);
+  const startAbsX = useSharedValue(0);
+  const startAbsY = useSharedValue(0);
   const animW = useSharedValue(baseWidthPx);
   const animH = useSharedValue(baseHeightPx);
   const animRot = useSharedValue<number>(baseRotation);
@@ -144,7 +155,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const liftSv = useSharedValue(1);
   const selectedSv = useSharedValue(selected);
   const [moving, setMoving] = React.useState(false);
-  const [tooltipText, setTooltipText] = React.useState<string | null>(null);
+  const tooltipRef = useRef<TooltipHandle | null>(null);
   const lastTooltipAt = useRef(0);
   const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -223,6 +234,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         animW.value = baseWidthPx;
         animH.value = baseHeightPx;
         animRot.value = baseRotation;
+        startW.value = baseWidthPx;
+        startH.value = baseHeightPx;
         isInteracting.value = false;
         pendingCommit.value = false;
         liftSv.value = 1;
@@ -239,6 +252,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     animW.value = baseWidthPx;
     animH.value = baseHeightPx;
     animRot.value = baseRotation;
+    startW.value = baseWidthPx;
+    startH.value = baseHeightPx;
     liftSv.value = 1;
   }, [
     element.left,
@@ -314,7 +329,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   /** Committed drag: moves position only. NEVER alters width, height, or fontSize. */
   const dispatchDragCommitMm = useCallback(
     (leftMm: number, topMm: number) => {
-      setTooltipText(null);
+      tooltipRef.current?.setText(null);
       const widthMm = sizeMm.width;
       const heightMm = sizeMm.height;
       const next = dropTopLeftMm({
@@ -368,7 +383,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
       });
     },
-    [sizeMm.width, sizeMm.height, canvasWidthMm, canvasHeightMm, element.id, element.left, element.top, baseRotation, baseLeftPx, baseTopPx, baseWidthPx, baseHeightPx, transX, transY, originLeftSv, originTopSv, animW, animH, isInteracting, pendingCommit, liftSv],
+    [sizeMm.width, sizeMm.height, canvasWidthMm, canvasHeightMm, element.id, element.left, element.top, baseRotation, baseLeftPx, baseTopPx, baseWidthPx, baseHeightPx, transX, transY, originLeftSv, originTopSv, animW, animH, isInteracting, pendingCommit],
   );
 
   const captureDragGrab = useCallback((windowX: number, windowY: number) => {
@@ -419,7 +434,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   /** Committed resize: millimetres via boundBoxMm, then written to the store. */
   const dispatchResizeCommit = useCallback(
     (handle: ResizeAnchor, nextWPx: number, nextHPx: number, rot: number) => {
-      setTooltipText(null);
+      tooltipRef.current?.setText(null);
       const behavior = resizePolicy.behavior[handle];
       if (!behavior) return;
       const start = resizeStartRef.current;
@@ -439,13 +454,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       let fontSize: number | undefined;
       let finalHeightMm = next.height;
       if (element.type === 'text' || element.type === 'degrees' || element.type === 'time') {
-        if ('fontSize' in element && typeof element.fontSize === 'number') {
-          const oldW = Math.max(0.1, start.width);
-          const ratio = next.width / oldW;
-          fontSize = Math.max(3, Math.min(72, Math.round(element.fontSize * ratio * 2) / 2));
-          const lines = ('text' in element ? element.text : 'content' in element ? element.content : '').split('\n').length || 1;
-          finalHeightMm = textBlockHeightMm(fontSize, lines);
-        }
+        const lines = ('text' in element ? element.text : 'content' in element ? element.content : '').split('\n').length || 1;
+        const fs = 'fontSize' in element && typeof element.fontSize === 'number' ? element.fontSize : 12;
+        finalHeightMm = textBlockHeightMm(fs, lines);
+        fontSize = fs;
       }
 
       const rotation = ((Math.round(rot) % 360) + 360) % 360;
@@ -486,7 +498,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   /** Committed rotate: alters rotation angle only. */
   const dispatchRotateCommit = useCallback(
     (rot: number) => {
-      setTooltipText(null);
+      tooltipRef.current?.setText(null);
       const rotation = ((Math.round(rot) % 360) + 360) % 360;
       committedRef.current = {
         leftMm: roundMm(element.left),
@@ -528,18 +540,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       lastTooltipAt.current = now;
       const wMm = pxToMm(wPx, pxPerMMSafe).toFixed(2);
       const hMm = pxToMm(hPx, pxPerMMSafe).toFixed(2);
-      setTooltipText(`${wMm} × ${hMm} mm`);
+      tooltipRef.current?.setText(`${wMm} × ${hMm} mm`);
     },
     [pxPerMMSafe],
   );
 
-  const startTX = useSharedValue(0);
-  const startTY = useSharedValue(0);
-  const startW = useSharedValue(0);
-  const startH = useSharedValue(0);
-  const startRot = useSharedValue(0);
-  const startAbsX = useSharedValue(0);
-  const startAbsY = useSharedValue(0);
   const setMoveLift = useCallback((on: boolean) => {
     setMoving(on);
   }, []);
@@ -617,6 +622,21 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       commitDragFromPointer,
       setMoveLift,
       element.id,
+      originLeftSv,
+      originTopSv,
+      transX,
+      transY,
+      isInteracting,
+      pendingCommit,
+      liftSv,
+      selectedSv,
+      padZoomSv,
+      canvasWMmSv,
+      sizeWMmSv,
+      sxSv,
+      canvasHMmSv,
+      sizeHMmSv,
+      sySv,
     ],
   );
 
@@ -701,64 +721,82 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           const canvasHPx = canvasHMmSv.value * sySv.value;
           const minPx = Math.max(2, minResizeMmSv.value * sxSv.value);
           const aspect = aspectSv.value > 0 ? aspectSv.value : 1;
-          const proposedW = originW + (handle === 'e' ? dx : 0);
-          const proposedH = originH + (handle === 's' ? dy : 0);
 
           let nw = originW;
           let nh = originH;
-          if (behavior === 'square') {
-            const driving = handle === 'e' ? proposedW : proposedH;
-            const side = Math.min(Math.min(canvasWPx, canvasHPx), Math.max(minPx, driving));
-            nw = side;
-            nh = side;
-          } else if (behavior === 'aspect') {
-            if (handle === 'e') {
-              nw = Math.min(canvasWPx, Math.max(minPx, proposedW));
-              nh = nw / aspect;
-              if (nh > canvasHPx) {
-                nh = canvasHPx;
-                nw = nh * aspect;
-              }
-            } else {
-              nh = Math.min(canvasHPx, Math.max(minPx, proposedH));
-              nw = nh * aspect;
-              if (nw > canvasWPx) {
-                nw = canvasWPx;
-                nh = nw / aspect;
-              }
-            }
-          } else if (behavior === 'width' && handle === 'e') {
-            nw = Math.min(canvasWPx, Math.max(minPx, proposedW));
-            nh = originH;
-          } else if (behavior === 'height' && handle === 's') {
-            nh = Math.min(canvasHPx, Math.max(minPx, proposedH));
-            nw = originW;
-          }
-
-          if (behavior === 'aspect' || behavior === 'square') {
-            const grow = Math.max(minPx / Math.max(nw, 1e-6), minPx / Math.max(nh, 1e-6));
-            if (grow > 1) {
-              nw *= grow;
-              nh *= grow;
-            }
-            const shrink = Math.min(canvasWPx / Math.max(nw, 1e-6), canvasHPx / Math.max(nh, 1e-6));
-            if (shrink < 1) {
-              nw *= shrink;
-              nh *= shrink;
-            }
-          }
-
           let left = originLeft;
           let top = originTop;
-          if (handle === 'e') {
+
+          if (behavior === 'width' && handle === 'e') {
+            const maxW = Math.max(minPx, canvasWPx - originLeft);
+            const proposedW = originW + dx;
+            nw = Math.max(minPx, Math.min(maxW, proposedW));
+            nh = originH;
             left = originLeft;
-            top = originTop + (originH - nh) / 2;
-          } else {
             top = originTop;
-            left = originLeft + (originW - nw) / 2;
+          } else if (behavior === 'height' && handle === 's') {
+            const maxH = Math.max(minPx, canvasHPx - originTop);
+            const proposedH = originH + dy;
+            nh = Math.max(minPx, Math.min(maxH, proposedH));
+            nw = originW;
+            left = originLeft;
+            top = originTop;
+          } else if (behavior === 'aspect' || behavior === 'square') {
+            const effectiveAspect = behavior === 'square' ? 1 : aspect;
+            if (handle === 'e') {
+              const maxW = Math.max(minPx, canvasWPx - originLeft);
+              const proposedW = originW + dx;
+              let targetW = Math.max(minPx, Math.min(maxW, proposedW));
+              let targetH = targetW / effectiveAspect;
+
+              let targetTop = originTop + (originH - targetH) / 2;
+              if (targetTop < 0) {
+                targetH = Math.min(canvasHPx, originH + 2 * originTop);
+                targetW = targetH * effectiveAspect;
+                targetTop = 0;
+              }
+              if (targetTop + targetH > canvasHPx) {
+                targetH = Math.min(canvasHPx, originH + 2 * (canvasHPx - originTop - originH));
+                targetW = targetH * effectiveAspect;
+                targetTop = canvasHPx - targetH;
+              }
+              if (targetW < minPx) {
+                targetW = minPx;
+                targetH = targetW / effectiveAspect;
+              }
+
+              nw = targetW;
+              nh = targetH;
+              left = originLeft;
+              top = Math.max(0, Math.min(canvasHPx - nh, originTop + (originH - nh) / 2));
+            } else {
+              const maxH = Math.max(minPx, canvasHPx - originTop);
+              const proposedH = originH + dy;
+              let targetH = Math.max(minPx, Math.min(maxH, proposedH));
+              let targetW = targetH * effectiveAspect;
+
+              let targetLeft = originLeft + (originW - targetW) / 2;
+              if (targetLeft < 0) {
+                targetW = Math.min(canvasWPx, originW + 2 * originLeft);
+                targetH = targetW / effectiveAspect;
+                targetLeft = 0;
+              }
+              if (targetLeft + targetW > canvasWPx) {
+                targetW = Math.min(canvasWPx, originW + 2 * (canvasWPx - originLeft - originW));
+                targetH = targetW / effectiveAspect;
+                targetLeft = canvasWPx - targetW;
+              }
+              if (targetH < minPx) {
+                targetH = minPx;
+                targetW = targetH * effectiveAspect;
+              }
+
+              nw = targetW;
+              nh = targetH;
+              top = originTop;
+              left = Math.max(0, Math.min(canvasWPx - nw, originLeft + (originW - nw) / 2));
+            }
           }
-          left = Math.max(0, Math.min(Math.max(0, canvasWPx - nw), left));
-          top = Math.max(0, Math.min(Math.max(0, canvasHPx - nh), top));
 
           animW.value = nw;
           animH.value = nh;
@@ -811,8 +849,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     return next;
   }, [createHandleGesture, resizePolicy]);
 
-
-
   const containerStyle = useAnimatedStyle(() => ({
     position: 'absolute' as const,
     left: 0,
@@ -828,33 +864,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     opacity: hidden ? 0.28 : (element.opacity ?? 1) * liftSv.value,
     overflow: 'visible' as const,
   }));
-
-  const contentScaleStyle = useAnimatedStyle(() => {
-    const bw = Math.max(1, baseWidthPx);
-    const bh = Math.max(1, baseHeightPx);
-    const sX = animW.value / bw;
-    const sY = animH.value / bh;
-    return {
-      position: 'absolute' as const,
-      left: 0,
-      top: 0,
-      width: bw,
-      height: bh,
-      minWidth: bw,
-      maxWidth: bw,
-      minHeight: bh,
-      maxHeight: bh,
-      flexShrink: 0,
-      flexGrow: 0,
-      overflow: 'visible' as const,
-      transform: [
-        { translateX: (bw * (sX - 1)) / 2 },
-        { translateY: (bh * (sY - 1)) / 2 },
-        { scaleX: sX },
-        { scaleY: sY },
-      ],
-    };
-  });
 
   if (element.type === 'border' || element.needPrinting === false) {
     return (
@@ -886,20 +895,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   return (
     <Animated.View style={containerStyle} collapsable={false}>
       <GestureDetector gesture={combinedBodyGesture}>
-        <Animated.View collapsable={false} style={contentScaleStyle}>
-          <View
-            pointerEvents="none"
-            style={{
-              width: baseWidthPx,
-              height: baseHeightPx,
-              minWidth: baseWidthPx,
-              maxWidth: baseWidthPx,
-              minHeight: baseHeightPx,
-              maxHeight: baseHeightPx,
-              flexShrink: 0,
-              flexGrow: 0,
-              overflow: 'visible',
-            }}>
+        <View collapsable={false} style={styles.fillContainer}>
+          <View pointerEvents="none" style={styles.fillContainer}>
             <ElementContentView
               element={element}
               widthPx={baseWidthPx}
@@ -908,7 +905,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               mediaShape={circularBorder ? 'circle' : undefined}
             />
           </View>
-        </Animated.View>
+        </View>
       </GestureDetector>
 
       {selected ? (
@@ -921,11 +918,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             ]}
           />
 
-          {tooltipText ? (
-            <View pointerEvents="none" style={styles.tooltipPill}>
-              <Text style={styles.tooltipText}>{tooltipText}</Text>
-            </View>
-          ) : null}
+          <ResizeTooltip tooltipRef={tooltipRef} />
 
           {element.lockMovement || moving ? null : (
             <>
@@ -946,6 +939,27 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         </View>
       ) : null}
     </Animated.View>
+  );
+});
+
+const ResizeTooltip = memo(function ResizeTooltip({
+  tooltipRef,
+}: {
+  tooltipRef: React.MutableRefObject<TooltipHandle | null>;
+}) {
+  const [text, setText] = React.useState<string | null>(null);
+  useEffect(() => {
+    tooltipRef.current = { setText };
+    return () => {
+      tooltipRef.current = null;
+    };
+  }, [tooltipRef]);
+
+  if (!text) return null;
+  return (
+    <View pointerEvents="none" style={styles.tooltipPill}>
+      <Text style={styles.tooltipText}>{text}</Text>
+    </View>
   );
 });
 
@@ -986,7 +1000,7 @@ const styles = StyleSheet.create({
   fillContainer: {
     width: '100%',
     height: '100%',
-    overflow: 'visible',
+    overflow: 'hidden',
   },
   selectionOutline: {
     ...StyleSheet.absoluteFillObject,
