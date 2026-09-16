@@ -13,7 +13,7 @@ import Animated, {
 import Svg, { Path as SvgPath, Line as SvgLine } from 'react-native-svg';
 import { AppIcon } from '@/components/app-icon';
 import { ElementContentView } from '@/components/editor/element-renderer';
-import { elementSizeMm, type LabelElement } from '@/lib/label-document';
+import { elementSizeMm, textBlockHeightMm, type LabelElement } from '@/lib/label-document';
 import { DIVIDER_HIT_SIZE_PX } from '@/lib/editor/canvas-split';
 import { finiteMm, roundMm } from '@/lib/editor/engine';
 import { mmToPx, pxToMm } from '@/lib/label-coordinate-system';
@@ -437,11 +437,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       });
 
       let fontSize: number | undefined;
+      let finalHeightMm = next.height;
       if (element.type === 'text' || element.type === 'degrees' || element.type === 'time') {
         if ('fontSize' in element && typeof element.fontSize === 'number') {
-          const oldH = Math.max(0.1, start.height);
-          const ratio = next.height / oldH;
+          const oldW = Math.max(0.1, start.width);
+          const ratio = next.width / oldW;
           fontSize = Math.max(3, Math.min(72, Math.round(element.fontSize * ratio * 2) / 2));
+          const lines = ('text' in element ? element.text : 'content' in element ? element.content : '').split('\n').length || 1;
+          finalHeightMm = textBlockHeightMm(fontSize, lines);
         }
       }
 
@@ -450,7 +453,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         leftMm: next.left,
         topMm: next.top,
         widthMm: next.width,
-        heightMm: next.height,
+        heightMm: finalHeightMm,
         rotation,
       };
 
@@ -472,7 +475,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         leftMm: next.left,
         topMm: next.top,
         widthMm: next.width,
-        heightMm: next.height,
+        heightMm: finalHeightMm,
         rotation,
         fontSize,
       });
@@ -826,6 +829,33 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     overflow: 'visible' as const,
   }));
 
+  const contentScaleStyle = useAnimatedStyle(() => {
+    const bw = Math.max(1, baseWidthPx);
+    const bh = Math.max(1, baseHeightPx);
+    const sX = animW.value / bw;
+    const sY = animH.value / bh;
+    return {
+      position: 'absolute' as const,
+      left: 0,
+      top: 0,
+      width: bw,
+      height: bh,
+      minWidth: bw,
+      maxWidth: bw,
+      minHeight: bh,
+      maxHeight: bh,
+      flexShrink: 0,
+      flexGrow: 0,
+      overflow: 'visible' as const,
+      transform: [
+        { translateX: (bw * (sX - 1)) / 2 },
+        { translateY: (bh * (sY - 1)) / 2 },
+        { scaleX: sX },
+        { scaleY: sY },
+      ],
+    };
+  });
+
   if (element.type === 'border' || element.needPrinting === false) {
     return (
       <View
@@ -856,8 +886,20 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   return (
     <Animated.View style={containerStyle} collapsable={false}>
       <GestureDetector gesture={combinedBodyGesture}>
-        <View collapsable={false} style={styles.fillContainer}>
-          <View pointerEvents="none" style={styles.fillContainer}>
+        <Animated.View collapsable={false} style={contentScaleStyle}>
+          <View
+            pointerEvents="none"
+            style={{
+              width: baseWidthPx,
+              height: baseHeightPx,
+              minWidth: baseWidthPx,
+              maxWidth: baseWidthPx,
+              minHeight: baseHeightPx,
+              maxHeight: baseHeightPx,
+              flexShrink: 0,
+              flexGrow: 0,
+              overflow: 'visible',
+            }}>
             <ElementContentView
               element={element}
               widthPx={baseWidthPx}
@@ -866,7 +908,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               mediaShape={circularBorder ? 'circle' : undefined}
             />
           </View>
-        </View>
+        </Animated.View>
       </GestureDetector>
 
       {selected ? (
@@ -944,7 +986,7 @@ const styles = StyleSheet.create({
   fillContainer: {
     width: '100%',
     height: '100%',
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   selectionOutline: {
     ...StyleSheet.absoluteFillObject,

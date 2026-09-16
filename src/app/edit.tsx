@@ -1207,14 +1207,18 @@ export default function EditScreen() {
               width: clean.widthMm,
               rotation: clean.rotation,
             };
-            if (resized || typeof (el as { height?: number }).height === 'number') {
+            if (clean.fontSize !== undefined && 'fontSize' in next) {
+              (next as { fontSize: number }).fontSize = clean.fontSize;
+            }
+            if (el.type === 'text' || el.type === 'degrees' || el.type === 'time') {
+              const lines = ('text' in el ? el.text : 'content' in el ? el.content : '').split('\n').length || 1;
+              const fs = clean.fontSize ?? (el as { fontSize?: number }).fontSize ?? 12;
+              (next as { height: number }).height = textBlockHeightMm(fs, lines);
+            } else if (resized || typeof (el as { height?: number }).height === 'number') {
               (next as { height: number }).height = clean.heightMm;
             }
             if (resized && 'autoTextHeight' in next) {
               (next as { autoTextHeight: boolean }).autoTextHeight = false;
-            }
-            if (clean.fontSize !== undefined && 'fontSize' in next) {
-              (next as { fontSize: number }).fontSize = clean.fontSize;
             }
             return next;
           }),

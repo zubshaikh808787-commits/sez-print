@@ -386,7 +386,11 @@ function clampPanelElement(
   return { ...element, left, top, width };
 }
 
-/** Bounding box of an element in mm. Prefer the JSON height when the template stored one. */
+export function textBlockHeightMm(fontSizePt: number, lines: number) {
+  return Math.max(2.4, ptToMm(fontSizePt) * 1.25 * Math.max(1, lines));
+}
+
+/** Bounding box of an element in mm. Text/degrees/time height prefers explicit height or derives from fontSize. */
 export function elementSizeMm(element: LabelElement): { width: number; height: number } {
   switch (element.type) {
     case 'text':
@@ -397,7 +401,7 @@ export function elementSizeMm(element: LabelElement): { width: number; height: n
       const lines = ('text' in element ? element.text : element.content).split('\n').length;
       return {
         width: element.width,
-        height: Math.max(3, ptToMm(element.fontSize) * 1.25 * lines),
+        height: textBlockHeightMm(element.fontSize, lines),
       };
     }
     case 'time':
@@ -406,7 +410,7 @@ export function elementSizeMm(element: LabelElement): { width: number; height: n
       }
       return {
         width: element.width,
-        height: Math.max(3, ptToMm(element.fontSize) * 1.25),
+        height: textBlockHeightMm(element.fontSize, 1),
       };
     default:
       return { width: element.width, height: element.height };

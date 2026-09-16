@@ -171,21 +171,21 @@ function testBarcodeWidthAndHeightIndependent() {
 function testTextWidthAndHeightIndependent() {
   const policy = resizePolicyFor(textEl());
   assert.deepEqual(policy.anchors, ['e', 's']);
-  assert.equal(policy.behavior.e, 'width');
-  assert.equal(policy.behavior.s, 'height');
+  assert.equal(policy.behavior.e, 'aspect');
+  assert.equal(policy.behavior.s, 'aspect');
   assert.ok(policy.comment.includes('fontSize'));
   const wider = boundBoxMm({
     anchor: 'e',
-    behavior: 'width',
+    behavior: 'aspect',
     start: { left: 2, top: 2, width: 20, height: 8 },
-    proposed: { width: 28, height: 8 },
+    proposed: { width: 30, height: 8 },
     aspect: 2.5,
     minMm: MIN_ELEMENT_MM,
     canvas: { widthMm: 50, heightMm: 30 },
   });
-  assert.equal(wider.width, 28);
-  assert.equal(wider.height, 8);
-  console.log('ok text right-handle changes wrap width without stretching glyphs');
+  assert.equal(wider.width, 30);
+  assert.equal(wider.height, 12);
+  console.log('ok text right-handle scales aspect proportionally without wrapping or clipping');
 }
 
 function testJewelryAndCableStayOnTheLabel() {
@@ -296,6 +296,71 @@ function testPolicyCatalog() {
   console.log('ok every element type has an explicit documented resize policy');
 }
 
+function testTextMultiCycleResizeStability() {
+  const initialWidth = 50;
+  const initialHeight = 10;
+  const initialFontSize = 24;
+  let current = {
+    left: 2,
+    top: 2,
+    width: initialWidth,
+    height: initialHeight,
+    fontSize: initialFontSize,
+  };
+
+  // Repeatedly cycle scale down (0.5x) and scale up (2.0x) 10 times
+  for (let i = 0; i < 10; i++) {
+    // Scale down
+    const scaledDown = boundBoxMm({
+      anchor: 'e',
+      behavior: 'aspect',
+      start: current,
+      proposed: { width: 25, height: current.height },
+      aspect: current.width / current.height,
+      minMm: MIN_ELEMENT_MM,
+      canvas: { widthMm: 60, heightMm: 40 },
+    });
+    const downRatio = scaledDown.width / current.width;
+    const downFontSize = Math.max(3, Math.min(72, Math.round(current.fontSize * downRatio * 2) / 2));
+    current = {
+      left: scaledDown.left,
+      top: scaledDown.top,
+      width: scaledDown.width,
+      height: scaledDown.height,
+      fontSize: downFontSize,
+    };
+    assert.equal(current.width, 25);
+    assert.equal(current.fontSize, 12);
+
+    // Scale back up
+    const scaledUp = boundBoxMm({
+      anchor: 'e',
+      behavior: 'aspect',
+      start: current,
+      proposed: { width: 50, height: current.height },
+      aspect: current.width / current.height,
+      minMm: MIN_ELEMENT_MM,
+      canvas: { widthMm: 60, heightMm: 40 },
+    });
+    const upRatio = scaledUp.width / current.width;
+    const upFontSize = Math.max(3, Math.min(72, Math.round(current.fontSize * upRatio * 2) / 2));
+    current = {
+      left: scaledUp.left,
+      top: scaledUp.top,
+      width: scaledUp.width,
+      height: scaledUp.height,
+      fontSize: upFontSize,
+    };
+    assert.equal(current.width, 50);
+    assert.equal(current.fontSize, 24);
+  }
+
+  assert.equal(current.width, initialWidth);
+  assert.equal(current.height, initialHeight);
+  assert.equal(current.fontSize, initialFontSize);
+  console.log('ok multi-cycle resize down and up maintains stable dimensions and fontSize without drift');
+}
+
 function main() {
   testImageShowsTwoAnchors();
   testRightHandleKeepsAspect();
@@ -304,6 +369,7 @@ function main() {
   testMinSizeFiveMm();
   testBarcodeWidthAndHeightIndependent();
   testTextWidthAndHeightIndependent();
+  testTextMultiCycleResizeStability();
   testJewelryAndCableStayOnTheLabel();
   testUnlockedImageIsAxisResize();
   testPolicyCatalog();

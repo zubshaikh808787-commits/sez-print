@@ -4,12 +4,12 @@ import type { ClipartShape } from '@/constants/clipart-library';
 
 type ClipartIconProps = {
   shapes: ClipartShape[];
-  size: number;
+  size?: number | string;
   color?: string;
 };
 
 /** Thermal-print-friendly black-and-white sticker glyph. */
-export function ClipartIcon({ shapes, size, color = '#111111' }: ClipartIconProps) {
+export function ClipartIcon({ shapes, size = '100%', color = '#111111' }: ClipartIconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
       {shapes.map((shape, index) => {

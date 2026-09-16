@@ -76,10 +76,10 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
     case 'time':
       return {
         anchors: ['e', 's'],
-        behavior: { e: 'width', s: 'height' },
+        behavior: { e: 'aspect', s: 'aspect' },
         rotateHandle: false,
         minMm: MIN_ELEMENT_MM,
-        comment: 'Text: right handle changes wrap width; bottom handle changes box height and scales fontSize on commit.',
+        comment: 'Text/degrees/time: proportional resize like image — scales uniform block and updates fontSize on commit.',
       };
     case 'line':
       return {

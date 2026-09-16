@@ -159,6 +159,8 @@ function TextContent({
         styles.fill,
         {
           width: widthPx,
+          minWidth: widthPx,
+          flexShrink: 0,
           justifyContent: 'center',
           alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
         },
@@ -166,14 +168,13 @@ function TextContent({
       ]}>
       <Text
         allowFontScaling={false}
-        ellipsizeMode="clip"
         style={[
           style,
           styles.textFill,
-          { width: widthPx, textAlign: align },
+          { width: widthPx, minWidth: widthPx, flexShrink: 0, textAlign: align },
           element.charSpacing ? { letterSpacing: element.charSpacing } : null,
         ]}
-        numberOfLines={element.verticalDisplay ? undefined : element.autoWrapping === 'Close' ? 1 : 6}>
+        numberOfLines={element.verticalDisplay ? undefined : element.autoWrapping === 'Close' ? 1 : undefined}>
         {text}
       </Text>
     </View>
@@ -206,6 +207,8 @@ function DegreesContent({
         styles.fill,
         {
           width: widthPx,
+          minWidth: widthPx,
+          flexShrink: 0,
           justifyContent: 'center',
           alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
         },
@@ -213,7 +216,7 @@ function DegreesContent({
       ]}>
       <Text
         allowFontScaling={false}
-        style={[style, { width: widthPx, textAlign: align }]}>
+        style={[style, { width: widthPx, minWidth: widthPx, flexShrink: 0, textAlign: align }]}>
         {text}
       </Text>
     </View>
@@ -239,6 +242,8 @@ function TimeContent({
         styles.fill,
         {
           width: widthPx,
+          minWidth: widthPx,
+          flexShrink: 0,
           justifyContent: 'center',
           alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
         },
@@ -246,7 +251,7 @@ function TimeContent({
       ]}>
       <Text
         allowFontScaling={false}
-        style={[style, { width: widthPx, textAlign: align }]}>
+        style={[style, { width: widthPx, minWidth: widthPx, flexShrink: 0, textAlign: align }]}>
         {`${formatLiveDate(adjusted)} ${formatLiveTime(adjusted)}`}
       </Text>
     </View>
@@ -698,7 +703,7 @@ export function ElementContentView({
         Math.round(forPrint ? heightPx : element.workingHeightPx ?? heightPx),
       );
       return (
-        <View style={[styles.fill, { overflow: 'hidden' }, element.antiColor && styles.antiBg]}>
+        <View style={[styles.fill, element.antiColor && styles.antiBg]}>
           <Image
             source={{ uri: displayUri, width: decodeW, height: decodeH }}
             style={[
@@ -763,7 +768,8 @@ const styles = StyleSheet.create({
   fill: {
     width: '100%',
     height: '100%',
-    overflow: 'hidden',
+    flexShrink: 0,
+    overflow: 'visible',
   },
   fillVisible: {
     width: '100%',
@@ -779,6 +785,7 @@ const styles = StyleSheet.create({
   },
   textFill: {
     width: '100%',
+    flexShrink: 0,
   },
   invalidBox: {
     flex: 1,
