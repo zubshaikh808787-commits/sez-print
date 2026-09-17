@@ -384,8 +384,8 @@ export function sanitizeTransform(payload: {
   let rotation = finiteMm(payload.rotation, 0);
   rotation = ((Math.round(rotation) % 360) + 360) % 360;
   const out = {
-    leftMm: roundMm(Math.max(0, finiteMm(payload.leftMm))),
-    topMm: roundMm(Math.max(0, finiteMm(payload.topMm))),
+    leftMm: roundMm(finiteMm(payload.leftMm)),
+    topMm: roundMm(finiteMm(payload.topMm)),
     widthMm: roundMm(widthMm),
     heightMm: roundMm(heightMm),
     rotation,
