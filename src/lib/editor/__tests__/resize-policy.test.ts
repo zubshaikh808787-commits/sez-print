@@ -511,10 +511,10 @@ function testOverflowedStateWhenTallerThanCanvas() {
     { anchor: 'body', naturalHeight },
   );
 
-  assert.equal(clamped.top, 0);
-  assert.equal(clamped.height, 30); // Hard clamped to canvas
+  assert.equal(clamped.top, 5);
+  assert.equal(clamped.height, roundMm(naturalHeight));
   assert.equal(clamped.overflowed, true);
-  console.log('ok overflowed flag is true while box height stays hard-clamped to canvas bounds');
+  console.log('ok overflowed flag is true while box height stays natural and body retains position');
 }
 
 function main() {

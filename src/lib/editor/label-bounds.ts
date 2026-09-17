@@ -73,7 +73,7 @@ export function clampToLabelBounds(
 
   if (opts.anchor === 'e') {
     // 1. Fix left — MUST NEVER move during an 'e' resize
-    left = Math.max(0, Math.min(left, canvasW - minMm));
+    left = Math.min(left, canvasW - minMm);
 
     // 2. Width is clamped strictly to the remaining space from the fixed left edge
     const maxAllowedWidth = Math.max(minMm, canvasW - left);
@@ -96,7 +96,7 @@ export function clampToLabelBounds(
     }
   } else if (opts.anchor === 's') {
     // 1. Fix top initially
-    top = Math.max(0, Math.min(top, canvasH - minMm));
+    top = Math.min(top, canvasH - minMm);
 
     // 2. Height handling
     const targetH = Math.max(minMm, naturalH ?? height);
@@ -114,26 +114,20 @@ export function clampToLabelBounds(
     }
 
     // 3. Width handling
-    left = Math.max(0, Math.min(left, canvasW - minMm));
-    width = Math.min(Math.max(minMm, width), canvasW - left);
+    width = Math.max(minMm, width);
   } else {
     // 'body' drag: allows elements to bleed or move partially outside the label canvas
     width = Math.max(minMm, width);
     const targetH = Math.max(minMm, naturalH ?? height);
-    if (targetH > canvasH) {
-      overflowed = true;
-      height = canvasH;
-      top = 0;
-    } else {
-      overflowed = false;
-      height = targetH;
-      const minVisibleH = Math.min(height, 1);
-      const minTop = -height + minVisibleH;
-      const maxTop = canvasH - minVisibleH;
-      top = Math.max(minTop, Math.min(top, maxTop));
-    }
+    height = targetH;
+    overflowed = targetH > canvasH || left < 0 || top < 0 || left + width > canvasW || top + height > canvasH;
 
-    const minVisibleW = Math.min(width, 1);
+    const minVisibleH = Math.min(height, 0.5);
+    const minTop = -height + minVisibleH;
+    const maxTop = canvasH - minVisibleH;
+    top = Math.max(minTop, Math.min(top, maxTop));
+
+    const minVisibleW = Math.min(width, 0.5);
     const minLeft = -width + minVisibleW;
     const maxLeft = canvasW - minVisibleW;
     left = Math.max(minLeft, Math.min(left, maxLeft));

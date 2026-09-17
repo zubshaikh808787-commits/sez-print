@@ -103,7 +103,7 @@ function testAnchorBodyClamping() {
   assert.equal(r1.top, -5);
   assert.equal(r1.width, 20);
   assert.equal(r1.height, 10);
-  assert.equal(r1.overflowed, false);
+  assert.equal(r1.overflowed, true);
 
   // 2. Dragging partially outside right/bottom allows position past canvas - size
   const r2 = clampToLabelBounds(
@@ -113,7 +113,7 @@ function testAnchorBodyClamping() {
   );
   assert.equal(r2.left, 45);
   assert.equal(r2.top, 25);
-  assert.equal(r2.overflowed, false);
+  assert.equal(r2.overflowed, true);
 
   console.log('ok anchor body clamping allows element to move past canvas borders');
 }
