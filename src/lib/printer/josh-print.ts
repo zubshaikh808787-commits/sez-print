@@ -22,7 +22,7 @@ export const JOSH_GAP_TYPE = {
   blackMark: 3,
 } as const;
 
-export function joshEffectiveDpi(settingsDpi?: number): number {
+export function joshEffectiveDpi(settingsDpi?: number | null): number {
   if (settingsDpi === 300) return 300;
   if (settingsDpi === 203) return 203;
   return JOSH_HARDWARE_DPI;

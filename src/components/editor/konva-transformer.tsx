@@ -14,7 +14,7 @@ import Animated, {
 import Svg, { Path as SvgPath, Line as SvgLine } from 'react-native-svg';
 import { AppIcon } from '@/components/app-icon';
 import { ElementContentView } from '@/components/editor/element-renderer';
-import { elementSizeMm, textBlockHeightMm, type LabelElement } from '@/lib/label-document';
+import { elementSizeMm, textBlockHeightMm, type LabelElement, type MediaShape } from '@/lib/label-document';
 import { computeTextElementHeightMm } from '@/lib/text-metrics';
 import { clampToLabelBounds, fitFontSizeToLabel } from '@/lib/editor/label-bounds';
 import { DIVIDER_HIT_SIZE_PX } from '@/lib/editor/canvas-split';
@@ -63,6 +63,8 @@ type KonvaTransformerProps = {
   selectionColor: string;
   canvasWidthMm: number;
   canvasHeightMm: number;
+  /** Stock shape from the document — the print capture uses this, so the editor must too. */
+  mediaShape?: MediaShape;
   onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
@@ -100,6 +102,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   selectionColor,
   canvasWidthMm,
   canvasHeightMm,
+  mediaShape,
   onSelect,
   onOpenPanel,
   onEditText,
@@ -124,11 +127,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const baseHeightPx = Math.max(element.type === 'line' ? 2 : 1, mmToPx(sizeMm.height, pxPerMMSafe));
   const minResizePx = Math.max(2, resizePolicy.minMm * pxPerMMSafe);
   const baseRotation = element.rotation ?? 0;
-  const circularBorder =
-    element.type === 'border' &&
-    Math.abs(canvasWidthMm - canvasHeightMm) < 0.75 &&
-    Math.abs((element.width ?? canvasWidthMm) - canvasWidthMm) < 1.25 &&
-    Math.abs((element.height ?? canvasHeightMm) - canvasHeightMm) < 1.25;
+  // Border shape comes from the stock shape, never from how square the label
+  // happens to be. The print capture decides this from `mediaShape`
+  // (label-preview -> element-renderer), so a squareness guess here meant a
+  // square rectangular label drew an ellipse ring on screen and a rectangle on paper.
+  const borderMediaShape = element.type === 'border' ? mediaShape : undefined;
 
   const transX = useSharedValue(0);
   const transY = useSharedValue(0);
@@ -918,7 +921,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           widthPx={baseWidthPx}
           heightPx={baseHeightPx}
           scale={pxPerMMSafe}
-          mediaShape={circularBorder ? 'circle' : undefined}
+          mediaShape={borderMediaShape}
         />
       </View>
     );
@@ -993,7 +996,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               widthPx={baseWidthPx}
               heightPx={baseHeightPx}
               scale={pxPerMMSafe}
-              mediaShape={circularBorder ? 'circle' : undefined}
+              mediaShape={borderMediaShape}
             />
           </View>
         </View>

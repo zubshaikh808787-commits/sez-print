@@ -38,6 +38,8 @@ export type DevPrintOptions = {
   density?: number;
   rotation?: number;
   threshold?: number;
+  /** Halftone/photo content only. Default (false) hard-thresholds so shapes/text/borders print solid and crisp. */
+  dither?: boolean;
   gapMm?: number;
   media?: 'gap' | 'bline' | 'continuous' | string;
   speed?: number;

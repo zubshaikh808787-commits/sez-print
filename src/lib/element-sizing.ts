@@ -205,22 +205,16 @@ export function clampElementToLabel(
   doc: Pick<LabelDocument, 'widthMm' | 'heightMm' | 'mediaGeometry'>,
 ): LabelElement {
   if (element.type === 'border') {
-    if (
-      element.left === 0 &&
-      element.top === 0 &&
-      element.width === doc.widthMm &&
-      element.height === doc.heightMm &&
-      (element.rotation ?? 0) === 0 &&
-      element.lockMovement === true
-    ) {
-      return element;
-    }
+    const left = Math.max(0, Math.min(doc.widthMm, finiteSize(element.left, 0)));
+    const top = Math.max(0, Math.min(doc.heightMm, finiteSize(element.top, 0)));
+    const width = Math.max(1, Math.min(doc.widthMm - left, finiteSize(element.width, doc.widthMm)));
+    const height = Math.max(1, Math.min(doc.heightMm - top, finiteSize(element.height, doc.heightMm)));
     return {
       ...element,
-      left: 0,
-      top: 0,
-      width: doc.widthMm,
-      height: doc.heightMm,
+      left,
+      top,
+      width,
+      height,
       rotation: 0 as const,
       lockMovement: true,
     };

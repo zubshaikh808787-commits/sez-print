@@ -9,7 +9,7 @@ import { runOnJS } from 'react-native-reanimated';
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
-import { type LabelDocument, type LabelElement } from '@/lib/label-document';
+import { type LabelDocument, type LabelElement, type MediaShape } from '@/lib/label-document';
 import { mediaShapeClipStyle } from '@/lib/label-geometry';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
 import { isCableFlagDieCutDocument } from '@/constants/cable-flag-diecut';
@@ -58,6 +58,7 @@ type ElementChrome = {
   selectionColor: string;
   canvasWidthMm: number;
   canvasHeightMm: number;
+  mediaShape?: MediaShape;
   onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
@@ -94,6 +95,7 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           selectionColor={chrome.selectionColor}
           canvasWidthMm={chrome.canvasWidthMm}
           canvasHeightMm={chrome.canvasHeightMm}
+          mediaShape={chrome.mediaShape}
           onSelect={chrome.onSelect}
           onOpenPanel={chrome.onOpenPanel}
           onEditText={chrome.onEditText}
@@ -289,6 +291,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       selectionColor,
       canvasWidthMm,
       canvasHeightMm,
+      mediaShape: doc.mediaShape,
       onSelect,
       onOpenPanel,
       onEditText,
@@ -306,6 +309,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       selectionColor,
       canvasWidthMm,
       canvasHeightMm,
+      doc.mediaShape,
       onSelect,
       onOpenPanel,
       onEditText,

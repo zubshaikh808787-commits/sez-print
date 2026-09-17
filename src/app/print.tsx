@@ -466,7 +466,6 @@ export default function PrintScreen() {
   const upsGapInitialized = useRef(false);
 
   const shotRef = useRef<ViewShot>(null);
-  const printRasterRef = useRef<{ key: string; base64: string } | null>(null);
 
   const isExcelJob = params.docType === 'Excel' && excelSheet !== null;
   const isPdfJob = params.docType === 'PDF';
@@ -571,21 +570,6 @@ export default function PrintScreen() {
     if (!doc) return { widthPx: 8, heightPx: 8 };
     return printCaptureLayout(doc.widthMm, doc.heightMm, jobDpi).content;
   }, [displayDocument, previewDocument, jobDpi]);
-
-  const printRasterKey = useMemo(() => {
-    const doc = displayDocument ?? previewDocument;
-    if (!doc) return '';
-    return [
-      doc.id,
-      doc.updatedAt,
-      doc.widthMm,
-      doc.heightMm,
-      printCaptureSize.widthPx,
-      printCaptureSize.heightPx,
-      pageIndex,
-      jobDpi,
-    ].join(':');
-  }, [displayDocument, previewDocument, printCaptureSize.widthPx, printCaptureSize.heightPx, pageIndex, jobDpi]);
 
   /** Live store ups config (compose strips it from the print document). */
   const upsSource = useMemo(() => {
@@ -757,10 +741,6 @@ export default function PrintScreen() {
         // while the expensive ViewShot capture runs concurrently.
         timer.start('capture+verify');
         const captureTarget = printCaptureLayout(widthMm, heightMm, jobDpi).content;
-        const cached =
-          pageCount === 1 && printRasterRef.current?.key === printRasterKey
-            ? printRasterRef.current.base64
-            : null;
         const capturePacked = async () => {
           // All native printer modules (TD-404, Josh LPAPI, Tez PrintSDK, Dev AutoReplyPrint)
           // accept raw PNG base64 and perform hardware-accelerated 1-bit packing natively.
@@ -771,12 +751,10 @@ export default function PrintScreen() {
           manager.ensureConnected().catch((err) => {
             return { error: err };
           }),
-          cached
-            ? Promise.resolve(cached)
-            : capturePacked().catch(async () => {
-                await waitForNextPaint();
-                return capturePacked();
-              }),
+          capturePacked().catch(async () => {
+            await waitForNextPaint();
+            return capturePacked();
+          }),
         ]);
         timer.end('capture+verify');
 
@@ -919,13 +897,15 @@ export default function PrintScreen() {
               heightMm: paper.heightMm,
               gapMm: gapLength,
               copies,
-              density: printDensity,
-              speed: printSpeed,
+              density: darkness != null ? printDensity : 14,
+              speed: speed != null ? printSpeed : 3,
+              threshold,
               vOffsetMm: vOffset,
               hOffsetMm: hOffset,
               media: wantsBline ? 'bline' : media,
               orientation: 0,
               dpi: jobDpi,
+              dither,
             });
             if (usedNative) {
               console.info(
@@ -1059,7 +1039,6 @@ export default function PrintScreen() {
     params.imageUri,
     historySource,
     deviceName,
-    printRasterKey,
     jewelryDieCutJob,
     cableFlagJob,
     ratTail143Job,

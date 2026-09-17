@@ -212,14 +212,22 @@ export async function printDevPngLabel(options: DevPrintOptions): Promise<DevPri
     heightMm: options.heightMm ?? 30,
     gapMm: options.gapMm ?? 2,
     copies: options.copies ?? 1,
-    density: options.density ?? 8,
+    density: options.density ?? 14,
+    speed: options.speed ?? 3,
     media: options.media ?? 'gap',
-    commandSet: options.commandSet ?? 'auto',
+    // Default to TSPL, not 'auto'. Native treats anything that isn't exactly
+    // "tspl" as ESC/POS (`useEscPos = commandSet != "tspl"`), and the ESC/POS
+    // engine is a different geometry universe: it ignores heightMm entirely and
+    // derives size from the source bitmap's aspect, centres on the printhead
+    // rather than the label, and byte-aligns height (a silent vertical stretch).
+    // Labels must go through the mm-locked, gap-sensor-aware TSPL path.
+    commandSet: options.commandSet ?? 'tspl',
     rotation: options.rotation ?? 0,
-    threshold: options.threshold ?? 128,
+    threshold: options.threshold ?? 160,
+    dither: options.dither ?? false,
     hOffsetMm: options.hOffsetMm ?? 0,
     vOffsetMm: options.vOffsetMm ?? 0,
-    printheadWidthMm: options.printheadWidthMm ?? 50,
+    printheadWidthMm: options.printheadWidthMm ?? 48,
   });
 }
 

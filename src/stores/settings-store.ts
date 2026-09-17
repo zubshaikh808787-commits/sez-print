@@ -44,8 +44,14 @@ export type PrintingSettings = {
   recordHistory: boolean;
   autoPages: boolean;
   returnPrevious: boolean;
-  /** Printer resolution: 304 (12 dots/mm), 300, or 203 (8 dots/mm). */
-  printerDpi: number;
+  /**
+   * Printer resolution override: 304 (12 dots/mm), 300, or 203 (8 dots/mm).
+   * `null` means auto — resolve from the selected printer model's declared DPI,
+   * which is the correct value for every supported model. Only set this for a
+   * generic printer whose head differs from its model's default; a wrong value
+   * scales every print (TSPL puts one bitmap dot on one head dot).
+   */
+  printerDpi: number | null;
   /** Printhead alignment: 'center' (standard thermal desktop) or 'left'. */
   printerAlignment: 'center' | 'left';
   /** Printhead physical width in mm (108mm for 4-inch printers). */
@@ -88,7 +94,7 @@ export const DEFAULT_PRINTING_SETTINGS: PrintingSettings = {
   recordHistory: true,
   autoPages: true,
   returnPrevious: false,
-  printerDpi: 304,
+  printerDpi: null,
   printerAlignment: 'left',
   printheadWidthMm: 108,
   customPaperWidthMm: 210,

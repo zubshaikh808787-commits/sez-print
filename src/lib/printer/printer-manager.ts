@@ -557,15 +557,15 @@ class PrinterManager {
     }
 
     // DEV OEM AutoReplyPrint printer
-    if (store.sdkId === 'dev' || this.activeTransport === 'dev-spp') {
+    if (
+      this.isDev ||
+      store.selectedPrinterModel === 'dev' ||
+      store.sdkId === 'dev' ||
+      this.activeTransport === 'dev-spp'
+    ) {
       const dpi = 203; // Standard Dev printer resolution (8 dots/mm)
       const alignment = settings.printerAlignment ?? 'center';
-      // The global printhead-width setting defaults to 108mm (TD-404's size) —
-      // same fix as Josh below. A user who never explicitly set this for their
-      // ~50mm Dev head would otherwise get TD-404's width, which oversizes
-      // ESC/POS's head-relative centering (DevPrinterModule autoCenterPad) and
-      // can shove printed content to one side of the real, narrower head.
-      const headWidthMm = settings.printheadWidthMm === 108 ? 50 : (settings.printheadWidthMm ?? 50);
+      const headWidthMm = 48; // Physical DEV thermal head is 48mm (384 dots at 203 DPI)
       const headWidthDots = mmToDots(headWidthMm, dpi);
       return {
         id: 'dev-spp',
@@ -575,7 +575,7 @@ class PrinterManager {
         printheadWidthDots: headWidthDots,
         maxHeightMm: 1000,
         alignment,
-        commandLanguage: 'escpos',
+        commandLanguage: 'tspl',
       };
     }
 
@@ -629,8 +629,15 @@ class PrinterManager {
       return PRINTER_PROFILES['receipt-58mm'];
     }
 
-    // TSPL label printers — resolve from user settings (default 304 DPI / 12 dots/mm)
-    const dpi = settings.printerDpi ?? PRINT_DPI;
+    // TSPL label printers. DPI comes from the selected printer MODEL, not from a
+    // global setting: TSPL prints one bitmap dot per head dot, so a stale 304
+    // against a real 203 head prints everything 1.5x oversized and clipped (and
+    // 203 on a 304 head prints at 0.67x). The model the user explicitly picked
+    // on the connect screen is the only reliable source we have — the global
+    // `printerDpi` setting leaks across printers and defaults to TD-404's 304.
+    // It stays supported, but only as a deliberate per-model override.
+    const modelDpi = SEZNIK_PRINTER_MODELS[store.selectedPrinterModel]?.defaultDpi;
+    const dpi = settings.printerDpi ?? modelDpi ?? PRINT_DPI;
     const alignment = settings.printerAlignment ?? 'center';
     const headWidthMm = settings.printheadWidthMm ?? 108;
     const headWidthDots = mmToDots(headWidthMm, dpi);
@@ -3025,6 +3032,9 @@ class PrinterManager {
     vOffsetMm?: number;
     media?: 'gap' | 'bline' | 'continuous';
     commandSet?: 'tspl' | 'escpos' | 'auto';
+    /** Halftone/photo content only — ordered dither stipples solid shapes and text. */
+    dither?: boolean;
+    threshold?: number;
   }): Promise<boolean> {
     if (!this.isDev) {
       return false;
@@ -3044,7 +3054,7 @@ class PrinterManager {
       try {
         const cmdSet = options.commandSet ?? store.devCommandSet ?? 'tspl';
         console.info(
-          `[DEV-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1} engine=${cmdSet} density=${options.density ?? 8} speed=${options.speed ?? 4} gap=${options.gapMm ?? 2} offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
+          `[DEV-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1} engine=${cmdSet} density=${options.density ?? 14} speed=${options.speed ?? 3} gap=${options.gapMm ?? 2} offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0} threshold=${options.threshold ?? 160}`,
         );
         await this.ensureConnected();
         const t0 = Date.now();
@@ -3053,14 +3063,16 @@ class PrinterManager {
           widthMm: options.widthMm,
           heightMm: options.heightMm,
           copies: Math.max(1, Math.round(options.copies ?? 1)),
-          density: options.density ?? 8,
-          speed: options.speed ?? 4,
+          density: options.density ?? 14,
+          speed: options.speed ?? 3,
           gapMm: options.gapMm ?? 2,
           media: options.media ?? 'gap',
           commandSet: cmdSet,
           hOffsetMm: options.hOffsetMm ?? 0,
           vOffsetMm: options.vOffsetMm ?? 0,
           printheadWidthMm: profile.printheadWidthMm,
+          dither: options.dither ?? false,
+          threshold: options.threshold ?? 160,
         });
         console.info(
           `[DEV-PRINT] Dev print completed in ${Date.now() - t0} ms |`,

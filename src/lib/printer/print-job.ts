@@ -30,7 +30,7 @@ import { encodeTscBitmapJob, inspectTsplJob } from '@/lib/printer/tsc';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
 import { logPrintTrace } from '@/printing';
 
-/** TD-404 / 203 DPI desktop thermal: ~4.25 in printable width. Fallback only — printJobSizeError checks the connected printer's real profile width. */
+/** TD-404 / 203 DPI desktop thermal: ~4.25 in printable width. */
 export const TD404_MAX_WIDTH_MM = 108;
 
 /** Capture at printer dots. pixelRatio 1 stops Android density from inflating the bitmap. */
@@ -68,17 +68,17 @@ export function waitForNextPaint(): Promise<void> {
 }
 
 /**
- * Validate against the *connected* printer's real printhead width, not a
- * single blanket constant — Josh/Dev heads default to ~50mm, well under
- * TD-404's 108mm, so a blanket check let oversized labels reach printers
- * with no other width protection (see DEV's TSPL native path).
+ * Upper bound only. Deliberately checks the widest supported head rather than
+ * the connected profile's `printheadWidthMm`: that value is a heuristic guess
+ * (it falls back to 50mm when unset), so validating against it would reject
+ * labels the printer can actually produce. Refusing a valid print is a worse
+ * failure than letting the native layer clamp a slightly over-wide one.
  */
 export function printJobSizeError(widthMm: number, heightMm: number): string | null {
   const range = validateLabelSize(widthMm, heightMm);
   if (range) return range;
-  const maxWidthMm = getPrinterManager().getActivePrinterProfile().printheadWidthMm || TD404_MAX_WIDTH_MM;
-  if (widthMm > maxWidthMm) {
-    return `This printer supports labels up to ${maxWidthMm} mm wide. Selected width is ${Math.round(widthMm * 100) / 100} mm.`;
+  if (widthMm > TD404_MAX_WIDTH_MM) {
+    return `This printer supports labels up to ${TD404_MAX_WIDTH_MM} mm wide. Selected width is ${Math.round(widthMm * 100) / 100} mm.`;
   }
   return null;
 }

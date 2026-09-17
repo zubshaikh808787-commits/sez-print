@@ -163,6 +163,10 @@ function LabelElements({
   return (
     <>
       {sortLayers(document.elements)
+        // A layer hidden in the editor must not print. `visible === false` hides
+        // it on the canvas (konva-transformer), so honouring only `needPrinting`
+        // here meant hidden layers still came out on paper.
+        .filter((element) => element.visible !== false)
         .filter((element) => !hideNonPrinting || element.needPrinting !== false)
         .map((element) => {
         const size = elementSizeMm(element);
@@ -199,7 +203,10 @@ function LabelElements({
                   ? 'visible'
                   : 'hidden',
               opacity: element.opacity ?? 1,
-              zIndex: element.zIndex ?? 0,
+              // Paint order is `sortLayers` array order — the same thing the editor
+              // canvas uses. Applying the raw numeric zIndex here overrode that, so a
+              // border carrying zIndex 5 sat at the bottom in the editor and on top
+              // in the print capture.
               transform: [{ rotate: `${element.rotation}deg` }],
             }}>
             <ElementContentView

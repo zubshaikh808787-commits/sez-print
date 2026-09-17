@@ -18,7 +18,8 @@ export default function PrintingSettingsScreen() {
   const setAutoPages = (value: boolean) => patchPrinting({ autoPages: value });
   const setReturnPrevious = (value: boolean) => patchPrinting({ returnPrevious: value });
 
-  const dpiLabel = printerDpi === 203 ? '203 DPI' : printerDpi === 300 ? '300 DPI' : '304 DPI';
+  const dpiLabel =
+    printerDpi === 203 ? '203 DPI' : printerDpi === 300 ? '300 DPI' : printerDpi === 304 ? '304 DPI' : 'Auto';
   const alignmentLabel = printerAlignment === 'left' ? 'Left' : 'Center';
   const widthLabel = `${printheadWidthMm} mm`;
 
@@ -27,10 +28,11 @@ export default function PrintingSettingsScreen() {
       <SettingsCard>
         <SettingsSegmentRow
           label="Printer Resolution (DPI)"
-          options={['304 DPI', '300 DPI', '203 DPI'] as const}
+          options={['Auto', '304 DPI', '300 DPI', '203 DPI'] as const}
           selected={dpiLabel}
           onSelect={(val) => {
-            const dpi = val === '203 DPI' ? 203 : val === '300 DPI' ? 300 : 304;
+            // 'Auto' clears the override so the connected model's own DPI is used.
+            const dpi = val === 'Auto' ? null : val === '203 DPI' ? 203 : val === '300 DPI' ? 300 : 304;
             patchPrinting({ printerDpi: dpi });
           }}
           showDivider

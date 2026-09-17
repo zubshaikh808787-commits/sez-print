@@ -1,4 +1,4 @@
-import { scaleDocumentToSize } from '@/lib/element-sizing';
+import { fitDocumentCenteredOnPage, scaleDocumentToSize } from '@/lib/element-sizing';
 import {
   CABLE_FLAG_DIECUT,
   cableFlagPrintDocument,
@@ -628,8 +628,13 @@ export function applyPrintSize(
   ) {
     return source;
   }
-  // Fill the chosen millimetre stock. Center-letterbox is a false border.
-  return scaleDocumentToSize(source, page.widthMm, page.heightMm);
+  // Contain-fit, centered, preserving the design's aspect ratio.
+  // Stretching width and height independently distorted every template printed
+  // at a different aspect: box geometry scaled anisotropically while font size
+  // scaled by min(sx, sy), so text re-wrapped to a different line count and
+  // stacked rows that were tuned to abut each other began to overlap. The clamp
+  // permits bleed, so that overflow was never re-fitted — only clipped at capture.
+  return fitDocumentCenteredOnPage(source, page.widthMm, page.heightMm);
 }
 
 /** Closest stock preset to an imported template's pixel aspect (no stretching). */
