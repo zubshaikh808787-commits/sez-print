@@ -34,7 +34,7 @@ function buildSampleTscLabel(opts = {}) {
     `DENSITY ${density}\r\n` +
     'CLS\r\n' +
     `TEXT 40,40,"0",0,1,1,"${text}"\r\n` +
-    'PRINT 1,1\r\n';
+    'PRINT 1\r\n';
   return Buffer.from(cmd, 'ascii');
 }
 
@@ -69,7 +69,7 @@ function buildTscBitmapLabel(opts = {}) {
       `BITMAP 0,0,${bytesPerRow},${height},0,`,
     'ascii',
   );
-  const footer = Buffer.from(`\r\nPRINT 1,1\r\n`, 'ascii');
+  const footer = Buffer.from(`\r\nPRINT 1\r\n`, 'ascii');
   return Buffer.concat([header, bitmap, footer]);
 }
 

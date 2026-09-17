@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        style="@style/Ai50DialogLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/dialog_language_label" />
+
+    <EditText
+        android:id="@+id/et_language"
+        style="@style/Ai50DialogInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_field_gap"
+        android:hint="@string/dialog_language_hint"
+        android:inputType="text"
+        android:maxLength="8" />
+
+    <TextView
+        style="@style/Ai50DialogTip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_field_gap"
+        android:text="@string/dialog_language_tip" />
+</LinearLayout>

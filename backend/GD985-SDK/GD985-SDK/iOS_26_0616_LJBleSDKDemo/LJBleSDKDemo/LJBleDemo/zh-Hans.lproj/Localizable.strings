@@ -1,0 +1,216 @@
+/* Home */
+"home.title" = "选择打印机类型";
+"home.subtitle" = "请选择您的打印机连接方式";
+"home.bluetooth.title" = "蓝牙打印机";
+"home.bluetooth.desc" = "经典蓝牙与低功耗蓝牙打印机，支持扫描、连接、打印与设备管理。";
+"home.wifi.title" = "WiFi 打印机 (AI50)";
+"home.wifi.desc" = "AI50 WiFi 打印机，支持 WiFi 配网、打印与设备控制。";
+"home.enter" = "进入 ›";
+"home.app_name" = "LJBleDemo";
+
+/* Language */
+"language.button" = "语言";
+"language.title" = "选择语言";
+"language.cancel" = "取消";
+"language.zh" = "简体中文";
+"language.en" = "English";
+
+/* Navigation */
+"nav.bluetooth" = "蓝牙打印机";
+"nav.ai50" = "AI50 WiFi 打印机";
+
+/* Common */
+"common.back" = "返回";
+"common.ok" = "确定";
+"common.cancel" = "取消";
+"common.confirm" = "确认";
+"common.connecting" = "连接中...";
+"common.connect_failed" = "连接失败";
+"common.disconnected" = "已断开连接";
+"common.not_connected" = "未连接设备";
+"common.connect_first" = "请先连接设备";
+"common.minutes" = "分钟";
+"common.unknown_device" = "未知设备";
+
+/* Bluetooth */
+"ble.search" = "搜索设备";
+"ble.connected_device" = "当前连接设备：";
+"ble.disconnect" = "断开连接";
+"ble.section.devices" = "设备列表";
+"ble.section.info" = "设备信息";
+"ble.section.actions" = "功能操作";
+"ble.no_device" = "未发现蓝牙打印机\n点击「扫描设备」开始搜索";
+"ble.select_device" = "请选择设备连接";
+"ble.connected" = "设备已连接";
+"ble.btn.unpair" = "蓝牙配对";
+"ble.btn.upgrade" = "固件升级";
+"ble.device.connected" = "已连接";
+"ble.device.tap_connect" = "点击连接";
+"ble.feature.unsupported" = "iOS 暂不支持此功能";
+"ble.scan.title" = "搜索设备";
+"ble.scan.hint" = "正在搜索附近的蓝牙打印机...";
+"ble.scan.empty" = "未发现打印机\n点击「重新搜索」再试";
+"ble.scan.rescan" = "重新搜索";
+"ble.detail.title" = "打印机控制";
+"ble.detail.ready" = "请选择下方功能操作";
+"ble.btn.switch_device" = "切换设备";
+
+/* AI50 Sections */
+"ai50.section.devices" = "设备列表";
+"ai50.section.info" = "设备信息";
+"ai50.section.actions" = "功能操作";
+"ai50.no_device" = "未发现 AI50 设备\n点击「扫描设备」开始搜索";
+"ai50.select_device" = "请选择设备连接";
+"ai50.btn.unpair" = "蓝牙配对";
+"ai50.btn.upgrade" = "固件升级";
+"ai50.device.connected" = "已连接";
+"ai50.device.tap_connect" = "点击连接";
+"ai50.not_ai50" = "当前设备不是 AI50 WiFi 打印机";
+
+/* Actions */
+"action.scan" = "扫描设备";
+"action.disconnect" = "断开连接";
+"action.print" = "打印图片";
+"action.model" = "查询型号";
+"action.boot" = "查询Boot";
+"action.sn" = "查询SN";
+"action.all_info" = "全部信息";
+"action.firmware" = "固件版本";
+"action.shut_time_get" = "查询关机时间";
+"action.status" = "打印机状态";
+"action.battery" = "查询电量";
+"action.density_get" = "查询浓度";
+"action.density_set" = "设置浓度";
+"action.shut_time_set" = "设置关机时间";
+"action.wifi_send" = "WiFi配网";
+"action.wifi_state" = "WiFi状态";
+"action.volume_get" = "查询音量";
+"action.volume_set" = "设置音量";
+"action.reset" = "恢复出厂";
+"action.set_language" = "设置语言";
+"action.print_label" = "标签打印";
+"action.print_circle_label" = "圆形标签打印";
+"action.print_black_label" = "黑标标签打印";
+"action.print_tattoo" = "纹身纸打印";
+"action.print_sheet_label" = "面单打印";
+"action.print_fold" = "A4折叠纸打印";
+"action.speed_get" = "查询速度";
+"action.speed_set" = "设置速度";
+"action.sync" = "同步设置";
+"action.go_paper" = "走纸";
+"action.reverse_go_paper" = "反向走纸";
+"action.recovery" = "恢复出厂";
+"action.printer_setting" = "打印机设置";
+
+/* Print */
+"print.title" = "打印图片";
+"print.message" = "选择图片并设置打印份数";
+"print.copies" = "打印份数";
+"print.select_image" = "选择图片";
+"print.processing" = "处理图片中...";
+"print.process_failed" = "图片处理失败";
+"print.start" = "开始打印...";
+"print.failed" = "打印失败";
+"print.failed_detail" = "打印失败: %@";
+"print.success" = "打印成功";
+
+/* WiFi */
+"wifi.setup.title" = "WiFi配网";
+"wifi.setup.message" = "输入 WiFi 名称和密码";
+"wifi.ssid" = "WiFi名称(SSID)";
+"wifi.password" = "WiFi密码";
+"wifi.ssid.empty" = "请输入WiFi名称";
+"wifi.password.empty" = "请输入WiFi密码";
+"wifi.configuring" = "正在配网...";
+"wifi.config_failed" = "配网失败: %@";
+"wifi.status.connecting" = "WiFi连接中";
+"wifi.status.success" = "WiFi连接成功";
+"wifi.status.pwd_error" = "WiFi密码错误";
+"wifi.status.disconnect" = "WiFi已断开";
+"wifi.status.unknown" = "WiFi状态未知";
+"wifi.status.code" = "WiFi状态: %d";
+"wifi.query.none" = "WiFi未连接";
+"wifi.query.connecting" = "WiFi连接中";
+"wifi.query.connected" = "WiFi已连接";
+"wifi.query.failed" = "查询WiFi状态失败: %@";
+
+/* Printer status */
+"status.printing" = "打印中";
+"status.open_cover" = "开盖";
+"status.out_paper" = "缺纸";
+"status.low_power" = "低电量";
+"status.overheat" = "过热";
+"status.normal" = "正常";
+"status.code" = "状态码: %lu";
+"status.unknown" = "状态未知";
+"status.query_failed" = "查询状态失败: %@";
+
+/* Dialogs */
+"dialog.set_density" = "设置浓度";
+"dialog.set_shut_time" = "设置关机时间";
+"dialog.set_volume" = "设置音量";
+"dialog.set_printer_language" = "设置语言";
+"dialog.set_printer_language.message" = "输入语言代码，如 zh / en";
+"dialog.language.placeholder" = "语言";
+"dialog.language.empty" = "请输入语言";
+"dialog.reset.title" = "恢复出厂设置";
+"dialog.reset.message" = "确定要恢复出厂设置吗？";
+"dialog.density.empty" = "无可选浓度";
+"dialog.volume.placeholder" = "0-100";
+"dialog.set_speed" = "设置速度";
+"dialog.speed.placeholder" = "速度档位";
+"dialog.go_paper" = "走纸";
+"dialog.reverse_go_paper" = "反向走纸";
+"dialog.go_paper.placeholder" = "毫米 (mm)";
+
+/* Results */
+"result.model" = "型号: %@";
+"result.model.fail" = "查询型号失败: %@";
+"result.boot" = "Boot模式: %d";
+"result.boot.ble" = "打印机类型: %d";
+"result.boot.fail" = "查询Boot失败: %@";
+"result.sn" = "SN: %@";
+"result.sn.fail" = "查询SN失败: %@";
+"result.firmware" = "固件版本: %@";
+"result.firmware.fail" = "查询固件失败: %@";
+"result.shut_time" = "关机时间: %d 分钟";
+"result.shut_time.fail" = "查询关机时间失败: %@";
+"result.battery" = "电量: %d%%";
+"result.battery.fail" = "查询电量失败: %@";
+"result.density" = "当前浓度: %d";
+"result.density.fail" = "查询浓度失败: %@";
+"result.density.set.ok" = "设置浓度成功";
+"result.density.set.fail" = "设置浓度失败: %@";
+"result.shut_time.set.ok" = "设置关机时间成功";
+"result.shut_time.set.fail" = "设置关机时间失败: %@";
+"result.volume" = "音量: %d/%d";
+"result.volume.fail" = "查询音量失败: %@";
+"result.volume.set.ok" = "设置音量成功";
+"result.volume.set.fail" = "设置音量失败: %@";
+"result.language.set.ok" = "设置语言成功";
+"result.language.set.fail" = "设置语言失败: %@";
+"result.all_info.fail" = "查询全部信息失败: %@";
+"result.all_info" = "版本: %@\n名称: %@\nMAC: %@\nSN: %@\n型号: %@\n电量: %d\n关机时间: %d\nSSID: %@\n音量: %d/%d";
+"result.all_info.ble" = "版本: %@\n名称: %@\nMAC: %@\nSN: %@\n型号: %@\n电量: %d\n关机时间: %d 分钟\n浓度: %d\n速度: %d\n纸张: %d";
+"result.reset.sent" = "已发送恢复出厂指令";
+"result.speed" = "速度: %d";
+"result.speed.fail" = "查询速度失败: %@";
+"result.speed.set.ok" = "设置速度成功";
+"result.speed.set.fail" = "设置速度失败: %@";
+"result.sync.ok" = "设置同步成功";
+"result.syncing" = "正在同步设置...";
+"result.go_paper.ok" = "走纸指令已发送 (%d mm)";
+"result.recovery.ok" = "已恢复默认设置";
+
+/* OTA */
+"ota.read_failed" = "读取固件文件失败";
+"ota.invalid_file" = "请选择 .bin 或 .prtu 文件";
+"ota.start" = "开始升级...";
+"ota.progress" = "升级进度: %.0f%%";
+"ota.failed" = "升级失败";
+"ota.failed_detail" = "升级失败: %@";
+"ota.done" = "升级完成";
+
+/* PrinterManager */
+"manager.connect_failed" = "连接失败";
+"manager.disconnected" = "设备已断开连接";

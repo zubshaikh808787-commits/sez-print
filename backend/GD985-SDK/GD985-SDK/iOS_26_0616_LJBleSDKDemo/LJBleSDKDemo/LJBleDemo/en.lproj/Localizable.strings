@@ -1,0 +1,216 @@
+/* Home */
+"home.title" = "Select Printer Type";
+"home.subtitle" = "Choose how you want to connect your printer";
+"home.bluetooth.title" = "Bluetooth Printer";
+"home.bluetooth.desc" = "Classic and BLE printers. Scan, connect, print, and manage devices.";
+"home.wifi.title" = "WiFi Printer (AI50)";
+"home.wifi.desc" = "AI50 WiFi printers. Setup network, print, and device control.";
+"home.enter" = "Enter ›";
+"home.app_name" = "LJBleDemo";
+
+/* Language */
+"language.button" = "Language";
+"language.title" = "Select Language";
+"language.cancel" = "Cancel";
+"language.zh" = "简体中文";
+"language.en" = "English";
+
+/* Navigation */
+"nav.bluetooth" = "Bluetooth Printer";
+"nav.ai50" = "AI50 WiFi Printer";
+
+/* Common */
+"common.back" = "Back";
+"common.ok" = "OK";
+"common.cancel" = "Cancel";
+"common.confirm" = "Confirm";
+"common.connecting" = "Connecting...";
+"common.connect_failed" = "Connection failed";
+"common.disconnected" = "Disconnected";
+"common.not_connected" = "Not connected";
+"common.connect_first" = "Please connect a device first";
+"common.minutes" = "Minutes";
+"common.unknown_device" = "Unknown device";
+
+/* Bluetooth */
+"ble.search" = "Search Devices";
+"ble.connected_device" = "Connected device:";
+"ble.disconnect" = "Disconnect";
+"ble.section.devices" = "Device List";
+"ble.section.info" = "Device Info";
+"ble.section.actions" = "Actions";
+"ble.no_device" = "No Bluetooth printer found\nTap \"Scan Devices\" to start";
+"ble.select_device" = "Please select a device to connect";
+"ble.connected" = "Device connected";
+"ble.btn.unpair" = "Bluetooth Pairing";
+"ble.btn.upgrade" = "Firmware Upgrade";
+"ble.device.connected" = "Connected";
+"ble.device.tap_connect" = "Tap to connect";
+"ble.feature.unsupported" = "This feature is not supported on iOS yet";
+"ble.scan.title" = "Search Devices";
+"ble.scan.hint" = "Searching for nearby Bluetooth printers...";
+"ble.scan.empty" = "No printer found\nTap Rescan to try again";
+"ble.scan.rescan" = "Rescan";
+"ble.detail.title" = "Printer Control";
+"ble.detail.ready" = "Select an action below";
+"ble.btn.switch_device" = "Switch Device";
+
+/* AI50 Sections */
+"ai50.section.devices" = "Device List";
+"ai50.section.info" = "Device Info";
+"ai50.section.actions" = "Actions";
+"ai50.no_device" = "No AI50 device found\nTap \"Scan Devices\" to start";
+"ai50.select_device" = "Please select a device to connect";
+"ai50.btn.unpair" = "Bluetooth Pairing";
+"ai50.btn.upgrade" = "Firmware Upgrade";
+"ai50.device.connected" = "Connected";
+"ai50.device.tap_connect" = "Tap to connect";
+"ai50.not_ai50" = "Current device is not an AI50 WiFi printer";
+
+/* Actions */
+"action.scan" = "Scan Devices";
+"action.disconnect" = "Disconnect";
+"action.print" = "Print Image";
+"action.model" = "Query Model";
+"action.boot" = "Query Boot";
+"action.sn" = "Query SN";
+"action.all_info" = "All Info";
+"action.firmware" = "Firmware Version";
+"action.shut_time_get" = "Query Shutdown Time";
+"action.status" = "Printer Status";
+"action.battery" = "Query Battery";
+"action.density_get" = "Query Density";
+"action.density_set" = "Set Density";
+"action.shut_time_set" = "Set Shutdown Time";
+"action.wifi_send" = "WiFi Setup";
+"action.wifi_state" = "WiFi Status";
+"action.volume_get" = "Query Volume";
+"action.volume_set" = "Set Volume";
+"action.reset" = "Factory Reset";
+"action.set_language" = "Set Language";
+"action.print_label" = "Print Label";
+"action.print_circle_label" = "Print Circle Label";
+"action.print_black_label" = "Print Black Label";
+"action.print_tattoo" = "Print Tattoo";
+"action.print_sheet_label" = "Print Sheet Label";
+"action.print_fold" = "Print A4 Fold";
+"action.speed_get" = "Query Speed";
+"action.speed_set" = "Set Speed";
+"action.sync" = "Sync Settings";
+"action.go_paper" = "Feed Paper";
+"action.reverse_go_paper" = "Reverse Feed";
+"action.recovery" = "Factory Reset";
+"action.printer_setting" = "Printer Setting";
+
+/* Print */
+"print.title" = "Print Image";
+"print.message" = "Select an image and set print copies";
+"print.copies" = "Print copies";
+"print.select_image" = "Select Image";
+"print.processing" = "Processing image...";
+"print.process_failed" = "Image processing failed";
+"print.start" = "Starting print...";
+"print.failed" = "Print failed";
+"print.failed_detail" = "Print failed: %@";
+"print.success" = "Print successful";
+
+/* WiFi */
+"wifi.setup.title" = "WiFi Setup";
+"wifi.setup.message" = "Enter WiFi name and password";
+"wifi.ssid" = "WiFi Name (SSID)";
+"wifi.password" = "WiFi Password";
+"wifi.ssid.empty" = "Please enter WiFi name";
+"wifi.password.empty" = "Please enter WiFi password";
+"wifi.configuring" = "Configuring WiFi...";
+"wifi.config_failed" = "WiFi setup failed: %@";
+"wifi.status.connecting" = "WiFi connecting";
+"wifi.status.success" = "WiFi connected";
+"wifi.status.pwd_error" = "WiFi password error";
+"wifi.status.disconnect" = "WiFi disconnected";
+"wifi.status.unknown" = "WiFi status unknown";
+"wifi.status.code" = "WiFi status: %d";
+"wifi.query.none" = "WiFi not connected";
+"wifi.query.connecting" = "WiFi connecting";
+"wifi.query.connected" = "WiFi connected";
+"wifi.query.failed" = "Failed to query WiFi status: %@";
+
+/* Printer status */
+"status.printing" = "Printing";
+"status.open_cover" = "Cover open";
+"status.out_paper" = "Out of paper";
+"status.low_power" = "Low battery";
+"status.overheat" = "Overheated";
+"status.normal" = "Normal";
+"status.code" = "Status code: %lu";
+"status.unknown" = "Unknown status";
+"status.query_failed" = "Failed to query status: %@";
+
+/* Dialogs */
+"dialog.set_density" = "Set Density";
+"dialog.set_shut_time" = "Set Shutdown Time";
+"dialog.set_volume" = "Set Volume";
+"dialog.set_printer_language" = "Set Language";
+"dialog.set_printer_language.message" = "Enter language code, e.g. zh / en";
+"dialog.language.placeholder" = "Language";
+"dialog.language.empty" = "Please enter language";
+"dialog.reset.title" = "Factory Reset";
+"dialog.reset.message" = "Are you sure you want to factory reset?";
+"dialog.density.empty" = "No density options available";
+"dialog.volume.placeholder" = "0-100";
+"dialog.set_speed" = "Set Speed";
+"dialog.speed.placeholder" = "Speed level";
+"dialog.go_paper" = "Feed Paper";
+"dialog.reverse_go_paper" = "Reverse Feed Paper";
+"dialog.go_paper.placeholder" = "Millimeters (mm)";
+
+/* Results */
+"result.model" = "Model: %@";
+"result.model.fail" = "Failed to query model: %@";
+"result.boot" = "Boot mode: %d";
+"result.boot.ble" = "Printer category: %d";
+"result.boot.fail" = "Failed to query boot: %@";
+"result.sn" = "SN: %@";
+"result.sn.fail" = "Failed to query SN: %@";
+"result.firmware" = "Firmware: %@";
+"result.firmware.fail" = "Failed to query firmware: %@";
+"result.shut_time" = "Shutdown time: %d min";
+"result.shut_time.fail" = "Failed to query shutdown time: %@";
+"result.battery" = "Battery: %d%%";
+"result.battery.fail" = "Failed to query battery: %@";
+"result.density" = "Current density: %d";
+"result.density.fail" = "Failed to query density: %@";
+"result.density.set.ok" = "Density set successfully";
+"result.density.set.fail" = "Failed to set density: %@";
+"result.shut_time.set.ok" = "Shutdown time set successfully";
+"result.shut_time.set.fail" = "Failed to set shutdown time: %@";
+"result.volume" = "Volume: %d/%d";
+"result.volume.fail" = "Failed to query volume: %@";
+"result.volume.set.ok" = "Volume set successfully";
+"result.volume.set.fail" = "Failed to set volume: %@";
+"result.language.set.ok" = "Language set successfully";
+"result.language.set.fail" = "Failed to set language: %@";
+"result.all_info.fail" = "Failed to query all info: %@";
+"result.all_info" = "Version: %@\nName: %@\nMAC: %@\nSN: %@\nModel: %@\nBattery: %d\nShutdown: %d\nSSID: %@\nVolume: %d/%d";
+"result.all_info.ble" = "Version: %@\nName: %@\nMAC: %@\nSN: %@\nModel: %@\nBattery: %d\nShutdown: %d min\nDensity: %d\nSpeed: %d\nPaper: %d";
+"result.reset.sent" = "Factory reset command sent";
+"result.speed" = "Speed: %d";
+"result.speed.fail" = "Failed to query speed: %@";
+"result.speed.set.ok" = "Speed set successfully";
+"result.speed.set.fail" = "Failed to set speed: %@";
+"result.sync.ok" = "Settings synced successfully";
+"result.syncing" = "Syncing settings...";
+"result.go_paper.ok" = "Paper feed command sent (%d mm)";
+"result.recovery.ok" = "Default settings restored";
+
+/* OTA */
+"ota.read_failed" = "Failed to read firmware file";
+"ota.invalid_file" = "Please select a .bin or .prtu file";
+"ota.start" = "Starting upgrade...";
+"ota.progress" = "Upgrade progress: %.0f%%";
+"ota.failed" = "Upgrade failed";
+"ota.failed_detail" = "Upgrade failed: %@";
+"ota.done" = "Upgrade completed";
+
+/* PrinterManager */
+"manager.connect_failed" = "Connection failed";
+"manager.disconnected" = "Device disconnected";

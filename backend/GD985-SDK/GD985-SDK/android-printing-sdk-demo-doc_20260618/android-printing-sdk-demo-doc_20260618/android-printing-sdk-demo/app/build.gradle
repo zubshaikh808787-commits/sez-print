@@ -1,0 +1,113 @@
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 35
+    namespace "com.luckjingle.printersdk"
+    buildFeatures {
+        buildConfig true
+    }
+    defaultConfig {
+        applicationId "com.luckjingle.printersdk"
+        minSdkVersion 22
+        targetSdkVersion 35
+        versionCode 6
+        versionName "1.0.8"
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+
+        ndk {
+            //设置支持的SO库架构
+            abiFilters 'armeabi-v7a', 'arm64-v8a'//, 'x86', 'armeabi-v7a', 'x86_64', 'arm64-v8a'
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('..\\test.jks')
+            storePassword '123456'
+            keyAlias 'test'
+            keyPassword '123456'
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    flavorDimensions "region"
+    productFlavors {
+        china {
+            dimension "region"
+        }
+        abroad {
+            dimension "region"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    packagingOptions {
+        pickFirst 'license/README.dom.txt'
+        pickFirst 'license/LICENSE.dom-documentation.txt'
+        pickFirst 'license/LICENSE.dom-software.txt'
+        pickFirst 'license/LICENSE'
+        pickFirst 'license/NOTICE'
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            def fileName = "sdkDemo-V${variant.versionName}"
+            if (variant.flavorName != "") {
+                fileName = fileName + "_${variant.flavorName}"
+            }
+            fileName = fileName + "-${releaseTime()}"
+            if ('debug' == variant.buildType.name) {
+                fileName = fileName + "-debug.apk"
+            } else {
+                fileName = fileName + "-release.apk"
+            }
+            outputFileName = fileName
+        }
+    }
+}
+
+static def releaseTime() {
+    return new Date().format("yyyyMMddHHmm", TimeZone.getDefault());
+}
+
+dependencies {
+    //公司主营中国，用此aar
+    //(For companies primarily operating in China, use this AAR.)
+    chinaImplementation files('libs/LuckPrinterSdk_OtherCompanyChina_V1.3.8.aar')
+    //公司主营中国之外地区，用此aar
+    //For companies primarily operating outside China, use this AAR.
+    abroadImplementation files('libs/LuckPrinterSdk_OtherCompanyAbroad_V1.3.8.aar')
+    implementation 'com.squareup.okhttp3:okhttp:4.10.0'
+    implementation 'com.github.Jasonchenlijian:FastBle:2.4.0'
+
+    testImplementation 'junit:junit:4.12'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.1'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.1.0'
+
+    implementation 'androidx.constraintlayout:constraintlayout:1.1.3'
+    implementation 'androidx.appcompat:appcompat:1.4.1'
+    implementation 'androidx.recyclerview:recyclerview:1.2.1'
+
+    implementation 'com.google.code.gson:gson:2.10'
+    implementation 'com.alibaba:fastjson:1.2.83'
+}

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="24765" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="BYZ-38-t0r">
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <dependencies>
+        <deployment identifier="iOS"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24743"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="System colors in document resources" minToolsVersion="11.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <!--View Controller-->
+        <scene sceneID="tne-QT-ifu">
+            <objects>
+                <viewController storyboardIdentifier="BluetoothPrinterController" id="BYZ-38-t0r" customClass="ViewController" customModule="LJBleDemo" customModuleProvider="target" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="8bC-Xf-vdC">
+                        <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="KYf-LI-xRS">
+                                <rect key="frame" x="0.0" y="118" width="393" height="44"/>
+                                <subviews>
+                                    <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="system" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="FU1-yG-vjy">
+                                        <rect key="frame" x="297.33333333333331" y="6" width="83.666666666666686" height="32"/>
+                                        <state key="normal" title="Button"/>
+                                        <buttonConfiguration key="configuration" style="plain" title="搜索设备">
+                                            <fontDescription key="titleFontDescription" type="system" pointSize="15"/>
+                                        </buttonConfiguration>
+                                        <connections>
+                                            <action selector="onSearchAct:" destination="BYZ-38-t0r" eventType="touchUpInside" id="pFW-t9-cFx"/>
+                                        </connections>
+                                    </button>
+                                    <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="LuckBleSDK" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="soD-6d-Umh">
+                                        <rect key="frame" x="149.66666666666666" y="11.999999999999998" width="93.666666666666657" height="20.333333333333329"/>
+                                        <fontDescription key="fontDescription" type="system" pointSize="17"/>
+                                        <nil key="textColor"/>
+                                        <nil key="highlightedColor"/>
+                                    </label>
+                                </subviews>
+                                <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                                <constraints>
+                                    <constraint firstAttribute="height" constant="44" id="ZRf-KQ-afJ"/>
+                                    <constraint firstItem="soD-6d-Umh" firstAttribute="centerY" secondItem="KYf-LI-xRS" secondAttribute="centerY" id="b5O-Cd-Tjt"/>
+                                    <constraint firstItem="soD-6d-Umh" firstAttribute="centerX" secondItem="KYf-LI-xRS" secondAttribute="centerX" id="ciG-Qr-LmU"/>
+                                    <constraint firstAttribute="trailing" secondItem="FU1-yG-vjy" secondAttribute="trailing" constant="12" id="eAC-UO-T9E"/>
+                                    <constraint firstItem="FU1-yG-vjy" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="soD-6d-Umh" secondAttribute="trailing" constant="8" symbolic="YES" id="l9i-ke-uia"/>
+                                    <constraint firstItem="FU1-yG-vjy" firstAttribute="centerY" secondItem="KYf-LI-xRS" secondAttribute="centerY" id="x9j-dY-kck"/>
+                                </constraints>
+                            </view>
+                            <stackView opaque="NO" contentMode="scaleToFill" axis="vertical" translatesAutoresizingMaskIntoConstraints="NO" id="sgW-Y6-n7F">
+                                <rect key="frame" x="141.66666666666666" y="686" width="110" height="88"/>
+                                <subviews>
+                                    <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="当前连接设备：" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="7AK-1K-euZ">
+                                        <rect key="frame" x="0.0" y="0.0" width="110" height="44"/>
+                                        <constraints>
+                                            <constraint firstAttribute="height" constant="44" id="IUw-z3-5Z2"/>
+                                        </constraints>
+                                        <fontDescription key="fontDescription" type="system" pointSize="17"/>
+                                        <nil key="textColor"/>
+                                        <nil key="highlightedColor"/>
+                                    </label>
+                                    <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="system" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="ib5-z5-Tr7">
+                                        <rect key="frame" x="0.0" y="44" width="110" height="44"/>
+                                        <constraints>
+                                            <constraint firstAttribute="height" constant="44" id="Yvh-r6-xc5"/>
+                                        </constraints>
+                                        <state key="normal" title="Button"/>
+                                        <buttonConfiguration key="configuration" style="plain" title="断开连接"/>
+                                        <connections>
+                                            <action selector="onDisconnectAct:" destination="BYZ-38-t0r" eventType="touchUpInside" id="BaA-Vz-xGb"/>
+                                        </connections>
+                                    </button>
+                                </subviews>
+                            </stackView>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
+                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <constraints>
+                            <constraint firstItem="sgW-Y6-n7F" firstAttribute="centerX" secondItem="6Tk-OE-BBY" secondAttribute="centerX" id="2fP-2w-jHY"/>
+                            <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" secondItem="KYf-LI-xRS" secondAttribute="trailing" id="2xc-ml-5Ui"/>
+                            <constraint firstItem="6Tk-OE-BBY" firstAttribute="bottom" secondItem="sgW-Y6-n7F" secondAttribute="bottom" constant="10" id="HFG-29-lXl"/>
+                            <constraint firstItem="KYf-LI-xRS" firstAttribute="leading" secondItem="8bC-Xf-vdC" secondAttribute="leading" id="cPu-e0-Nr6"/>
+                            <constraint firstItem="KYf-LI-xRS" firstAttribute="top" secondItem="6Tk-OE-BBY" secondAttribute="top" id="zZ9-4L-umA"/>
+                        </constraints>
+                    </view>
+                    <connections>
+                        <outlet property="bottomStackView" destination="sgW-Y6-n7F" id="bSv-0k-mN2"/>
+                        <outlet property="connectedDeviceLabel" destination="7AK-1K-euZ" id="cDl-0k-mN2"/>
+                        <outlet property="disconnectButton" destination="ib5-z5-Tr7" id="dBt-0k-mN2"/>
+                        <outlet property="headerView" destination="KYf-LI-xRS" id="hVw-1x-kP3"/>
+                        <outlet property="searchButton" destination="FU1-yG-vjy" id="sBt-0k-mN2"/>
+                    </connections>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="dkx-z0-nzr" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="-295" y="99"/>
+        </scene>
+    </scenes>
+    <resources>
+        <systemColor name="systemBackgroundColor">
+            <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+        </systemColor>
+    </resources>
+</document>

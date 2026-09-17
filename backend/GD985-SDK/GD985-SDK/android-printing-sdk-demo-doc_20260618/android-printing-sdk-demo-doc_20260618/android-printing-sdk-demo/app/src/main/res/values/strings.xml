@@ -1,0 +1,243 @@
+<resources>
+    <string name="app_name">Luck Printer Demo</string>
+
+    <!-- Home -->
+    <string name="home_title">Select Printer Type</string>
+    <string name="home_subtitle">Choose how you want to connect your printer</string>
+    <string name="home_bluetooth_title">Bluetooth Printer</string>
+    <string name="home_bluetooth_desc">Classic and BLE printers. Scan, connect, print, and manage devices.</string>
+    <string name="home_wifi_title">WiFi Printer (AI50)</string>
+    <string name="home_wifi_desc">AI50 WiFi printers. Setup network, print, and device control.</string>
+    <string name="home_enter">Enter ›</string>
+
+    <!-- AI50 Activity -->
+    <string name="ai50_title">AI50 Printer</string>
+    <string name="ai50_subtitle">WiFi Setup · Print · Device Control</string>
+    <string name="device_list_title">Devices</string>
+    <string name="no_device">No AI50 device found\nTap \"Scan Printer\" to search</string>
+    <string name="status_select_device">Select an AI50 device to connect</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Connected: %1$s</string>
+    <string name="status_connect_fail">Connection failed</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_disconnect_fail">Failed to disconnect</string>
+    <string name="status_not_connected">Device not connected</string>
+    <string name="status_not_ai50">Current device is not AI50</string>
+    <string name="device_connected_badge">Connected</string>
+    <string name="actions_title">Actions</string>
+    <string name="btn_unpair">Unpair All</string>
+    <string name="btn_upgrade">Firmware Update</string>
+    <string name="btn_confirm">OK</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="location_off">Please enable location services</string>
+    <string name="bluetooth_permission_denied">Bluetooth permissions not granted</string>
+    <string name="device_forbidden">Device is disabled</string>
+    <string name="label_paper_error">Label paper placement error</string>
+
+    <!-- Actions -->
+    <string name="action_scan">Scan Bluetooth Printers</string>
+    <string name="action_disconnect">Disconnect Bluetooth</string>
+    <string name="action_print">Print Image (Continuous)</string>
+    <string name="action_model">Get Device Model</string>
+    <string name="action_boot">Get Boot Version</string>
+    <string name="action_sn">Get Serial Number (SN)</string>
+    <string name="action_all_info">Get All Device Info</string>
+    <string name="action_firmware">Get Firmware Version</string>
+    <string name="action_shut_time_get">Get Auto Power-off Time</string>
+    <string name="action_status">Get Printer Status</string>
+    <string name="action_battery">Get Battery Level</string>
+    <string name="action_density_get">Get Print Density</string>
+    <string name="action_density_set">Set Print Density</string>
+    <string name="action_shut_time_set">Set Auto Power-off Time</string>
+    <string name="action_wifi_send">WiFi Setup</string>
+    <string name="action_wifi_state">Get WiFi Connection Status</string>
+    <string name="action_volume_get">Get Device Volume</string>
+    <string name="action_volume_set">Set Device Volume</string>
+    <string name="action_factory_reset">Factory Reset Device</string>
+    <string name="action_factory_reset_confirm">Restore factory settings? This cannot be undone.</string>
+    <string name="action_language_set">Set Printer Language</string>
+
+    <!-- Dialog titles -->
+    <string name="dialog_wifi_title">WiFi Setup</string>
+    <string name="dialog_wifi_subtitle">Printer supports 2.4 GHz WiFi only.</string>
+    <string name="dialog_wifi_ssid">WiFi Name (SSID)</string>
+    <string name="dialog_wifi_ssid_hint">Enter WiFi name</string>
+    <string name="dialog_wifi_pwd">WiFi Password</string>
+    <string name="dialog_wifi_pwd_hint">Enter WiFi password</string>
+    <string name="dialog_density_title">Set Density</string>
+    <string name="dialog_density_hint_range">Available density levels: %1$s</string>
+    <string name="dialog_density_option">Level %1$d</string>
+    <string name="dialog_density_empty">No density levels available for this device</string>
+    <string name="dialog_shut_time_title">Set Auto-off Time</string>
+    <string name="dialog_shut_time_hint">Minutes (0 = never)</string>
+    <string name="dialog_volume_title">Set Volume</string>
+    <string name="dialog_volume_hint">Enter volume level</string>
+    <string name="dialog_language_title">Set Printer Language</string>
+    <string name="dialog_language_subtitle">Use the language code supported by your printer.</string>
+    <string name="dialog_language_label">Language Code</string>
+    <string name="dialog_language_hint">e.g. en</string>
+    <string name="dialog_language_tip">English: en · Chinese: zh\nEnter the language code supported by the printer.</string>
+    <string name="dialog_factory_reset_title">Factory Reset</string>
+    <string name="dialog_factory_reset_subtitle">This action cannot be undone.</string>
+
+    <!-- Validation -->
+    <string name="error_wifi_ssid_empty">WiFi name is required</string>
+    <string name="error_wifi_pwd_empty">WiFi password is required</string>
+    <string name="error_volume_empty">Volume is required</string>
+    <string name="error_language_empty">Language is required</string>
+    <string name="error_select_image">Please select an image</string>
+    <string name="error_image_load">Failed to load image</string>
+    <string name="error_upgrade_not_connected">Printer not connected</string>
+    <string name="error_upgrade_file">Select a .BIN or .PRTU file</string>
+    <string name="error_firmware_copy">Failed to prepare firmware file</string>
+
+    <!-- Results -->
+    <string name="result_model">Model: %1$s</string>
+    <string name="result_model_fail">Failed to get model</string>
+    <string name="result_boot">Boot: %1$s</string>
+    <string name="result_boot_fail">Failed to get boot version</string>
+    <string name="result_sn">SN: %1$s</string>
+    <string name="result_sn_fail">Failed to get SN</string>
+    <string name="result_firmware">Firmware: %1$s</string>
+    <string name="result_firmware_fail">Failed to get firmware version</string>
+    <string name="result_shut_time">Auto-off: %1$d min</string>
+    <string name="result_shut_time_fail">Failed to get auto-off time</string>
+    <string name="result_shut_time_set_ok">Auto-off time updated</string>
+    <string name="result_shut_time_set_fail">Failed to set auto-off time</string>
+    <string name="result_status">Status › Print:%1$d Cover:%2$d Paper:%3$d Power:%4$d Heat:%5$d</string>
+    <string name="result_status_fail">Failed to get status</string>
+    <string name="result_battery">Battery: %1$d%%</string>
+    <string name="result_battery_fail">Failed to get battery</string>
+    <string name="result_density">Density: %1$d</string>
+    <string name="result_density_fail">Failed to get density</string>
+    <string name="result_density_set_ok">Density updated</string>
+    <string name="result_density_set_fail">Failed to set density</string>
+    <string name="result_volume">Volume %1$d / Max %2$d</string>
+    <string name="result_volume_fail">Failed to get volume</string>
+    <string name="result_volume_set_ok">Volume updated</string>
+    <string name="result_volume_set_fail">Failed to set volume</string>
+    <string name="result_wifi_send_ok">WiFi credentials sent</string>
+    <string name="result_wifi_send_fail">WiFi setup failed</string>
+    <string name="result_factory_reset_ok">Factory reset command sent</string>
+    <string name="result_language_set_ok">Language updated</string>
+    <string name="result_language_set_fail">Failed to set language</string>
+    <string name="result_all_info">[Ver]%1$s [Name]%2$s [MAC]%3$s [SN]%4$s [Model]%5$s [Bat]%6$s%% [Off]%7$dmin [Den]%8$d</string>
+    <string name="result_upgrade_start">Updating…</string>
+    <string name="result_upgrade_progress">Updating %1$d%%</string>
+    <string name="result_upgrade_error">Update error</string>
+    <string name="result_upgrade_done">Update completed</string>
+
+    <!-- WiFi states -->
+    <string name="wifi_state_connecting">WiFi connecting</string>
+    <string name="wifi_state_connected">WiFi connected</string>
+    <string name="wifi_state_pwd_error">WiFi password incorrect</string>
+    <string name="wifi_state_disconnect">WiFi disconnected</string>
+    <string name="wifi_state_not_connected">WiFi not connected</string>
+    <string name="wifi_state_unknown">Unknown network status (%1$d)</string>
+    <string name="wifi_state_query_fail">Failed to get network status</string>
+
+    <!-- Print -->
+    <string name="print_dialog_subtitle">Select an image and set print options.</string>
+    <string name="print_start">Printing started</string>
+    <string name="print_progress">Printing %1$d/%2$d</string>
+    <string name="print_success">Print completed</string>
+    <string name="print_fail">Print failed</string>
+    <string name="print_status_outpaper">Out of paper</string>
+    <string name="print_status_opencover">Cover open</string>
+    <string name="print_status_overheat">Overheating</string>
+    <string name="print_status_lowval">Low battery</string>
+
+    <!-- Print dialog (AI50) -->
+    <string name="print_dialog_image_label">Image</string>
+    <string name="print_dialog_count_label">Copies</string>
+    <string name="print_dialog_count_hint">Enter copies</string>
+    <string name="print_dialog_width_label">Width (mm)</string>
+    <string name="print_dialog_width_hint">Leave empty for default</string>
+    <string name="print_dialog_select_image_hint">Tap to select image</string>
+    <string name="print_dialog_select_image_arrow">›</string>
+    <string name="print_dialog_image_path">Image: %1$s</string>
+    <string name="result_info_title">Device Info</string>
+
+    <!-- LuckPrinterSdkDemoActivity -->
+    <string name="demo_device_list_title">Devices</string>
+    <string name="demo_no_device">No devices found</string>
+    <string name="demo_select_device">Select a device to connect</string>
+    <string name="demo_log_title">Log</string>
+    <string name="demo_log_clear">Clear log</string>
+    <string name="demo_btn_upgrade">Update</string>
+    <string name="demo_connecting">Connecting…</string>
+    <string name="demo_connect_success">Connected: %1$s</string>
+    <string name="demo_connect_fail">Connection failed</string>
+    <string name="demo_bt_connected">Bluetooth connected</string>
+    <string name="demo_bt_disconnected">Disconnected</string>
+    <string name="demo_print_image_title">Print Image</string>
+    <string name="demo_continuous_print_title">Continuous Paper Print</string>
+    <string name="demo_dialog_enter_density">Enter density</string>
+    <string name="demo_dialog_enter_speed">Enter speed (0–8)</string>
+    <string name="demo_dialog_enter_shut_time">Enter auto-off time (minutes)</string>
+    <string name="demo_result_speed">Speed: %1$d</string>
+    <string name="demo_result_speed_fail">Failed to get speed</string>
+    <string name="demo_result_speed_set_ok">Speed updated</string>
+    <string name="demo_result_speed_set_fail">Failed to set speed</string>
+    <string name="demo_recovery_ok">Factory reset succeeded</string>
+    <string name="demo_recovery_fail">Factory reset failed</string>
+    <string name="demo_pack_log_ok">Generated successfully</string>
+    <string name="demo_pack_log_fail">Generation failed</string>
+    <string name="demo_md5">MD5: %1$s</string>
+    <string name="demo_test_print_ok">Test page printed: %1$s</string>
+    <string name="demo_test_print_fail">Test page print failed</string>
+    <string name="demo_not_a4_printer">Device is not an A4 printer</string>
+    <string name="demo_upgrade_file_invalid">File is not a valid firmware (.BIN)</string>
+    <string name="demo_firmware_gen_fail">Failed to prepare firmware file</string>
+    <string name="demo_status_low_voltage">Low voltage</string>
+    <string name="demo_info_version">[Version] %1$s</string>
+    <string name="demo_info_name">[Name] %1$s</string>
+    <string name="demo_info_mac">[MAC] %1$s</string>
+    <string name="demo_info_sn">[SN] %1$s</string>
+    <string name="demo_info_model">[Model] %1$s</string>
+    <string name="demo_info_battery">[Battery] %1$s%%</string>
+    <string name="demo_info_shut_time">[Auto-off] %1$d min</string>
+    <string name="demo_info_density">[Density] %1$d</string>
+    <string name="demo_gray_scale_label">Gray scale:</string>
+    <string name="demo_gray_scale_4">4 levels</string>
+    <string name="demo_gray_scale_8">8 levels</string>
+    <string name="demo_gray_scale_16">16 levels</string>
+    <string name="demo_print_qty_label">Copies:</string>
+    <string name="demo_print_qty_hint">Copies</string>
+    <string name="demo_print_width_mm_label">Width (mm):</string>
+    <string name="demo_print_width_mm_hint">Enter width (mm)</string>
+    <string name="demo_print_height_mm_label">Height (mm):</string>
+    <string name="demo_print_height_mm_hint">Enter height (mm)</string>
+    <string name="demo_print_speed_label">Speed (1–8):</string>
+    <string name="demo_print_speed_hint">Enter speed (1–8)</string>
+    <string name="demo_print_density_label">Density (0–15):</string>
+    <string name="demo_print_density_hint">Enter density (1–15)</string>
+    <string name="demo_a4_paper_size_label">A4 paper size:</string>
+    <string name="demo_menu_scan">Scan printers</string>
+    <string name="demo_menu_print">Print (continuous)</string>
+    <string name="demo_menu_print_label">Print (gap label)</string>
+    <string name="demo_menu_print_circle_label">Print (circle label)</string>
+    <string name="demo_menu_print_black_label">Print (black mark)</string>
+    <string name="demo_menu_print_tattoo">Print (tattoo)</string>
+    <string name="demo_menu_print_sheet_label">Print (sheet label)</string>
+    <string name="demo_menu_print_a4_folder">Print (A4 folder)</string>
+    <string name="demo_menu_model">Device model</string>
+    <string name="demo_menu_boot">Boot version</string>
+    <string name="demo_menu_sn">Serial number</string>
+    <string name="demo_menu_all_info">All device info</string>
+    <string name="demo_menu_firmware">Firmware version</string>
+    <string name="demo_menu_shut_time_get">Auto-off time</string>
+    <string name="demo_menu_status">Status</string>
+    <string name="demo_menu_battery">Battery</string>
+    <string name="demo_menu_density_get">Density</string>
+    <string name="demo_menu_density_set">Set density</string>
+    <string name="demo_menu_speed_get">Speed</string>
+    <string name="demo_menu_speed_set">Set speed</string>
+    <string name="demo_menu_shut_time_set">Set auto-off</string>
+    <string name="demo_menu_recovery">Factory reset</string>
+    <string name="demo_menu_go_paper">Feed paper</string>
+    <string name="demo_menu_reverse_go_paper">Reverse feed</string>
+    <string name="demo_menu_pack_error_log">Send error log</string>
+    <string name="demo_menu_printer_setting">Query config</string>
+    <string name="demo_menu_test">Test</string>
+</resources>

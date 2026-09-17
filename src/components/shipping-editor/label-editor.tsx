@@ -4,6 +4,7 @@
  * zoom controls, field inspector, PDF vector export, and direct thermal printing.
  */
 
+import { router } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -26,6 +27,7 @@ import { AppIcon } from '@/components/app-icon';
 import { LabelSizePicker } from '@/components/shipping-editor/label-size-picker';
 import { ShippingLabelCanvas } from '@/components/shipping-editor/shipping-label-canvas';
 import { renderLabelToPDF, shareLabelPDF } from '@/lib/shipping-editor/pdf-export';
+import { resolvePrintQuality } from '@/lib/printer/print-quality';
 import {
   DEFAULT_SHIPPING_ORDER_DATA,
   LabelDpi,
@@ -178,12 +180,30 @@ export function LabelEditor({
   // Direct Thermal Print
   const handleDirectPrint = async () => {
     const manager = getPrinterManager();
-    if (!manager.isConnected) {
-      Alert.alert(
-        'Printer Not Connected',
-        'Connect a thermal printer via Bluetooth or Wi‑Fi to print directly.',
-      );
-      return;
+    const isHealthy = manager.isConnectionHealthy();
+
+    if (!isHealthy) {
+      setPrinting(true);
+      try {
+        const recon = await manager.ensureConnected();
+        if (!recon) {
+          throw new Error('Could not connect');
+        }
+      } catch {
+        setPrinting(false);
+        Alert.alert(
+          'Printer Not Connected',
+          'Would you like to connect your Bluetooth thermal printer now?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Connect Printer',
+              onPress: () => router.push('/printer-connect'),
+            },
+          ],
+        );
+        return;
+      }
     }
 
     const widthMm = template.customWidthMm || sizePreset.widthMm;
@@ -199,6 +219,12 @@ export function LabelEditor({
       if (!printShotRef.current) {
         throw new Error('Print canvas is not ready.');
       }
+
+      const quality = resolvePrintQuality({
+        darkness: 10,
+        speed: 3,
+        grayThreshold: 160,
+      });
 
       timer.start('capture+verify');
       const [connectionResult, base64] = await Promise.all([
@@ -224,8 +250,9 @@ export function LabelEditor({
         heightMm: geometry.labelHeightMm,
         gapMm: 2,
         copies: 1,
-        density: 8,
-        speed: 6,
+        density: quality.density,
+        speed: quality.speed,
+        threshold: quality.threshold,
         vOffsetMm: 0,
         hOffsetMm: 0,
         media: 'gap',
@@ -240,7 +267,7 @@ export function LabelEditor({
           widthMm: geometry.labelWidthMm,
           heightMm: geometry.labelHeightMm,
           orientation: 0,
-          threshold: 128,
+          threshold: quality.threshold,
           dither: false,
           hOffsetMm: 0,
         });
@@ -252,8 +279,8 @@ export function LabelEditor({
           heightMm: geometry.labelHeightMm,
           gapMm: 2,
           copies: 1,
-          density: 8,
-          speed: 6,
+          density: quality.density,
+          speed: quality.speed,
           vOffsetMm: 0,
           media: 'gap',
         });
@@ -384,7 +411,9 @@ export function LabelEditor({
         style={{
           position: 'absolute',
           left: 0,
-          top: 0,
+          top: -20000,
+          width: activePrintGeometry.widthDots,
+          height: activePrintGeometry.heightDots,
           zIndex: -999,
           opacity: 1,
           pointerEvents: 'none',
@@ -393,7 +422,10 @@ export function LabelEditor({
         }}>
         <ViewShot
           ref={printShotRef}
-          options={PRINT_CAPTURE_OPTIONS}
+          options={printCaptureOptionsForSize(
+            activePrintGeometry.widthDots,
+            activePrintGeometry.heightDots,
+          )}
           style={{
             width: activePrintGeometry.widthDots,
             height: activePrintGeometry.heightDots,
@@ -465,42 +497,80 @@ export function LabelEditor({
         </View>
       )}
 
-      {/* Bottom Export & Print Actions Bar */}
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 10 }]}>
+      {/* Bottom Export & Print Actions Bar with Bluetooth Status */}
+      <View style={[styles.bottomContainer, { paddingBottom: insets.bottom + 10 }]}>
+        {/* Bluetooth Connection Status Pill */}
         <Pressable
-          onPress={() => setDataModalVisible(true)}
-          style={({ pressed }) => [styles.secBtn, pressed && styles.pressed]}>
-          <AppIcon name="person.crop.circle" tintColor="#0F172A" size={16} />
-          <Text style={styles.secBtnText}>Order Data</Text>
+          onPress={() => router.push('/printer-connect')}
+          style={({ pressed }) => [styles.btStatusBar, pressed && styles.pressed]}>
+          <View style={styles.btStatusLeft}>
+            <View
+              style={[
+                styles.btStatusDot,
+                {
+                  backgroundColor:
+                    printerStatus === 'connected' || printerStatus === 'printing'
+                      ? '#10B981'
+                      : printerStatus === 'connecting'
+                        ? '#3B82F6'
+                        : '#F59E0B',
+                },
+              ]}
+            />
+            <Text style={styles.btStatusText} numberOfLines={1}>
+              {printerStatus === 'connected' || printerStatus === 'printing'
+                ? `Connected: ${connectedDeviceName || 'Thermal Printer'}`
+                : printerStatus === 'connecting'
+                  ? 'Connecting to printer...'
+                  : connectedDeviceName
+                    ? `Disconnected (${connectedDeviceName})`
+                    : 'Printer Disconnected'}
+            </Text>
+          </View>
+          <View style={styles.btStatusRight}>
+            <Text style={styles.btStatusAction}>
+              {printerStatus === 'connected' || printerStatus === 'printing' ? 'Change' : 'Connect'}
+            </Text>
+            <AppIcon name="chevron.right" tintColor="#64748B" size={12} />
+          </View>
         </Pressable>
 
-        <Pressable
-          onPress={handleExportPDF}
-          disabled={exportingPdf}
-          style={({ pressed }) => [styles.secBtn, pressed && styles.pressed]}>
-          {exportingPdf ? (
-            <ActivityIndicator size="small" color="#0F172A" />
-          ) : (
-            <>
-              <AppIcon name="arrow.down.doc" tintColor="#0F172A" size={16} />
-              <Text style={styles.secBtnText}>Export PDF</Text>
-            </>
-          )}
-        </Pressable>
+        <View style={styles.bottomBar}>
+          <Pressable
+            onPress={() => setDataModalVisible(true)}
+            style={({ pressed }) => [styles.secBtn, pressed && styles.pressed]}>
+            <AppIcon name="person.crop.circle" tintColor="#0F172A" size={16} />
+            <Text style={styles.secBtnText}>Order Data</Text>
+          </Pressable>
 
-        <Pressable
-          onPress={handleDirectPrint}
-          disabled={printing}
-          style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}>
-          {printing ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <>
-              <AppIcon name="printer.fill" tintColor="#FFFFFF" size={16} />
-              <Text style={styles.primaryBtnText}>Print Label</Text>
-            </>
-          )}
-        </Pressable>
+          <Pressable
+            onPress={handleExportPDF}
+            disabled={exportingPdf}
+            style={({ pressed }) => [styles.secBtn, pressed && styles.pressed]}>
+            {exportingPdf ? (
+              <ActivityIndicator size="small" color="#0F172A" />
+            ) : (
+              <>
+                <AppIcon name="arrow.down.doc" tintColor="#0F172A" size={16} />
+                <Text style={styles.secBtnText}>Export PDF</Text>
+              </>
+            )}
+          </Pressable>
+
+          <Pressable
+            onPress={handleDirectPrint}
+            disabled={printing}
+            style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}>
+            {printing ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <AppIcon name="printer.fill" tintColor="#FFFFFF" size={16} />
+                <Text style={styles.primaryBtnText}>Print Label</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
       </View>
 
       {/* Order Data Editor Modal */}
@@ -713,15 +783,53 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  bottomBar: {
+  bottomContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  btStatusBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 12,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
+    paddingVertical: 8,
+    backgroundColor: '#F8FAFC',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  btStatusLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  btStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  btStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+    flex: 1,
+  },
+  btStatusRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  btStatusAction: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2563EB',
+  },
+  bottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 10,
     gap: 8,
   },
   secBtn: {

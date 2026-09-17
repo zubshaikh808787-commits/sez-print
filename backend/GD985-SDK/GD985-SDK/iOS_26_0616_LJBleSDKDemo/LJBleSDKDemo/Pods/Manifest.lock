@@ -1,0 +1,50 @@
+PODS:
+  - AFNetworking (4.0.1):
+    - AFNetworking/NSURLSession (= 4.0.1)
+    - AFNetworking/Reachability (= 4.0.1)
+    - AFNetworking/Security (= 4.0.1)
+    - AFNetworking/Serialization (= 4.0.1)
+    - AFNetworking/UIKit (= 4.0.1)
+  - AFNetworking/NSURLSession (4.0.1):
+    - AFNetworking/Reachability
+    - AFNetworking/Security
+    - AFNetworking/Serialization
+  - AFNetworking/Reachability (4.0.1)
+  - AFNetworking/Security (4.0.1)
+  - AFNetworking/Serialization (4.0.1)
+  - AFNetworking/UIKit (4.0.1):
+    - AFNetworking/NSURLSession
+  - Masonry (1.1.0)
+  - MBProgressHUD (1.2.0)
+  - SnapKit (5.7.1)
+  - TZImagePickerController (3.8.8):
+    - TZImagePickerController/Basic (= 3.8.8)
+    - TZImagePickerController/Location (= 3.8.8)
+  - TZImagePickerController/Basic (3.8.8)
+  - TZImagePickerController/Location (3.8.8)
+
+DEPENDENCIES:
+  - AFNetworking
+  - Masonry
+  - MBProgressHUD
+  - SnapKit
+  - TZImagePickerController (= 3.8.8)
+
+SPEC REPOS:
+  trunk:
+    - AFNetworking
+    - Masonry
+    - MBProgressHUD
+    - SnapKit
+    - TZImagePickerController
+
+SPEC CHECKSUMS:
+  AFNetworking: 3bd23d814e976cd148d7d44c3ab78017b744cd58
+  Masonry: 678fab65091a9290e40e2832a55e7ab731aad201
+  MBProgressHUD: 3ee5efcc380f6a79a7cc9b363dd669c5e1ae7406
+  SnapKit: d612e99e678a2d3b95bf60b0705ed0a35c03484a
+  TZImagePickerController: d084a7b97c82d387e7669dd86dc9a9057500aacf
+
+PODFILE CHECKSUM: f4141c14bd33d8fb74eefd60975f87a1a8f83b83
+
+COCOAPODS: 1.16.2

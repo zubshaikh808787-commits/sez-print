@@ -77,6 +77,7 @@ import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { loadAndRenderPdf, printPdfToThermal, type RenderedPdfPage } from '@/lib/pdf-printer';
 
 import { fitLabelSize, printMediaSizeMm, type LabelSizeMm } from '@/lib/label-geometry';
 import {
@@ -437,13 +438,39 @@ export default function PrintScreen() {
   const isExcelJob = params.docType === 'Excel' && excelSheet !== null;
   const isPdfJob = params.docType === 'PDF';
 
+  const [pdfPages, setPdfPages] = useState<RenderedPdfPage[]>([]);
+  const [pdfRendering, setPdfRendering] = useState(false);
+
+  useEffect(() => {
+    if (!isPdfJob || !params.docUri) return;
+    let active = true;
+    setPdfRendering(true);
+    loadAndRenderPdf(params.docUri)
+      .then((res) => {
+        if (active) {
+          setPdfPages(res.pages);
+          setPdfRendering(false);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          console.warn('[print] Failed to render PDF:', err);
+          setPdfRendering(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [isPdfJob, params.docUri]);
+
   const pageCount = useMemo(() => {
+    if (isPdfJob) return Math.max(1, pdfPages.length);
     if (isExcelJob && excelSheet) return Math.max(1, excelSheet.rows.length);
     if (baseDocument && excelSheet && printingSettings.autoPages) {
       return dataPageCount(baseDocument, excelSheet);
     }
     return 1;
-  }, [isExcelJob, excelSheet, baseDocument, printingSettings.autoPages]);
+  }, [isPdfJob, pdfPages.length, isExcelJob, excelSheet, baseDocument, printingSettings.autoPages]);
 
   const buildPageDocument = useCallback(
     (page: number): LabelDocument | null => {
@@ -590,26 +617,48 @@ export default function PrintScreen() {
 
   const handlePrint = useCallback(async () => {
     if (printingLockRef.current) return;
-    // PDFs can't be rasterized for a thermal printer here; hand them to the OS
-    // print dialog (AirPrint / Android print services) instead.
-    if (isPdfJob && params.docUri) {
+    if (isPdfJob) {
+      const manager = getPrinterManager();
+      if (!manager.isConnected) {
+        Alert.alert(
+          'Printer Not Connected',
+          'Connect your thermal printer (TD-404, Tez, Dev, Josh) before printing.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Connect', onPress: () => router.push('/printer-connect') },
+          ],
+        );
+        return;
+      }
+
+      if (pdfPages.length === 0) {
+        Alert.alert('PDF Not Ready', 'Please wait for the PDF pages to finish rendering.');
+        return;
+      }
+
+      setPrinting(true);
+      printingLockRef.current = true;
       try {
-        const Print = await import('expo-print');
-        await Print.printAsync({ uri: params.docUri });
-        if (printingSettings.recordHistory) {
-          addHistoryEntry({
-            labelName: jobName,
-            copies: 1,
-            documentId: undefined,
-            source: 'pdf',
-          });
-        }
+        const targetSelection = pageCount > 1 ? pageIndex : 'all';
+        await printPdfToThermal(pdfPages, {
+          pageSelection: targetSelection,
+          copies,
+          density: darkness ?? 10,
+          speed: speed ?? 3,
+          docName: jobName,
+        });
+
+        Alert.alert(
+          'Print Sent',
+          `${jobName} was sent to ${deviceName ?? 'the printer'}.`,
+        );
+        if (printingSettings.returnPrevious) router.back();
       } catch (error) {
-        const message = error instanceof Error ? error.message : '';
-        // User dismissing the dialog is not an error worth surfacing.
-        if (!/cancel|dismiss/i.test(message)) {
-          Alert.alert('Print Failed', message || 'Could not open the system print dialog.');
-        }
+        const message = formatPrintFailure(error);
+        if (message) Alert.alert('Print Failed', message);
+      } finally {
+        printingLockRef.current = false;
+        setPrinting(false);
       }
       return;
     }
@@ -741,7 +790,33 @@ export default function PrintScreen() {
         const artworkPhoto = Boolean(params.imageUri) && !params.labelId;
 
         let usedNative = false;
-        if (manager.isTez) {
+        if (manager.isLabelX) {
+          console.info(
+            `[LABELX-PRINT] Label print via Label X LuckPrinter SDK: page=${page + 1}/${pageCount}, size=${paper.widthMm}x${paper.heightMm}mm, copies=${copies}, media=${media}`,
+          );
+          timer.start('transmit');
+          await manager.printLabelXPngLabelFast({
+            pngBase64: ratTail143Job
+              ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
+              : base64,
+            widthMm: paper.widthMm,
+            heightMm: paper.heightMm,
+            gapMm: gapLength,
+            copies,
+            density: printDensity !== undefined && printDensity !== null ? Math.min(2, Math.max(0, Math.floor(printDensity / 5))) : 1,
+            speed: printSpeed,
+            hOffsetMm: hOffset,
+            vOffsetMm: vOffset,
+            media: wantsBline ? 'bline' : media,
+            threshold,
+            dither,
+          });
+          usedNative = true;
+          timer.end('transmit');
+          console.info(
+            `[LABELX-PRINT] page ${page + 1} total: ${Date.now() - pageStart} ms | Label X LuckPrinter SDK path`,
+          );
+        } else if (manager.isTez) {
           console.info(
             `[TEZ-PRINT] Label print via OEM PrintSDK: page=${page + 1}/${pageCount}, size=${paper.widthMm}x${paper.heightMm}mm, copies=${copies}, media=${media}`,
           );
@@ -859,7 +934,7 @@ export default function PrintScreen() {
           timer.end('sdkFastPrint');
         }
 
-        if (!manager.isJosh && !manager.isTez && !manager.isDev && !usedNative) {
+        if (!manager.isLabelX && !manager.isJosh && !manager.isTez && !manager.isDev && !usedNative) {
           timer.start('rasterize');
           const bits = rasterizePngForPrint(base64, {
             widthMm,
@@ -1004,6 +1079,29 @@ export default function PrintScreen() {
                   contentFit="contain"
                 />
               </View>
+            ) : isPdfJob && pdfPages.length > 0 ? (
+              <View
+                style={[
+                  styles.previewCard,
+                  {
+                    width: cardWidth,
+                    height: cardHeight,
+                    backgroundColor: '#FFFFFF',
+                    padding: 8,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  },
+                ]}>
+                <Image
+                  source={{
+                    uri: `data:image/png;base64,${
+                      pdfPages[Math.min(pageIndex, pdfPages.length - 1)]?.base64
+                    }`,
+                  }}
+                  style={{ width: '100%', height: '100%' }}
+                  contentFit="contain"
+                />
+              </View>
             ) : (
               <View
                 style={[styles.previewCard, styles.docPreviewCard, { width: cardWidth, height: cardHeight }]}>
@@ -1014,9 +1112,7 @@ export default function PrintScreen() {
                   {params.docName ?? 'Document'}
                 </Text>
                 <Text style={styles.docPreviewSub}>
-                  {isPdfJob
-                    ? 'Prints via the system print dialog'
-                    : 'Document Ready for Print'}
+                  {pdfRendering ? 'Rendering PDF pages…' : 'Document Ready for Thermal Print'}
                 </Text>
               </View>
             )}

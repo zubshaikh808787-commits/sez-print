@@ -42,11 +42,20 @@ export const PRINT_CAPTURE_OPTIONS = {
 };
 
 /**
- * ViewShot options for a view already laid out at SIZE-in-dots.
- * Do not pass width/height — that second resize is the dp→dots mismatch.
- * Density-inflated captures (2×/3× SIZE) are integer-downsampled later.
+ * ViewShot options for a view laid out at printer-dot dimensions.
+ * Passing width and height instructs ViewShot to output exact hardware dots on Android,
+ * preventing device screen density (2.625x, 3x) from inflating the bitmap.
  */
-export function printCaptureOptionsForSize(_widthPx?: number, _heightPx?: number) {
+export function printCaptureOptionsForSize(widthPx?: number, heightPx?: number) {
+  if (widthPx && heightPx && Number.isFinite(widthPx) && Number.isFinite(heightPx) && widthPx > 0 && heightPx > 0) {
+    return {
+      format: 'png' as const,
+      quality: 1,
+      result: 'base64' as const,
+      width: Math.round(widthPx),
+      height: Math.round(heightPx),
+    };
+  }
   return PRINT_CAPTURE_OPTIONS;
 }
 
@@ -417,6 +426,7 @@ export type NativePngPrintOptions = {
   media?: 'gap' | 'bline' | 'continuous';
   orientation?: number;
   dpi?: number;
+  threshold?: number;
 };
 
 /**

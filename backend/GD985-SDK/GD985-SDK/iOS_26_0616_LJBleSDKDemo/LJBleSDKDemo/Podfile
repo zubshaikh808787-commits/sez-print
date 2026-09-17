@@ -1,0 +1,92 @@
+# 指定平台和版本
+platform :ios, '13.0'
+use_frameworks!
+# 指定项目的目标
+target 'LJBleDemo' do
+  use_frameworks!
+  # 添加依赖库
+  pod 'Masonry'
+  pod 'MBProgressHUD'
+  pod 'AFNetworking'
+  pod 'SnapKit'
+  
+  pod 'TZImagePickerController', '3.8.8'
+
+end
+
+#post_install do |installer|
+#    installer.generated_projects.each do |project|
+#          project.targets.each do |target|
+#              target.build_configurations.each do |config|
+#                  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+#               end
+#          end
+#   end
+#end
+
+post_install do |installer|
+  # sandbox.root 即 Pods 目录（不是工程根目录）
+  pods_root = installer.sandbox.root.to_s
+
+  # Xcode 26 Explicit Modules：不允许直接 #import Darwin 私有头 <netinet6/in6.h>
+  Dir.glob(File.join(pods_root, '**', '*.{h,m,mm,c}')).each do |file|
+    begin
+      content = File.read(file)
+      next unless content.include?('#import <netinet6/in6.h>')
+
+      File.chmod(0644, file)
+      new_content = content.gsub(/^\s*#import\s+<netinet6\/in6\.h>\s*\n/, '')
+      File.write(file, new_content)
+      puts "[Podfile] Removed #import <netinet6/in6.h> from #{file}"
+    rescue => e
+      puts "[Podfile] Warning: failed to patch #{file}: #{e.message}"
+    end
+  end
+
+  # Xcode 26：YYTextLayout.m 链式比较 a < b < c 会报错，改为按距离选 prev/next
+  chained_cmp_pattern = /
+    position\ =\ fabs\(left\ -\ point\.(x|y)\)\ <\ fabs\(right\ -\ point\.\1\)\ <\ \(right\ \?\ prev\ :\ next\);
+  /x
+  chained_cmp_replacement = "position = fabs(left - point.\\1) < fabs(right - point.\\1) ? prev : next;"
+
+  yytext_root = installer.sandbox.pod_dir('YYText').to_s
+  Dir.glob(File.join(yytext_root, '**', 'YYTextLayout.m')).each do |yytext_layout_file|
+    begin
+      content = File.read(yytext_layout_file)
+      next unless content.match?(chained_cmp_pattern)
+
+      File.chmod(0644, yytext_layout_file)
+      new_content = content.gsub(chained_cmp_pattern, chained_cmp_replacement)
+      File.write(yytext_layout_file, new_content)
+      puts "[Podfile] Fixed chained comparison in #{yytext_layout_file}"
+    rescue => e
+      puts "[Podfile] Warning: failed to patch #{yytext_layout_file}: #{e.message}"
+    end
+  end
+
+  # Xcode 26 / Swift 6：扩展内 alignCenter 会与全局函数歧义，需加模块前缀
+  stevia_center_file = File.join(installer.sandbox.pod_dir('SteviaLayout').to_s, 'Sources', 'Stevia', 'Stevia+Center.swift')
+  if File.exist?(stevia_center_file)
+    begin
+      content = File.read(stevia_center_file)
+      old_call = 'alignCenter(self, with: spv)'
+      new_call = 'Stevia.alignCenter(self, with: spv)'
+      if content.include?(old_call) && !content.include?(new_call)
+        File.chmod(0644, stevia_center_file)
+        File.write(stevia_center_file, content.gsub(old_call, new_call))
+        puts "[Podfile] Fixed Stevia alignCenter ambiguity in #{stevia_center_file}"
+      end
+    rescue => e
+      puts "[Podfile] Warning: failed to patch #{stevia_center_file}: #{e.message}"
+    end
+  end
+
+  installer.generated_projects.each do |project|
+    project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+        config.build_settings['SWIFT_VERSION'] = '5.0'
+      end
+    end
+  end
+end

@@ -51,8 +51,8 @@ function mediaCommand(media: TscJobOptions['media'], gapMm: number): string {
 
 /**
  * Encode a 1-bit packed raster as a full TSPL job with BITMAP payload.
- * Mode 0 = OVERWRITE. Always emits PRINT 1,1 — callers that need N copies must
- * send N independent jobs.
+ * Mode 0 = OVERWRITE. Emits PRINT 1 — callers that need N copies must
+ * send N independent jobs or specify copies in the print manager.
  *
  * Single-allocation zero-copy: inverts raster directly into output buffer
  * without allocating intermediate 250KB payloads or multi-array concatenation.
@@ -94,7 +94,7 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
     'CLS\r\n' +
     `BITMAP ${x},${y},${bitmap.bytesPerRow},${bitmap.height},0,`;
 
-  const footer = '\r\nPRINT 1,1\r\n';
+  const footer = '\r\nPRINT 1\r\n';
 
   const headerLen = header.length;
   const dataLen = bitmap.data.length;
@@ -135,7 +135,7 @@ export type TsplJobInspection = {
 /** Parse the TSPL ASCII header that this encoder actually wrote. */
 export function inspectTsplJob(bytes: Uint8Array): TsplJobInspection {
   const { text, payloadStart } = readTsplHeader(bytes);
-  const footerLen = '\r\nPRINT 1,1\r\n'.length;
+  const footerLen = '\r\nPRINT 1\r\n'.length;
   const sizeCommand = matchLine(text, /^SIZE .+$/m) ?? '';
   const gapCommand = matchLine(text, /^(GAP|BLINE) .+$/m) ?? '';
   const directionCommand = matchLine(text, /^DIRECTION .+$/m) ?? '';
@@ -171,7 +171,7 @@ function readTsplHeader(bytes: Uint8Array): { text: string; payloadStart: number
       return { text, payloadStart: i };
     }
     text += String.fromCharCode(c);
-    // BITMAP x,y,byteWidth,height,mode,  — do not stop at BITMAP x,y,
+    // BITMAP x,y,byteWidth,height,mode, — do not stop at BITMAP x,y,
     if (/BITMAP\s+-?\d+,-?\d+,\d+,\d+,\d+,$/.test(text)) {
       return { text, payloadStart: i + 1 };
     }
@@ -202,6 +202,6 @@ export function encodeTscTextSample(options: {
     'REFERENCE 0,0\r\n' +
     'CLS\r\n' +
     `TEXT 40,40,"0",0,1,1,"${text}"\r\n` +
-    'PRINT 1,1\r\n';
+    'PRINT 1\r\n';
   return ascii(cmd);
 }

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        style="@style/Ai50DialogLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/dialog_wifi_ssid" />
+
+    <EditText
+        android:id="@+id/et_account"
+        style="@style/Ai50DialogInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_field_gap"
+        android:hint="@string/dialog_wifi_ssid_hint"
+        android:inputType="text" />
+
+    <TextView
+        style="@style/Ai50DialogLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_section_gap"
+        android:text="@string/dialog_wifi_pwd" />
+
+    <EditText
+        android:id="@+id/et_password"
+        style="@style/Ai50DialogInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_field_gap"
+        android:hint="@string/dialog_wifi_pwd_hint"
+        android:inputType="textPassword" />
+</LinearLayout>

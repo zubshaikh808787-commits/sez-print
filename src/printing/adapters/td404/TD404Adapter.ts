@@ -88,9 +88,21 @@ export function createTd404Adapter(
       if (job.bitmap.pixelFormat !== '1bpp') {
         throw new Error('TD-404 adapter expects a 1bpp bitmap from the universal renderer.');
       }
+      const isAlreadyPacked =
+        packedW === job.widthDots ||
+        job.bitmap.widthDots === packedW ||
+        job.bitmap.bytesPerRow === packedW / 8;
       const packedJob =
-        packedW === job.widthDots
-          ? job
+        isAlreadyPacked
+          ? {
+              ...job,
+              widthDots: packedW,
+              bitmap: {
+                ...job.bitmap,
+                widthDots: packedW,
+                bytesPerRow: packedW / 8,
+              },
+            }
           : {
               ...job,
               widthDots: packedW,
@@ -98,7 +110,12 @@ export function createTd404Adapter(
                 ...job.bitmap,
                 widthDots: packedW,
                 bytesPerRow: packedW / 8,
-                data: packCrop1bpp(job.bitmap.data, job.widthDots, job.heightDots, packedW),
+                data: packCrop1bpp(
+                  job.bitmap.data,
+                  job.bitmap.bytesPerRow ?? Math.ceil(job.widthDots / 8),
+                  job.heightDots,
+                  packedW / 8,
+                ),
               },
             };
       return fns.encodeTspl(packedJob, options, packedW);
@@ -114,15 +131,15 @@ export function createTd404Adapter(
 
 function packCrop1bpp(
   data: Uint8Array,
-  srcWidth: number,
+  srcBpr: number,
   height: number,
-  destWidth: number,
+  destBpr: number,
 ): Uint8Array {
-  const srcBpr = Math.ceil(srcWidth / 8);
-  const destBpr = destWidth / 8;
+  if (srcBpr === destBpr) return data;
   const out = new Uint8Array(destBpr * height);
+  const copyBpr = Math.min(srcBpr, destBpr);
   for (let y = 0; y < height; y++) {
-    out.set(data.subarray(y * srcBpr, y * srcBpr + destBpr), y * destBpr);
+    out.set(data.subarray(y * srcBpr, y * srcBpr + copyBpr), y * destBpr);
   }
   return out;
 }

@@ -17,12 +17,17 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Rect
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import androidx.core.content.ContextCompat
 import com.ninestar.printer.command.LabelCommand
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.util.UUID
 import java.util.Vector
@@ -341,6 +346,85 @@ class Td404PrinterModule : Module() {
         }
       }
     }
+
+    /**
+     * Native Android hardware-accelerated PDF renderer.
+     * Converts any PDF URI (content:// or file://) into page Bitmaps/PNGs at target DPI.
+     */
+    AsyncFunction("renderPdfPages") { uriString: String, options: Map<String, Any?>?, promise: Promise ->
+      ioExecutor.execute {
+        var pfd: ParcelFileDescriptor? = null
+        var renderer: PdfRenderer? = null
+        var tempFile: File? = null
+        try {
+          val context = appContext.reactContext ?: throw IllegalStateException("No Android React Context available")
+          val uri = Uri.parse(uriString)
+          val targetDpi = (options?.get("dpi") as? Number)?.toDouble() ?: 203.0
+          val maxPages = (options?.get("maxPages") as? Number)?.toInt() ?: 100
+
+          val file = if (uri.scheme == "content" || (uri.scheme == null && !uriString.startsWith("/"))) {
+            val tmp = File.createTempFile("pdf_render_", ".pdf", context.cacheDir)
+            tempFile = tmp
+            context.contentResolver.openInputStream(uri)?.use { input ->
+              tmp.outputStream().use { output ->
+                input.copyTo(output)
+              }
+            } ?: throw IOException("Cannot open input stream for: $uriString")
+            tmp
+          } else {
+            val path = if (uri.scheme == "file") uri.path ?: uriString else uriString
+            File(path)
+          }
+
+          pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+          renderer = PdfRenderer(pfd)
+          val totalPages = renderer.pageCount
+          val renderCount = minOf(totalPages, maxPages)
+          val pagesList = mutableListOf<Map<String, Any?>>()
+          val scale = targetDpi / 72.0
+
+          for (i in 0 until renderCount) {
+            val page = renderer.openPage(i)
+            val w = Math.max(1, Math.round(page.width * scale).toInt())
+            val h = Math.max(1, Math.round(page.height * scale).toInt())
+            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(Color.WHITE)
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+            page.close()
+
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 95, stream)
+            val base64 = android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+            bitmap.recycle()
+
+            pagesList.add(
+              mapOf(
+                "pageIndex" to i,
+                "widthPx" to w,
+                "heightPx" to h,
+                "widthMm" to (page.width * 25.4 / 72.0),
+                "heightMm" to (page.height * 25.4 / 72.0),
+                "base64" to base64,
+              )
+            )
+          }
+
+          promise.resolve(
+            mapOf(
+              "pageCount" to totalPages,
+              "pages" to pagesList,
+            )
+          )
+        } catch (e: Exception) {
+          android.util.Log.e("Td404Printer", "renderPdfPages failed: ${e.message}", e)
+          promise.reject("PDF_RENDER_FAILED", e.message, e)
+        } finally {
+          try { renderer?.close() } catch (_: Exception) {}
+          try { pfd?.close() } catch (_: Exception) {}
+          try { tempFile?.delete() } catch (_: Exception) {}
+        }
+      }
+    }
   }
 
   private fun writeBytesToSocket(bytes: ByteArray, promise: Promise) {
@@ -419,14 +503,18 @@ class Td404PrinterModule : Module() {
     val widthMm = (options["widthMm"] as? Number)?.toDouble() ?: 50.0
     val heightMm = (options["heightMm"] as? Number)?.toDouble() ?: 30.0
     val gapMm = (options["gapMm"] as? Number)?.toDouble() ?: 2.0
-    val density = (options["density"] as? Number)?.toInt() ?: 8
-    val speed = (options["speed"] as? Number)?.toInt() ?: 6
+    val density = (options["density"] as? Number)?.toInt() ?: 10
+    val speed = (options["speed"] as? Number)?.toInt() ?: 3
+    val threshold = (options["threshold"] as? Number)?.toInt() ?: 160
     val xDots = (options["xDots"] as? Number)?.toInt() ?: 0
     val yDots = (options["yDots"] as? Number)?.toInt() ?: 0
     val copies = ((options["copies"] as? Number)?.toInt() ?: 1).coerceAtLeast(1)
     val media = (options["media"] as? String) ?: "gap"
     val orientation = (options["orientation"] as? Number)?.toInt() ?: 0
     val dpi = (options["dpi"] as? Number)?.toDouble() ?: 304.0
+    // DIRECTION 1 matches the JS TSPL pipeline default. DIRECTION 0 mirrors the
+    // bitmap along the feed axis, causing apparent zoom/offset vs the on-screen preview.
+    val direction = (options["direction"] as? Number)?.toInt() ?: 1
 
     val t0 = System.currentTimeMillis()
     val raw = android.util.Base64.decode(pngBase64, android.util.Base64.DEFAULT)
@@ -453,28 +541,25 @@ class Td404PrinterModule : Module() {
     // TSPL BITMAP is bytes×8. Never pack UP past SIZE-in-dots.
     val packedW = Math.max(8, (sizeDotsW / 8) * 8)
     val packedH = sizeDotsH
-    // Capture is SIZE-in-dots. TSPL BITMAP is packed DOWN. Crop the right 0–7
-    // columns or pad with white. Never scale — scaling changes millimetres.
+    // If incoming capture is density-inflated (e.g. ViewShot rendered at screen
+    // density 2.625x / 3x) or differently sized, scale to target packed dots
+    // rather than blindly cropping. If difference is within 8 dots, it is just byte-alignment;
+    // preserve exact pixels to prevent bilinear blur on crisp lines and dithers.
     val srcW = bitmap.width
     val srcH = bitmap.height
     if (srcW != packedW || srcH != packedH) {
-      android.util.Log.w(
-        "Td404Printer",
-        "PRINT-TRACE BITMAP_FIT src=${srcW}x${srcH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} (crop/pad, no scale)",
-      )
-      val next = Bitmap.createBitmap(packedW, packedH, Bitmap.Config.ARGB_8888)
-      next.eraseColor(Color.WHITE)
-      val copyW = minOf(srcW, packedW)
-      val copyH = minOf(srcH, packedH)
-      Canvas(next).drawBitmap(
-        bitmap,
-        Rect(0, 0, copyW, copyH),
-        Rect(0, 0, copyW, copyH),
-        null,
-      )
-      if (next !== bitmap) {
-        bitmap.recycle()
-        bitmap = next
+      val diffW = Math.abs(srcW - packedW)
+      val diffH = Math.abs(srcH - packedH)
+      if (diffW > 8 || diffH > 8) {
+        android.util.Log.w(
+          "Td404Printer",
+          "PRINT-TRACE BITMAP_FIT src=${srcW}x${srcH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} (scaling to packed dots)",
+        )
+        val scaled = Bitmap.createScaledBitmap(bitmap, packedW, packedH, true)
+        if (scaled !== bitmap) {
+          bitmap.recycle()
+          bitmap = scaled
+        }
       }
     }
 
@@ -499,28 +584,77 @@ class Td404PrinterModule : Module() {
       )
     }
 
-    val contentW = bitmap.width
-    val contentH = bitmap.height
+    val dither = (options["dither"] as? Boolean) ?: false
+    val contentW = minOf(bitmap.width, packedW)
+    val contentH = minOf(bitmap.height, packedH)
     val bytesPerRow = packedW / 8
-    val pixels = IntArray(contentW * contentH)
-    bitmap.getPixels(pixels, 0, contentW, 0, 0, contentW, contentH)
+    val pixels = IntArray(bitmap.width * bitmap.height)
+    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
     val rawBmp = ByteArray(bytesPerRow * contentH)
 
     // Pre-fill white (bit 1 set) so unused trailing bits stay blank
     java.util.Arrays.fill(rawBmp, 0xFF.toByte())
-    for (y in 0 until contentH) {
-      val rowOffset = y * bytesPerRow
-      val pixRowOffset = y * contentW
-      for (x in 0 until contentW) {
-        val c = pixels[pixRowOffset + x]
-        val r = (c shr 16) and 0xFF
-        val g = (c shr 8) and 0xFF
-        val b = c and 0xFF
-        val lum = (77 * r + 150 * g + 29 * b) shr 8
-        if (lum < 128) {
-          val byteIndex = rowOffset + (x shr 3)
-          val bitIndex = 7 - (x and 7)
-          rawBmp[byteIndex] = (rawBmp[byteIndex].toInt() and (1 shl bitIndex).inv()).toByte()
+
+    if (!dither) {
+      for (y in 0 until contentH) {
+        val rowOffset = y * bytesPerRow
+        val pixRowOffset = y * bitmap.width
+        for (x in 0 until contentW) {
+          val c = pixels[pixRowOffset + x]
+          val r = (c shr 16) and 0xFF
+          val g = (c shr 8) and 0xFF
+          val b = c and 0xFF
+          val lum = (77 * r + 150 * g + 29 * b) shr 8
+          if (lum < threshold) {
+            val byteIndex = rowOffset + (x shr 3)
+            val bitIndex = 7 - (x and 7)
+            rawBmp[byteIndex] = (rawBmp[byteIndex].toInt() and (1 shl bitIndex).inv()).toByte()
+          }
+        }
+      }
+    } else {
+      // Native Floyd-Steinberg error diffusion for photo & halftone print quality
+      val work = IntArray(contentW * contentH)
+      for (y in 0 until contentH) {
+        val pixRowOffset = y * bitmap.width
+        val workRowOffset = y * contentW
+        for (x in 0 until contentW) {
+          val c = pixels[pixRowOffset + x]
+          val r = (c shr 16) and 0xFF
+          val g = (c shr 8) and 0xFF
+          val b = c and 0xFF
+          work[workRowOffset + x] = (77 * r + 150 * g + 29 * b) shr 8
+        }
+      }
+      for (y in 0 until contentH) {
+        val rowOffset = y * bytesPerRow
+        val workRowOffset = y * contentW
+        val hasNextRow = y + 1 < contentH
+        val nextWorkRowOffset = workRowOffset + contentW
+        for (x in 0 until contentW) {
+          val idx = workRowOffset + x
+          val oldLum = work[idx]
+          val black = oldLum < threshold
+          if (black) {
+            val byteIndex = rowOffset + (x shr 3)
+            val bitIndex = 7 - (x and 7)
+            rawBmp[byteIndex] = (rawBmp[byteIndex].toInt() and (1 shl bitIndex).inv()).toByte()
+          }
+          val error = if (black) oldLum else (oldLum - 255)
+          if (error != 0) {
+            if (x + 1 < contentW) {
+              work[idx + 1] += (error * 7) shr 4
+            }
+            if (hasNextRow) {
+              if (x > 0) {
+                work[nextWorkRowOffset + x - 1] += (error * 3) shr 4
+              }
+              work[nextWorkRowOffset + x] += (error * 5) shr 4
+              if (x + 1 < contentW) {
+                work[nextWorkRowOffset + x + 1] += error shr 4
+              }
+            }
+          }
         }
       }
     }
@@ -536,11 +670,13 @@ class Td404PrinterModule : Module() {
       gapCmd +
       "SPEED $speed\r\n" +
       "DENSITY $density\r\n" +
-      "DIRECTION 0\r\n" +
+      "DIRECTION $direction\r\n" +
+      "SET TEAR ON\r\n" +
+      "OFFSET 0 mm\r\n" +
       "REFERENCE 0,0\r\n" +
       "CLS\r\n" +
       "BITMAP $bitmapX,$bitmapY,$bytesPerRow,$contentH,0,"
-    val footer = "\r\nPRINT 1,1\r\n"
+    val footer = "\r\nPRINT 1\r\n"
 
     val headerBytes = header.toByteArray(Charsets.US_ASCII)
     val footerBytes = footer.toByteArray(Charsets.US_ASCII)
@@ -561,7 +697,7 @@ class Td404PrinterModule : Module() {
       "Td404Printer",
       "PRINT-TRACE SDK png=${srcW}x${srcH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} " +
         "dpm=$dpm dpi=$dpi SIZE=${formatMm(widthMm)}x${formatMm(heightMm)}mm " +
-        "BITMAP=${bytesPerRow}x${contentH} job=${job.size}B copies=$copies " +
+        "BITMAP=${bytesPerRow}x${contentH} DIRECTION=$direction job=${job.size}B copies=$copies " +
         "decode=${tDecode - t0}ms rotate=${tRotate - tDecode}ms encode=${tEncode - tRotate}ms write=${tWrite - tEncode}ms",
     )
 

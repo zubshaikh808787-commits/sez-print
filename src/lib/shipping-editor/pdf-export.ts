@@ -409,7 +409,7 @@ export function renderLabelToTSPL(
     }
   }
 
-  lines.push('PRINT 1,1');
+  lines.push('PRINT 1');
   return lines.join('\r\n') + '\r\n';
 }
 

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:baselineAligned="false"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                style="@style/Ai50DialogLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/demo_print_qty_label" />
+
+            <EditText
+                android:id="@+id/et_content"
+                style="@style/Ai50DialogInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/ai50_dialog_field_gap"
+                android:hint="@string/demo_print_qty_hint"
+                android:inputType="number"
+                android:maxLength="2"
+                android:text="1" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="12dp"
+            android:layout_height="1dp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                style="@style/Ai50DialogLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/demo_print_width_mm_label" />
+
+            <EditText
+                android:id="@+id/et_width"
+                style="@style/Ai50DialogInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/ai50_dialog_field_gap"
+                android:hint="@string/demo_print_width_mm_hint"
+                android:inputType="number"
+                android:maxLength="3"
+                android:text="50" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        style="@style/Ai50DialogLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_section_gap"
+        android:text="@string/demo_print_height_mm_label" />
+
+    <EditText
+        android:id="@+id/et_height"
+        style="@style/Ai50DialogInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_field_gap"
+        android:hint="@string/demo_print_height_mm_hint"
+        android:inputType="number"
+        android:maxLength="3"
+        android:text="50" />
+
+    <include layout="@layout/include_ai50_select_photo" />
+</LinearLayout>

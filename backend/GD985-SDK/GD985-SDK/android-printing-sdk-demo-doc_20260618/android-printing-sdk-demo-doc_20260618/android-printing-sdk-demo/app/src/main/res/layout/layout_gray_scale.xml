@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingBottom="4dp">
+
+    <TextView
+        style="@style/Ai50DialogLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/demo_gray_scale_label" />
+
+    <CheckBox
+        android:id="@+id/cb_gray_scale"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp" />
+
+    <RadioGroup
+        android:id="@+id/rg_gray_scale"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/rb_gray_4"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:tag="4"
+            android:text="@string/demo_gray_scale_4"
+            android:textColor="@color/ai50_text_primary"
+            android:textSize="14sp" />
+
+        <RadioButton
+            android:id="@+id/rb_gray_8"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:tag="8"
+            android:text="@string/demo_gray_scale_8"
+            android:textColor="@color/ai50_text_primary"
+            android:textSize="14sp" />
+
+        <RadioButton
+            android:id="@+id/rb_gray_16"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:checked="true"
+            android:tag="16"
+            android:text="@string/demo_gray_scale_16"
+            android:textColor="@color/ai50_text_primary"
+            android:textSize="14sp" />
+    </RadioGroup>
+</LinearLayout>

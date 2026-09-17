@@ -24,6 +24,7 @@ import {
   isLikelyJoshName,
   isLikelyTd404Name,
   isLikelyDevName,
+  isLikelyLabelXName,
   shouldUseTsplCommandSet,
 } from '@/lib/printer/printer-heuristics';
 import {
@@ -41,13 +42,14 @@ export type DiscoveredPrinter = {
   id: string;
   name: string | null;
   rssi: number | null;
-  transport?: 'bluetooth-spp' | 'bluetooth-ble' | 'wifi' | 'josh-lpapi' | 'tez-spp' | 'dev-spp';
-  sdkId?: 'td404' | 'josh' | 'tez' | 'dev' | 'generic';
+  transport?: 'bluetooth-spp' | 'bluetooth-ble' | 'wifi' | 'josh-lpapi' | 'tez-spp' | 'dev-spp' | 'labelx-spp';
+  sdkId?: 'td404' | 'josh' | 'tez' | 'dev' | 'labelx' | 'generic';
   likelyTd404?: boolean;
   likelyJosh?: boolean;
   likelyTez?: boolean;
   likelyShakti?: boolean;
   likelyDev?: boolean;
+  likelyLabelX?: boolean;
   bonded?: boolean;
 };
 
@@ -60,6 +62,7 @@ export type BluetoothCapabilities = {
   joshAvailable: boolean;
   tezAvailable: boolean;
   devAvailable: boolean;
+  labelxAvailable: boolean;
   canScan: boolean;
   bluetoothOn: boolean;
   reason: string | null;
@@ -197,6 +200,7 @@ export {
   isLikelyTd404Name,
   isLikelyJoshName,
   isLikelyDevName,
+  isLikelyLabelXName,
   shouldUseTsplCommandSet,
 } from './printer-heuristics';
 
@@ -211,7 +215,7 @@ type WritableTarget = {
   withResponse: boolean;
 };
 
-type ActiveTransport = 'td404-spp' | 'ble' | 'wifi' | 'josh-lpapi' | 'tez-spp' | 'dev-spp' | null;
+type ActiveTransport = 'td404-spp' | 'ble' | 'wifi' | 'josh-lpapi' | 'tez-spp' | 'dev-spp' | 'labelx-spp' | null;
 
 class PrinterManager {
   private ble: any = null;
@@ -226,6 +230,7 @@ class PrinterManager {
   private joshScanStop: (() => Promise<void>) | null = null;
   private tezScanStop: (() => Promise<void>) | null = null;
   private devScanStop: (() => Promise<void>) | null = null;
+  private labelxScanStop: (() => Promise<void>) | null = null;
   private backendPrinterId: string | null = null;
   private lastScanError: string | null = null;
   /** Negotiated BLE ATT MTU. Payload = mtu - 3. */
@@ -250,13 +255,30 @@ class PrinterManager {
     return this.activeTransport;
   }
 
+  get isLabelX(): boolean {
+    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'josh-lpapi' || this.activeTransport === 'tez-spp' || this.activeTransport === 'dev-spp') return false;
+    if (this.activeTransport === 'labelx-spp') return true;
+    const store = usePrinterStore.getState();
+    const name = store.deviceName ?? store.lastDeviceName;
+    if (store.sdkId === 'labelx' || store.transport === 'labelx-spp') {
+      return true;
+    }
+    if (isLikelyLabelXName(name)) {
+      return true;
+    }
+    if (this.activeTransport === null && Boolean(this.getLabelX()?.isLabelXConnected?.())) {
+      return true;
+    }
+    return false;
+  }
+
   get isJosh(): boolean {
-    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'tez-spp' || this.activeTransport === 'dev-spp') return false;
+    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'tez-spp' || this.activeTransport === 'dev-spp' || this.activeTransport === 'labelx-spp') return false;
     if (this.activeTransport === 'josh-lpapi') return true;
     const store = usePrinterStore.getState();
-    if (store.transport === 'bluetooth-spp' || store.sdkId === 'td404' || store.sdkId === 'tez' || store.sdkId === 'dev') return false;
+    if (store.transport === 'bluetooth-spp' || store.sdkId === 'td404' || store.sdkId === 'tez' || store.sdkId === 'dev' || store.sdkId === 'labelx') return false;
     const name = store.deviceName ?? store.lastDeviceName;
-    if (isLikelyTd404Name(name) || isLikelyTezName(name) || isLikelyShaktiName(name) || isLikelyDevName(name)) return false;
+    if (isLikelyTd404Name(name) || isLikelyTezName(name) || isLikelyShaktiName(name) || isLikelyDevName(name) || isLikelyLabelXName(name)) return false;
     if (store.sdkId === 'josh' || store.transport === 'josh-lpapi') {
       return true;
     }
@@ -270,19 +292,19 @@ class PrinterManager {
   }
 
   get isTez(): boolean {
-    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'josh-lpapi' || this.activeTransport === 'dev-spp') return false;
+    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'josh-lpapi' || this.activeTransport === 'dev-spp' || this.activeTransport === 'labelx-spp') return false;
     if (this.activeTransport === 'tez-spp') return true;
     const store = usePrinterStore.getState();
     if (store.sdkId === 'tez' || store.transport === 'tez-spp') return true;
     if (this.activeTransport === null && Boolean(this.getTez()?.isTezConnected?.())) return true;
     const name = store.deviceName ?? store.lastDeviceName;
     if (isLikelyTezName(name) || isLikelyShaktiName(name)) return true;
-    if (isLikelyTd404Name(name) || isLikelyJoshName(name) || isLikelyDevName(name)) return false;
+    if (isLikelyTd404Name(name) || isLikelyJoshName(name) || isLikelyDevName(name) || isLikelyLabelXName(name)) return false;
     return false;
   }
 
   get isDev(): boolean {
-    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'josh-lpapi' || this.activeTransport === 'tez-spp') return false;
+    if (this.activeTransport === 'td404-spp' || this.activeTransport === 'josh-lpapi' || this.activeTransport === 'tez-spp' || this.activeTransport === 'labelx-spp') return false;
     if (this.activeTransport === 'dev-spp') return true;
     const store = usePrinterStore.getState();
     const name = store.deviceName ?? store.lastDeviceName;
@@ -292,8 +314,8 @@ class PrinterManager {
     if (isLikelyDevName(name)) {
       return true;
     }
-    if (store.transport === 'bluetooth-spp' || store.sdkId === 'td404' || store.sdkId === 'josh' || store.sdkId === 'tez') return false;
-    if (isLikelyTd404Name(name) || isLikelyJoshName(name) || isLikelyTezName(name) || isLikelyShaktiName(name)) return false;
+    if (store.transport === 'bluetooth-spp' || store.sdkId === 'td404' || store.sdkId === 'josh' || store.sdkId === 'tez' || store.sdkId === 'labelx') return false;
+    if (isLikelyTd404Name(name) || isLikelyJoshName(name) || isLikelyTezName(name) || isLikelyShaktiName(name) || isLikelyLabelXName(name)) return false;
     if (this.activeTransport === null && Boolean(this.getDev()?.isDevConnected?.())) {
       return true;
     }
@@ -376,6 +398,20 @@ class PrinterManager {
     }
   }
 
+  private getLabelX() {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require('labelx-printer') as typeof import('labelx-printer');
+    } catch {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        return require('../../../modules/labelx-printer/src/index') as typeof import('labelx-printer');
+      } catch {
+        return null;
+      }
+    }
+  }
+
   getCapabilities(): BluetoothCapabilities {
     const isWeb = Platform.OS === 'web';
     const expoGo = isExpoGoRuntime();
@@ -387,16 +423,18 @@ class PrinterManager {
     const tezAvailable = Boolean(tez?.isTezNativeAvailable());
     const dev = this.getDev();
     const devAvailable = Boolean(dev?.isDevNativeAvailable());
+    const labelx = this.getLabelX();
+    const labelxAvailable = Boolean(labelx?.isLabelXNativeAvailable());
     const bleAvailable = this.hasBleNative() || this.ble !== null;
 
     let reason: string | null = null;
     if (isWeb) {
       reason =
         'Bluetooth scan is not available in the browser. Use an Android development build, or connect the printer over Wi‑Fi below.';
-    } else if (expoGo && !classicSppAvailable && !bleAvailable && !joshAvailable && !tezAvailable && !devAvailable) {
+    } else if (expoGo && !classicSppAvailable && !bleAvailable && !joshAvailable && !tezAvailable && !devAvailable && !labelxAvailable) {
       reason =
         'You are running Expo Go. Bluetooth printer modules need a development build. Run: npx expo run:android';
-    } else if (!classicSppAvailable && !bleAvailable && !joshAvailable && !tezAvailable && !devAvailable) {
+    } else if (!classicSppAvailable && !bleAvailable && !joshAvailable && !tezAvailable && !devAvailable && !labelxAvailable) {
       reason =
         this.bleLoadError ||
         'No Bluetooth native modules are linked. Rebuild the app with npx expo run:android.';
@@ -411,7 +449,8 @@ class PrinterManager {
       joshAvailable,
       tezAvailable,
       devAvailable,
-      canScan: classicSppAvailable || bleAvailable || joshAvailable || tezAvailable || devAvailable,
+      labelxAvailable,
+      canScan: classicSppAvailable || bleAvailable || joshAvailable || tezAvailable || devAvailable || labelxAvailable,
       bluetoothOn: this.isBluetoothEnabled(),
       reason,
     };
@@ -452,6 +491,13 @@ class PrinterManager {
     } catch {
       // fall through
     }
+    try {
+      const labelx = this.getLabelX();
+      const lx = labelx?.isLabelXBluetoothEnabled?.();
+      if (typeof lx === 'boolean') return lx;
+    } catch {
+      // fall through
+    }
     return true;
   }
 
@@ -470,6 +516,9 @@ class PrinterManager {
     if (this.isJosh || store.sdkId === 'josh' || this.activeTransport === 'josh-lpapi') {
       return false;
     }
+    if (this.isLabelX || store.sdkId === 'labelx' || this.activeTransport === 'labelx-spp') {
+      return false;
+    }
     return shouldUseTsplCommandSet({
       activeTransport: this.activeTransport,
       storeTransport: store.transport,
@@ -486,6 +535,29 @@ class PrinterManager {
     const store = usePrinterStore.getState();
     const settings = useSettingsStore.getState().printing;
     const name = (store.deviceName ?? store.lastDeviceName ?? '').toLowerCase();
+
+    // Label X OEM LuckPrinter (Seznik MiniX / GD985)
+    if (
+      this.isLabelX ||
+      store.sdkId === 'labelx' ||
+      this.activeTransport === 'labelx-spp' ||
+      isLikelyLabelXName(name)
+    ) {
+      const dpi = 203; // Standard LuckPrinter / MiniX resolution (8 dots/mm)
+      const alignment = settings.printerAlignment ?? 'center';
+      const headWidthMm = settings.printheadWidthMm ?? 48;
+      const headWidthDots = mmToDots(headWidthMm, dpi);
+      return {
+        id: 'labelx-spp',
+        name: store.deviceName ?? 'Seznik MiniX Label X',
+        dpi,
+        printheadWidthMm: headWidthMm,
+        printheadWidthDots: headWidthDots,
+        maxHeightMm: 1000,
+        alignment,
+        commandLanguage: 'tspl',
+      };
+    }
 
     // DEV OEM AutoReplyPrint printer
     if (store.sdkId === 'dev' || this.activeTransport === 'dev-spp') {
@@ -737,12 +809,26 @@ class PrinterManager {
         await this.ensurePermissions('connect-only');
         const bonded = await td404.getTd404BondedDevices();
         for (const d of bonded) {
-          const isJosh = isLikelyJoshName(d.name);
-          const isTd = isLikelyTd404Name(d.name);
-          const isTz = isLikelyTezName(d.name);
-          const isShakti = isLikelyShaktiName(d.name);
-          const isDev = isLikelyDevName(d.name);
-          if (isJosh) {
+          const isLabelX = isLikelyLabelXName(d.name);
+          const isJosh = !isLabelX && isLikelyJoshName(d.name);
+          const isTd = !isLabelX && isLikelyTd404Name(d.name);
+          const isTz = !isLabelX && isLikelyTezName(d.name);
+          const isShakti = !isLabelX && isLikelyShaktiName(d.name);
+          const isDev = !isLabelX && isLikelyDevName(d.name);
+          if (isLabelX) {
+            emit({
+              id: d.id,
+              name: d.name,
+              rssi: null,
+              transport: 'labelx-spp',
+              sdkId: 'labelx',
+              likelyLabelX: true,
+              likelyTd404: false,
+              likelyJosh: false,
+              likelyDev: false,
+              bonded: true,
+            });
+          } else if (isJosh) {
             emit({
               id: d.id,
               name: d.name,
@@ -813,6 +899,9 @@ class PrinterManager {
       }
     }
 
+    const labelx = this.getLabelX();
+    const hasLabelXNative = Boolean(labelx?.isLabelXNativeAvailable());
+
     // Nearby classic inquiry. Skip BLE when SPP is available — TD-404 / Tez are classic BT.
     await Promise.all([
       hasNative && td404
@@ -833,6 +922,11 @@ class PrinterManager {
       hasDevNative && dev
         ? this.startDevScan(dev, emit).catch((err) => {
             errors.push(err instanceof Error ? err.message : 'DEV scan failed.');
+          })
+        : Promise.resolve(),
+      hasLabelXNative && labelx
+        ? this.startLabelXScan(labelx, emit).catch((err) => {
+            errors.push(err instanceof Error ? err.message : 'Label X scan failed.');
           })
         : Promise.resolve(),
       !hasNative && ble
@@ -1156,6 +1250,62 @@ class PrinterManager {
     });
   }
 
+  private startLabelXScan(
+    labelx: NonNullable<ReturnType<PrinterManager['getLabelX']>>,
+    onDevice: (device: DiscoveredPrinter) => void,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        void this.labelxScanStop?.().catch(() => {});
+        this.labelxScanStop = null;
+        if (error) reject(error);
+        else resolve();
+      };
+
+      try {
+        const handle = labelx.startLabelXScan(
+          (device) => {
+            const isLabelX = isLikelyLabelXName(device.name);
+            if (isLabelX) {
+              onDevice({
+                id: device.mac || (device as any).id,
+                name: device.name,
+                rssi: null,
+                transport: 'labelx-spp',
+                sdkId: 'labelx',
+                likelyLabelX: true,
+                likelyTd404: false,
+                likelyJosh: false,
+                likelyDev: false,
+                bonded: device.bonded ?? false,
+              });
+              return;
+            }
+            onDevice({
+              id: device.mac || (device as any).id,
+              name: device.name,
+              rssi: null,
+              transport: 'bluetooth-spp',
+              sdkId: 'generic',
+              likelyLabelX: false,
+              likelyTd404: false,
+              likelyJosh: false,
+              bonded: device.bonded ?? false,
+            });
+          },
+          (error) => finish(error),
+        );
+        this.labelxScanStop = handle.stop;
+        setTimeout(() => finish(), SCAN_TIMEOUT_MS);
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error('Label X scan failed to start.'));
+      }
+    });
+  }
+
   private startTd404Scan(
     td404: NonNullable<ReturnType<PrinterManager['getTd404']>>,
     onDevice: (device: DiscoveredPrinter) => void,
@@ -1262,6 +1412,8 @@ class PrinterManager {
     this.tezScanStop = null;
     void this.devScanStop?.().catch(() => {});
     this.devScanStop = null;
+    void this.labelxScanStop?.().catch(() => {});
+    this.labelxScanStop = null;
     try {
       this.ble?.stopDeviceScan();
     } catch {
@@ -1342,16 +1494,24 @@ class PrinterManager {
       `[CONN-ROUTE] connectInner called: id=${deviceId}, name=${deviceName ?? 'null'}, transport=${transport ?? 'undefined'}`,
     );
 
-    // Specific model identification by authoritative name heuristics FIRST:
-    // Josh (LD08, LP08, etc.) must NEVER be hijacked by a stale or generic 'dev-spp' transport!
-    const isTargetJosh =
-      isLikelyJoshName(deviceName) ||
+    const isTargetLabelX =
+      isLikelyLabelXName(deviceName) ||
       (!isLikelyDevName(deviceName) &&
         !isLikelyTezName(deviceName) &&
         !isLikelyTd404Name(deviceName) &&
-        transport === 'josh-lpapi');
+        !isLikelyJoshName(deviceName) &&
+        transport === 'labelx-spp');
+
+    const isTargetJosh =
+      !isTargetLabelX &&
+      (isLikelyJoshName(deviceName) ||
+        (!isLikelyDevName(deviceName) &&
+          !isLikelyTezName(deviceName) &&
+          !isLikelyTd404Name(deviceName) &&
+          transport === 'josh-lpapi'));
 
     const isTargetTez =
+      !isTargetLabelX &&
       !isTargetJosh &&
       (isLikelyTezName(deviceName) ||
         isLikelyShaktiName(deviceName) ||
@@ -1360,6 +1520,7 @@ class PrinterManager {
           transport === 'tez-spp'));
 
     const isTargetTd404 =
+      !isTargetLabelX &&
       !isTargetJosh &&
       !isTargetTez &&
       (isLikelyTd404Name(deviceName) ||
@@ -1367,15 +1528,96 @@ class PrinterManager {
           (transport === 'bluetooth-spp' || !transport)));
 
     const isTargetDev =
+      !isTargetLabelX &&
       !isTargetJosh &&
       !isTargetTez &&
       !isTargetTd404 &&
       (isLikelyDevName(deviceName) || transport === 'dev-spp');
 
     console.info(
-      `[CONN-ROUTE] isTargetTez=${isTargetTez}, isTargetTd404=${isTargetTd404}, isTargetDev=${isTargetDev}, isTargetJosh=${isTargetJosh}, ` +
-      `devNameMatch=${isLikelyDevName(deviceName)}, tezNameMatch=${isLikelyTezName(deviceName) || isLikelyShaktiName(deviceName)}, td404NameMatch=${isLikelyTd404Name(deviceName)}, joshNameMatch=${isLikelyJoshName(deviceName)}`,
+      `[CONN-ROUTE] isTargetLabelX=${isTargetLabelX}, isTargetTez=${isTargetTez}, isTargetTd404=${isTargetTd404}, isTargetDev=${isTargetDev}, isTargetJosh=${isTargetJosh}, ` +
+      `labelxNameMatch=${isLikelyLabelXName(deviceName)}, devNameMatch=${isLikelyDevName(deviceName)}, tezNameMatch=${isLikelyTezName(deviceName) || isLikelyShaktiName(deviceName)}, td404NameMatch=${isLikelyTd404Name(deviceName)}, joshNameMatch=${isLikelyJoshName(deviceName)}`,
     );
+
+    if (isTargetLabelX) {
+      const labelx = this.getLabelX();
+      const diag = labelx?.getLabelXNativeDiagnostic?.() ?? {
+        isLinked: false,
+        isAvailable: false,
+        reason: 'Label X module failed to load (require error)',
+      };
+      console.info(
+        `[CONN-ROUTE] Label X path: isLinked=${diag.isLinked}, isAvailable=${diag.isAvailable}, reason=${diag.reason ?? 'OK'}`,
+      );
+
+      if (!labelx || !diag.isAvailable) {
+        const reason = diag.reason ?? 'Label X native module is not available in running APK. Install a development build.';
+        console.error(`[CONN-ROUTE] Label X path BLOCKED: ${reason}`);
+        usePrinterStore.getState().clearConnection();
+        throw new Error(`Label X printer cannot connect: ${reason}`);
+      }
+
+      try {
+        await this.ensurePermissions('connect-only');
+        console.info(
+          `[LABELX-CONN] Initiating Label X connection: mac=${deviceId}, name=${deviceName ?? 'unknown'}, transport=${transport ?? 'auto'}`,
+        );
+
+        if (labelx.isLabelXConnected()) {
+          console.info('[LABELX-CONN] Closing lingering Label X SDK session');
+          await labelx.disconnectLabelX().catch(() => {});
+        }
+        const dev = this.getDev();
+        if (dev?.isDevConnected()) {
+          await dev.disconnectDev().catch(() => {});
+        }
+        const tez = this.getTez();
+        if (tez?.isTezConnected()) {
+          await tez.disconnectTez().catch(() => {});
+        }
+        const td404 = this.getTd404();
+        if (td404?.isTd404Connected()) {
+          await td404.disconnectTd404().catch(() => {});
+        }
+        const josh = this.getJosh();
+        if (josh?.isJoshConnected()) {
+          await josh.disconnectJosh().catch(() => {});
+        }
+        if (this.connectedDevice) {
+          await this.connectedDevice.cancelConnection().catch(() => {});
+          this.connectedDevice = null;
+          this.writableTarget = null;
+        }
+
+        console.info(`[LABELX-CONN] Submitting Label X connect request → ${deviceId} (${deviceName ?? 'LabelX'})`);
+        const result = await labelx.connectLabelX(deviceId, deviceName);
+        this.activeTransport = 'labelx-spp';
+        this.connectedDevice = null;
+        this.writableTarget = null;
+        this.backendPrinterId = null;
+        this.bleNegotiatedMtu = 0;
+        this.lastErrorMessage = null;
+        console.info(
+          `[LABELX-CONN] Label X connected in ${Date.now() - connectStart} ms → ${result.mac} (${result.name ?? deviceName})`,
+        );
+        usePrinterStore.getState().setConnectedDevice(result.mac, result.name ?? deviceName ?? deviceId, {
+          transport: 'labelx-spp',
+          sdkId: 'labelx',
+          backendPrinterId: null,
+        });
+        return;
+      } catch (error) {
+        console.warn(
+          `[LABELX-CONN] Label X connect failed after ${Date.now() - connectStart} ms:`,
+          error,
+        );
+        this.activeTransport = null;
+        usePrinterStore.getState().clearConnection();
+        const msg = error instanceof Error ? error.message : String(error);
+        this.lastErrorMessage = msg;
+        throw new Error(`Failed to connect to Label X printer (${msg})`);
+      }
+    }
 
     if (isTargetDev) {
       const dev = this.getDev();
@@ -1761,6 +2003,21 @@ class PrinterManager {
     await this.connect(mac, name ?? 'TEZ', 'tez-spp');
   }
 
+  /** Connect specifically to Label X / LuckPrinter OEM printer by MAC address. */
+  async connectLabelXByMac(macAddress: string, name?: string): Promise<void> {
+    const mac = macAddress.trim().toUpperCase();
+    if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) {
+      throw new Error('Enter a MAC like AA:BB:CC:DD:EE:FF (from Android Bluetooth settings).');
+    }
+    const labelx = this.getLabelX();
+    if (!labelx?.isLabelXNativeAvailable()) {
+      throw new Error(
+        'Label X OEM Bluetooth connect needs a development build (`npx expo run:android`).',
+      );
+    }
+    await this.connect(mac, name ?? 'Label X', 'labelx-spp');
+  }
+
   async connectWifi(ip: string, port = 9100, name?: string): Promise<void> {
     this.stopScan();
     usePrinterStore.getState().setStatus('connecting');
@@ -1876,6 +2133,9 @@ class PrinterManager {
       return;
     }
     console.info('[printer] disconnect requested, transport:', this.activeTransport);
+    if (this.activeTransport === 'labelx-spp') {
+      await this.getLabelX()?.disconnectLabelX().catch(() => {});
+    }
     if (this.activeTransport === 'dev-spp') {
       if (isVardrzAvailable()) {
         await disconnectVardrz().catch(() => {});
@@ -1914,6 +2174,9 @@ class PrinterManager {
   }
 
   get isConnected(): boolean {
+    if (this.activeTransport === 'labelx-spp') {
+      return Boolean(this.getLabelX()?.isLabelXConnected());
+    }
     if (this.activeTransport === 'dev-spp') {
       if (isVardrzAvailable()) {
         return Boolean(usePrinterStore.getState().deviceId);
@@ -1947,6 +2210,9 @@ class PrinterManager {
    * Use this to avoid starting expensive data preparation when the connection is dead.
    */
   isConnectionHealthy(): boolean {
+    if (this.activeTransport === 'labelx-spp') {
+      return Boolean(this.getLabelX()?.isLabelXConnected());
+    }
     if (this.activeTransport === 'dev-spp') {
       if (isVardrzAvailable()) {
         return Boolean(usePrinterStore.getState().deviceId);
@@ -1970,6 +2236,11 @@ class PrinterManager {
     }
     // activeTransport is null — probe native modules to auto-restore.
     // This avoids a full reconnect cycle (150–1500ms) when the socket is actually alive.
+    if (this.getLabelX()?.isLabelXConnected?.()) {
+      console.info('[printer] isConnectionHealthy: auto-restoring labelx-spp');
+      this.activeTransport = 'labelx-spp';
+      return true;
+    }
     if (this.getDev()?.isDevConnected?.()) {
       console.info('[printer] isConnectionHealthy: auto-restoring dev-spp');
       this.activeTransport = 'dev-spp';
@@ -2112,18 +2383,25 @@ class PrinterManager {
       return false;
     }
     try {
+      const isLabelXDevice =
+        store.sdkId === 'labelx' ||
+        store.transport === 'labelx-spp' ||
+        (Boolean(store.lastDeviceName) && isLikelyLabelXName(store.lastDeviceName));
       const isDevDevice =
-        store.sdkId === 'dev' ||
-        store.transport === 'dev-spp' ||
-        (Boolean(store.lastDeviceName) && isLikelyDevName(store.lastDeviceName));
+        !isLabelXDevice &&
+        (store.sdkId === 'dev' ||
+          store.transport === 'dev-spp' ||
+          (Boolean(store.lastDeviceName) && isLikelyDevName(store.lastDeviceName)));
       const isTezDevice =
+        !isLabelXDevice &&
         !isDevDevice &&
         (store.sdkId === 'tez' ||
           store.transport === 'tez-spp' ||
           (Boolean(store.lastDeviceName) &&
             (isLikelyTezName(store.lastDeviceName) || isLikelyShaktiName(store.lastDeviceName))));
-      const isTd = !isDevDevice && !isTezDevice && isLikelyTd404Name(store.lastDeviceName);
+      const isTd = !isLabelXDevice && !isDevDevice && !isTezDevice && isLikelyTd404Name(store.lastDeviceName);
       const isTargetJosh =
+        !isLabelXDevice &&
         !isTd &&
         !isDevDevice &&
         !isTezDevice &&
@@ -2132,9 +2410,13 @@ class PrinterManager {
           (Boolean(store.lastDeviceName) && isLikelyJoshName(store.lastDeviceName)));
 
       console.info(
-        `[printer] auto-reconnect → ${store.lastDeviceId} ${store.lastDeviceName ?? ''} (isDev=${isDevDevice}, isTez=${isTezDevice}, isTargetJosh=${isTargetJosh})`,
+        `[printer] auto-reconnect → ${store.lastDeviceId} ${store.lastDeviceName ?? ''} (isLabelX=${isLabelXDevice}, isDev=${isDevDevice}, isTez=${isTezDevice}, isTargetJosh=${isTargetJosh})`,
       );
-      if (isDevDevice) {
+      if (isLabelXDevice) {
+        console.info(
+          `[LABELX-CONN] Auto-reconnect identified Label X printer: ${store.lastDeviceId} (${store.lastDeviceName ?? 'LabelX'})`,
+        );
+      } else if (isDevDevice) {
         console.info(
           `[DEV-CONN] Auto-reconnect identified DEV printer: ${store.lastDeviceId} (${store.lastDeviceName ?? 'DEV'})`,
         );
@@ -2147,13 +2429,15 @@ class PrinterManager {
           `[JOSH-CONN-P1:IDENTIFY] Auto-reconnect identified JOSH printer: ${store.lastDeviceId} (${store.lastDeviceName ?? 'JOSH'})`,
         );
       }
-      const transport = isDevDevice
-        ? 'dev-spp'
-        : isTezDevice
-          ? 'tez-spp'
-          : isTargetJosh
-            ? 'josh-lpapi'
-            : (store.transport ?? 'bluetooth-spp');
+      const transport = isLabelXDevice
+        ? 'labelx-spp'
+        : isDevDevice
+          ? 'dev-spp'
+          : isTezDevice
+            ? 'tez-spp'
+            : isTargetJosh
+              ? 'josh-lpapi'
+              : (store.transport ?? 'bluetooth-spp');
       // For Wi-Fi, skip — requires explicit IP entry.
       if (transport === 'wifi') return false;
       let timer: ReturnType<typeof setTimeout> | null = null;
@@ -2189,6 +2473,21 @@ class PrinterManager {
 
   async printTestLabel(text = 'Sez Print OK'): Promise<void> {
     if (!this.isConnected) throw new Error('No printer connected.');
+
+    if (this.activeTransport === 'labelx-spp' || this.isLabelX) {
+      console.info(`[LABELX-PRINT] Test print dispatching via Label X SDK: "${text}"`);
+      const labelx = this.getLabelX();
+      if (!labelx) throw new Error('Label X module not available.');
+      if (!labelx.isLabelXConnected()) {
+        console.info('[LABELX-CONN] Printer identified as Label X but session not active. Reconnecting...');
+        const store = usePrinterStore.getState();
+        await this.connect(store.deviceId ?? store.lastDeviceId!, store.deviceName ?? store.lastDeviceName, 'labelx-spp');
+      }
+      console.info('[LABELX-PRINT] Submitting test print to Label X hardware...');
+      await labelx.printLabelXTestLabel(text);
+      console.info('[LABELX-PRINT] Label X test print completed successfully');
+      return;
+    }
 
     if (this.activeTransport === 'dev-spp' || this.isDev) {
       if (isVardrzAvailable()) {
@@ -2287,7 +2586,12 @@ class PrinterManager {
     media?: 'gap' | 'bline' | 'continuous';
     orientation?: number;
     dpi?: number;
+    threshold?: number;
+    dither?: boolean;
   }): Promise<boolean> {
+    if (this.activeTransport === 'labelx-spp' || this.isLabelX) {
+      return this.printLabelXPngLabelFast(options);
+    }
     if (this.activeTransport === 'dev-spp' || this.isDev) {
       return this.printDevPngLabelFast(options);
     }
@@ -2332,14 +2636,17 @@ class PrinterManager {
           widthMm: spec.widthMm,
           heightMm: spec.heightMm,
           gapMm: spec.gapMm,
-          density: options.density ?? 8,
-          speed: options.speed ?? 6,
+          density: options.density ?? 10,
+          speed: options.speed ?? 3,
           xDots: spec.xOffsetDots,
           yDots: spec.yOffsetDots,
           copies: Math.max(1, Math.round(options.copies ?? 1)),
           media: options.media ?? 'gap',
           orientation: options.orientation ?? 0,
           dpi: spec.dpi,
+          direction: 1,
+          threshold: options.threshold ?? 160,
+          dither: options.dither ?? false,
         });
         if (!result) {
           // Module present but method missing at runtime (old binary) — signal fallback.
@@ -2381,6 +2688,87 @@ class PrinterManager {
       }
       throw error;
     }
+  }
+
+  /**
+   * Label X / GD985 OEM SDK fast print: PNG → native LuckPrinter printTag / print via OEM AAR.
+   * Direct high-resolution thermal print with hardware flow control and status feedback.
+   */
+  async printLabelXPngLabelFast(options: {
+    pngBase64: string;
+    widthMm?: number;
+    heightMm?: number;
+    gapMm?: number;
+    copies?: number;
+    density?: number | null;
+    speed?: number | null;
+    dpi?: number;
+    hOffsetMm?: number;
+    vOffsetMm?: number;
+    media?: 'gap' | 'bline' | 'continuous';
+    paperType?: 'tag' | 'continuous' | 'blacktag';
+    threshold?: number;
+    dither?: boolean;
+  }): Promise<boolean> {
+    if (!this.isLabelX) {
+      return false;
+    }
+    this.activeTransport = 'labelx-spp';
+    const labelx = this.getLabelX();
+    if (!labelx || typeof labelx.printLabelXPngLabel !== 'function') {
+      return false;
+    }
+
+    this.printQueueDepth++;
+    const run = this.printChain.then(async () => {
+      const store = usePrinterStore.getState();
+      store.setStatus('printing');
+      this.connectionState = 'printing';
+      try {
+        console.info(
+          `[LABELX-PRINT] Fast PNG print: ${options.widthMm ?? 48}mm copies=${options.copies ?? 1} density=${options.density ?? 1}`,
+        );
+        await this.ensureConnected();
+        const t0 = Date.now();
+
+        const paperType = options.paperType ?? (
+          options.media === 'bline' ? 'blacktag' : (options.media === 'continuous' ? 'continuous' : 'tag')
+        );
+
+        const result = await labelx.printLabelXPngLabel({
+          pngBase64: options.pngBase64,
+          copies: Math.max(1, Math.round(options.copies ?? 1)),
+          widthMm: options.widthMm ?? 48,
+          widthDots: 384,
+          paperType,
+          density: options.density !== null && options.density !== undefined ? Math.min(2, Math.max(0, options.density)) : 1,
+          threshold: options.threshold ?? 145,
+          dither: options.dither ?? true,
+        });
+
+        const elapsed = Date.now() - t0;
+        console.info(
+          `[LABELX-PRINT] Label X print job dispatched in ${elapsed} ms: success=${result.success}`,
+        );
+        this.lastPrintTiming = [
+          { phase: 'labelx-dispatch', elapsedMs: elapsed },
+          { phase: 'total', elapsedMs: elapsed },
+        ];
+      } finally {
+        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        if (this.printQueueDepth === 0) {
+          this.connectionState = 'connected';
+          store.setStatus('connected');
+        }
+      }
+    });
+
+    this.printChain = run.catch((err) => {
+      console.warn('[LABELX-PRINT] Print error caught in serial chain:', err);
+    });
+
+    await run;
+    return true;
   }
 
   /**

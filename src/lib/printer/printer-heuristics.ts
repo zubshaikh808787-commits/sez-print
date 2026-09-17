@@ -13,11 +13,29 @@ function hasVeerToken(n: string): boolean {
   return /(^|[^a-z])veer([^a-z]|$)/.test(n);
 }
 
+export function isLikelyLabelXName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const n = name.toLowerCase().trim();
+  if (n.includes('tejas') || n.includes('rudra') || n.includes('josh')) return false;
+  return (
+    n.includes('labelx') ||
+    n.includes('label x') ||
+    n.includes('gd985') ||
+    n.includes('minix') ||
+    n.includes('luckp') ||
+    n.startsWith('u8_') ||
+    n.startsWith('ppp1_') ||
+    n.startsWith('lpc50_') ||
+    n.startsWith('btw')
+  );
+}
+
 export function isLikelyDevName(name: string | null | undefined): boolean {
   if (!name) return false;
   const n = name.toLowerCase().trim();
-  // TD-404 / Josh / Tez / Shakti guards — these printers are NEVER Dev
+  // TD-404 / Josh / Tez / Shakti / LabelX guards — these printers are NEVER Dev
   // NOTE: Do NOT call isLikelyTezName/isLikelyShaktiName here — they call isLikelyDevName (circular)
+  if (isLikelyLabelXName(name)) return false;
   if (n.includes('tejas') || n.includes('rudra') || n.includes('josh')) return false;
   if (n.includes('tez') || n.includes('shakti') || n.includes('flashlabel') || hasTejToken(n)) return false;
   if (n.startsWith('seznik_') || n.startsWith('seznik-') || n === 'seznik' || n === 'seznek') return false;
@@ -131,8 +149,8 @@ export function isLikelyShaktiName(name: string | null | undefined): boolean {
 export function isLikelyTd404Name(name: string | null | undefined): boolean {
   if (!name) return false;
   const n = name.toLowerCase().trim();
-  // If the device matches Dev, Josh, or Shakti, it is NEVER a TD-404 printer
-  if (isLikelyDevName(name) || isLikelyJoshName(name) || isLikelyShaktiName(name)) return false;
+  // If the device matches Dev, Josh, Shakti, or LabelX, it is NEVER a TD-404 printer
+  if (isLikelyLabelXName(name) || isLikelyDevName(name) || isLikelyJoshName(name) || isLikelyShaktiName(name)) return false;
   // Tejas and Rudra are ALWAYS TD-404 (even if prefixed with Seznik / Sez)
   if (n.includes('tejas') || n.includes('rudra')) return true;
   // If it matches Tez explicitly, not TD-404
@@ -195,12 +213,15 @@ export function shouldUseTsplCommandSet(opts: {
     opts.activeTransport === 'josh-lpapi' ||
     opts.activeTransport === 'tez-spp' ||
     opts.activeTransport === 'dev-spp' ||
+    opts.activeTransport === 'labelx-spp' ||
     opts.sdkId === 'josh' ||
     opts.sdkId === 'tez' ||
     opts.sdkId === 'dev' ||
+    opts.sdkId === 'labelx' ||
     opts.storeTransport === 'josh-lpapi' ||
     opts.storeTransport === 'tez-spp' ||
-    opts.storeTransport === 'dev-spp'
+    opts.storeTransport === 'dev-spp' ||
+    opts.storeTransport === 'labelx-spp'
   ) {
     return false;
   }

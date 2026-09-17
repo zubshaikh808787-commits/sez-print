@@ -221,6 +221,20 @@ export async function printPreparedGrayJob(
 
   const pngBase64 = grayToPngBase64(printGray);
 
+  if (manager.isLabelX) {
+    await defaultPrintQueue.enqueue(async () => {
+      await manager.printLabelXPngLabelFast({
+        pngBase64,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        gapMm: input.gapMm,
+        copies: input.copies ?? 1,
+        density: input.density !== undefined && input.density !== null ? Math.min(2, Math.max(0, Math.floor(input.density / 5))) : 1,
+        media: input.mediaType ?? 'gap',
+      });
+    });
+    return job;
+  }
   if (manager.isDev) {
     await defaultPrintQueue.enqueue(async () => {
       await manager.printDevPngLabelFast({
@@ -276,6 +290,28 @@ export async function printPreparedGrayJob(
     return job;
   }
 
+  if (manager.activeTransport === 'td404-spp' || manager.usesTd404CommandSet) {
+    const printed = await defaultPrintQueue.enqueue(async () => {
+      return manager.printPngLabelFast({
+        pngBase64,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        gapMm: input.gapMm ?? 2,
+        copies: input.copies ?? 1,
+        density: input.density ?? 10,
+        speed: input.speed ?? 3,
+        threshold: input.threshold ?? 160,
+        hOffsetMm: input.offsetXmm,
+        vOffsetMm: input.offsetYmm,
+        media: input.mediaType ?? 'gap',
+        orientation: 0,
+        dpi: manager.getPrintDpi(),
+        dither: Boolean(input.dither),
+      });
+    });
+    if (printed) return job;
+  }
+
   const adapter = adapterFromManager();
   const bytes = await adapter.encode(job, {
     gapMm: input.gapMm,
@@ -301,6 +337,25 @@ export async function printArtworkJob(input: ArtworkPrintInput): Promise<Rendere
   const manager = getPrinterManager();
   const job = renderArtworkToJob(input);
 
+  if (manager.isLabelX) {
+    const pngBase64 = grayToPngBase64({
+      width: input.gray.width,
+      height: input.gray.height,
+      gray: input.gray.gray,
+    });
+    await defaultPrintQueue.enqueue(async () => {
+      await manager.printLabelXPngLabelFast({
+        pngBase64,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        gapMm: input.gapMm,
+        copies: input.copies ?? 1,
+        density: input.density !== undefined && input.density !== null ? Math.min(2, Math.max(0, Math.floor(input.density / 5))) : 1,
+        media: input.mediaType ?? 'gap',
+      });
+    });
+    return job;
+  }
   if (manager.isDev) {
     const pngBase64 = grayToPngBase64({
       width: input.gray.width,
@@ -367,6 +422,33 @@ export async function printArtworkJob(input: ArtworkPrintInput): Promise<Rendere
       });
     });
     return job;
+  }
+
+  if (manager.activeTransport === 'td404-spp' || manager.usesTd404CommandSet) {
+    const pngBase64 = grayToPngBase64({
+      width: input.gray.width,
+      height: input.gray.height,
+      gray: input.gray.gray,
+    });
+    const printed = await defaultPrintQueue.enqueue(async () => {
+      return manager.printPngLabelFast({
+        pngBase64,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        gapMm: input.gapMm ?? 2,
+        copies: input.copies ?? 1,
+        density: input.density ?? 10,
+        speed: input.speed ?? 3,
+        threshold: input.threshold ?? 160,
+        hOffsetMm: input.offsetXmm,
+        vOffsetMm: input.offsetYmm,
+        media: input.mediaType ?? 'gap',
+        orientation: 0,
+        dpi: manager.getPrintDpi(),
+        dither: Boolean(input.dither),
+      });
+    });
+    if (printed) return job;
   }
 
   const adapter = adapterFromManager();

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        style="@style/Ai50DialogLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/demo_print_qty_label" />
+
+    <EditText
+        android:id="@+id/et_content"
+        style="@style/Ai50DialogInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_field_gap"
+        android:hint="@string/print_dialog_count_hint"
+        android:inputType="number"
+        android:maxLength="2"
+        android:text="1" />
+
+    <TextView
+        style="@style/Ai50DialogLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_section_gap"
+        android:text="@string/demo_a4_paper_size_label" />
+
+    <RadioGroup
+        android:id="@+id/rg_a4_size"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ai50_dialog_field_gap"
+        android:checkedButton="@id/rb_210_297"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/rb_210_297"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:tag="210x297"
+            android:text="210x297mm"
+            android:textColor="@color/ai50_text_primary"
+            android:textSize="14sp" />
+
+        <RadioButton
+            android:id="@+id/rb_216_279"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:tag="216x279"
+            android:text="216x279mm"
+            android:textColor="@color/ai50_text_primary"
+            android:textSize="14sp" />
+
+        <RadioButton
+            android:id="@+id/rb_148_210"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:tag="148x210"
+            android:text="148x210mm"
+            android:textColor="@color/ai50_text_primary"
+            android:textSize="14sp" />
+
+        <RadioButton
+            android:id="@+id/rb_216_355"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:tag="216x355"
+            android:text="216x355mm"
+            android:textColor="@color/ai50_text_primary"
+            android:textSize="14sp" />
+    </RadioGroup>
+
+    <include layout="@layout/include_ai50_select_photo" />
+</LinearLayout>

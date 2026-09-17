@@ -90,6 +90,13 @@ const V_ALIGNS: VAlign[] = ['top', 'center', 'bottom'];
 
 const PAPER_TYPES = ['Label', 'Cardstock', 'Receipt', 'Black mark'] as const;
 
+type RenderQualityMode = 'halftone' | 'sharp';
+const RENDER_MODES: readonly RenderQualityMode[] = ['halftone', 'sharp'];
+const RENDER_LABELS: Record<RenderQualityMode, string> = {
+  halftone: 'Smooth / Photo',
+  sharp: 'Line Art / Text',
+};
+
 // ─── Sub-components ────────────────────────────────────────────────────────
 
 function ChipGroup<T extends string>({
@@ -371,6 +378,8 @@ export default function ImgToLabelScreen() {
   const [trimBorder, setTrimBorder] = useState(true);
   const [safeMarginMm, setSafeMarginMm] = useState(0);
   const [decoding, setDecoding] = useState(false);
+  const [renderMode, setRenderMode] = useState<RenderQualityMode>('halftone');
+  const isPrintingRef = useRef(false);
 
   // ─── Image Pick ────────────────────────────────────────────────────────
   const pickImage = useCallback(async () => {
@@ -470,11 +479,16 @@ export default function ImgToLabelScreen() {
     [defaults.grayThreshold, darkness],
   );
 
+  const isHalftone = renderMode === 'halftone';
+
   const printPreview = useMemo(() => {
     if (!sourceGray) return null;
     const rendered = renderImgToLabel(sourceGray, renderConfig);
-    return finalizeImgToLabelForPrint(rendered, { threshold: printThreshold, dither: false });
-  }, [sourceGray, renderConfig, printThreshold]);
+    return finalizeImgToLabelForPrint(rendered, {
+      threshold: printThreshold,
+      dither: isHalftone,
+    });
+  }, [sourceGray, renderConfig, printThreshold, isHalftone]);
 
   const previewDataUri = useMemo(() => {
     if (!printPreview) return null;
@@ -504,6 +518,7 @@ export default function ImgToLabelScreen() {
 
   // ─── Print ─────────────────────────────────────────────────────────────
   const handlePrint = useCallback(async () => {
+    if (isPrintingRef.current) return;
     if (!imageUri) {
       Alert.alert('No Image', 'Please import an image first.');
       return;
@@ -524,6 +539,7 @@ export default function ImgToLabelScreen() {
       return;
     }
 
+    isPrintingRef.current = true;
     setPrinting(true);
     const timer = new PrintTimingLogger();
 
@@ -551,13 +567,15 @@ export default function ImgToLabelScreen() {
         safeMarginMm,
         sourceW: gray.width,
         sourceH: gray.height,
+        renderMode,
       });
 
       timer.start('render');
       const rendered = renderImgToLabel(gray, renderConfig);
+      const isDither = renderMode === 'halftone';
       const result = finalizeImgToLabelForPrint(rendered, {
         threshold: printThreshold,
-        dither: false,
+        dither: isDither,
       });
 
       logPrintTrace('IMG_TO_LABEL_RENDER', {
@@ -568,6 +586,7 @@ export default function ImgToLabelScreen() {
         fitMode: result.fitMode,
         dpi: result.dpi,
         threshold: printThreshold,
+        dither: isDither,
       });
       timer.end('render');
 
@@ -585,14 +604,14 @@ export default function ImgToLabelScreen() {
         heightMm: result.heightMm,
         gray: result.gray,
         fit: 'original',
-        dither: false,
+        dither: isDither,
         threshold,
         flipY: false,
         copies,
         gapMm: gapLength,
         mediaType: media,
-        density: darkness,
-        speed: speed ?? 6,
+        density: darkness ?? 10,
+        speed: speed ?? 3,
         offsetXmm: hOffset,
         offsetYmm: vOffset,
         preparedGeometry: result.geometry,
@@ -625,6 +644,7 @@ export default function ImgToLabelScreen() {
       if (message) Alert.alert('Print Failed', message);
       else Alert.alert('Print Failed', 'Unable to prepare the label for printing.\nPlease try again.');
     } finally {
+      isPrintingRef.current = false;
       setPrinting(false);
     }
   }, [
@@ -647,6 +667,7 @@ export default function ImgToLabelScreen() {
     paperType,
     darkness,
     speed,
+    renderMode,
     printingSettings.recordHistory,
     printingSettings.returnPrevious,
     addHistoryEntry,
@@ -960,6 +981,14 @@ export default function ImgToLabelScreen() {
                   options={PAPER_TYPES}
                   selected={paperType}
                   onSelect={setPaperType}
+                />
+
+                <Text style={styles.labelLabel}>Print Style</Text>
+                <ChipGroup
+                  options={RENDER_MODES}
+                  labels={RENDER_LABELS}
+                  selected={renderMode}
+                  onSelect={setRenderMode}
                 />
 
                 {/* Printer info */}

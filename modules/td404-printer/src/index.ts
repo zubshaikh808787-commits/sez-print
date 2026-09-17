@@ -37,6 +37,10 @@ type NativeTd404 = {
   printBase64(base64: string): Promise<{ bytesSent: number }>;
   printRaw?(bytes: Uint8Array): Promise<{ bytesSent: number }>;
   printPngLabel?(options: Record<string, unknown>): Promise<Td404PngLabelResult>;
+  renderPdfPages?(
+    uri: string,
+    options?: Record<string, unknown>,
+  ): Promise<RenderPdfResult>;
   addListener(
     eventName: string,
     listener: (event: Td404Device | Record<string, unknown>) => void,
@@ -216,6 +220,12 @@ export type Td404PngLabelOptions = {
   media?: 'gap' | 'bline' | 'continuous';
   orientation?: number;
   dpi?: number;
+  /** TSPL DIRECTION: 1 (default, matches JS pipeline / preview) or 0. */
+  direction?: 0 | 1;
+  /** Luminance cutoff (0–255) for black ink. Default 160 keeps thin text and barcodes solid. */
+  threshold?: number;
+  /** Whether to use Floyd-Steinberg error diffusion dithering for photos / halftones. */
+  dither?: boolean;
 };
 
 /**
@@ -235,14 +245,44 @@ export async function printTd404PngLabel(
     widthMm: options.widthMm,
     heightMm: options.heightMm,
     gapMm: options.gapMm ?? 2,
-    density: options.density ?? 8,
-    speed: options.speed ?? 6,
+    density: options.density ?? 10,
+    speed: options.speed ?? 3,
     xDots: options.xDots ?? 0,
     yDots: options.yDots ?? 0,
     copies: options.copies ?? 1,
     media: options.media ?? 'gap',
     orientation: options.orientation ?? 0,
     dpi: options.dpi ?? 304,
+    direction: options.direction ?? 1,
+    threshold: options.threshold ?? 160,
+    dither: options.dither ?? false,
   });
+}
+
+export type RenderedPdfPage = {
+  pageIndex: number;
+  widthPx: number;
+  heightPx: number;
+  widthMm: number;
+  heightMm: number;
+  base64: string;
+};
+
+export type RenderPdfResult = {
+  pageCount: number;
+  pages: RenderedPdfPage[];
+};
+
+/**
+ * Native Android hardware-accelerated PDF renderer.
+ * Converts any PDF URI into rendered page Bitmaps/PNGs at target DPI.
+ */
+export async function renderPdfPages(
+  uriString: string,
+  options?: { dpi?: number; maxPages?: number },
+): Promise<RenderPdfResult | null> {
+  const mod = getNative();
+  if (!mod || typeof mod.renderPdfPages !== 'function') return null;
+  return mod.renderPdfPages(uriString, options as Record<string, unknown> | undefined);
 }
 
