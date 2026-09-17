@@ -2416,10 +2416,16 @@ class PrinterManager {
       const store = usePrinterStore.getState();
       store.setStatus('printing');
       this.connectionState = 'printing';
+      const profile = this.getActivePrinterProfile();
       try {
         if (isVardrzAvailable()) {
+          // Head class must reflect the connected printer's real printhead
+          // (from settings), not the label being printed — using the label's
+          // own width to guess 58mm vs 80mm shifts/crops labels near that
+          // boundary onto the wrong raster width.
+          const paperWidth: '58mm' | '80mm' = profile.printheadWidthMm > 58 ? '80mm' : '58mm';
           console.info(
-            `[DEV-PRINT] mm-locked PNG print via @vardrz BluetoothEscposPrinter: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1}`,
+            `[DEV-PRINT] mm-locked PNG print via @vardrz BluetoothEscposPrinter: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1} head=${profile.printheadWidthMm}mm(${paperWidth})`,
           );
           await this.ensureConnected();
           const t0 = Date.now();
@@ -2431,6 +2437,7 @@ class PrinterManager {
             hOffsetMm: options.hOffsetMm ?? 0,
             copies: options.copies ?? 1,
             media: options.media ?? 'gap',
+            paperWidth,
           });
           console.info(
             `[DEV-PRINT] @vardrz print completed in ${Date.now() - t0} ms`,
@@ -2456,6 +2463,7 @@ class PrinterManager {
           commandSet: cmdSet,
           hOffsetMm: options.hOffsetMm ?? 0,
           vOffsetMm: options.vOffsetMm ?? 0,
+          printheadWidthMm: profile.printheadWidthMm,
         });
         console.info(
           `[DEV-PRINT] Dev print completed in ${Date.now() - t0} ms |`,

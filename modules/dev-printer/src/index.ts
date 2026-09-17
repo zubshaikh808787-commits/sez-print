@@ -219,6 +219,7 @@ export async function printDevPngLabel(options: DevPrintOptions): Promise<DevPri
     threshold: options.threshold ?? 128,
     hOffsetMm: options.hOffsetMm ?? 0,
     vOffsetMm: options.vOffsetMm ?? 0,
+    printheadWidthMm: options.printheadWidthMm ?? 50,
   });
 }
 

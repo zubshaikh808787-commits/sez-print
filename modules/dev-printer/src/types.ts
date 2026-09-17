@@ -44,6 +44,8 @@ export type DevPrintOptions = {
   commandSet?: 'tspl' | 'escpos' | 'auto';
   hOffsetMm?: number;
   vOffsetMm?: number;
+  /** Physical printhead width in mm — from the connected printer's profile, not the label size. */
+  printheadWidthMm?: number;
 };
 
 export type DevPrintResult = {

@@ -459,6 +459,10 @@ class DevPrinterModule : Module() {
       val commandSet = (options["commandSet"] as? String) ?: "escpos"
       val hOffsetMm = (options["hOffsetMm"] as? Number)?.toDouble() ?: 0.0
       val vOffsetMm = (options["vOffsetMm"] as? Number)?.toDouble() ?: 0.0
+      // Physical printhead width — must come from the connected printer's real
+      // hardware, never guessed from the label being printed (that clips/shifts
+      // labels that straddle the 58 mm/80 mm class boundary).
+      val printheadWidthMm = (options["printheadWidthMm"] as? Number)?.toDouble() ?: 50.0
 
       ioExecutor.execute {
         try {
@@ -471,11 +475,11 @@ class DevPrinterModule : Module() {
           val feedDots = if (media == "continuous") 0 else Math.max(16, Math.min(48, Math.round(gapMm * 8.0).toInt()))
 
           val (jobBytes, wDots, hDots) = if (useEscPos) {
-            Log.i(TAG, "Building ESC/POS raster job: ${widthMm}x${heightMm}mm feedDots=$feedDots...")
-            buildEscPosRasterJob(decoded, widthMm, feedDots)
+            Log.i(TAG, "Building ESC/POS raster job: ${widthMm}x${heightMm}mm feedDots=$feedDots offset=${hOffsetMm}x${vOffsetMm}mm head=${printheadWidthMm}mm...")
+            buildEscPosRasterJob(decoded, widthMm, printheadWidthMm, hOffsetMm, vOffsetMm, feedDots)
           } else {
-            Log.i(TAG, "Building TSPL label job: ${widthMm}x${heightMm}mm gap=${gapMm}mm copies=$copies...")
-            buildTsplPrintJob(decoded, widthMm, heightMm, gapMm, copies, density, speed)
+            Log.i(TAG, "Building TSPL label job: ${widthMm}x${heightMm}mm gap=${gapMm}mm copies=$copies offset=${hOffsetMm}x${vOffsetMm}mm...")
+            buildTsplPrintJob(decoded, widthMm, heightMm, gapMm, copies, density, speed, hOffsetMm, vOffsetMm)
           }
 
           if (!decoded.isRecycled) decoded.recycle()
@@ -606,9 +610,9 @@ class DevPrinterModule : Module() {
           canvas.drawText("* DEV-7299 *", 20f, 225f, paint)
 
           val (jobBytes, _, _) = if (mode == "tspl") {
-            buildTsplPrintJob(testBitmap, 48.0, 30.0, 2.0, 1, 8, 4)
+            buildTsplPrintJob(testBitmap, 48.0, 30.0, 2.0, 1, 8, 4, 0.0, 0.0)
           } else {
-            buildEscPosRasterJob(testBitmap, 48.0, 30)
+            buildEscPosRasterJob(testBitmap, 48.0, 48.0, 0.0, 0.0, 30)
           }
           testBitmap.recycle()
 
@@ -635,17 +639,20 @@ class DevPrinterModule : Module() {
     gapMm: Double,
     copies: Int,
     density: Int,
-    speed: Int
+    speed: Int,
+    hOffsetMm: Double,
+    vOffsetMm: Double
   ): PrintJobResult {
     val dpm = 8.0 // 203 DPI = 8 dots/mm
     val rawW = Math.max(64, Math.round(widthMm * dpm).toInt())
     val rawH = Math.max(32, Math.round(heightMm * dpm).toInt())
 
-    // Printable head width: 384 dots for 58mm printer, 576 dots for 80mm
-    val maxHeadDots = if (widthMm > 58.0) 576 else 384
-    val targetW = Math.min(maxHeadDots, rawW)
-    val width = ((targetW + 7) / 8) * 8
-    val height = Math.max(32, Math.round(rawH * (width.toDouble() / rawW)).toInt())
+    // TSPL SIZE already tells the firmware the physical label size — pack the
+    // BITMAP to the label's own width (byte-aligned), never to a guessed
+    // printhead width. Clamping to an assumed head here silently shrank/cropped
+    // any label wider than that guess.
+    val width = ((rawW + 7) / 8) * 8
+    val height = rawH
     val widthBytes = width / 8
 
     val scaled = if (bitmap.width != width || bitmap.height != height) {
@@ -654,10 +661,16 @@ class DevPrinterModule : Module() {
       bitmap
     }
 
+    // Bake calibration offsets directly into the raster (TSPL BITMAP x/y must be
+    // >= 0, and Canvas.drawBitmap naturally clips draws that fall outside the
+    // canvas in either direction).
+    val hOffsetDots = Math.round(hOffsetMm * dpm).toInt()
+    val vOffsetDots = Math.round(vOffsetMm * dpm).toInt()
+
     val solidBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(solidBitmap)
     canvas.drawColor(Color.WHITE)
-    canvas.drawBitmap(scaled, 0f, 0f, null)
+    canvas.drawBitmap(scaled, hOffsetDots.toFloat(), vOffsetDots.toFloat(), null)
 
     val pixels = IntArray(width * height)
     solidBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
@@ -722,16 +735,29 @@ class DevPrinterModule : Module() {
   /**
    * Sliced line-by-line ESC/POS raster job generator matching inventort-seznik POS_PrintBMP and the @vardrz patch
    */
-  private fun buildEscPosRasterJob(bitmap: Bitmap, widthMm: Double, feedDots: Int = 30): PrintJobResult {
+  private fun buildEscPosRasterJob(
+    bitmap: Bitmap,
+    widthMm: Double,
+    printheadWidthMm: Double,
+    hOffsetMm: Double,
+    vOffsetMm: Double,
+    feedDots: Int = 30
+  ): PrintJobResult {
     val dpm = 8.0
     val rawW = Math.max(64, Math.round(widthMm * dpm).toInt())
-    val headDots = if (widthMm > 58.0) 576 else 384
+    // Real hardware raster width for this printer's ESC/POS engine — must come
+    // from the connected printer's actual head, never from the label size
+    // being printed (that picked the wrong head class for labels near 58mm).
+    val headDots = Math.max(64, ((Math.round(printheadWidthMm * dpm).toInt() + 7) / 8) * 8)
     val headBytes = headDots / 8
 
     val targetW = Math.min(headDots, ((rawW + 7) / 8) * 8)
     val targetH = Math.max(32, Math.round(bitmap.height * (targetW.toDouble() / bitmap.width)).toInt())
     val height = ((targetH + 7) / 8) * 8
-    val leftPadding = Math.max(0, (headDots - targetW) / 2) // Center horizontally on thermal head matching 2af2d61
+    val autoCenterPad = Math.max(0, (headDots - targetW) / 2) // Center horizontally on thermal head matching 2af2d61
+    val hOffsetDots = Math.round(hOffsetMm * dpm).toInt()
+    val vOffsetDots = Math.round(vOffsetMm * dpm).toInt()
+    val leftPadding = autoCenterPad + hOffsetDots
 
     val scaled = if (bitmap.width != targetW || bitmap.height != height) {
       Bitmap.createScaledBitmap(bitmap, targetW, height, true)
@@ -742,7 +768,7 @@ class DevPrinterModule : Module() {
     val solidBitmap = Bitmap.createBitmap(headDots, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(solidBitmap)
     canvas.drawColor(Color.WHITE)
-    canvas.drawBitmap(scaled, leftPadding.toFloat(), 0f, null)
+    canvas.drawBitmap(scaled, leftPadding.toFloat(), vOffsetDots.toFloat(), null)
 
     val pixels = IntArray(headDots * height)
     solidBitmap.getPixels(pixels, 0, headDots, 0, 0, headDots, height)
