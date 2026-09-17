@@ -179,25 +179,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const verticalDisplaySv = useSharedValue(textVerticalDisplay);
 
   const isInteracting = useSharedValue(false);
-  const pendingCommit = useSharedValue(false);
   const liftSv = useSharedValue(1);
   const selectedSv = useSharedValue(selected);
   const [moving, setMoving] = React.useState(false);
   const tooltipRef = useRef<TooltipHandle | null>(null);
   const lastTooltipAt = useRef(0);
-  const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => {
-    if (commitTimeoutRef.current) clearTimeout(commitTimeoutRef.current);
-  }, []);
-
-  const committedRef = useRef<{
-    leftMm: number;
-    topMm: number;
-    widthMm: number;
-    heightMm: number;
-    rotation: number;
-  } | null>(null);
 
   useEffect(() => {
     selectedSv.value = selected;
@@ -259,43 +245,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   ]);
 
   useEffect(() => {
-    if (committedRef.current) {
-      const c = committedRef.current;
-      const curLeftMm = finiteMm(element.left);
-      const curTopMm = finiteMm(element.top);
-      const curWMm = sizeMm.width;
-      const curHMm = sizeMm.height;
-      const curRot = ((Math.round(element.rotation ?? 0) % 360) + 360) % 360;
-      const isCommitted =
-        Math.abs(curLeftMm - c.leftMm) < 0.25 &&
-        Math.abs(curTopMm - c.topMm) < 0.25 &&
-        Math.abs(curWMm - c.widthMm) < 0.25 &&
-        Math.abs(curHMm - c.heightMm) < 0.25 &&
-        Math.abs(curRot - c.rotation) < 2;
-
-      if (isCommitted) {
-        if (commitTimeoutRef.current) {
-          clearTimeout(commitTimeoutRef.current);
-          commitTimeoutRef.current = null;
-        }
-        committedRef.current = null;
-        transX.value = 0;
-        transY.value = 0;
-        originLeftSv.value = baseLeftPx;
-        originTopSv.value = baseTopPx;
-        animW.value = baseWidthPx;
-        animH.value = baseHeightPx;
-        animRot.value = baseRotation;
-        startW.value = baseWidthPx;
-        startH.value = baseHeightPx;
-        isInteracting.value = false;
-        pendingCommit.value = false;
-        liftSv.value = 1;
-      }
-      return;
-    }
-
-    if (isInteracting.value || pendingCommit.value) return;
+    // Don't clobber an in-progress gesture. A gesture folds its own final
+    // position/size into these shared values synchronously as soon as it ends
+    // (see the `onEnd` handlers below), so by the time this effect sees the
+    // matching props update, it's just reasserting the value already on screen.
+    if (isInteracting.value) return;
 
     transX.value = 0;
     transY.value = 0;
@@ -326,7 +280,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     animH,
     animRot,
     isInteracting,
-    pendingCommit,
+    startW,
+    startH,
     liftSv,
   ]);
 
@@ -395,36 +350,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       const roundedTop = next.top;
 
       if (Math.abs(roundedLeft - element.left) < 0.005 && Math.abs(roundedTop - element.top) < 0.005) {
-        committedRef.current = null;
-        transX.value = 0;
-        transY.value = 0;
         isInteracting.value = false;
-        pendingCommit.value = false;
-        liftSv.value = 1;
-        setMoving(false);
         return;
       }
-
-      committedRef.current = {
-        leftMm: roundedLeft,
-        topMm: roundedTop,
-        widthMm: roundMm(widthMm),
-        heightMm: roundMm(heightMm),
-        rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
-      };
-
-      if (commitTimeoutRef.current) clearTimeout(commitTimeoutRef.current);
-      commitTimeoutRef.current = setTimeout(() => {
-        committedRef.current = null;
-        pendingCommit.value = false;
-        isInteracting.value = false;
-        transX.value = 0;
-        transY.value = 0;
-        originLeftSv.value = baseLeftPx;
-        originTopSv.value = baseTopPx;
-        animW.value = baseWidthPx;
-        animH.value = baseHeightPx;
-      }, 500);
 
       callbacksRef.current.onTransformEnd({
         id: element.id,
@@ -434,8 +362,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         heightMm: roundMm(heightMm),
         rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
       });
+      // The store update above is already queued — safe to hand control
+      // back to the props-sync effect now, before anything else can render.
+      isInteracting.value = false;
     },
-    [sizeMm.width, sizeMm.height, canvasWidthMm, canvasHeightMm, element.id, element.left, element.top, baseRotation, baseLeftPx, baseTopPx, baseWidthPx, baseHeightPx, transX, transY, originLeftSv, originTopSv, animW, animH, isInteracting, pendingCommit],
+    [sizeMm.width, sizeMm.height, canvasWidthMm, canvasHeightMm, element.id, element.left, element.top, baseRotation, isInteracting],
   );
 
   const captureDragGrab = useCallback((windowX: number, windowY: number) => {
@@ -488,7 +419,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     (handle: ResizeAnchor, nextWPx: number, nextHPx: number, rot: number) => {
       tooltipRef.current?.setText(null);
       const behavior = resizePolicy.behavior[handle];
-      if (!behavior) return;
+      if (!behavior) {
+        isInteracting.value = false;
+        return;
+      }
       const start = resizeStartRef.current;
       const next = boundBoxMm({
         anchor: handle,
@@ -549,26 +483,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       }
 
       const rotation = ((Math.round(rot) % 360) + 360) % 360;
-      committedRef.current = {
-        leftMm: next.left,
-        topMm: next.top,
-        widthMm: next.width,
-        heightMm: finalHeightMm,
-        rotation,
-      };
-
-      if (commitTimeoutRef.current) clearTimeout(commitTimeoutRef.current);
-      commitTimeoutRef.current = setTimeout(() => {
-        committedRef.current = null;
-        pendingCommit.value = false;
-        isInteracting.value = false;
-        transX.value = 0;
-        transY.value = 0;
-        originLeftSv.value = baseLeftPx;
-        originTopSv.value = baseTopPx;
-        animW.value = baseWidthPx;
-        animH.value = baseHeightPx;
-      }, 500);
 
       callbacksRef.current.onTransformEnd({
         id: element.id,
@@ -579,46 +493,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         rotation,
         fontSize,
       });
+      // The store update above is already queued — safe to hand control
+      // back to the props-sync effect now, before anything else can render.
+      isInteracting.value = false;
     },
-    [pxPerMMSafe, canvasWidthMm, canvasHeightMm, element, resizePolicy, baseLeftPx, baseTopPx, baseWidthPx, baseHeightPx, transX, transY, originLeftSv, originTopSv, animW, animH, isInteracting, pendingCommit],
-  );
-
-  /** Committed rotate: alters rotation angle only. */
-  const dispatchRotateCommit = useCallback(
-    (rot: number) => {
-      tooltipRef.current?.setText(null);
-      const rotation = ((Math.round(rot) % 360) + 360) % 360;
-      committedRef.current = {
-        leftMm: roundMm(element.left),
-        topMm: roundMm(element.top),
-        widthMm: roundMm(sizeMm.width),
-        heightMm: roundMm(sizeMm.height),
-        rotation,
-      };
-
-      if (commitTimeoutRef.current) clearTimeout(commitTimeoutRef.current);
-      commitTimeoutRef.current = setTimeout(() => {
-        committedRef.current = null;
-        pendingCommit.value = false;
-        isInteracting.value = false;
-        transX.value = 0;
-        transY.value = 0;
-        originLeftSv.value = baseLeftPx;
-        originTopSv.value = baseTopPx;
-        animW.value = baseWidthPx;
-        animH.value = baseHeightPx;
-      }, 500);
-
-      callbacksRef.current.onTransformEnd({
-        id: element.id,
-        leftMm: roundMm(element.left),
-        topMm: roundMm(element.top),
-        widthMm: roundMm(sizeMm.width),
-        heightMm: roundMm(sizeMm.height),
-        rotation,
-      });
-    },
-    [element.id, element.left, element.top, sizeMm.width, sizeMm.height, baseLeftPx, baseTopPx, baseWidthPx, baseHeightPx, transX, transY, originLeftSv, originTopSv, animW, animH, isInteracting, pendingCommit],
+    [pxPerMMSafe, canvasWidthMm, canvasHeightMm, element, resizePolicy, isInteracting],
   );
 
   const updateTooltipJS = useCallback(
@@ -658,7 +537,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         .onStart((_e) => {
           'worklet';
           isInteracting.value = true;
-          pendingCommit.value = false;
           originLeftSv.value = originLeftSv.value + transX.value;
           originTopSv.value = originTopSv.value + transY.value;
           transX.value = 0;
@@ -697,16 +575,24 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         })
         .onEnd((e) => {
           'worklet';
-          pendingCommit.value = true;
+          // Fold the gesture offset into the origin now, so the view is
+          // already sitting at its final pixel position — no round trip
+          // through React props needed to look settled.
+          originLeftSv.value = originLeftSv.value + transX.value;
+          originTopSv.value = originTopSv.value + transY.value;
+          transX.value = 0;
+          transY.value = 0;
+          // isInteracting stays true until the JS-side commit callback below
+          // has actually queued the store update — otherwise an unrelated
+          // re-render landing in the gap could snap this back to the stale
+          // pre-drag props.
           liftSv.value = 1;
           runOnJS(setMoveLift)(false);
-          const finalLeftPx = originLeftSv.value + transX.value;
-          const finalTopPx = originTopSv.value + transY.value;
           runOnJS(commitDragFromPointer)(
             e.absoluteX,
             e.absoluteY,
-            finalLeftPx,
-            finalTopPx,
+            originLeftSv.value,
+            originTopSv.value,
           );
         }),
     [
@@ -722,7 +608,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       animW,
       animH,
       isInteracting,
-      pendingCommit,
       liftSv,
       selectedSv,
       padZoomSv,
@@ -775,7 +660,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         .onStart((_e) => {
           'worklet';
           isInteracting.value = true;
-          pendingCommit.value = false;
           originLeftSv.value = originLeftSv.value + transX.value;
           originTopSv.value = originTopSv.value + transY.value;
           transX.value = 0;
@@ -937,7 +821,16 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         })
         .onEnd(() => {
           'worklet';
-          pendingCommit.value = true;
+          // Fold the gesture offset into the origin now, so the view is
+          // already sitting at its final pixel size/position.
+          originLeftSv.value = originLeftSv.value + transX.value;
+          originTopSv.value = originTopSv.value + transY.value;
+          transX.value = 0;
+          transY.value = 0;
+          // isInteracting stays true until the JS-side commit callback below
+          // has actually queued the store update — otherwise an unrelated
+          // re-render landing in the gap could snap this back to the stale
+          // pre-resize props.
           runOnJS(dispatchResizeCommit)(handle, animW.value, animH.value, animRot.value);
         })
         .blocksExternalGesture(bodyDragGesture),
@@ -955,7 +848,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       startTY,
       startRot,
       isInteracting,
-      pendingCommit,
       element.id,
       dispatchResizeCommit,
       captureResizeStartFromPx,
@@ -1189,16 +1081,18 @@ const EdgeResizeHandle = memo(function EdgeResizeHandle({
         style={[styles.handleCircle, position === 'e' ? styles.handleE : styles.handleS]}>
         <View pointerEvents="none">
           {position === 'e' ? (
-            <Svg width={16} height={16} viewBox="-8 -8 16 16">
-              <SvgPath d="M -2 -4 L -6.5 0 L -2 4 Z" fill="#FFFFFF" />
-              <SvgPath d="M 2 -4 L 6.5 0 L 2 4 Z" fill="#FFFFFF" />
-              <SvgLine x1={-3} y1={0} x2={3} y2={0} stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" />
+            <Svg width={16} height={16} viewBox="-10 -10 20 20">
+              <SvgPath
+                d="M -3 -5 L -8.5 0 L -3 5 L -3 1.5 L 3 1.5 L 3 5 L 8.5 0 L 3 -5 L 3 -1.5 L -3 -1.5 Z"
+                fill="#FFFFFF"
+              />
             </Svg>
           ) : (
-            <Svg width={16} height={16} viewBox="-8 -8 16 16">
-              <SvgPath d="M -4 -2 L 0 -6.5 L 4 -2 Z" fill="#FFFFFF" />
-              <SvgPath d="M -4 2 L 0 6.5 L 4 2 Z" fill="#FFFFFF" />
-              <SvgLine x1={0} y1={-3} x2={0} y2={3} stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" />
+            <Svg width={16} height={16} viewBox="-10 -10 20 20">
+              <SvgPath
+                d="M -5 -3 L 0 -8.5 L 5 -3 L 1.5 -3 L 1.5 3 L 5 3 L 0 8.5 L -5 3 L -1.5 3 L -1.5 -3 Z"
+                fill="#FFFFFF"
+              />
             </Svg>
           )}
         </View>
@@ -1224,15 +1118,15 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#54C8C8',
+    backgroundColor: '#42BCC7',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 3,
+    shadowOpacity: 0.15,
+    shadowRadius: 1.5,
+    elevation: 2,
   },
   handleS: {
     bottom: -14,

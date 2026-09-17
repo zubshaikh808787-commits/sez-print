@@ -18,9 +18,9 @@ export const CHROME_STROKE_DARK = 'rgba(153, 246, 228, 0.92)';
 export const CHROME_SELECTION_STROKE = '#E8543C';
 export const CHROME_SELECTION_DASH = [6, 4];
 
-/** Circular resize handle per canvas.md §3.1 (#2FB6B2 teal, 28px diameter). */
-export const CHROME_HANDLE_FILL = '#2FB6B2';
-export const CHROME_HANDLE_COLOR = '#2FB6B2';
+/** Circular resize handle per vendor UI (#42BCC7 cyan-teal, 28px diameter). */
+export const CHROME_HANDLE_FILL = '#42BCC7';
+export const CHROME_HANDLE_COLOR = '#42BCC7';
 export const CHROME_HANDLE_SIZE_PX = 28;
 export const CHROME_HANDLE_RADIUS_PX = 14;
 export const CHROME_HANDLE_ICON_COLOR = '#FFFFFF';
