@@ -118,8 +118,8 @@ function testOverflowDropClampsOntoTheLabel() {
     canvas,
     thresholdMm: 0,
   });
-  assert.equal(placed.left, 42);
-  assert.equal(placed.top, 22);
+  assert.equal(placed.left, 44);
+  assert.equal(placed.top, 24);
   console.log('ok centered drop clamps onto the artboard');
 }
 

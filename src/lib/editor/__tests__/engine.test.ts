@@ -166,8 +166,8 @@ function testSmallContentCanSitAnywhere() {
   assert.equal(corner.top, 72.5);
 
   const clamped = clampBoxOnCanvas(80, -4, 0.5, 0.5, canvas);
-  assert.equal(clamped.left, 49.5);
-  assert.equal(clamped.top, 0);
+  assert.equal(clamped.left, 49.5); // canvas.widthMm - minVisibleW (50 - 0.5)
+  assert.equal(clamped.top, 0); // -h + minVisibleH (-0.5 + 0.5)
 
   const el = textEl('tiny', 40.25, 60.1, 0.5, 0.5);
   const kept = clampElementToLabel(el, { widthMm: 50, heightMm: 73 });

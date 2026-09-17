@@ -117,18 +117,26 @@ export function clampToLabelBounds(
     left = Math.max(0, Math.min(left, canvasW - minMm));
     width = Math.min(Math.max(minMm, width), canvasW - left);
   } else {
-    // 'body' drag
-    width = Math.min(Math.max(minMm, width), canvasW);
+    // 'body' drag: allows elements to bleed or move partially outside the label canvas
+    width = Math.max(minMm, width);
     const targetH = Math.max(minMm, naturalH ?? height);
     if (targetH > canvasH) {
       overflowed = true;
       height = canvasH;
+      top = 0;
     } else {
       overflowed = false;
       height = targetH;
+      const minVisibleH = Math.min(height, 1);
+      const minTop = -height + minVisibleH;
+      const maxTop = canvasH - minVisibleH;
+      top = Math.max(minTop, Math.min(top, maxTop));
     }
-    left = Math.max(0, Math.min(left, Math.max(0, canvasW - width)));
-    top = Math.max(0, Math.min(top, Math.max(0, canvasH - height)));
+
+    const minVisibleW = Math.min(width, 1);
+    const minLeft = -width + minVisibleW;
+    const maxLeft = canvasW - minVisibleW;
+    left = Math.max(minLeft, Math.min(left, maxLeft));
   }
 
   return {

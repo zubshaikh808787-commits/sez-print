@@ -206,11 +206,15 @@ export function nudgeBox(
   dyMm: number,
   canvas: CanvasBounds,
 ): { left: number; top: number } {
-  const maxLeft = Math.max(0, canvas.widthMm - width);
-  const maxTop = Math.max(0, canvas.heightMm - height);
+  const minVisibleW = Math.min(width, 1);
+  const minVisibleH = Math.min(height, 1);
+  const minLeft = -width + minVisibleW;
+  const maxLeft = canvas.widthMm - minVisibleW;
+  const minTop = -height + minVisibleH;
+  const maxTop = canvas.heightMm - minVisibleH;
   return {
-    left: roundMm(Math.min(maxLeft, Math.max(0, left + dxMm))),
-    top: roundMm(Math.min(maxTop, Math.max(0, top + dyMm))),
+    left: roundMm(Math.min(maxLeft, Math.max(minLeft, left + dxMm))),
+    top: roundMm(Math.min(maxTop, Math.max(minTop, top + dyMm))),
   };
 }
 
@@ -289,11 +293,15 @@ export function clampBoxOnCanvas(
 ): { left: number; top: number } {
   const w = Math.max(MIN_ELEMENT_MM, finiteMm(width, MIN_ELEMENT_MM));
   const h = Math.max(0.1, finiteMm(height, MIN_ELEMENT_MM));
-  const maxLeft = Math.max(0, canvas.widthMm - w);
-  const maxTop = Math.max(0, canvas.heightMm - h);
+  const minVisibleW = Math.min(w, 1);
+  const minVisibleH = Math.min(h, 1);
+  const minLeft = -w + minVisibleW;
+  const maxLeft = canvas.widthMm - minVisibleW;
+  const minTop = -h + minVisibleH;
+  const maxTop = canvas.heightMm - minVisibleH;
   return {
-    left: roundMm(Math.min(maxLeft, Math.max(0, finiteMm(left)))),
-    top: roundMm(Math.min(maxTop, Math.max(0, finiteMm(top)))),
+    left: roundMm(Math.min(maxLeft, Math.max(minLeft, finiteMm(left)))),
+    top: roundMm(Math.min(maxTop, Math.max(minTop, finiteMm(top)))),
   };
 }
 

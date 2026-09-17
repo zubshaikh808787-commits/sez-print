@@ -93,29 +93,29 @@ function testAnchorSClamping() {
 function testAnchorBodyClamping() {
   const canvas = { widthMm: 50, heightMm: 30 };
 
-  // 1. Dragging outside left/top
+  // 1. Dragging partially outside left/top allows negative position
   const r1 = clampToLabelBounds(
     { left: -10, top: -5, width: 20, height: 10 },
     canvas,
     { anchor: 'body' },
   );
-  assert.equal(r1.left, 0);
-  assert.equal(r1.top, 0);
+  assert.equal(r1.left, -10);
+  assert.equal(r1.top, -5);
   assert.equal(r1.width, 20);
   assert.equal(r1.height, 10);
   assert.equal(r1.overflowed, false);
 
-  // 2. Dragging outside right/bottom
+  // 2. Dragging partially outside right/bottom allows position past canvas - size
   const r2 = clampToLabelBounds(
     { left: 45, top: 25, width: 20, height: 10 },
     canvas,
     { anchor: 'body' },
   );
-  assert.equal(r2.left, 30); // 50 - 20
-  assert.equal(r2.top, 20); // 30 - 10
+  assert.equal(r2.left, 45);
+  assert.equal(r2.top, 25);
   assert.equal(r2.overflowed, false);
 
-  console.log('ok anchor body clamping keeps element fully inside canvas');
+  console.log('ok anchor body clamping allows element to move past canvas borders');
 }
 
 function testFitFontSizeToLabel() {

@@ -31,8 +31,8 @@ function testDragBoundKeepsElementOnArtboard() {
   assert.equal(inside.left, 12);
   assert.equal(inside.top, 8);
   const overflow = dragBoundMm(80, -4, 10, 6, canvas);
-  assert.equal(overflow.left, 40);
-  assert.equal(overflow.top, 0);
+  assert.equal(overflow.left, 49); // canvas.widthMm - minVisibleMm (50 - 1)
+  assert.equal(overflow.top, -4); // allows bleed
   console.log('ok dragBoundMm clamps to the artboard like dragBoundFunc');
 }
 
