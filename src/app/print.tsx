@@ -679,6 +679,7 @@ export default function PrintScreen() {
           pageCount === 1 && printRasterRef.current?.key === printRasterKey
             ? printRasterRef.current.base64
             : null;
+        const capturePacked = async () => {
           // All native printer modules (TD-404, Josh LPAPI, Tez PrintSDK, Dev AutoReplyPrint)
           // accept raw PNG base64 and perform hardware-accelerated 1-bit packing natively.
           // Skipping the pure-JS PNG decode→re-encode saves ~2–3s per label on mobile.
@@ -823,39 +824,6 @@ export default function PrintScreen() {
             }
           } catch (err) {
             console.warn('[print] DEV native print failed:', err);
-            throw err;
-          }
-          timer.end('sdkFastPrint');
-        } else if (manager.isTez) {
-          console.info(
-            `[TEZ-PRINT-P1:PREFLIGHT] Label print dispatching via TEZ PrintSDK: page=${page + 1}/${pageCount}, size=${paper.widthMm}x${paper.heightMm}mm, copies=${copies}`,
-          );
-          timer.start('sdkFastPrint');
-          try {
-            usedNative = await manager.printTezPngLabelFast({
-              pngBase64: ratTail143Job
-                ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
-                : base64,
-              widthMm: paper.widthMm,
-              heightMm: paper.heightMm,
-              gapMm: gapLength,
-              copies,
-              density: printDensity,
-              speed: printSpeed,
-              vOffsetMm: vOffset,
-              hOffsetMm: hOffset,
-              media: wantsBline ? 'bline' : media,
-              orientation: ratTail143Job ? 0 : orientationDeg,
-              dpi: jobDpi,
-              threshold: jewelryDieCutJob ? Math.max(threshold, 168) : threshold,
-            });
-            if (usedNative) {
-              console.info(
-                `[print] page ${page + 1} total: ${Date.now() - pageStart} ms | PrintSDK native fast path (TEZ)`,
-              );
-            }
-          } catch (err) {
-            console.warn('[print] TEZ native print failed:', err);
             throw err;
           }
           timer.end('sdkFastPrint');
