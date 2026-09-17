@@ -2914,7 +2914,7 @@ const styles = StyleSheet.create({
   },
   artboardSlot: {
     position: 'relative',
-    overflow: 'visible',
+    overflow: 'hidden',
     backgroundColor: '#FFFFFF',
     borderRightWidth: 1,
     borderBottomWidth: 1,
