@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { IosAlertModal, IosAlertInput } from '@/components/ui/ios-alert-modal';
 import { editorBridge } from '@/constants/editor-bridge';
 import { isScanEmptyError, payloadFromBarcodeResult, SCAN_CODE_TYPES } from '@/lib/scan-codes';
 
@@ -237,39 +238,21 @@ export default function ScanScreen() {
         </View>
 
         {/* Manual Modal Fallback */}
-        <Modal
+        <IosAlertModal
           visible={manualModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setManualModalVisible(false)}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalBackdrop}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Enter Barcode Manually</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Enter barcode or serial number"
-                placeholderTextColor="#8E97A1"
-                value={manualInput}
-                onChangeText={setManualInput}
-                autoFocus
-              />
-              <View style={styles.modalButtons}>
-                <Pressable
-                  style={[styles.modalBtn, styles.modalCancelBtn]}
-                  onPress={() => setManualModalVisible(false)}>
-                  <Text style={styles.modalCancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.modalBtn, styles.modalSubmitBtn]}
-                  onPress={handleManualSubmit}>
-                  <Text style={styles.modalSubmitText}>Done</Text>
-                </Pressable>
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+          onClose={() => setManualModalVisible(false)}
+          title="Enter Barcode Manually"
+          buttons={[
+            { text: 'Cancel', style: 'cancel', onPress: () => setManualModalVisible(false) },
+            { text: 'Done', style: 'default', bold: true, onPress: handleManualSubmit },
+          ]}>
+          <IosAlertInput
+            placeholder="Enter barcode or serial number"
+            value={manualInput}
+            onChangeText={setManualInput}
+            autoFocus
+          />
+        </IosAlertModal>
       </View>
     );
   }
@@ -353,41 +336,32 @@ export default function ScanScreen() {
       </View>
 
       {/* Manual Entry Modal */}
-      <Modal
+      <IosAlertModal
         visible={manualModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setManualModalVisible(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Enter Barcode Manually</Text>
-            <TextInput
-              style={styles.textInput}
-              placeholder="e.g. 8901234567890"
-              placeholderTextColor="#8E97A1"
-              value={manualInput}
-              onChangeText={setManualInput}
-              autoCapitalize="none"
-              autoFocus
-            />
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalCancelBtn]}
-                onPress={() => {
-                  setManualModalVisible(false);
-                  setManualInput('');
-                }}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalSubmitBtn]} onPress={handleManualSubmit}>
-                <Text style={styles.modalSubmitText}>Confirm</Text>
-              </Pressable>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        onClose={() => {
+          setManualModalVisible(false);
+          setManualInput('');
+        }}
+        title="Enter Barcode Manually"
+        buttons={[
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => {
+              setManualModalVisible(false);
+              setManualInput('');
+            },
+          },
+          { text: 'Confirm', style: 'default', bold: true, onPress: handleManualSubmit },
+        ]}>
+        <IosAlertInput
+          placeholder="e.g. 8901234567890"
+          value={manualInput}
+          onChangeText={setManualInput}
+          autoCapitalize="none"
+          autoFocus
+        />
+      </IosAlertModal>
 
       {/* Scan Result Modal */}
       <Modal

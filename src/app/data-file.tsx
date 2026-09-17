@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { Palette, Type } from '@/constants/ui';
+import { IosAlertModal, IosAlertInput } from '@/components/ui/ios-alert-modal';
 import { parseExcelFile } from '@/lib/excel';
 import { useDataStore, type ImportedExcelFile } from '@/stores/data-store';
 
@@ -488,44 +489,29 @@ export default function DataFileScreen() {
         </Pressable>
       </View>
 
-      <Modal
+      <IosAlertModal
         visible={showLinkModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowLinkModal(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalHeading}>Create Data Link</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={linkName}
-              onChangeText={setLinkName}
-              placeholder="Link name"
-              placeholderTextColor="#94A3B8"
-              autoFocus
-            />
-            <TextInput
-              style={styles.modalInput}
-              value={linkUrl}
-              onChangeText={setLinkUrl}
-              placeholder="https://example.com/data.csv"
-              placeholderTextColor="#94A3B8"
-              autoCapitalize="none"
-              keyboardType="url"
-            />
-            <View style={styles.modalActionRow}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalCancelBtn]}
-                onPress={() => setShowLinkModal(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalSaveBtn]} onPress={confirmCreateLink}>
-                <Text style={styles.modalSaveText}>Save</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowLinkModal(false)}
+        title="Create Data Link"
+        buttons={[
+          { text: 'Cancel', style: 'cancel', onPress: () => setShowLinkModal(false) },
+          { text: 'Save', style: 'default', bold: true, onPress: confirmCreateLink },
+        ]}>
+        <IosAlertInput
+          value={linkName}
+          onChangeText={setLinkName}
+          placeholder="Link name"
+          autoFocus
+        />
+        <IosAlertInput
+          value={linkUrl}
+          onChangeText={setLinkUrl}
+          placeholder="https://example.com/data.csv"
+          autoCapitalize="none"
+          keyboardType="url"
+          style={{ marginTop: 8 }}
+        />
+      </IosAlertModal>
     </View>
   );
 }

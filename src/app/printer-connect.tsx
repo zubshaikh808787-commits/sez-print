@@ -35,6 +35,11 @@ import {
   type BluetoothCapabilities,
   type DiscoveredPrinter,
 } from '@/lib/printer/printer-manager';
+import {
+  PRINTER_MODEL_LIST,
+  SEZNIK_PRINTER_MODELS,
+  type SeznikPrinterModelId,
+} from '@/constants/printer-models';
 import { usePrinterStore } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
@@ -47,7 +52,6 @@ async function openPhoneBluetoothSettings() {
       return;
     }
     if (Platform.OS === 'ios') {
-      // Apple does not allow a third-party app to open the Bluetooth pane.
       await Linking.openURL('app-settings:');
       return;
     }
@@ -75,8 +79,9 @@ export default function PrinterConnectScreen() {
   const deviceId = usePrinterStore((s) => s.deviceId);
   const deviceName = usePrinterStore((s) => s.deviceName);
   const transport = usePrinterStore((s) => s.transport);
-  const lastDeviceName = usePrinterStore((s) => s.lastDeviceName);
-  const lastDeviceId = usePrinterStore((s) => s.lastDeviceId);
+  const selectedModel = usePrinterStore((s) => s.selectedPrinterModel);
+  const setSelectedPrinterModel = usePrinterStore((s) => s.setSelectedPrinterModel);
+  const lastDeviceForModel = usePrinterStore((s) => s.lastDeviceForModel);
   const devCommandSet = usePrinterStore((s) => s.devCommandSet);
   const setDevCommandSet = usePrinterStore((s) => s.setDevCommandSet);
 
@@ -97,6 +102,8 @@ export default function PrinterConnectScreen() {
   const [bluetoothOn, setBluetoothOn] = useState(() => getPrinterManager().isBluetoothEnabled());
   const mountedRef = useRef(true);
 
+  const activeModelMeta = SEZNIK_PRINTER_MODELS[selectedModel] || SEZNIK_PRINTER_MODELS.td404;
+
   const refreshCaps = useCallback(() => {
     const mgr = getPrinterManager();
     const nextCaps = mgr.getCapabilities();
@@ -106,29 +113,7 @@ export default function PrinterConnectScreen() {
     return { caps: nextCaps, bluetoothOn: on };
   }, []);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    refreshCaps();
-    void backendHealth().then((ok) => {
-      if (mountedRef.current) setBackendOk(ok);
-    });
-    const appSub = AppState.addEventListener('change', (next) => {
-      if (next !== 'active' || !mountedRef.current) return;
-      const { caps: nextCaps, bluetoothOn: on } = refreshCaps();
-      if (on && nextCaps.canScan) {
-        setNativeHint(null);
-      } else if (!on && nextCaps.canScan) {
-        setNativeHint(BLUETOOTH_OFF_MESSAGE);
-      }
-    });
-    return () => {
-      mountedRef.current = false;
-      appSub.remove();
-      getPrinterManager().stopScan();
-    };
-  }, [refreshCaps]);
-
-  const startScan = useCallback(async () => {
+  const startScan = useCallback(async (targetModel = selectedModel) => {
     const { caps: nextCaps, bluetoothOn: on } = refreshCaps();
     if (!nextCaps.canScan) {
       setNativeHint(nextCaps.reason);
@@ -146,7 +131,7 @@ export default function PrinterConnectScreen() {
     setNativeHint(null);
     setScanErrors([]);
     try {
-      const result = await getPrinterManager().startScan((device) => {
+      const result = await getPrinterManager().startModelScan(targetModel, (device) => {
         if (!mountedRef.current) return;
         setDevices((prev) => {
           const key = device.id.toUpperCase();
@@ -205,7 +190,6 @@ export default function PrinterConnectScreen() {
             finalLikelyTd404 = false;
             finalLikelyJosh = false;
           } else {
-            // Unidentified name — if existing device had an explicit SDK and incoming is generic, keep existing
             const SPECIFIC_SDKS = new Set(['td404', 'josh', 'tez', 'dev', 'labelx']);
             if (SPECIFIC_SDKS.has(existing.sdkId ?? '') && !SPECIFIC_SDKS.has(device.sdkId ?? '')) {
               finalTransport = existing.transport;
@@ -220,7 +204,7 @@ export default function PrinterConnectScreen() {
           }
 
           next[idx] = {
-            ...existing,
+            ...next[idx],
             ...device,
             name: device.name || existing.name,
             transport: finalTransport,
@@ -245,15 +229,14 @@ export default function PrinterConnectScreen() {
           const detail =
             result.errors[0] ||
             getPrinterManager().getLastScanError() ||
-            getPrinterManager().getCapabilities().reason ||
-            'No Bluetooth printers found.';
+            `No ${activeModelMeta.shortName} Bluetooth printers found.`;
           setNativeHint(detail);
         }
       }
     } catch (error) {
       if (mountedRef.current) {
         const message =
-          error instanceof Error ? error.message : 'Could not start scanning for printers.';
+          error instanceof Error ? error.message : `Could not scan for ${activeModelMeta.shortName} printers.`;
         setNativeHint(message);
         refreshCaps();
         if (!isBluetoothOffError(error)) {
@@ -263,91 +246,46 @@ export default function PrinterConnectScreen() {
     } finally {
       if (mountedRef.current) setScanning(false);
     }
-  }, [refreshCaps]);
+  }, [refreshCaps, selectedModel, activeModelMeta.shortName]);
+
+  const handleModelChange = (modelId: SeznikPrinterModelId) => {
+    if (modelId === selectedModel) return;
+    setSelectedPrinterModel(modelId);
+    setDevices([]);
+    setNativeHint(null);
+    setScanErrors([]);
+    void startScan(modelId);
+  };
 
   useEffect(() => {
-    const { caps: nextCaps, bluetoothOn: on } = refreshCaps();
-    if (!nextCaps.canScan) {
-      setNativeHint(nextCaps.reason);
-      return;
-    }
-    if (!on) {
-      setNativeHint(BLUETOOTH_OFF_MESSAGE);
-      return;
-    }
-    void startScan().catch(() => {});
-  }, [startScan, refreshCaps]);
+    mountedRef.current = true;
+    refreshCaps();
+    void backendHealth().then((ok) => {
+      if (mountedRef.current) setBackendOk(ok);
+    });
+    const appSub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active' || !mountedRef.current) return;
+      const { caps: nextCaps, bluetoothOn: on } = refreshCaps();
+      if (on && nextCaps.canScan) {
+        setNativeHint(null);
+      } else if (!on && nextCaps.canScan) {
+        setNativeHint(BLUETOOTH_OFF_MESSAGE);
+      }
+    });
+    void startScan(selectedModel).catch(() => {});
+    return () => {
+      mountedRef.current = false;
+      appSub.remove();
+      getPrinterManager().stopScan();
+    };
+  }, []);
 
   const paired = useMemo(
-    () =>
-      devices
-        .filter((d) => d.bonded)
-        .sort((a, b) => {
-          const aTd = a.likelyTd404 || isLikelyTd404Name(a.name);
-          const bTd = b.likelyTd404 || isLikelyTd404Name(b.name);
-          const aMatch =
-            (a as any).likelyLabelX ||
-            isLikelyLabelXName(a.name) ||
-            aTd ||
-            a.likelyDev ||
-            isLikelyDevName(a.name) ||
-            a.likelyJosh ||
-            isLikelyJoshName(a.name) ||
-            a.likelyTez ||
-            a.likelyShakti ||
-            isLikelyTezName(a.name) ||
-            isLikelyShaktiName(a.name);
-          const bMatch =
-            (b as any).likelyLabelX ||
-            isLikelyLabelXName(b.name) ||
-            bTd ||
-            b.likelyDev ||
-            isLikelyDevName(b.name) ||
-            b.likelyJosh ||
-            isLikelyJoshName(b.name) ||
-            b.likelyTez ||
-            b.likelyShakti ||
-            isLikelyTezName(b.name) ||
-            isLikelyShaktiName(b.name);
-          return Number(bMatch) - Number(aMatch);
-        }),
+    () => devices.filter((d) => d.bonded),
     [devices],
   );
   const nearby = useMemo(
-    () =>
-      devices
-        .filter((d) => !d.bonded)
-        .sort((a, b) => {
-          const aTd = a.likelyTd404 || isLikelyTd404Name(a.name);
-          const bTd = b.likelyTd404 || isLikelyTd404Name(b.name);
-          const aMatch =
-            (a as any).likelyLabelX ||
-            isLikelyLabelXName(a.name) ||
-            aTd ||
-            a.likelyDev ||
-            isLikelyDevName(a.name) ||
-            a.likelyJosh ||
-            isLikelyJoshName(a.name) ||
-            a.likelyTez ||
-            a.likelyShakti ||
-            isLikelyTezName(a.name) ||
-            isLikelyShaktiName(a.name);
-          const bMatch =
-            (b as any).likelyLabelX ||
-            isLikelyLabelXName(b.name) ||
-            bTd ||
-            b.likelyDev ||
-            isLikelyDevName(b.name) ||
-            b.likelyJosh ||
-            isLikelyJoshName(b.name) ||
-            b.likelyTez ||
-            b.likelyShakti ||
-            isLikelyTezName(b.name) ||
-            isLikelyShaktiName(b.name);
-          const aScore = (aMatch ? 2 : 0) + (a.rssi ?? -999);
-          const bScore = (bMatch ? 2 : 0) + (b.rssi ?? -999);
-          return bScore - aScore;
-        }),
+    () => devices.filter((d) => !d.bonded).sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999)),
     [devices],
   );
 
@@ -360,70 +298,34 @@ export default function PrinterConnectScreen() {
     }
     setConnectingId(device.id);
     try {
-      const name = device.name;
-      const isLabelX =
-        isLikelyLabelXName(name) ||
-        device.transport === 'labelx-spp' ||
-        (device as any).likelyLabelX;
-      const isJosh =
-        !isLabelX &&
-        (isLikelyJoshName(name) ||
-          device.transport === 'josh-lpapi' ||
-          (device.likelyJosh && !isLikelyDevName(name)));
-      const isTez =
-        !isLabelX &&
-        !isJosh &&
-        (isLikelyTezName(name) ||
-          isLikelyShaktiName(name) ||
-          device.transport === 'tez-spp' ||
-          ((device as any).likelyTez && !isLikelyDevName(name)) ||
-          ((device as any).likelyShakti && !isLikelyDevName(name)));
-      const isTd404 =
-        !isLabelX &&
-        !isJosh &&
-        !isTez &&
-        (isLikelyTd404Name(name) || (device.likelyTd404 && !isLikelyDevName(name)));
-      const isDev =
-        !isLabelX &&
-        !isJosh &&
-        !isTez &&
-        !isTd404 &&
-        (isLikelyDevName(name) || (device.transport === 'dev-spp' && (device as any).likelyDev));
-      const transport = isLabelX
-        ? 'labelx-spp'
-        : isJosh
-          ? 'josh-lpapi'
-          : isTez
-            ? 'tez-spp'
-            : isTd404
-              ? 'bluetooth-spp'
-              : isDev
-                ? 'dev-spp'
-                : (device.transport === 'wifi' ? 'wifi' : 'bluetooth-spp');
+      const targetModel: SeznikPrinterModelId =
+        device.sdkId && device.sdkId !== 'generic'
+          ? (device.sdkId as SeznikPrinterModelId)
+          : (device as any).likelyLabelX
+            ? 'labelx'
+            : (device as any).likelyDev
+              ? 'dev'
+              : (device as any).likelyTez || (device as any).likelyShakti
+                ? 'tez'
+                : device.likelyJosh
+                  ? 'josh'
+                  : device.likelyTd404
+                    ? 'td404'
+                    : selectedModel;
 
       console.info(
-        isLabelX
-          ? `[LABELX-CONN] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to Label X LuckPrinter SDK`
-          : isJosh
-            ? `[JOSH-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to JOSH LPAPI`
-            : isTez
-              ? `[TEZ-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to TEZ OEM PrintSDK`
-              : isTd404
-                ? `[TD404-CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to TD-404 BT SPP`
-                : isDev
-                  ? `[DEV-CONN] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to AutoReplyPrint SDK`
-                  : `[CONN-P1:IDENTIFY] User selected device: ${device.id} (${device.name ?? 'unknown'}) -> routing to ${transport}`,
+        `[PRINTER-CONNECT] Connecting model ${targetModel} to ${device.id} (${device.name ?? 'unknown'})`,
       );
-      await getPrinterManager().connect(
+      await getPrinterManager().connectModel(
+        targetModel,
         device.id,
         device.name,
-        transport,
       );
     } catch (error) {
       if (mountedRef.current) {
         Alert.alert(
           'Connection Failed',
-          error instanceof Error ? error.message : 'Could not connect to the printer.',
+          error instanceof Error ? error.message : `Could not connect to ${activeModelMeta.shortName} printer.`,
         );
       }
     } finally {
@@ -432,6 +334,11 @@ export default function PrinterConnectScreen() {
   };
 
   const handleMacConnect = async () => {
+    const mac = macInput.trim().toUpperCase();
+    if (!mac) {
+      Alert.alert('MAC required', 'Enter a Bluetooth MAC like AA:BB:CC:DD:EE:FF');
+      return;
+    }
     if (!getPrinterManager().isBluetoothEnabled()) {
       setBluetoothOn(false);
       setNativeHint(BLUETOOTH_OFF_MESSAGE);
@@ -440,120 +347,23 @@ export default function PrinterConnectScreen() {
     }
     setConnectingId('mac');
     try {
-      await getPrinterManager().connectByMac(macInput, macInput);
-      Alert.alert('Connected', 'Printer linked over classic Bluetooth.');
+      console.info(`[PRINTER-CONNECT] Manual MAC connect for ${selectedModel}: ${mac}`);
+      await getPrinterManager().connectModel(selectedModel, mac, activeModelMeta.shortName);
+      Alert.alert('Connected', `${activeModelMeta.shortName} printer linked successfully.`);
     } catch (error) {
       Alert.alert(
         'MAC Connect Failed',
-        error instanceof Error ? error.message : 'Could not connect.',
+        error instanceof Error ? error.message : `Could not connect to ${activeModelMeta.shortName} printer.`,
       );
     } finally {
       if (mountedRef.current) setConnectingId(null);
     }
   };
 
-  const handleLabelXMacConnect = async () => {
-    const mac = macInput.trim().toUpperCase();
-    if (!mac) {
-      Alert.alert('MAC required', 'Enter a Bluetooth MAC like AA:BB:CC:DD:EE:FF');
-      return;
-    }
-    if (!getPrinterManager().isBluetoothEnabled()) {
-      setBluetoothOn(false);
-      setNativeHint(BLUETOOTH_OFF_MESSAGE);
-      Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
-      return;
-    }
-    setConnectingId('mac-labelx');
-    try {
-      console.info(`[LABELX-CONN] Manual MAC connect entered: ${mac}`);
-      await getPrinterManager().connectLabelXByMac(mac, 'Label X');
-      Alert.alert('Connected', `Label X printer ${mac} linked over OEM LuckPrinter SDK.`);
-    } catch (error) {
-      Alert.alert(
-        'Label X Connect Failed',
-        error instanceof Error ? error.message : 'Could not connect to Label X printer.',
-      );
-    } finally {
-      if (mountedRef.current) setConnectingId(null);
-    }
-  };
-
-  const handleDevMacConnect = async () => {
-    const mac = macInput.trim().toUpperCase();
-    if (!mac) {
-      Alert.alert('MAC required', 'Enter a Bluetooth MAC like AA:BB:CC:DD:EE:FF');
-      return;
-    }
-    if (!getPrinterManager().isBluetoothEnabled()) {
-      setBluetoothOn(false);
-      setNativeHint(BLUETOOTH_OFF_MESSAGE);
-      Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
-      return;
-    }
-    setConnectingId('mac-dev');
-    try {
-      console.info(`[DEV-CONN] Manual MAC connect entered: ${mac}`);
-      await getPrinterManager().connectDevByMac(mac, 'DEV');
-      Alert.alert('Connected', `SEZNIK DEV printer ${mac} linked over AutoReplyPrint SDK.`);
-    } catch (error) {
-      Alert.alert(
-        'DEV Connect Failed',
-        error instanceof Error ? error.message : 'Could not connect to DEV printer.',
-      );
-    } finally {
-      if (mountedRef.current) setConnectingId(null);
-    }
-  };
-
-  const handleJoshMacConnect = async () => {
-    if (!getPrinterManager().isBluetoothEnabled()) {
-      setBluetoothOn(false);
-      setNativeHint(BLUETOOTH_OFF_MESSAGE);
-      Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
-      return;
-    }
-    setConnectingId('mac-josh');
-    try {
-      console.info(`[JOSH-CONN-P1:IDENTIFY] Manual MAC connect entered: ${macInput}`);
-      await getPrinterManager().connectJoshByMac(macInput, 'JOSH');
-      Alert.alert('Connected', 'JOSH printer linked over LPAPI.');
-    } catch (error) {
-      Alert.alert(
-        'JOSH Connect Failed',
-        error instanceof Error ? error.message : 'Could not connect to JOSH printer.',
-      );
-    } finally {
-      if (mountedRef.current) setConnectingId(null);
-    }
-  };
-
-  const handleTezMacConnect = async () => {
-    const mac = macInput.trim().toUpperCase();
-    if (!mac) {
-      Alert.alert('MAC required', 'Enter a Bluetooth MAC like AA:BB:CC:DD:EE:FF');
-      return;
-    }
-    if (!getPrinterManager().isBluetoothEnabled()) {
-      setBluetoothOn(false);
-      setNativeHint(BLUETOOTH_OFF_MESSAGE);
-      Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
-      return;
-    }
-    setConnectingId('mac-tez');
-    try {
-      console.info(`[TEZ-CONN] Manual MAC connect entered: ${mac}`);
-      await getPrinterManager().connectTezByMac(mac, 'TEZ');
-      Alert.alert('Connected', `TEZ/SHAKTI printer ${mac} linked over OEM PrintSDK.`);
-    } catch (error) {
-      Alert.alert(
-        'TEZ Connect Failed',
-        error instanceof Error ? error.message : 'Could not connect to TEZ/SHAKTI printer.',
-      );
-    } finally {
-      if (mountedRef.current) setConnectingId(null);
-    }
-  };
+  const handleLabelXMacConnect = () => handleMacConnect();
+  const handleDevMacConnect = () => handleMacConnect();
+  const handleJoshMacConnect = () => handleMacConnect();
+  const handleTezMacConnect = () => handleMacConnect();
 
   const handleCalibrateDev = async () => {
     setCalibrating(true);
@@ -599,37 +409,23 @@ export default function PrinterConnectScreen() {
     }
   };
 
+  const lastDeviceForActiveModel = lastDeviceForModel[selectedModel];
+
   const handleReconnectLast = async () => {
-    if (!lastDeviceId) return;
+    if (!lastDeviceForActiveModel) return;
     if (!getPrinterManager().isBluetoothEnabled()) {
       setBluetoothOn(false);
       setNativeHint(BLUETOOTH_OFF_MESSAGE);
       Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
       return;
     }
-    setConnectingId(lastDeviceId);
+    setConnectingId(lastDeviceForActiveModel.id);
     try {
-      const isLabelX =
-        transport === 'labelx-spp' ||
-        isLikelyLabelXName(lastDeviceName);
-      const isDev =
-        !isLabelX &&
-        (transport === 'dev-spp' ||
-          isLikelyDevName(lastDeviceName));
-      const isTez =
-        !isLabelX &&
-        !isDev &&
-        (transport === 'tez-spp' ||
-          isLikelyTezName(lastDeviceName) ||
-          isLikelyShaktiName(lastDeviceName));
-      const isJosh = !isLabelX && !isDev && !isTez && (transport === 'josh-lpapi' || isLikelyJoshName(lastDeviceName));
-      const isTd = !isLabelX && !isDev && !isTez && !isJosh && isLikelyTd404Name(lastDeviceName);
-      if (isLabelX || isDev || isTez || isJosh) {
-        const ok = await getPrinterManager().reconnectLastDevice();
-        if (!ok) throw new Error('Could not reconnect to printer.');
-      } else {
-        await getPrinterManager().connect(lastDeviceId, lastDeviceName, 'bluetooth-spp');
-      }
+      await getPrinterManager().connectModel(
+        selectedModel,
+        lastDeviceForActiveModel.id,
+        lastDeviceForActiveModel.name,
+      );
     } catch (error) {
       Alert.alert(
         'Connection Failed',
@@ -654,32 +450,9 @@ export default function PrinterConnectScreen() {
   const handleTestPrint = async () => {
     setTesting(true);
     try {
-      const isLabelX = getPrinterManager().isLabelX;
-      const isDev = !isLabelX && getPrinterManager().isDev;
-      const isTez = !isLabelX && !isDev && getPrinterManager().isTez;
-      const isJosh = !isLabelX && !isDev && !isTez && getPrinterManager().isJosh;
-      console.info(
-        isLabelX
-          ? '[LABELX-PRINT] Test print button tapped (routing: Label X LuckPrinter SDK)'
-          : isDev
-            ? `[DEV-PRINT] Test print button tapped (mode=${devCommandSet})`
-            : isTez
-              ? '[TEZ-PRINT-P1:PREFLIGHT] Test print button tapped (routing: TEZ PrintSDK)'
-              : isJosh
-                ? '[JOSH-PRINT-P1:PREFLIGHT] Test print button tapped (routing: JOSH LPAPI)'
-                : '[PRINT-P1:PREFLIGHT] Test print button tapped (routing: TD-404 / ESCPOS)',
-      );
-      const testName = isLabelX
-        ? 'Sez Print Label X'
-        : isDev
-          ? `Sez Print DEV (${devCommandSet.toUpperCase()})`
-          : isTez
-            ? 'Sez Print TEZ'
-            : isJosh
-              ? 'Sez Print JOSH'
-              : 'Sez Print TD-404';
+      const testName = `Sez Print ${activeModelMeta.shortName}`;
       await getPrinterManager().printTestLabel(testName);
-      Alert.alert('Test Print Sent', `Check the printer for a sample ${isDev ? devCommandSet.toUpperCase() : ''} label.`);
+      Alert.alert('Test Print Sent', `Check ${activeModelMeta.shortName} for a sample label.`);
     } catch (error) {
       Alert.alert(
         'Test Print Failed',
@@ -725,54 +498,46 @@ export default function PrinterConnectScreen() {
   };
 
   const renderDevice = (device: DiscoveredPrinter, index: number, total: number) => {
-    const name = device.name;
     const isLabelX =
-      isLikelyLabelXName(name) ||
       device.transport === 'labelx-spp' ||
-      (device as any).likelyLabelX;
-    const isJosh =
-      !isLabelX &&
-      (isLikelyJoshName(name) ||
-        device.transport === 'josh-lpapi' ||
-        (device.likelyJosh && !isLikelyDevName(name)));
-    const isTez =
-      !isLabelX &&
-      !isJosh &&
-      (isLikelyTezName(name) ||
-        device.transport === 'tez-spp' ||
-        ((device as any).likelyTez && !isLikelyDevName(name)));
-    const isShakti =
-      !isLabelX &&
-      !isJosh &&
-      !isTez &&
-      (isLikelyShaktiName(name) ||
-        ((device as any).likelyShakti && !isLikelyDevName(name)));
-    const td404 =
-      !isLabelX &&
-      !isJosh &&
-      !isTez &&
-      !isShakti &&
-      (isLikelyTd404Name(name) || (device.likelyTd404 && !isLikelyDevName(name)));
+      (device as any).likelyLabelX ||
+      isLikelyLabelXName(device.name);
     const isDev =
-      !isLabelX &&
-      !isJosh &&
-      !isTez &&
-      !isShakti &&
-      !td404 &&
-      (isLikelyDevName(name) || (device.transport === 'dev-spp' && (device as any).likelyDev));
+      device.transport === 'dev-spp' ||
+      (device as any).likelyDev ||
+      isLikelyDevName(device.name);
+    const isTez =
+      device.transport === 'tez-spp' ||
+      (device as any).likelyTez ||
+      isLikelyTezName(device.name);
+    const isShakti = (device as any).likelyShakti || isLikelyShaktiName(device.name);
+    const isJosh =
+      device.transport === 'josh-lpapi' ||
+      device.likelyJosh ||
+      isLikelyJoshName(device.name);
+    const td404 =
+      device.transport === 'bluetooth-spp' ||
+      device.likelyTd404 ||
+      isLikelyTd404Name(device.name);
+
+    const isThisModel =
+      (selectedModel === 'td404' && td404) ||
+      (selectedModel === 'josh' && isJosh) ||
+      (selectedModel === 'dev' && isDev) ||
+      (selectedModel === 'tez' && (isTez || isShakti)) ||
+      (selectedModel === 'labelx' && isLabelX);
+
     const iconTint = isLabelX
-      ? '#06B6D4'
+      ? '#0891B2'
       : isDev
-        ? '#0284C7'
+        ? '#2563EB'
         : isTez
-          ? '#8B5CF6'
+          ? '#059669'
           : isShakti
-            ? '#F59E0B'
+            ? '#D97706'
             : isJosh
-              ? '#10B981'
-              : td404
-                ? Palette.accent
-                : Palette.ink;
+              ? '#7C3AED'
+              : activeModelMeta.badgeTextColor;
 
     return (
       <Pressable
@@ -789,28 +554,28 @@ export default function PrinterConnectScreen() {
           <View style={styles.nameRow}>
             <Text style={styles.deviceName}>{device.name ?? 'Unknown device'}</Text>
             {isLabelX ? (
-              <View style={[styles.badge, { backgroundColor: '#06B6D4' }]}>
-                <Text style={styles.badgeText}>LABEL X</Text>
+              <View style={[styles.badge, { backgroundColor: '#ECFEFF', borderColor: '#A5F3FC' }]}>
+                <Text style={[styles.badgeText, { color: '#0891B2' }]}>LABEL X</Text>
               </View>
             ) : isDev ? (
-              <View style={[styles.badge, { backgroundColor: '#0284C7' }]}>
-                <Text style={styles.badgeText}>SEZNIK DEV</Text>
+              <View style={[styles.badge, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
+                <Text style={[styles.badgeText, { color: '#2563EB' }]}>SEZNIK DEV</Text>
               </View>
             ) : isTez ? (
-              <View style={[styles.badge, { backgroundColor: '#8B5CF6' }]}>
-                <Text style={styles.badgeText}>TEZ</Text>
+              <View style={[styles.badge, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}>
+                <Text style={[styles.badgeText, { color: '#059669' }]}>TEZ</Text>
               </View>
             ) : isShakti ? (
-              <View style={[styles.badge, { backgroundColor: '#F59E0B' }]}>
-                <Text style={styles.badgeText}>SHAKTI</Text>
+              <View style={[styles.badge, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]}>
+                <Text style={[styles.badgeText, { color: '#D97706' }]}>SHAKTI</Text>
               </View>
             ) : isJosh ? (
-              <View style={[styles.badge, { backgroundColor: '#10B981' }]}>
-                <Text style={styles.badgeText}>JOSH</Text>
+              <View style={[styles.badge, { backgroundColor: '#F5F3FF', borderColor: '#DDD6FE' }]}>
+                <Text style={[styles.badgeText, { color: '#7C3AED' }]}>JOSH</Text>
               </View>
             ) : td404 ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>
+              <View style={[styles.badge, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD' }]}>
+                <Text style={[styles.badgeText, { color: '#0284C7' }]}>
                   {device.name?.toLowerCase().includes('tejas')
                     ? 'TEJAS'
                     : device.name?.toLowerCase().includes('rudra')
@@ -818,7 +583,17 @@ export default function PrinterConnectScreen() {
                       : 'TD-404'}
                 </Text>
               </View>
-            ) : null}
+            ) : (
+              <View
+                style={[
+                  styles.badge,
+                  { backgroundColor: activeModelMeta.badgeColor, borderColor: activeModelMeta.badgeBorderColor },
+                ]}>
+                <Text style={[styles.badgeText, { color: activeModelMeta.badgeTextColor }]}>
+                  {activeModelMeta.shortName}
+                </Text>
+              </View>
+            )}
             {device.bonded ? (
               <View style={[styles.badge, styles.badgeMuted]}>
                 <Text style={styles.badgeMutedText}>Paired</Text>
@@ -842,6 +617,7 @@ export default function PrinterConnectScreen() {
             {' · '}
             {device.id}
             {device.rssi != null ? ` · ${device.rssi} dBm` : ''}
+            {isThisModel ? ' · Optimized match' : ''}
           </Text>
         </View>
         {connectingId === device.id ? (
@@ -862,6 +638,73 @@ export default function PrinterConnectScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing.four }]}
         showsVerticalScrollIndicator={false}>
         <View style={styles.inner}>
+          {/* PRINTER MODEL SELECTOR TABS */}
+          <View style={styles.modelTabsContainer}>
+            <Text style={styles.selectorHeading}>Select Label Printer Model</Text>
+            <View style={styles.modelTabsRow}>
+              {PRINTER_MODEL_LIST.map((model) => {
+                const isSelected = model.id === selectedModel;
+                return (
+                  <Pressable
+                    key={model.id}
+                    onPress={() => handleModelChange(model.id)}
+                    style={({ pressed }) => [
+                      styles.modelTab,
+                      isSelected && {
+                        backgroundColor: model.badgeColor,
+                        borderColor: model.badgeBorderColor,
+                      },
+                      pressed && styles.pressed,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.modelTabText,
+                        isSelected && {
+                          color: model.badgeTextColor,
+                          fontWeight: '700',
+                        },
+                      ]}>
+                      {model.shortName}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* ACTIVE MODEL INFO CARD */}
+          <View
+            style={[
+              styles.modelBannerCard,
+              { backgroundColor: activeModelMeta.badgeColor, borderColor: activeModelMeta.badgeBorderColor },
+            ]}>
+            <View style={styles.modelBannerHeader}>
+              <View style={styles.modelBannerLeft}>
+                <Text style={[styles.modelBannerTitle, { color: activeModelMeta.badgeTextColor }]}>
+                  {activeModelMeta.name}
+                </Text>
+                <Text style={styles.modelBannerSub}>{activeModelMeta.tagline}</Text>
+              </View>
+              <View
+                style={[
+                  styles.driverPill,
+                  { backgroundColor: '#FFFFFF', borderColor: activeModelMeta.badgeBorderColor },
+                ]}>
+                <Text style={[styles.driverPillText, { color: activeModelMeta.badgeTextColor }]}>
+                  {activeModelMeta.driver}
+                </Text>
+              </View>
+            </View>
+            {activeModelMeta.warningNotice ? (
+              <View style={styles.modelNoticeBox}>
+                <AppIcon name="info.circle.fill" tintColor={activeModelMeta.badgeTextColor} size={14} />
+                <Text style={[styles.modelNoticeText, { color: activeModelMeta.badgeTextColor }]}>
+                  {activeModelMeta.warningNotice}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
           {!caps.canScan ? (
             <View style={styles.blockerCard}>
               <Text style={styles.blockerTitle}>Bluetooth scan blocked</Text>
@@ -872,12 +715,7 @@ export default function PrinterConnectScreen() {
                 Fix: stop Expo Go, then run{'\n'}
                 <Text style={styles.code}>npx expo run:android</Text>
                 {'\n'}
-                That installs a development build with TD-404 classic Bluetooth (SPP).
-              </Text>
-              <Text style={styles.diagLine}>
-                Runtime: {caps.isWeb ? 'web' : caps.isExpoGo ? 'Expo Go' : caps.platform}
-                {' · '}SPP {caps.classicSppAvailable ? 'yes' : 'no'}
-                {' · '}BLE {caps.bleAvailable ? 'yes' : 'no'}
+                That installs the development build with all label printer bridges.
               </Text>
               {showBluetoothSettings ? (
                 <Pressable
@@ -906,16 +744,18 @@ export default function PrinterConnectScreen() {
             </View>
           ) : null}
 
+          {/* SCAN ACTION CARD */}
           <View style={styles.heroCard}>
-            <Text style={styles.heroTitle}>TD-404 Bluetooth</Text>
+            <Text style={styles.heroTitle}>{activeModelMeta.shortName} Bluetooth Scan</Text>
             <Text style={styles.heroBody}>
-              Scan lists paired printers first (fast), then nearby devices for a few seconds. Tap Connect as soon as your printer appears.
+              Dedicated scan for {activeModelMeta.name}. Tap Connect as soon as your device appears.
             </Text>
             <Pressable
-              onPress={() => void startScan().catch(() => {})}
+              onPress={() => void startScan(selectedModel).catch(() => {})}
               disabled={connectingId !== null || !caps.canScan || !bluetoothOn}
               style={({ pressed }) => [
                 styles.connectBtn,
+                { backgroundColor: activeModelMeta.badgeTextColor },
                 (connectingId !== null || !caps.canScan || !bluetoothOn) && styles.connectBtnDisabled,
                 pressed && styles.pressed,
               ]}>
@@ -925,7 +765,7 @@ export default function PrinterConnectScreen() {
                 <AppIcon name="antenna.radiowaves.left.and.right" tintColor="#FFFFFF" size={18} />
               )}
               <Text style={styles.connectBtnText}>
-                {scanning ? 'Scanning…' : 'Scan Paired & Nearby'}
+                {scanning ? `Scanning for ${activeModelMeta.shortName}…` : `Scan for ${activeModelMeta.shortName}`}
               </Text>
             </Pressable>
             {showBluetoothSettings && caps.canScan ? (
@@ -936,17 +776,6 @@ export default function PrinterConnectScreen() {
                   <AppIcon name="link" tintColor={Palette.accent} size={16} />
                   <Text style={styles.settingsBtnText}>{bluetoothSettingsLabel}</Text>
                 </Pressable>
-                {Platform.OS === 'ios' ? (
-                  <Text style={styles.settingsHint}>
-                    Opens this app’s Settings. From there, go to Bluetooth to turn it on or pair
-                    the printer.
-                  </Text>
-                ) : (
-                  <Text style={styles.settingsHint}>
-                    Opens the phone’s Bluetooth settings so you can turn Bluetooth on or pair the
-                    printer, then come back and scan.
-                  </Text>
-                )}
               </>
             ) : null}
             {nativeHint ? <Text style={styles.warnText}>{nativeHint}</Text> : null}
@@ -955,6 +784,7 @@ export default function PrinterConnectScreen() {
             ) : null}
           </View>
 
+          {/* CONNECTED PRINTER STATUS CARD */}
           {status === 'connected' ? (
             <View style={[styles.card, styles.connectedCard]}>
               <View style={styles.connectedRow}>
@@ -962,8 +792,8 @@ export default function PrinterConnectScreen() {
                 <View style={styles.connectedInfo}>
                   <Text style={styles.connectedName}>{deviceName ?? deviceId}</Text>
                   <Text style={styles.connectedStatus}>
-                    Connected
-                    {transport ? ` · ${transport}` : ''}
+                    Connected · {activeModelMeta.name}
+                    {transport ? ` (${transport})` : ''}
                   </Text>
                 </View>
                 <Pressable
@@ -972,8 +802,10 @@ export default function PrinterConnectScreen() {
                   <Text style={styles.disconnectText}>Disconnect</Text>
                 </Pressable>
               </View>
-              {transport === 'dev-spp' || getPrinterManager().isDev ? (
-                <View style={{ marginTop: 10, marginBottom: 8 }}>
+
+              {/* DEV DUAL COMMAND SET TOGGLE */}
+              {selectedModel === 'dev' ? (
+                <View style={{ marginTop: 12, marginBottom: 6 }}>
                   <Text style={{ fontSize: 12, fontWeight: '600', color: Palette.muted, marginBottom: 6 }}>
                     Command Engine (2-in-1 Dual Mode):
                   </Text>
@@ -1005,6 +837,8 @@ export default function PrinterConnectScreen() {
                   </View>
                 </View>
               ) : null}
+
+              {/* TEST PRINT */}
               <Pressable
                 onPress={() => void handleTestPrint()}
                 disabled={testing}
@@ -1016,10 +850,12 @@ export default function PrinterConnectScreen() {
                 {testing ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.connectBtnText}>Test Print</Text>
+                  <Text style={styles.connectBtnText}>Test Print ({activeModelMeta.shortName})</Text>
                 )}
               </Pressable>
-              {transport === 'dev-spp' || getPrinterManager().isDev ? (
+
+              {/* CALIBRATION BUTTONS */}
+              {selectedModel === 'dev' ? (
                 <Pressable
                   onPress={() => void handleCalibrateDev()}
                   disabled={calibrating}
@@ -1036,7 +872,8 @@ export default function PrinterConnectScreen() {
                   )}
                 </Pressable>
               ) : null}
-              {transport === 'tez-spp' || getPrinterManager().isTez ? (
+
+              {selectedModel === 'tez' ? (
                 <Pressable
                   onPress={() => void handleCalibrateTez()}
                   disabled={calibrating}
@@ -1053,6 +890,7 @@ export default function PrinterConnectScreen() {
                   )}
                 </Pressable>
               ) : null}
+
               <Pressable
                 onPress={() => router.push('/printer-diagnostics')}
                 style={({ pressed }) => [styles.diagQuickBtn, pressed && styles.pressed]}>
@@ -1062,18 +900,22 @@ export default function PrinterConnectScreen() {
             </View>
           ) : null}
 
-          {status !== 'connected' && lastDeviceId ? (
+          {/* LAST PAIRED FOR ACTIVE MODEL */}
+          {status !== 'connected' && lastDeviceForActiveModel ? (
             <Pressable
               onPress={() => void handleReconnectLast()}
               style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
-              <Text style={styles.sectionTitleInline}>Last printer</Text>
-              <Text style={styles.deviceName}>{lastDeviceName ?? lastDeviceId}</Text>
+              <Text style={styles.sectionTitleInline}>Last {activeModelMeta.shortName} Printer</Text>
+              <Text style={styles.deviceName}>
+                {lastDeviceForActiveModel.name || lastDeviceForActiveModel.id}
+              </Text>
               <Text style={styles.connectLink}>Reconnect</Text>
             </Pressable>
           ) : null}
 
+          {/* PAIRED DEVICES LIST */}
           <View style={styles.scanHeader}>
-            <Text style={styles.sectionTitle}>Paired devices ({paired.length})</Text>
+            <Text style={styles.sectionTitle}>Paired {activeModelMeta.shortName} ({paired.length})</Text>
             {scanning ? <ActivityIndicator size="small" color={Palette.accent} /> : null}
           </View>
           <View style={styles.card}>
@@ -1084,19 +926,20 @@ export default function PrinterConnectScreen() {
                   : !bluetoothOn
                     ? 'Turn Bluetooth on to list paired printers.'
                   : scanning
-                    ? 'Loading paired Bluetooth devices…'
-                    : 'No paired printers yet. Pair the printer in Android Bluetooth settings, then rescan.'}
+                    ? `Loading paired ${activeModelMeta.shortName} devices…`
+                    : `No paired ${activeModelMeta.shortName} printers yet. Pair in Android Bluetooth settings, then rescan.`}
               </Text>
             ) : (
               paired.map((d, i) => renderDevice(d, i, paired.length))
             )}
           </View>
 
+          {/* NEARBY DEVICES LIST */}
           <View style={styles.scanHeader}>
-            <Text style={styles.sectionTitle}>Nearby devices ({nearby.length})</Text>
+            <Text style={styles.sectionTitle}>Nearby {activeModelMeta.shortName} ({nearby.length})</Text>
             {!scanning && caps.canScan && bluetoothOn ? (
               <Pressable
-                onPress={() => void startScan().catch(() => {})}
+                onPress={() => void startScan(selectedModel).catch(() => {})}
                 style={({ pressed }) => [styles.rescanBtn, pressed && styles.pressed]}>
                 <AppIcon name="arrow.clockwise" tintColor={Palette.accent} size={15} />
                 <Text style={styles.rescanText}>Rescan</Text>
@@ -1111,18 +954,19 @@ export default function PrinterConnectScreen() {
                   : !bluetoothOn
                     ? 'Turn Bluetooth on to search nearby printers.'
                   : scanning
-                    ? 'Searching nearby…'
-                    : 'No nearby printers found. Keep the printer on and in range.'}
+                    ? `Searching nearby ${activeModelMeta.shortName}…`
+                    : `No nearby ${activeModelMeta.shortName} printers found. Ensure the printer is powered on and in range.`}
               </Text>
             ) : (
               nearby.map((d, i) => renderDevice(d, i, nearby.length))
             )}
           </View>
 
+          {/* DIRECT MAC CONNECT */}
           <View style={styles.card}>
-            <Text style={styles.sectionTitleInline}>Connect by MAC</Text>
+            <Text style={styles.sectionTitleInline}>Connect {activeModelMeta.shortName} by MAC</Text>
             <Text style={styles.heroBody}>
-              Android Settings → Bluetooth → pair printer → copy MAC, then connect here (dev build).
+              Android Settings → Bluetooth → pair printer → copy MAC, then connect directly:
             </Text>
             <TextInput
               value={macInput}
@@ -1133,85 +977,26 @@ export default function PrinterConnectScreen() {
               autoCorrect={false}
               style={styles.input}
             />
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              <Pressable
-                onPress={() => void handleLabelXMacConnect()}
-                disabled={connectingId !== null}
-                style={({ pressed }) => [
-                  styles.wifiBtn,
-                  { flex: 1, minWidth: 64, backgroundColor: '#06B6D4', borderColor: '#06B6D4' },
-                  connectingId !== null && styles.connectBtnDisabled,
-                  pressed && styles.pressed,
-                ]}>
-                {connectingId === 'mac-labelx' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>LABEL X</Text>
-                )}
-              </Pressable>
-              <Pressable
-                onPress={() => void handleDevMacConnect()}
-                disabled={connectingId !== null}
-                style={({ pressed }) => [
-                  styles.wifiBtn,
-                  { flex: 1, minWidth: 64, backgroundColor: '#0284C7', borderColor: '#0284C7' },
-                  connectingId !== null && styles.connectBtnDisabled,
-                  pressed && styles.pressed,
-                ]}>
-                {connectingId === 'mac-dev' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>DEV</Text>
-                )}
-              </Pressable>
-              <Pressable
-                onPress={() => void handleTezMacConnect()}
-                disabled={connectingId !== null}
-                style={({ pressed }) => [
-                  styles.wifiBtn,
-                  { flex: 1, minWidth: 64, backgroundColor: '#8B5CF6', borderColor: '#8B5CF6' },
-                  connectingId !== null && styles.connectBtnDisabled,
-                  pressed && styles.pressed,
-                ]}>
-                {connectingId === 'mac-tez' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>TEZ</Text>
-                )}
-              </Pressable>
-              <Pressable
-                onPress={() => void handleJoshMacConnect()}
-                disabled={connectingId !== null}
-                style={({ pressed }) => [
-                  styles.wifiBtn,
-                  { flex: 1, minWidth: 64, backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
-                  connectingId !== null && styles.connectBtnDisabled,
-                  pressed && styles.pressed,
-                ]}>
-                {connectingId === 'mac-josh' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>JOSH</Text>
-                )}
-              </Pressable>
-              <Pressable
-                onPress={() => void handleMacConnect()}
-                disabled={connectingId !== null}
-                style={({ pressed }) => [
-                  styles.wifiBtn,
-                  { flex: 1, minWidth: 64 },
-                  connectingId !== null && styles.connectBtnDisabled,
-                  pressed && styles.pressed,
-                ]}>
-                {connectingId === 'mac' ? (
-                  <ActivityIndicator color={Palette.accent} />
-                ) : (
-                  <Text style={styles.wifiBtnText}>TD-404</Text>
-                )}
-              </Pressable>
-            </View>
+            <Pressable
+              onPress={() => void handleMacConnect()}
+              disabled={connectingId !== null}
+              style={({ pressed }) => [
+                styles.wifiBtn,
+                { backgroundColor: activeModelMeta.badgeTextColor, borderColor: activeModelMeta.badgeTextColor },
+                connectingId !== null && styles.connectBtnDisabled,
+                pressed && styles.pressed,
+              ]}>
+              {connectingId === 'mac' ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={[styles.wifiBtnText, { color: '#FFFFFF' }]}>
+                  Connect to {activeModelMeta.shortName}
+                </Text>
+              )}
+            </Pressable>
           </View>
 
+          {/* WI-FI LAN CONNECT */}
           <View style={styles.card}>
             <Text style={styles.sectionTitleInline}>Wi‑Fi (via backend)</Text>
             <Text style={styles.heroBody}>
@@ -1243,6 +1028,7 @@ export default function PrinterConnectScreen() {
             </Pressable>
           </View>
 
+          {/* DIAGNOSTICS LINK */}
           <Pressable
             onPress={() => router.push('/printer-diagnostics')}
             style={({ pressed }) => [styles.card, styles.diagCard, pressed && styles.pressed]}>
@@ -1253,7 +1039,7 @@ export default function PrinterConnectScreen() {
               <View style={styles.diagCardTextWrap}>
                 <Text style={styles.diagCardTitle}>Diagnostics & Latency Log</Text>
                 <Text style={styles.diagCardSub}>
-                  Inspect stage-by-stage pipeline timing, BLE MTU, queue depth & error logs
+                  Inspect stage-by-stage pipeline timing, queue depth & error logs
                 </Text>
               </View>
               <AppIcon name="chevron.right" tintColor="#94A3B8" size={16} />
@@ -1274,6 +1060,90 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
   },
   inner: { width: '100%', maxWidth: MaxContentWidth, gap: Spacing.three },
+  modelTabsContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    ...cardShadow,
+  },
+  selectorHeading: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Palette.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  modelTabsRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  modelTab: {
+    flex: 1,
+    paddingVertical: 9,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  modelTabText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  modelBannerCard: {
+    borderRadius: 12,
+    padding: Spacing.three,
+    borderWidth: 1,
+    gap: 8,
+  },
+  modelBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modelBannerLeft: {
+    flex: 1,
+    marginRight: 8,
+  },
+  modelBannerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  modelBannerSub: {
+    fontSize: 12,
+    color: '#475569',
+    marginTop: 2,
+  },
+  driverPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  driverPillText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+  modelNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(0,0,0,0.08)',
+  },
+  modelNoticeText: {
+    fontSize: 11.5,
+    fontWeight: '500',
+    flex: 1,
+  },
   blockerCard: {
     backgroundColor: '#FFF7ED',
     borderRadius: 12,
@@ -1288,7 +1158,6 @@ const styles = StyleSheet.create({
     fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
     fontWeight: '700',
   },
-  diagLine: { marginTop: 4, fontSize: 12, color: '#C2410C' },
   heroCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -1300,7 +1169,6 @@ const styles = StyleSheet.create({
   heroBody: { fontSize: 13.5, lineHeight: 19, color: Palette.muted },
   connectBtn: {
     marginTop: 4,
-    backgroundColor: Palette.accent,
     borderRadius: 10,
     minHeight: 48,
     paddingHorizontal: 16,
@@ -1366,13 +1234,13 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   deviceName: { fontSize: 15, fontWeight: '500', color: Palette.ink },
   badge: {
-    backgroundColor: '#E8F3FE',
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  badgeText: { color: Palette.accent, fontSize: 11, fontWeight: '600' },
-  badgeMuted: { backgroundColor: '#F1F5F9' },
+  badgeText: { fontSize: 11, fontWeight: '600' },
+  badgeMuted: { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0' },
   badgeMutedText: { color: '#64748B', fontSize: 11, fontWeight: '600' },
   deviceMeta: { fontSize: 11.5, color: '#94A3B8', marginTop: 1 },
   connectLink: { color: Palette.accent, fontSize: 13.5, fontWeight: '600' },
@@ -1410,7 +1278,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   settingsBtnText: { color: Palette.accent, fontSize: 14, fontWeight: '600' },
-  settingsHint: { color: Palette.muted, fontSize: 12.5, lineHeight: 18 },
   diagQuickBtn: {
     marginTop: 10,
     flexDirection: 'row',
@@ -1460,3 +1327,4 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.65 },
 });
+

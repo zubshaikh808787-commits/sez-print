@@ -27,16 +27,10 @@ import {
   isLikelyLabelXName,
   shouldUseTsplCommandSet,
 } from '@/lib/printer/printer-heuristics';
-import {
-  isVardrzAvailable,
-  connectVardrz,
-  disconnectVardrz,
-  printVardrzLabel,
-  NativeEscposPrinter,
-} from '@/lib/printer/vardrz-printer';
 import { encodeTscTextSample } from '@/lib/printer/tsc';
 import { usePrinterStore } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { type SeznikPrinterModelId, SEZNIK_PRINTER_MODELS } from '@/constants/printer-models';
 
 export type DiscoveredPrinter = {
   id: string;
@@ -307,6 +301,9 @@ class PrinterManager {
     if (this.activeTransport === 'td404-spp' || this.activeTransport === 'josh-lpapi' || this.activeTransport === 'tez-spp' || this.activeTransport === 'labelx-spp') return false;
     if (this.activeTransport === 'dev-spp') return true;
     const store = usePrinterStore.getState();
+    if (store.selectedPrinterModel === 'dev' && (store.status === 'connected' || Boolean(this.getDev()?.isDevConnected?.()))) {
+      return true;
+    }
     const name = store.deviceName ?? store.lastDeviceName;
     if (store.sdkId === 'dev' || store.transport === 'dev-spp') {
       return true;
@@ -401,11 +398,11 @@ class PrinterManager {
   private getLabelX() {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      return require('labelx-printer') as typeof import('labelx-printer');
+      return require('../../../modules/labelx-printer/src/index') as typeof import('../../../modules/labelx-printer/src/index');
     } catch {
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        return require('../../../modules/labelx-printer/src/index') as typeof import('labelx-printer');
+        return require('labelx-printer') as typeof import('../../../modules/labelx-printer/src/index');
       } catch {
         return null;
       }
@@ -563,7 +560,12 @@ class PrinterManager {
     if (store.sdkId === 'dev' || this.activeTransport === 'dev-spp') {
       const dpi = 203; // Standard Dev printer resolution (8 dots/mm)
       const alignment = settings.printerAlignment ?? 'center';
-      const headWidthMm = settings.printheadWidthMm ?? 50;
+      // The global printhead-width setting defaults to 108mm (TD-404's size) —
+      // same fix as Josh below. A user who never explicitly set this for their
+      // ~50mm Dev head would otherwise get TD-404's width, which oversizes
+      // ESC/POS's head-relative centering (DevPrinterModule autoCenterPad) and
+      // can shove printed content to one side of the real, narrower head.
+      const headWidthMm = settings.printheadWidthMm === 108 ? 50 : (settings.printheadWidthMm ?? 50);
       const headWidthDots = mmToDots(headWidthMm, dpi);
       return {
         id: 'dev-spp',
@@ -948,6 +950,285 @@ class PrinterManager {
     return { paired, nearby, errors };
   }
 
+  /**
+   * Dedicated Model-Isolated Scan.
+   * Only activates the selected label printer model's native SDK without launching
+   * other native drivers concurrently, avoiding RFCOMM socket conflicts and discovery collisions.
+   */
+  async startModelScan(
+    model: SeznikPrinterModelId,
+    onDevice: (device: DiscoveredPrinter) => void,
+    onFinished?: (error?: Error) => void,
+  ): Promise<{ paired: number; nearby: number; errors: string[] }> {
+    if (!this.isBluetoothEnabled()) {
+      return bluetoothOffScanResult();
+    }
+    const store = usePrinterStore.getState();
+    store.setStatus('scanning');
+    this.stopScan();
+
+    const seen = new Set<string>();
+    const emit = (d: DiscoveredPrinter) => {
+      const key = (d.id || '').toUpperCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      onDevice(d);
+    };
+
+    let paired = 0;
+    let nearby = 0;
+    const errors: string[] = [];
+
+    try {
+      await this.ensurePermissions('full');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Bluetooth permissions missing';
+      errors.push(msg);
+      store.setStatus(this.isConnected ? 'connected' : 'disconnected');
+      onFinished?.(e instanceof Error ? e : new Error(msg));
+      return { paired: 0, nearby: 0, errors };
+    }
+
+    if (model === 'td404') {
+      const td404 = this.getTd404();
+      if (td404?.isTd404NativeAvailable()) {
+        try {
+          const bonded = await td404.getTd404BondedDevices();
+          for (const b of bonded) {
+            paired++;
+            emit({
+              id: b.id,
+              name: b.name ?? b.id,
+              rssi: null,
+              transport: 'bluetooth-spp',
+              sdkId: 'td404',
+              likelyTd404: true,
+              bonded: true,
+            });
+          }
+        } catch {}
+        try {
+          await this.startTd404Scan(td404, (d) => {
+            nearby++;
+            emit(d);
+          });
+        } catch (e) {
+          errors.push(e instanceof Error ? e.message : 'TD-404 scan failed');
+        }
+      } else {
+        errors.push('TD-404 native module not available in this build');
+      }
+    } else if (model === 'josh') {
+      const josh = this.getJosh();
+      if (josh?.isJoshNativeAvailable()) {
+        try {
+          await this.startJoshScan(josh, (d) => {
+            nearby++;
+            emit(d);
+          });
+        } catch (e) {
+          errors.push(e instanceof Error ? e.message : 'JOSH scan failed');
+        }
+      } else {
+        errors.push('JOSH native module not available in this build');
+      }
+    } else if (model === 'dev') {
+      const dev = this.getDev();
+      if (dev?.isDevNativeAvailable()) {
+        try {
+          const bonded = await dev.getDevBondedDevices();
+          for (const b of bonded) {
+            paired++;
+            emit({
+              id: b.id,
+              name: b.name ?? b.id,
+              rssi: null,
+              transport: 'dev-spp',
+              sdkId: 'dev',
+              likelyDev: true,
+              bonded: true,
+            });
+          }
+        } catch {}
+        try {
+          await this.startDevScan(dev, (d) => {
+            nearby++;
+            emit(d);
+          });
+        } catch (e) {
+          errors.push(e instanceof Error ? e.message : 'DEV scan failed');
+        }
+      } else {
+        errors.push('DEV native module not available in this build');
+      }
+    } else if (model === 'tez') {
+      const tez = this.getTez();
+      if (tez?.isTezNativeAvailable()) {
+        try {
+          const bonded = await tez.getTezBondedDevices();
+          for (const b of bonded) {
+            paired++;
+            emit({
+              id: b.id,
+              name: b.name ?? b.id,
+              rssi: null,
+              transport: 'tez-spp',
+              sdkId: 'tez',
+              likelyTez: true,
+              bonded: true,
+            });
+          }
+        } catch {}
+        try {
+          await this.startTezScan(tez, (d) => {
+            nearby++;
+            emit(d);
+          });
+        } catch (e) {
+          errors.push(e instanceof Error ? e.message : 'TEZ scan failed');
+        }
+      } else {
+        errors.push('TEZ native module not available in this build');
+      }
+    } else if (model === 'labelx') {
+      const labelx = this.getLabelX();
+      if (labelx?.isLabelXNativeAvailable()) {
+        try {
+          const bonded = await labelx.getLabelXBondedDevices();
+          for (const b of bonded) {
+            paired++;
+            emit({
+              id: b.mac,
+              name: b.name ?? b.mac,
+              rssi: null,
+              transport: 'labelx-spp',
+              sdkId: 'labelx',
+              likelyLabelX: true,
+              bonded: true,
+            });
+          }
+        } catch {}
+        try {
+          await this.startLabelXScan(labelx, (d) => {
+            nearby++;
+            emit(d);
+          });
+        } catch (e) {
+          errors.push(e instanceof Error ? e.message : 'LABEL X scan failed');
+        }
+      } else {
+        errors.push('LABEL X native module not available in this build');
+      }
+    }
+
+    if (store.status === 'scanning') {
+      store.setStatus(this.isConnected ? 'connected' : 'disconnected');
+    }
+    onFinished?.();
+    return { paired, nearby, errors };
+  }
+
+  /**
+   * Connect strictly using the selected model's driver after disconnecting any others.
+   */
+  async connectModel(
+    model: SeznikPrinterModelId,
+    deviceId: string,
+    deviceName?: string | null,
+  ): Promise<void> {
+    const store = usePrinterStore.getState();
+    store.setStatus('connecting');
+    this.connectionState = 'connecting';
+    this.stopScan();
+
+    // 1. Cleanly disconnect all existing bridges first
+    await this.disconnect().catch(() => {});
+
+    await this.ensurePermissions('connect-only');
+
+    try {
+      if (model === 'td404') {
+        const td404 = this.getTd404();
+        if (!td404?.isTd404NativeAvailable()) {
+          throw new Error('TD-404 module not available in this build.');
+        }
+        const res = await td404.connectTd404(deviceId, deviceName ?? 'TEJAS/RUDRA');
+        this.activeTransport = 'td404-spp';
+        this.connectionState = 'connected';
+        store.setConnectedDevice(res.id, res.name ?? deviceName ?? deviceId, {
+          transport: 'bluetooth-spp',
+          sdkId: 'td404',
+          model: 'td404',
+        });
+      } else if (model === 'josh') {
+        const josh = this.getJosh();
+        if (!josh?.isJoshNativeAvailable()) {
+          throw new Error('JOSH module not available in this build.');
+        }
+        const res = await josh.connectJosh(deviceId, deviceName ?? 'JOSH');
+        this.activeTransport = 'josh-lpapi';
+        this.connectionState = 'connected';
+        store.setConnectedDevice(res.id, res.name ?? deviceName ?? deviceId, {
+          transport: 'josh-lpapi',
+          sdkId: 'josh',
+          model: 'josh',
+        });
+      } else if (model === 'dev') {
+        const dev = this.getDev();
+        if (!dev?.isDevNativeAvailable()) {
+          throw new Error('DEV module not available in this build.');
+        }
+        const res = await dev.connectDev(deviceId, deviceName ?? 'DEV');
+        this.activeTransport = 'dev-spp';
+        this.connectionState = 'connected';
+        store.setConnectedDevice(res.id, res.name ?? deviceName ?? deviceId, {
+          transport: 'dev-spp',
+          sdkId: 'dev',
+          model: 'dev',
+        });
+      } else if (model === 'tez') {
+        const tez = this.getTez();
+        if (!tez?.isTezNativeAvailable()) {
+          throw new Error('TEZ module not available in this build.');
+        }
+        const res = await tez.connectTez(deviceId, deviceName ?? 'TEZ');
+        this.activeTransport = 'tez-spp';
+        this.connectionState = 'connected';
+        store.setConnectedDevice(res.id, res.name ?? deviceName ?? deviceId, {
+          transport: 'tez-spp',
+          sdkId: 'tez',
+          model: 'tez',
+        });
+      } else if (model === 'labelx') {
+        const labelx = this.getLabelX();
+        if (!labelx?.isLabelXNativeAvailable()) {
+          throw new Error('LABEL X module not available in this build.');
+        }
+        const res = await labelx.connectLabelX(deviceId, deviceName ?? 'LABEL X');
+        this.activeTransport = 'labelx-spp';
+        this.connectionState = 'connected';
+        store.setConnectedDevice(res.mac || deviceId, res.name ?? deviceName ?? deviceId, {
+          transport: 'labelx-spp',
+          sdkId: 'labelx',
+          model: 'labelx',
+        });
+      }
+    } catch (err) {
+      this.connectionState = 'disconnected';
+      store.clearConnection();
+      throw err;
+    }
+  }
+
+  isModelConnected(model: SeznikPrinterModelId): boolean {
+    if (model === 'td404') return Boolean(this.getTd404()?.isTd404Connected());
+    if (model === 'josh') return Boolean(this.getJosh()?.isJoshConnected());
+    if (model === 'dev') return Boolean(this.getDev()?.isDevConnected());
+    if (model === 'tez') return Boolean(this.getTez()?.isTezConnected());
+    if (model === 'labelx') return Boolean(this.getLabelX()?.isLabelXConnected());
+    return false;
+  }
+
   private startDevScan(
     dev: NonNullable<ReturnType<PrinterManager['getDev']>>,
     onDevice: (device: DiscoveredPrinter) => void,
@@ -1267,7 +1548,7 @@ class PrinterManager {
 
       try {
         const handle = labelx.startLabelXScan(
-          (device) => {
+          (device: any) => {
             const isLabelX = isLikelyLabelXName(device.name);
             if (isLabelX) {
               onDevice({
@@ -1296,7 +1577,7 @@ class PrinterManager {
               bonded: device.bonded ?? false,
             });
           },
-          (error) => finish(error),
+          (error: any) => finish(error),
         );
         this.labelxScanStop = handle.stop;
         setTimeout(() => finish(), SCAN_TIMEOUT_MS);
@@ -1669,26 +1950,6 @@ class PrinterManager {
           this.writableTarget = null;
         }
 
-        if (isVardrzAvailable()) {
-          console.info(`[DEV-CONN] Connecting exclusively via @vardrz BluetoothManager: ${deviceId}`);
-          await connectVardrz(deviceId);
-          this.activeTransport = 'dev-spp';
-          this.connectedDevice = null;
-          this.writableTarget = null;
-          this.backendPrinterId = null;
-          this.bleNegotiatedMtu = 0;
-          this.lastErrorMessage = null;
-          console.info(
-            `[DEV-CONN] DEV connected via @vardrz in ${Date.now() - connectStart} ms → ${deviceId} (${deviceName ?? 'DEV'})`,
-          );
-          usePrinterStore.getState().setConnectedDevice(deviceId, deviceName ?? 'DEV', {
-            transport: 'dev-spp',
-            sdkId: 'dev',
-            backendPrinterId: null,
-          });
-          return;
-        }
-
         console.info(`[DEV-CONN] Submitting DEV connect request → ${deviceId} (${deviceName ?? 'DEV'})`);
         const result = await dev.connectDev(deviceId, deviceName);
         this.activeTransport = 'dev-spp';
@@ -1703,6 +1964,7 @@ class PrinterManager {
         usePrinterStore.getState().setConnectedDevice(result.id, result.name ?? deviceName ?? deviceId, {
           transport: 'dev-spp',
           sdkId: 'dev',
+          model: 'dev',
           backendPrinterId: null,
         });
         return;
@@ -2137,9 +2399,6 @@ class PrinterManager {
       await this.getLabelX()?.disconnectLabelX().catch(() => {});
     }
     if (this.activeTransport === 'dev-spp') {
-      if (isVardrzAvailable()) {
-        await disconnectVardrz().catch(() => {});
-      }
       await this.getDev()?.disconnectDev().catch(() => {});
     }
     if (this.activeTransport === 'td404-spp') {
@@ -2178,9 +2437,6 @@ class PrinterManager {
       return Boolean(this.getLabelX()?.isLabelXConnected());
     }
     if (this.activeTransport === 'dev-spp') {
-      if (isVardrzAvailable()) {
-        return Boolean(usePrinterStore.getState().deviceId);
-      }
       return Boolean(this.getDev()?.isDevConnected());
     }
     if (this.activeTransport === 'td404-spp') {
@@ -2214,9 +2470,6 @@ class PrinterManager {
       return Boolean(this.getLabelX()?.isLabelXConnected());
     }
     if (this.activeTransport === 'dev-spp') {
-      if (isVardrzAvailable()) {
-        return Boolean(usePrinterStore.getState().deviceId);
-      }
       return Boolean(this.getDev()?.isDevConnected());
     }
     if (this.activeTransport === 'td404-spp') {
@@ -2490,23 +2743,6 @@ class PrinterManager {
     }
 
     if (this.activeTransport === 'dev-spp' || this.isDev) {
-      if (isVardrzAvailable()) {
-        console.info(`[DEV-PRINT] Test print dispatching via @vardrz: "${text}"`);
-        await this.ensureConnected();
-        try {
-          if (typeof NativeEscposPrinter.printerInit === 'function') {
-            await NativeEscposPrinter.printerInit();
-          }
-          if (typeof NativeEscposPrinter.printText === 'function') {
-            await NativeEscposPrinter.printText(`${text}\n\n\n`, {});
-          }
-        } catch (e) {
-          console.warn('[DEV-PRINT] @vardrz test text print error:', e);
-        }
-        console.info('[DEV-PRINT] Dev test print completed successfully via @vardrz');
-        return;
-      }
-
       console.info(`[DEV-PRINT] Test print dispatching via Dev SDK: "${text}"`);
       const dev = this.getDev();
       if (!dev) throw new Error('Dev module not available.');
@@ -2516,7 +2752,7 @@ class PrinterManager {
         await this.connect(store.deviceId ?? store.lastDeviceId!, store.deviceName ?? store.lastDeviceName, 'dev-spp');
       }
       const store = usePrinterStore.getState();
-      const devMode = store.devCommandSet ?? 'escpos';
+      const devMode = store.devCommandSet ?? 'tspl';
       console.info(`[DEV-PRINT] Submitting test print to Dev hardware (mode=${devMode})...`);
       await dev.testDevPrint(devMode);
       console.info('[DEV-PRINT] Dev test print completed successfully');
@@ -2806,34 +3042,7 @@ class PrinterManager {
       this.connectionState = 'printing';
       const profile = this.getActivePrinterProfile();
       try {
-        if (isVardrzAvailable()) {
-          // Head class must reflect the connected printer's real printhead
-          // (from settings), not the label being printed — using the label's
-          // own width to guess 58mm vs 80mm shifts/crops labels near that
-          // boundary onto the wrong raster width.
-          const paperWidth: '58mm' | '80mm' = profile.printheadWidthMm > 58 ? '80mm' : '58mm';
-          console.info(
-            `[DEV-PRINT] mm-locked PNG print via @vardrz BluetoothEscposPrinter: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1} head=${profile.printheadWidthMm}mm(${paperWidth})`,
-          );
-          await this.ensureConnected();
-          const t0 = Date.now();
-          await printVardrzLabel(options.pngBase64, {
-            widthMm: options.widthMm,
-            heightMm: options.heightMm,
-            gapMm: options.gapMm ?? 2,
-            vOffsetMm: options.vOffsetMm ?? 0,
-            hOffsetMm: options.hOffsetMm ?? 0,
-            copies: options.copies ?? 1,
-            media: options.media ?? 'gap',
-            paperWidth,
-          });
-          console.info(
-            `[DEV-PRINT] @vardrz print completed in ${Date.now() - t0} ms`,
-          );
-          return;
-        }
-
-        const cmdSet = options.commandSet ?? store.devCommandSet ?? 'escpos';
+        const cmdSet = options.commandSet ?? store.devCommandSet ?? 'tspl';
         console.info(
           `[DEV-PRINT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm copies=${options.copies ?? 1} engine=${cmdSet} density=${options.density ?? 8} speed=${options.speed ?? 4} gap=${options.gapMm ?? 2} offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
         );

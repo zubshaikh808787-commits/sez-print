@@ -1,3 +1,4 @@
+import { dotsPerMm as dotsPerMmForDpi } from '@/lib/printer/print-spec';
 import type { MediaProfile } from '@/printing/document/types';
 import type { RenderedPrintJob } from '@/printing/renderer/UniversalRenderer';
 import type {
@@ -27,7 +28,8 @@ export function createTd404Capabilities(params: {
   transport: PrinterCapabilities['transport'];
 }): PrinterCapabilities {
   const dpi = params.dpi;
-  const dotsPerMm = dpi === 304 ? 12 : dpi === 203 ? 8 : undefined;
+  // Single source of truth for the 304→12 / 203→8 hardware special case: print-spec.ts `dotsPerMm`.
+  const dotsPerMm = dpi === 304 || dpi === 203 ? dotsPerMmForDpi(dpi) : undefined;
   return {
     printerId: params.printerId ?? 'td404',
     model: params.model ?? 'TD-404',

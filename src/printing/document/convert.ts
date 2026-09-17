@@ -32,6 +32,7 @@ import {
 import { DRAWING_COLORS } from '@/components/editor/types';
 import { applySerialOffset } from '@/lib/serial-content';
 import { logPrintTrace } from '@/printing/trace';
+import { dotsPerMm as dotsPerMmForDpi } from '@/lib/printer/print-spec';
 
 export type ConvertOptions = {
   /**
@@ -79,7 +80,8 @@ export async function convertLabelToPrintDocument(
 ): Promise<PrintDocument> {
   const elements: PrintElement[] = [];
   const { renderElementFallback, decodeImageUri, dpi = 304, templateVariables } = options;
-  const dotsPerMm = dpi === 304 ? 12 : dpi === 203 ? 8 : dpi / 25.4;
+  // Single source of truth for the 304→12 / 203→8 hardware special case: print-spec.ts `dotsPerMm`.
+  const dotsPerMm = dotsPerMmForDpi(dpi);
 
   // Only visible & printable elements
   const printable = doc.elements.filter((el) => el.needPrinting !== false);

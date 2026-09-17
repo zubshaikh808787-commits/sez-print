@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LabelSizeEditor } from '@/components/label-size-editor';
+import { IosAlertModal, IosAlertInput } from '@/components/ui/ios-alert-modal';
 import { CABLE_FLAG_DIECUT } from '@/constants/cable-flag-diecut';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
 import { Spacing } from '@/constants/theme';
@@ -28,6 +29,7 @@ import {
     type LabelElement,
 } from '@/lib/label-document';
 import { clampLabelMm, containFitImageOnLabel, validateLabelSize } from '@/lib/label-geometry';
+import { scaleDocumentToSize } from '@/lib/element-sizing';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { Image } from 'expo-image';
@@ -192,7 +194,18 @@ export default function NewLabelSetupScreen() {
     if (params.cloneFromId) {
       const source = useLabelStore.getState().getDocument(params.cloneFromId);
       if (source) {
-        seedElements = JSON.parse(JSON.stringify(source.elements)) as LabelElement[];
+        const cloned = JSON.parse(JSON.stringify(source.elements)) as LabelElement[];
+        // Each ups panel is one label at `size` mm. A source cloned at a
+        // different size needs the same proportional rescale as the in-editor
+        // resize control, or geometry stays stale and clips at the new bounds.
+        seedElements =
+          source.widthMm === size.widthMm && source.heightMm === size.heightMm
+            ? cloned
+            : scaleDocumentToSize(
+                { ...source, elements: cloned, ups: undefined },
+                size.widthMm,
+                size.heightMm,
+              ).elements;
       }
     }
 
@@ -426,41 +439,28 @@ export default function NewLabelSetupScreen() {
         </Pressable>
       </View>
 
-      <Modal
+      <IosAlertModal
         visible={nameModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setNameModalVisible(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalHeading}>{t('editor.labelName')}</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={tempName}
-              onChangeText={setTempName}
-              autoFocus
-              placeholderTextColor="#94A3B8"
-            />
-            <View style={styles.modalActions}>
-              <Pressable
-                style={styles.modalBtn}
-                onPress={() => setNameModalVisible(false)}>
-                <Text style={styles.modalCancel}>{t('common.cancel')}</Text>
-              </Pressable>
-              <Pressable
-                style={styles.modalBtn}
-                onPress={() => {
-                  if (tempName.trim()) setLabelName(tempName.trim());
-                  setNameModalVisible(false);
-                }}>
-                <Text style={styles.modalOk}>{t('common.confirm')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        onClose={() => setNameModalVisible(false)}
+        title={t('editor.labelName')}
+        buttons={[
+          { text: t('common.cancel'), style: 'cancel', onPress: () => setNameModalVisible(false) },
+          {
+            text: t('common.confirm'),
+            style: 'default',
+            bold: true,
+            onPress: () => {
+              if (tempName.trim()) setLabelName(tempName.trim());
+              setNameModalVisible(false);
+            },
+          },
+        ]}>
+        <IosAlertInput
+          value={tempName}
+          onChangeText={setTempName}
+          autoFocus
+        />
+      </IosAlertModal>
 
       <Modal
         visible={sizeModalVisible}
@@ -476,8 +476,10 @@ export default function NewLabelSetupScreen() {
             contentContainerStyle={styles.sizeModalScroll}
             bounces={false}
             showsVerticalScrollIndicator={false}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalHeading}>Customize label size</Text>
+            <View style={[styles.modalCard, styles.sizeModalCard]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalHeading}>Customize Label Size</Text>
+              </View>
               {sizeModalVisible ? (
                 <LabelSizeEditor
                   widthMm={labelWidth}
@@ -488,9 +490,13 @@ export default function NewLabelSetupScreen() {
                   }}
                 />
               ) : null}
-              <Pressable style={styles.modalBtn} onPress={() => setSizeModalVisible(false)}>
-                <Text style={styles.modalOk}>Done</Text>
-              </Pressable>
+              <View style={styles.modalFooter}>
+                <Pressable
+                  style={({ pressed }) => [styles.modalFooterBtn, pressed && styles.pressed]}
+                  onPress={() => setSizeModalVisible(false)}>
+                  <Text style={styles.modalDoneText}>Done</Text>
+                </Pressable>
+              </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -650,31 +656,59 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
+    paddingHorizontal: 24,
   },
   sizeModalScroll: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 24,
   },
   modalCard: {
+    width: '100%',
+    maxWidth: 290,
+    alignSelf: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
-    padding: 18,
-    gap: 10,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  modalHeading: { fontSize: 16, fontWeight: '500', color: Palette.ink },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    backgroundColor: '#F8FAFC',
+  sizeModalCard: {
+    maxWidth: 340,
   },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 18, marginTop: 6 },
-  modalBtn: { paddingVertical: 6 },
-  modalCancel: { color: '#64748B', fontSize: 16, fontWeight: '500' },
-  modalOk: { color: Palette.accent, fontSize: 16, fontWeight: '500' },
+  modalHeader: {
+    paddingTop: 18,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#D1D1D6',
+  },
+  modalHeading: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#000000',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  modalFooter: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#D1D1D6',
+    height: 45,
+  },
+  modalFooterBtn: {
+    flex: 1,
+    height: 45,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalDoneText: {
+    color: '#007AFF',
+    fontSize: 17,
+    fontWeight: '600',
+  },
   pressed: { opacity: 0.75 },
 });

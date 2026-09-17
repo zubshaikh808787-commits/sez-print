@@ -28,6 +28,7 @@ import { HomeHeroFlow } from '@/components/home-hero-flow';
 import { LabelPreview } from '@/components/label-preview';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { androidRipple, cardShadow, Palette, scaleFont } from '@/constants/ui';
+import { SEZNIK_PRINTER_MODELS } from '@/constants/printer-models';
 import { useTabBarPadding } from '@/hooks/use-tab-bar-padding';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore } from '@/stores/printer-store';
@@ -157,6 +158,9 @@ export default function HomeScreen() {
   const printerStatus = usePrinterStore((s) => s.status);
   const printerName = usePrinterStore((s) => s.deviceName);
 
+  const selectedModel = usePrinterStore((s) => s.selectedPrinterModel);
+  const activeModelMeta = SEZNIK_PRINTER_MODELS[selectedModel] || SEZNIK_PRINTER_MODELS.td404;
+
   const recentLabel = useMemo(
     () =>
       documents.length > 0
@@ -206,7 +210,9 @@ export default function HomeScreen() {
             pressed && styles.pressed,
           ]}>
           <Text numberOfLines={1} style={styles.connectionText}>
-            {connected ? printerName ?? 'Connected' : 'Unconnected'}
+            {connected
+              ? `${activeModelMeta.shortName}: ${printerName ?? 'Connected'}`
+              : `${activeModelMeta.shortName} · Unconnected`}
           </Text>
           <AppIcon name="link" tintColor="#FFFFFF" size={15} />
         </Pressable>

@@ -33,6 +33,7 @@ import {
   extractJewelryFirstColumnDocument,
   isJewelryDieCutDocument,
 } from '@/constants/jewelry-diecut';
+import { SEZNIK_PRINTER_MODELS } from '@/constants/printer-models';
 import { canonicalizeJewelryDieCutDocument } from '@/constants/jewelry-template-elements';
 import { resolvePrintQuality } from '@/lib/printer/print-quality';
 import {
@@ -333,9 +334,21 @@ export default function PrintScreen() {
   const printingSettings = useSettingsStore((s) => s.printing);
   const status = usePrinterStore((s) => s.status);
   const deviceName = usePrinterStore((s) => s.deviceName);
+  const selectedModel = usePrinterStore((s) => s.selectedPrinterModel);
   const addHistoryEntry = usePrinterStore((s) => s.addHistoryEntry);
+  const printerDeviceId = usePrinterStore((s) => s.deviceId ?? s.lastDeviceId);
+  const printerSdkId = usePrinterStore((s) => s.sdkId);
+  const printCalibration = usePrinterStore((s) => s.printCalibration);
+  const setPrintCalibration = usePrinterStore((s) => s.setPrintCalibration);
+  // A fixed print-head/media-guide offset is a per-unit hardware trait, not
+  // something geometry math can solve — key by the physical device so a
+  // calibrated offset survives switching label/template and reopening Print.
+  const calibrationKey = printerDeviceId ?? printerSdkId ?? 'unknown';
+  const savedCalibration = printCalibration[calibrationKey];
   const excelFiles = useDataStore((s) => s.excelFiles);
   const activeExcelFileId = useDataStore((s) => s.activeExcelFileId);
+
+  const activeModelMeta = SEZNIK_PRINTER_MODELS[selectedModel] || SEZNIK_PRINTER_MODELS.td404;
 
   const excelSheet = useMemo<ExcelSheet | null>(() => {
     const fileId = params.excelFileId ?? activeExcelFileId;
@@ -390,9 +403,11 @@ export default function PrintScreen() {
     if (jewelryDieCutJob || cableFlagJob || ratTail143Job) return sourceDocument;
     return sourceDocument.ups ? composeUpsDocument(sourceDocument) : sourceDocument;
   }, [sourceDocument, jewelryDieCutJob, cableFlagJob, ratTail143Job]);
-  const jewelryJobDpi = null; // Use connected printer DPI — forced 304 blurred Tez/Dev 203 heads.
-  const cableJobDpi = cableFlagJob ? CABLE_FLAG_DIECUT.printDpi : null;
-  const ratTailJobDpi = ratTail143Job ? RAT_TAIL_143_PRINT.printDpi : null;
+  // Always use the connected printer's real DPI — a hardcoded 304 blurs 203 DPI
+  // Josh/Dev/Tez heads (already fixed for jewelry; cable-flag/rat-tail-143 had the same bug).
+  const jewelryJobDpi = null;
+  const cableJobDpi = null;
+  const ratTailJobDpi = null;
 
   const defaultPreset = useMemo<PrintSizePreset | null>(() => {
     if (cableFlagJob) {
@@ -420,8 +435,26 @@ export default function PrintScreen() {
   const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]>('0°');
   const [paperType, setPaperType] = useState<PaperType>(defaults.paperType);
   const [gapLength, setGapLength] = useState(3);
-  const [hOffset, setHOffset] = useState(0);
-  const [vOffset, setVOffset] = useState(0);
+  const [hOffset, setHOffset] = useState(() => savedCalibration?.hOffsetMm ?? 0);
+  const [vOffset, setVOffset] = useState(() => savedCalibration?.vOffsetMm ?? 0);
+
+  // Re-sync when the connected printer changes (or persisted calibration
+  // finishes loading from AsyncStorage after this screen already mounted).
+  useEffect(() => {
+    const saved = usePrinterStore.getState().printCalibration[calibrationKey];
+    setHOffset(saved?.hOffsetMm ?? 0);
+    setVOffset(saved?.vOffsetMm ?? 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calibrationKey]);
+
+  // Persist calibration per physical printer so a dialed-in offset survives
+  // reopening Print — the controls used to always reset to 0mm, making a
+  // real, fixed mechanical offset look like an unresolved random shift.
+  useEffect(() => {
+    if (calibrationKey === 'unknown') return;
+    setPrintCalibration(calibrationKey, { hOffsetMm: hOffset, vOffsetMm: vOffset });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hOffset, vOffset, calibrationKey]);
   const [zoom, setZoom] = useState(1);
   const [pageIndex, setPageIndex] = useState(0);
   const [printing, setPrinting] = useState(false);
@@ -757,6 +790,14 @@ export default function PrintScreen() {
         if (!base64) {
           throw new Error('Could not capture the label for printing.');
         }
+
+        // Rotate once in JS, uniformly for every printer SDK. Native rotation is
+        // only correct on TD-404/Josh; Dev/Tez either ignore orientation or apply
+        // it incorrectly (see printer-manager.ts). Pre-rotating here and always
+        // telling native `orientation: 0` makes all four SDKs share one, tested,
+        // lossless rotation path (rotateGray — exact axis transpose, no skew).
+        const rotatedBase64 = rotatePngBase64(base64, orientationDeg);
+
         logPrintTrace('EDITOR_CAPTURE', {
           userWidthMm: widthMm,
           userHeightMm: heightMm,
@@ -822,16 +863,14 @@ export default function PrintScreen() {
           );
           timer.start('transmit');
           await manager.printTezPngLabelFast({
-            pngBase64: ratTail143Job
-              ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
-              : base64,
+            pngBase64: rotatedBase64,
             widthMm: paper.widthMm,
             heightMm: paper.heightMm,
             gapMm: gapLength,
             copies,
             density: printDensity,
             speed: printSpeed,
-            orientation: ratTail143Job ? 0 : orientationDeg,
+            orientation: 0,
             dpi: jobDpi,
             hOffsetMm: hOffset,
             vOffsetMm: vOffset,
@@ -849,16 +888,14 @@ export default function PrintScreen() {
           );
           timer.start('transmit');
           await manager.printJoshPngLabelFast({
-            pngBase64: ratTail143Job
-              ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
-              : base64,
+            pngBase64: rotatedBase64,
             widthMm: paper.widthMm,
             heightMm: paper.heightMm,
             gapMm: gapLength,
             copies: copies,
             density: printDensity,
             speed: printSpeed,
-            orientation: ratTail143Job ? 0 : orientationDeg,
+            orientation: 0,
             dpi: jobDpi,
             hOffsetMm: hOffset,
             vOffsetMm: vOffset,
@@ -877,9 +914,7 @@ export default function PrintScreen() {
           timer.start('sdkFastPrint');
           try {
             usedNative = await manager.printDevPngLabelFast({
-              pngBase64: ratTail143Job
-                ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
-                : base64,
+              pngBase64: rotatedBase64,
               widthMm: paper.widthMm,
               heightMm: paper.heightMm,
               gapMm: gapLength,
@@ -889,7 +924,7 @@ export default function PrintScreen() {
               vOffsetMm: vOffset,
               hOffsetMm: hOffset,
               media: wantsBline ? 'bline' : media,
-              orientation: ratTail143Job ? 0 : orientationDeg,
+              orientation: 0,
               dpi: jobDpi,
             });
             if (usedNative) {
@@ -907,9 +942,7 @@ export default function PrintScreen() {
           timer.start('sdkFastPrint');
           try {
             usedNative = await tryNativeSdkPngPrint({
-              pngBase64: ratTail143Job
-                ? rotatePngBase64(base64, RAT_TAIL_143_PRINT.captureOrientation)
-                : base64,
+              pngBase64: rotatedBase64,
               widthMm: paper.widthMm,
               heightMm: paper.heightMm,
               gapMm: gapLength,
@@ -919,7 +952,7 @@ export default function PrintScreen() {
               vOffsetMm: vOffset,
               hOffsetMm: hOffset,
               media: wantsBline ? 'bline' : media,
-              orientation: ratTail143Job ? 0 : orientationDeg,
+              orientation: 0,
               dpi: jobDpi,
             });
             if (usedNative) {
@@ -936,10 +969,13 @@ export default function PrintScreen() {
 
         if (!manager.isLabelX && !manager.isJosh && !manager.isTez && !manager.isDev && !usedNative) {
           timer.start('rasterize');
-          const bits = rasterizePngForPrint(base64, {
-            widthMm,
-            heightMm,
-            orientation: orientationDeg,
+          const bits = rasterizePngForPrint(rotatedBase64, {
+            // `paper` mm is already orientation-swapped to match rotatedBase64's
+            // pixel dimensions; passing orientation:0 here would re-derive
+            // unswapped dims and mismatch the already-rotated bitmap.
+            widthMm: paper.widthMm,
+            heightMm: paper.heightMm,
+            orientation: 0,
             threshold,
             dither,
             hOffsetMm: hOffset,
@@ -1048,10 +1084,10 @@ export default function PrintScreen() {
           ]}>
           <Text numberOfLines={1} style={styles.connectionText}>
             {connected
-              ? deviceName ?? 'Connected'
+              ? `${activeModelMeta.shortName}: ${deviceName ?? 'Connected'}`
               : status === 'connecting'
               ? 'Connecting…'
-              : 'Unconnected'}
+              : `${activeModelMeta.shortName} · Unconnected`}
           </Text>
           <AppIcon name="link" tintColor="#FFFFFF" size={14} />
         </Pressable>
@@ -1360,7 +1396,7 @@ export default function PrintScreen() {
                   bordered
                 />
                 <StepperRow
-                  label="Horizontal Offset"
+                  label="Horizontal Offset (saved for this printer)"
                   value={`${hOffset.toFixed(2)} mm`}
                   minusDisabled={hOffset <= -10}
                   onMinus={() => setHOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
@@ -1368,7 +1404,7 @@ export default function PrintScreen() {
                   bordered
                 />
                 <StepperRow
-                  label="Vertical Offset"
+                  label="Vertical Offset (saved for this printer)"
                   value={`${vOffset.toFixed(2)} mm`}
                   minusDisabled={vOffset <= -10}
                   onMinus={() => setVOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}

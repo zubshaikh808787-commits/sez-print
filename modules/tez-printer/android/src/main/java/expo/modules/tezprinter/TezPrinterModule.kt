@@ -132,8 +132,12 @@ class TezPrinterModule : Module() {
             val base64 = options["pngBase64"] as? String
                 ?: return@AsyncFunction promise.reject("ERR_TEZ_INVALID_ARG", "pngBase64 is required", null)
 
-            val widthMm = (options["widthMm"] as? Number)?.toInt() ?: 50
-            val heightMm = (options["heightMm"] as? Number)?.toInt() ?: 30
+            // Round, don't truncate — .toInt() on a Double truncates toward zero,
+            // so every non-integer-mm label (50.8mm, 76.2mm, ...) was silently
+            // told to the firmware and to scaleToLabelDots as up to ~1mm
+            // narrower/shorter than it actually is on every axis.
+            val widthMm = (options["widthMm"] as? Number)?.toDouble()?.let { Math.round(it).toInt() } ?: 50
+            val heightMm = (options["heightMm"] as? Number)?.toDouble()?.let { Math.round(it).toInt() } ?: 30
             val copies = (options["copies"] as? Number)?.toInt() ?: 1
             val paperType = (options["paperType"] as? Number)?.toInt() ?: 0
             val density = (options["density"] as? Number)?.toInt() ?: 8

@@ -651,12 +651,29 @@ class DevPrinterModule : Module() {
     // BITMAP to the label's own width (byte-aligned), never to a guessed
     // printhead width. Clamping to an assumed head here silently shrank/cropped
     // any label wider than that guess.
-    val width = ((rawW + 7) / 8) * 8
+    // Pack DOWN (floor), matching print-spec.ts's tsplPackedWidthDots policy —
+    // packing UP (ceiling) mismatched the JS-captured bitmap width on every
+    // non-integer-mm label (50.8mm, 76.2mm, 101.6mm, ...), forcing a bilinear
+    // Bitmap.createScaledBitmap stretch below on virtually every real print.
+    val width = Math.max(8, (rawW / 8) * 8)
     val height = rawH
     val widthBytes = width / 8
 
+    // Crop/pad only — never scale. TD-404's native module (Td404PrinterModule)
+    // uses the same crop/pad approach; resampling an already-correct capture
+    // for a 0–7 dot byte-alignment gap is a pure quality loss for no benefit.
     val scaled = if (bitmap.width != width || bitmap.height != height) {
-      Bitmap.createScaledBitmap(bitmap, width, height, true)
+      val next = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+      next.eraseColor(Color.WHITE)
+      val copyW = minOf(bitmap.width, width)
+      val copyH = minOf(bitmap.height, height)
+      Canvas(next).drawBitmap(
+        bitmap,
+        Rect(0, 0, copyW, copyH),
+        Rect(0, 0, copyW, copyH),
+        null,
+      )
+      next
     } else {
       bitmap
     }
@@ -751,7 +768,10 @@ class DevPrinterModule : Module() {
     val headDots = Math.max(64, ((Math.round(printheadWidthMm * dpm).toInt() + 7) / 8) * 8)
     val headBytes = headDots / 8
 
-    val targetW = Math.min(headDots, ((rawW + 7) / 8) * 8)
+    // Pack DOWN (floor) like the TSPL path above — ceiling-packing `rawW` here
+    // mismatched the JS-captured bitmap width on non-integer-mm labels and
+    // forced the bilinear Bitmap.createScaledBitmap stretch below unnecessarily.
+    val targetW = Math.min(headDots, Math.max(8, (rawW / 8) * 8))
     val targetH = Math.max(32, Math.round(bitmap.height * (targetW.toDouble() / bitmap.width)).toInt())
     val height = ((targetH + 7) / 8) * 8
     val autoCenterPad = Math.max(0, (headDots - targetW) / 2) // Center horizontally on thermal head matching 2af2d61

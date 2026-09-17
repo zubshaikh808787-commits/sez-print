@@ -26,6 +26,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Line } from 'react-native-svg';
 
+import { IosAlertModal, IosAlertInput } from '@/components/ui/ios-alert-modal';
+
 import {
   clampElementToLabel,
   fitBarcodeDefaults,
@@ -407,10 +409,23 @@ export default function EditScreen() {
     if (params.cloneFromId) {
       const source = useLabelStore.getState().getDocument(params.cloneFromId);
       if (source) {
-        elements = (JSON.parse(JSON.stringify(source.elements)) as LabelElement[]).map((el) => ({
+        const cloned = (JSON.parse(JSON.stringify(source.elements)) as LabelElement[]).map((el) => ({
           ...el,
           id: generateId(),
         }));
+        // Clone target size can differ from the source (2ups/duplicate-at-new-size
+        // flow). Rescale through the same proportional logic as the in-editor
+        // resize control — a verbatim copy only clamped to the new bounds leaves
+        // stale mm geometry (position, font size, stroke width) that clips at
+        // the new label's edges instead of resizing to fit it.
+        elements =
+          source.widthMm === widthMm && source.heightMm === heightMm
+            ? cloned
+            : scaleDocumentToSize(
+                { ...source, elements: cloned, ups: undefined },
+                widthMm,
+                heightMm,
+              ).elements;
       }
     } else if (params.templateCategory) {
       const created = createIndustryTemplateDocument({
@@ -2549,35 +2564,21 @@ export default function EditScreen() {
         />
       )}
 
-      <Modal
+      <IosAlertModal
         visible={saveAsVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSaveAsVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalHeading}>Save As</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={saveAsName}
-              onChangeText={setSaveAsName}
-              placeholder="Label name"
-              placeholderTextColor="#94A3B8"
-              autoFocus
-            />
-            <View style={styles.modalActionRow}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalCancelBtn]}
-                onPress={() => setSaveAsVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalSaveBtn]} onPress={confirmSaveAs}>
-                <Text style={styles.modalSaveText}>Save</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setSaveAsVisible(false)}
+        title="Save As"
+        buttons={[
+          { text: 'Cancel', style: 'cancel', onPress: () => setSaveAsVisible(false) },
+          { text: 'Save', style: 'default', bold: true, onPress: confirmSaveAs },
+        ]}>
+        <IosAlertInput
+          value={saveAsName}
+          onChangeText={setSaveAsName}
+          placeholder="Label name"
+          autoFocus
+        />
+      </IosAlertModal>
 
       <Modal
         visible={showOpenModal}
@@ -2586,7 +2587,9 @@ export default function EditScreen() {
         onRequestClose={() => setShowOpenModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, styles.openModalCard]}>
-            <Text style={styles.modalHeading}>Open Label</Text>
+            <View style={styles.openModalHeader}>
+              <Text style={styles.modalHeading}>Open Label</Text>
+            </View>
             {savedDocuments.length === 0 ? (
               <Text style={styles.openEmptyText}>No saved labels yet.</Text>
             ) : (
@@ -2610,11 +2613,13 @@ export default function EditScreen() {
                 ))}
               </ScrollView>
             )}
-            <Pressable
-              style={[styles.modalBtn, styles.modalCancelBtn, styles.openCloseBtn]}
-              onPress={() => setShowOpenModal(false)}>
-              <Text style={styles.modalCancelText}>Close</Text>
-            </Pressable>
+            <View style={styles.openModalFooter}>
+              <Pressable
+                style={({ pressed }) => [styles.openModalCloseBtn, pressed && styles.pressed]}
+                onPress={() => setShowOpenModal(false)}>
+                <Text style={styles.openModalCloseText}>Cancel</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2634,7 +2639,9 @@ export default function EditScreen() {
             bounces={false}
             showsVerticalScrollIndicator={false}>
             <View style={[styles.modalCard, styles.sizeModalCard]}>
-              <Text style={styles.modalHeading}>Label size</Text>
+              <View style={styles.openModalHeader}>
+                <Text style={styles.modalHeading}>Label Size</Text>
+              </View>
               {sizeModalVisible ? (
                 <LabelSizeEditor
                   widthMm={doc.widthMm}
@@ -2642,11 +2649,13 @@ export default function EditScreen() {
                   onChange={applyLabelSize}
                 />
               ) : null}
-              <Pressable
-                style={[styles.modalBtn, styles.modalSaveBtn, styles.openCloseBtn]}
-                onPress={() => setSizeModalVisible(false)}>
-                <Text style={styles.modalSaveText}>Done</Text>
-              </Pressable>
+              <View style={styles.openModalFooter}>
+                <Pressable
+                  style={({ pressed }) => [styles.openModalCloseBtn, pressed && styles.pressed]}
+                  onPress={() => setSizeModalVisible(false)}>
+                  <Text style={styles.openModalDoneText}>Done</Text>
+                </Pressable>
+              </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -3098,72 +3107,80 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
     justifyContent: 'center',
+    paddingHorizontal: 24,
   },
   sizeModalScroll: {
     flexGrow: 1,
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     paddingVertical: 24,
   },
   modalCard: {
     width: '100%',
-    maxWidth: 340,
+    maxWidth: 290,
     alignSelf: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 22,
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 8,
   },
   openModalCard: {
+    maxWidth: 320,
     maxHeight: 480,
   },
   sizeModalCard: {
-    maxWidth: 400,
+    maxWidth: 340,
+  },
+  openModalHeader: {
+    paddingTop: 18,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#D1D1D6',
   },
   modalHeading: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#1E293B',
-    marginBottom: 16,
+    color: '#000000',
     textAlign: 'center',
+    lineHeight: 22,
   },
   modalInput: {
-    height: 48,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    fontSize: 15,
-    color: '#1E293B',
-    backgroundColor: '#F8FAFC',
-    marginBottom: 16,
+    height: 36,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#C6C6C8',
+    borderRadius: 7,
+    paddingHorizontal: 10,
+    fontSize: 14,
+    color: '#000000',
+    backgroundColor: '#FFFFFF',
+    marginTop: 12,
   },
-  modalActionRow: {
-    flexDirection: 'row',
-    gap: 10,
+  openModalFooter: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#D1D1D6',
+    height: 45,
   },
-  modalBtn: {
+  openModalCloseBtn: {
     flex: 1,
-    height: 44,
-    borderRadius: 8,
+    height: 45,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalCancelBtn: {
-    backgroundColor: '#F1F5F9',
+  openModalCloseText: {
+    color: '#007AFF',
+    fontSize: 17,
+    fontWeight: '400',
   },
-  modalSaveBtn: {
-    backgroundColor: '#17A6B8',
-  },
-  modalCancelText: {
-    color: '#64748B',
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  modalSaveText: {
-    color: '#FFFFFF',
-    fontSize: 15,
+  openModalDoneText: {
+    color: '#007AFF',
+    fontSize: 17,
     fontWeight: '600',
   },
   openList: {

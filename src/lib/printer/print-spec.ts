@@ -175,8 +175,14 @@ export function tsplPackedWidthDots(contentDots: number): number {
  * One layout for preview capture and TSPL BITMAP.
  *
  * Capture at SIZE-in-dots (1 px = 1 printer dot, same mm scale as the editor).
- * BITMAP width is packed DOWN; leftover 0–7 columns are cropped on the right —
- * never scaled, or the label would print slightly narrower than the preview.
+ * This is shared by all four printer integrations, so it must NOT bake in a
+ * TSPL-only constraint: Josh's LPAPI, Dev's ESC/POS mode, and Tez's PrintSDK
+ * do not have TSPL's BITMAP-width-is-bytes×8 rule, and narrowing their
+ * capture to match it made their own native fit/scale step (containFitToPage,
+ * createScaledBitmap, scaleToLabelDots) resample a bitmap that no longer
+ * matched the target mm exactly — a measured source of blur and a horizontal
+ * offset on hardware. BITMAP width is packed DOWN only at TSPL encode time
+ * (`bitmapDotsW`); leftover 0–7 columns are cropped there, never scaled.
  */
 export type UniversalPrintLayout = {
   widthMm: number;

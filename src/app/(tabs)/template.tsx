@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect as SvgRect, Stop } from 'react-native-svg';
 
+import { IosAlertModal, IosAlertInput } from '@/components/ui/ios-alert-modal';
 import { ShareNodeIcon } from '@/components/home-icons';
 import { LabelPreview } from '@/components/label-preview';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
@@ -2186,77 +2187,46 @@ export default function TemplateScreen() {
       )}
       </View>
 
-      <Modal
+      <IosAlertModal
         visible={newGroupVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setNewGroupVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalHeading}>New Group</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={newGroupName}
-              onChangeText={setNewGroupName}
-              placeholder="Group name"
-              placeholderTextColor="#94A3B8"
-              autoFocus
-            />
-            <View style={styles.modalActionRow}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalCancelBtn]}
-                onPress={() => setNewGroupVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalSaveBtn]} onPress={handleCreateGroup}>
-                <Text style={styles.modalSaveText}>Create</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setNewGroupVisible(false)}
+        title="New Group"
+        buttons={[
+          { text: 'Cancel', style: 'cancel', onPress: () => setNewGroupVisible(false) },
+          { text: 'Create', style: 'default', bold: true, onPress: handleCreateGroup },
+        ]}>
+        <IosAlertInput
+          value={newGroupName}
+          onChangeText={setNewGroupName}
+          placeholder="Group name"
+          autoFocus
+        />
+      </IosAlertModal>
 
-      <Modal
+      <IosAlertModal
         visible={loginVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setLoginVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalHeading}>Cloud Login</Text>
-            <Text style={{ fontSize: 12, color: '#64748B', textAlign: 'center', marginBottom: 12 }}>
-              Saved on this phone only — there is no remote cloud account yet.
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              value={loginEmail}
-              onChangeText={setLoginEmail}
-              placeholder="Email"
-              placeholderTextColor="#94A3B8"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              autoFocus
-            />
-            <TextInput
-              style={styles.modalInput}
-              value={loginName}
-              onChangeText={setLoginName}
-              placeholder="Display name (optional)"
-              placeholderTextColor="#94A3B8"
-            />
-            <View style={styles.modalActionRow}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalCancelBtn]}
-                onPress={() => setLoginVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalSaveBtn]} onPress={handleLogin}>
-                <Text style={styles.modalSaveText}>Login</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setLoginVisible(false)}
+        title="Cloud Login"
+        message="Saved on this phone only — there is no remote cloud account yet."
+        buttons={[
+          { text: 'Cancel', style: 'cancel', onPress: () => setLoginVisible(false) },
+          { text: 'Login', style: 'default', bold: true, onPress: handleLogin },
+        ]}>
+        <IosAlertInput
+          value={loginEmail}
+          onChangeText={setLoginEmail}
+          placeholder="Email"
+          autoCapitalize="none"
+          keyboardType="email-address"
+          autoFocus
+        />
+        <IosAlertInput
+          value={loginName}
+          onChangeText={setLoginName}
+          placeholder="Display name (optional)"
+          style={{ marginTop: 8 }}
+        />
+      </IosAlertModal>
     </View>
   );
 }

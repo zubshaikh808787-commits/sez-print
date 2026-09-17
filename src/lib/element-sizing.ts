@@ -285,6 +285,68 @@ export function normalizeDocumentElements(doc: LabelDocument): LabelElement[] {
   return doc.elements.map((el) => clampElementToLabel(el, doc));
 }
 
+/**
+ * Scale one element's dimensional fields for a label resize.
+ * `sx`/`sy` scale position/size (anisotropic — matches the new aspect ratio).
+ * `fontScale` (uniform, normally min(sx, sy)) scales ink-thickness fields —
+ * font size, stroke/line width, corner radius — so glyphs and strokes don't
+ * distort when width and height scale by different amounts.
+ */
+function scaleElementFields(el: LabelElement, sx: number, sy: number, fontScale: number): LabelElement {
+  const scaled: LabelElement = {
+    ...el,
+    left: el.left * sx,
+    top: el.top * sy,
+    width: el.width * sx,
+  };
+  if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
+    (scaled as { height: number }).height *= sy;
+  }
+  if (scaled.type === 'line' && typeof scaled.height === 'number') {
+    const vertical = scaled.height >= scaled.width * 2;
+    (scaled as { height: number }).height *= vertical ? sy : fontScale;
+  }
+  if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
+    (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * fontScale);
+  }
+  if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
+    (scaled as { lineWidth: number }).lineWidth *= fontScale;
+  }
+  if ('roundRadius' in scaled && typeof scaled.roundRadius === 'number') {
+    (scaled as { roundRadius: number }).roundRadius *= fontScale;
+  }
+  if (scaled.type === 'table') {
+    scaled.columnWidths = scaled.columnWidths.map((n) => n * sx);
+    scaled.rowHeights = scaled.rowHeights.map((n) => n * sy);
+  }
+  return scaled;
+}
+
+/**
+ * Border is locked to the label bounds, not scaled by sx/sy like other
+ * elements — but its stroke thickness (`lineWidth`) is still an ink-thickness
+ * field and must scale by `fontScale`, or it goes stale (a 2mm border on a
+ * shrunk label prints as a near-solid block; on an enlarged one, hairline-thin).
+ */
+function scaleBorderElement(
+  el: LabelElement & { type: 'border' },
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  fontScale: number,
+): LabelElement {
+  return {
+    ...el,
+    left,
+    top,
+    width,
+    height,
+    rotation: 0 as const,
+    lineWidth: el.lineWidth * fontScale,
+  };
+}
+
 /** Scale and reposition layers when the label size changes (no silent crop). */
 export function scaleDocumentToSize(
   doc: LabelDocument,
@@ -305,34 +367,11 @@ export function scaleDocumentToSize(
     source.map((el) => {
       if (el.type === 'border') {
         return clampElementToLabel(
-          { ...el, left: 0, top: 0, width: widthMm, height: heightMm, rotation: 0 as const },
+          scaleBorderElement(el, 0, 0, widthMm, heightMm, fontScale),
           nextDoc,
         );
       }
-      const scaled: LabelElement = {
-        ...el,
-        left: el.left * sx,
-        top: el.top * sy,
-        width: el.width * sx,
-      };
-      if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
-        (scaled as { height: number }).height *= sy;
-      }
-      if (scaled.type === 'line' && typeof scaled.height === 'number') {
-        const vertical = scaled.height >= scaled.width * 2;
-        (scaled as { height: number }).height *= vertical ? sy : Math.min(sx, sy);
-      }
-      if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
-        (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * fontScale);
-      }
-      if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
-        (scaled as { lineWidth: number }).lineWidth *= fontScale;
-      }
-      if (scaled.type === 'table') {
-        scaled.columnWidths = scaled.columnWidths.map((n) => n * sx);
-        scaled.rowHeights = scaled.rowHeights.map((n) => n * sy);
-      }
-      return clampElementToLabel(scaled, nextDoc);
+      return clampElementToLabel(scaleElementFields(el, sx, sy, fontScale), nextDoc);
     });
 
   const elements = scaleElements(doc.elements);
@@ -372,36 +411,13 @@ export function fitDocumentCenteredOnPage(
   const elements = doc.elements.map((el) => {
     if (el.type === 'border') {
       return clampElementToLabel(
-        {
-          ...el,
-          left: ox,
-          top: oy,
-          width: contentW,
-          height: contentH,
-          rotation: 0 as const,
-        },
+        scaleBorderElement(el, ox, oy, contentW, contentH, scale),
         nextDoc,
       );
     }
-    const scaled: LabelElement = {
-      ...el,
-      left: ox + el.left * scale,
-      top: oy + el.top * scale,
-      width: el.width * scale,
-    };
-    if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
-      (scaled as { height: number }).height *= scale;
-    }
-    if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
-      (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * scale);
-    }
-    if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
-      (scaled as { lineWidth: number }).lineWidth *= scale;
-    }
-    if (scaled.type === 'table') {
-      scaled.columnWidths = scaled.columnWidths.map((n) => n * scale);
-      scaled.rowHeights = scaled.rowHeights.map((n) => n * scale);
-    }
+    const scaled = scaleElementFields(el, scale, scale, scale);
+    scaled.left = ox + scaled.left;
+    scaled.top = oy + scaled.top;
     return clampElementToLabel(scaled, nextDoc);
   });
   return { ...nextDoc, elements };
@@ -424,37 +440,11 @@ export function fitDocumentToFillPage(
   const elements = doc.elements.map((el) => {
     if (el.type === 'border') {
       return clampElementToLabel(
-        {
-          ...el,
-          left: 0,
-          top: 0,
-          width: widthMm,
-          height: heightMm,
-          rotation: 0 as const,
-        },
+        scaleBorderElement(el, 0, 0, widthMm, heightMm, fontScale),
         nextDoc,
       );
     }
-    const scaled: LabelElement = {
-      ...el,
-      left: el.left * scaleX,
-      top: el.top * scaleY,
-      width: el.width * scaleX,
-    };
-    if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
-      (scaled as { height: number }).height *= scaleY;
-    }
-    if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
-      (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * fontScale);
-    }
-    if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
-      (scaled as { lineWidth: number }).lineWidth *= fontScale;
-    }
-    if (scaled.type === 'table') {
-      scaled.columnWidths = scaled.columnWidths.map((n) => n * scaleX);
-      scaled.rowHeights = scaled.rowHeights.map((n) => n * scaleY);
-    }
-    return clampElementToLabel(scaled, nextDoc);
+    return clampElementToLabel(scaleElementFields(el, scaleX, scaleY, fontScale), nextDoc);
   });
   return { ...nextDoc, elements };
 }

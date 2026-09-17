@@ -6,7 +6,9 @@ import { dotsPerMm, type PrinterAlignment } from '@/lib/printer/print-spec';
  * a 50×30 mm capture at 12 dpm is 600×360 dots → ~75×45 mm on a 203 DPI head.
  */
 export const JOSH_HARDWARE_DPI = 203;
-export const JOSH_DOTS_PER_MM = 8;
+// Derived from print-spec.ts `dotsPerMm` — the single source of truth for the
+// 304→12 / 203→8 hardware special case. Do not re-hardcode 8 elsewhere.
+export const JOSH_DOTS_PER_MM = dotsPerMm(JOSH_HARDWARE_DPI);
 
 /**
  * LPAPI PrintParamName.GAP_TYPE (official demo: list index − 1).

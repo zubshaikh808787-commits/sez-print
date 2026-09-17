@@ -257,7 +257,10 @@ export function LabelEditor({
         hOffsetMm: 0,
         media: 'gap',
         orientation: 0,
-        dpi,
+        // `geometry` (the ViewShot capture size) was built from `activeDpi`, not
+        // the separately-tracked `dpi` UI state — sending `dpi` here could tell
+        // the native module a different resolution than what was captured.
+        dpi: activeDpi,
       });
       timer.end('sdkFastPrint');
 

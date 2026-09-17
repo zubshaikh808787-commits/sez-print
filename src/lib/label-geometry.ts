@@ -9,7 +9,7 @@
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_2UP_SHEET_WIDTH_MM } from '@/constants/jewelry-diecut';
 import { CABLE_FLAG_DIECUT } from '@/constants/cable-flag-diecut';
 import { containFitLabel } from '@/lib/label-coordinate-system';
-import { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout, formatTsplSizeCommand } from '@/lib/printer/print-spec';
+import { dotsPerMm, dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout, formatTsplSizeCommand } from '@/lib/printer/print-spec';
 import type { MediaShape } from '@/lib/label-document';
 
 export {
@@ -29,8 +29,12 @@ export {
 export { dotsToMm, MM_PER_INCH, mmToDots, tsplPackedWidthDots, createUniversalPrintLayout, formatTsplSizeCommand };
 export type { MediaShape };
 export const PRINT_DPI = 304;
-/** 304 DPI thermal heads are 12 dots/mm (304.8), not 304/25.4. */
-export const PRINT_DOTS_PER_MM = 12;
+/**
+ * 304 DPI thermal heads are 12 dots/mm (304.8), not 304/25.4.
+ * Derived from `dotsPerMm` in print-spec.ts — the single source of truth for
+ * every DPI→dots/mm mapping in the app. Do not re-hardcode 12/8 elsewhere.
+ */
+export const PRINT_DOTS_PER_MM = dotsPerMm(PRINT_DPI);
 export const MIN_LABEL_MM = 8;
 export const MAX_LABEL_MM = 310;
 
