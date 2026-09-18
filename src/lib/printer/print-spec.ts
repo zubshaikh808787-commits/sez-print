@@ -426,3 +426,71 @@ export function formatPrintSpecDiagnostics(spec: PrintSpec): string {
     '========================================',
   ].join('\n');
 }
+
+export interface DevTsplPrintLayoutOptions {
+  printheadWidthMm?: number;
+  dpi?: number;
+  hOffsetMm?: number;
+  vOffsetMm?: number;
+}
+
+export interface DevTsplPrintLayout {
+  isOverwide: boolean;
+  fitScale: number;
+  targetWidthDots: number;
+  targetHeightDots: number;
+  widthBytes: number;
+  totalHeightDots: number;
+  drawX: number;
+  drawY: number;
+  sizeCommand: string;
+}
+
+/**
+ * Generalized layout computation for TSPL on DEV printers (e.g. 48mm/384-dot head).
+ * Handles proportional scaling for overwide labels, 1:1 pixel mapping for <= 48mm media,
+ * byte alignment, and calibration offsets without hardcoding.
+ */
+export function computeDevTsplPrintLayout(
+  labelWidthMm: number,
+  labelHeightMm: number,
+  options: DevTsplPrintLayoutOptions = {},
+): DevTsplPrintLayout {
+  const dpi = options.dpi ?? 203;
+  const dpmm = Math.round(dpi / MM_PER_INCH); // 8 dots/mm for 203 DPI
+  const printheadWidthMm = options.printheadWidthMm ?? 48;
+  const headDots = Math.round(printheadWidthMm * dpmm); // 384 dots
+
+  const rawWidthDots = Math.round(labelWidthMm * dpmm);
+  const totalHeightDots = Math.round(labelHeightMm * dpmm);
+
+  const isOverwide = labelWidthMm > printheadWidthMm;
+  const fitScale = isOverwide ? headDots / rawWidthDots : 1.0;
+
+  let targetWidthDots = isOverwide ? headDots : rawWidthDots;
+  const widthBytes = Math.ceil(targetWidthDots / 8);
+  targetWidthDots = widthBytes * 8;
+
+  const targetHeightDots = Math.round(totalHeightDots * fitScale);
+
+  const baseDrawY = isOverwide ? Math.round((totalHeightDots - targetHeightDots) / 2) : 0;
+  const vOffsetDots = options.vOffsetMm != null ? Math.round(options.vOffsetMm * dpmm) : 0;
+  const drawY = Math.max(0, baseDrawY + vOffsetDots);
+
+  const hOffsetDots = options.hOffsetMm != null ? Math.round(options.hOffsetMm * dpmm) : 0;
+  const drawX = Math.max(0, hOffsetDots);
+
+  const sizeCommand = `SIZE ${labelWidthMm.toFixed(2)} mm,${labelHeightMm.toFixed(2)} mm`;
+
+  return {
+    isOverwide,
+    fitScale,
+    targetWidthDots,
+    targetHeightDots,
+    widthBytes,
+    totalHeightDots,
+    drawX,
+    drawY,
+    sizeCommand,
+  };
+}
