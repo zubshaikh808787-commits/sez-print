@@ -1,0 +1,56 @@
+# Modernization & Architecture Redesign Task Checklist
+
+> Reference Master Plan: [`ARCHITECTURE_REDESIGN_PLAN.md`](./ARCHITECTURE_REDESIGN_PLAN.md)  
+> Detailed Progress Log: [`PROGRESS.md`](./PROGRESS.md)
+
+---
+
+## Phase 1: Interactive Skia Canvas & Resizing Engine (Editor UI & Geometry)
+- [ ] **Task 1.1:** Refactor `skia-element-renderer.tsx` to support live scaling via Reanimated shared values
+- [ ] **Task 1.2:** Implement Native Vector Handles in `skia-canvas.tsx`
+- [ ] **Task 1.3:** Modernize Template Resizing in `src/lib/element-sizing.ts`
+- [ ] **Task 1.4:** Mount `<SkiaCanvas>` in `src/app/edit.tsx`
+
+---
+
+## Phase 2: Integer-Module Optical Barcode & 2D Symbology Engine
+- [ ] **Task 2.1:** Build Integer Module Snapping Engine in `src/lib/barcode/barcode-snapping.ts`
+- [ ] **Task 2.2:** Implement Authentic PDF417 and DataMatrix Encoders
+- [ ] **Task 2.3:** Update Skia Barcode Rendering in `skia-element-renderer.tsx`
+- [ ] **Task 2.4:** Build Real-Time Scannability Preflight Inspector
+
+---
+
+## Phase 3: Constraint-Based Layout & Responsive Anchor Architecture
+- [ ] **Task 3.1:** Extend `LabelElement` Schema in `src/lib/label-document.ts`
+- [ ] **Task 3.2:** Implement Layout Constraint Solver in `src/lib/layout-constraints.ts`
+- [ ] **Task 3.3:** Integrate Constraint Resolution into Label Size Switching
+- [ ] **Task 3.4:** Add Constraint UI Controls to Editor Property Panels
+
+---
+
+## Phase 4: Headless In-Memory Skia Direct Rasterizer (Print Pipeline)
+- [ ] **Task 4.1:** Build Headless Skia Surface Engine in `src/printing/raster/skia-surface.ts`
+- [ ] **Task 4.2:** Implement High-Speed 1-Bit Monochrome Bit-Packer
+- [ ] **Task 4.3:** Integrate Direct Rasterizer into `src/app/print.tsx`
+
+---
+
+## Phase 5: Streaming Multi-Page Batch & Data Binding Pipeline
+- [ ] **Task 5.1:** Create Data Substitution Engine in `src/printing/batch/data-binder.ts`
+- [ ] **Task 5.2:** Build Streaming Batch Controller in `src/printing/batch/batch-streamer.ts`
+- [ ] **Task 5.3:** Cancellation & Progress UI in `src/app/print.tsx`
+
+---
+
+## Phase 6: Hardware Calibration, Printhead Margins & Universal Driver Layer
+- [ ] **Task 6.1:** Refactor Driver Layer into Unified Hardware Interface
+- [ ] **Task 6.2:** Build MAC-Keyed Calibration Storage in `src/lib/printer/calibration-store.ts`
+- [ ] **Task 6.3:** Implement Interactive Calibration Wizard Screen
+
+---
+
+## Phase 7: Print Preflight Engine & Thermal Density Optimization
+- [ ] **Task 7.1:** Build Preflight Inspection Rules in `src/lib/preflight/preflight-engine.ts`
+- [ ] **Task 7.2:** Build Thermal Density Analyzer in `src/printing/raster/thermal-density.ts`
+- [ ] **Task 7.3:** Build Preflight Review UI Modal in `src/components/preflight/preflight-modal.tsx`
