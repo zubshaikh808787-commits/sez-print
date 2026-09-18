@@ -1,11 +1,20 @@
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect } from 'react-native-svg';
+import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 
 import { rulerTicksFor, type RulerTick } from '@/lib/editor/ruler-ticks';
 import { Palette } from '@/constants/ui';
 
 export const RULER_SIZE = 28;
+
+export type LiveRulerBounds = {
+  leftMm: SharedValue<number>;
+  topMm: SharedValue<number>;
+  widthMm: SharedValue<number>;
+  heightMm: SharedValue<number>;
+  visible: SharedValue<boolean>;
+};
 
 const RULER_BG = '#F0F4F9';
 const BRAND_BLUE = Palette.header; // #214668
@@ -53,12 +62,14 @@ export function HorizontalRuler({
   contentWidthPx,
   lengthMm,
   selectedRangeMm,
+  liveBounds,
 }: {
   trackWidthPx: number;
   originPx: number;
   contentWidthPx: number;
   lengthMm: number;
   selectedRangeMm?: { start: number; end: number } | null;
+  liveBounds?: LiveRulerBounds;
 }) {
   const track = Math.max(1, trackWidthPx);
   const content = Math.max(1, contentWidthPx);
@@ -66,15 +77,32 @@ export function HorizontalRuler({
   const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
   const labels = useMemo(() => spacedMajor(ticks, 22), [ticks]);
 
-  // Selected element projection on horizontal ruler
+  // Selected element projection on horizontal ruler (fallback for static prop)
   const selectionProjection = useMemo(() => {
-    if (!selectedRangeMm || lengthMm <= 0) return null;
+    if (liveBounds || !selectedRangeMm || lengthMm <= 0) return null;
     const x1 = Math.max(0, Math.min(track, origin + (selectedRangeMm.start / lengthMm) * content));
     const x2 = Math.max(0, Math.min(track, origin + (selectedRangeMm.end / lengthMm) * content));
     const left = Math.min(x1, x2);
     const width = Math.max(1, Math.abs(x2 - x1));
     return { x1, x2, left, width };
-  }, [selectedRangeMm, lengthMm, content, origin, track]);
+  }, [liveBounds, selectedRangeMm, lengthMm, content, origin, track]);
+
+  const animatedOverlayStyle = useAnimatedStyle(() => {
+    if (!liveBounds || !liveBounds.visible.value || lengthMm <= 0) {
+      return { opacity: 0 };
+    }
+    const leftVal = liveBounds.leftMm.value;
+    const widthVal = liveBounds.widthMm.value;
+    const x1 = Math.max(0, Math.min(track, origin + (leftVal / lengthMm) * content));
+    const x2 = Math.max(0, Math.min(track, origin + ((leftVal + widthVal) / lengthMm) * content));
+    const left = Math.min(x1, x2);
+    const width = Math.max(1, Math.abs(x2 - x1));
+    return {
+      opacity: 1,
+      left,
+      width,
+    };
+  }, [liveBounds, lengthMm, content, origin, track]);
 
   return (
     <View style={[styles.hTrack, { width: track }]}>
@@ -82,7 +110,7 @@ export function HorizontalRuler({
         {/* Light blue-grey background */}
         <Rect x={0} y={0} width={track} height={RULER_SIZE} fill={RULER_BG} />
 
-        {/* Selected element projection band & edge indicators */}
+        {/* Selected element projection band & edge indicators (static fallback) */}
         {selectionProjection && (
           <>
             <Rect
@@ -150,6 +178,14 @@ export function HorizontalRuler({
         />
       </Svg>
 
+      {/* Real-time Reanimated selection projection overlay */}
+      {liveBounds && (
+        <Animated.View
+          style={[styles.hSelectionOverlay, animatedOverlayStyle]}
+          pointerEvents="none"
+        />
+      )}
+
       {labels.map((tick) => {
         const isEnd = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
         return (
@@ -174,12 +210,14 @@ export function VerticalRuler({
   contentHeightPx,
   lengthMm,
   selectedRangeMm,
+  liveBounds,
 }: {
   trackHeightPx: number;
   originPx: number;
   contentHeightPx: number;
   lengthMm: number;
   selectedRangeMm?: { start: number; end: number } | null;
+  liveBounds?: LiveRulerBounds;
 }) {
   const track = Math.max(1, trackHeightPx);
   const content = Math.max(1, contentHeightPx);
@@ -187,15 +225,32 @@ export function VerticalRuler({
   const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
   const labels = useMemo(() => spacedMajor(ticks, 16), [ticks]);
 
-  // Selected element projection on vertical ruler
+  // Selected element projection on vertical ruler (fallback for static prop)
   const selectionProjection = useMemo(() => {
-    if (!selectedRangeMm || lengthMm <= 0) return null;
+    if (liveBounds || !selectedRangeMm || lengthMm <= 0) return null;
     const y1 = Math.max(0, Math.min(track, origin + (selectedRangeMm.start / lengthMm) * content));
     const y2 = Math.max(0, Math.min(track, origin + (selectedRangeMm.end / lengthMm) * content));
     const top = Math.min(y1, y2);
     const height = Math.max(1, Math.abs(y2 - y1));
     return { y1, y2, top, height };
-  }, [selectedRangeMm, lengthMm, content, origin, track]);
+  }, [liveBounds, selectedRangeMm, lengthMm, content, origin, track]);
+
+  const animatedOverlayStyle = useAnimatedStyle(() => {
+    if (!liveBounds || !liveBounds.visible.value || lengthMm <= 0) {
+      return { opacity: 0 };
+    }
+    const topVal = liveBounds.topMm.value;
+    const heightVal = liveBounds.heightMm.value;
+    const y1 = Math.max(0, Math.min(track, origin + (topVal / lengthMm) * content));
+    const y2 = Math.max(0, Math.min(track, origin + ((topVal + heightVal) / lengthMm) * content));
+    const top = Math.min(y1, y2);
+    const height = Math.max(1, Math.abs(y2 - y1));
+    return {
+      opacity: 1,
+      top,
+      height,
+    };
+  }, [liveBounds, lengthMm, content, origin, track]);
 
   return (
     <View style={[styles.vTrack, { height: track }]}>
@@ -203,7 +258,7 @@ export function VerticalRuler({
         {/* Light blue-grey background */}
         <Rect x={0} y={0} width={RULER_SIZE} height={track} fill={RULER_BG} />
 
-        {/* Selected element projection band & edge indicators */}
+        {/* Selected element projection band & edge indicators (static fallback) */}
         {selectionProjection && (
           <>
             <Rect
@@ -271,6 +326,14 @@ export function VerticalRuler({
         />
       </Svg>
 
+      {/* Real-time Reanimated selection projection overlay */}
+      {liveBounds && (
+        <Animated.View
+          style={[styles.vSelectionOverlay, animatedOverlayStyle]}
+          pointerEvents="none"
+        />
+      )}
+
       {labels.map((tick) => {
         const isEnd = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
         return (
@@ -307,6 +370,26 @@ const styles = StyleSheet.create({
     width: RULER_SIZE,
     backgroundColor: RULER_BG,
     overflow: 'hidden',
+  },
+  hSelectionOverlay: {
+    position: 'absolute',
+    top: 0,
+    height: RULER_SIZE - 1,
+    backgroundColor: 'rgba(33, 70, 104, 0.12)',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderLeftColor: BRAND_BLUE,
+    borderRightColor: BRAND_BLUE,
+  },
+  vSelectionOverlay: {
+    position: 'absolute',
+    left: 0,
+    width: RULER_SIZE - 1,
+    backgroundColor: 'rgba(33, 70, 104, 0.12)',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderTopColor: BRAND_BLUE,
+    borderBottomColor: BRAND_BLUE,
   },
   hLabel: {
     position: 'absolute',

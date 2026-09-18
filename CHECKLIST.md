@@ -5,6 +5,14 @@
 
 ---
 
+## Standalone Bugfixes (Legacy Konva Canvas — Non-Phase 1)
+- [x] **Bugfix (Legacy Konva Canvas):** Vertical Resize Height Jitter on Barcode/Shape/Image Elements (`src/lib/editor/label-bounds.ts`, `src/components/editor/element-renderer.tsx`)
+- [x] **Bugfix (Legacy Konva Canvas):** Barcode Width Scale & HRI Text Distortion + Anchor Audit in `clampToLabelBounds` (`src/lib/editor/label-bounds.ts`, `src/components/editor/element-renderer.tsx`)
+- [x] **Bugfix (Legacy Konva Canvas):** QR Code Vector Rendering & Resize Bleed (`src/components/editor/element-renderer.tsx`)
+- [x] **Enhancement (Active Editor UX):** Real-Time Ruler Scale Highlighting During Move & Resize Gestures (`src/components/canvas-rulers.tsx`, `src/app/edit.tsx`, `src/components/editor/konva-transformer.tsx`, `src/components/editor/konva-canvas.tsx`, `src/components/editor/skia-canvas.tsx`)
+
+---
+
 ## Phase 1: Interactive Skia Canvas & Resizing Engine (Editor UI & Geometry)
 - [ ] **Task 1.1:** Refactor `skia-element-renderer.tsx` to support live scaling via Reanimated shared values
 - [ ] **Task 1.2:** Implement Native Vector Handles in `skia-canvas.tsx`
@@ -34,7 +42,7 @@
 - [ ] **Task 4.2:** Implement High-Speed 1-Bit Monochrome Bit-Packer
 - [ ] **Task 4.3:** Integrate Direct Rasterizer into `src/app/print.tsx`
 
----
+--- 
 
 ## Phase 5: Streaming Multi-Page Batch & Data Binding Pipeline
 - [ ] **Task 5.1:** Create Data Substitution Engine in `src/printing/batch/data-binder.ts`

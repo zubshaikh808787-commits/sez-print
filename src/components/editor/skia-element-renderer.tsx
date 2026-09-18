@@ -1,4 +1,5 @@
 import React, { memo, useMemo } from 'react';
+import { type SharedValue, useDerivedValue } from 'react-native-reanimated';
 import {
   Circle,
   DashPathEffect,
@@ -8,7 +9,7 @@ import {
   Paint,
   Path,
   Rect,
-  RRect,
+  RoundedRect,
   Skia,
   Text,
   matchFont,
@@ -21,15 +22,11 @@ import {
 import type {
   ArcTextElementState,
   BarcodeElementState,
-  BorderElementState,
-  ClipartElementState,
   DegreesElementState,
   EditorElementState,
-  ImageElementState,
   LineElementState,
   QrcodeElementState,
   ShapeElementState,
-  SignatureElementState,
   TableElementState,
   TimeElementState,
 } from '@/components/editor/types';
@@ -44,7 +41,14 @@ import { generateQrMatrix } from '@/printing/renderer/qrcode';
 import { applySerialOffset, lineSpacingMultiplier } from '@/lib/serial-content';
 import { FONT_LIBRARY } from '@/constants/font-library';
 import { getClipartById } from '@/constants/clipart-library';
-import { ptToMm, type LabelElement } from '@/lib/label-document';
+import {
+  ptToMm,
+  type BorderElementState,
+  type ClipartElementState,
+  type ImageElementState,
+  type LabelElement,
+  type SignatureElementState,
+} from '@/lib/label-document';
 
 export const DESIGN_INK = '#111111';
 
@@ -107,7 +111,7 @@ export const SkiaText = memo(function SkiaText({
     element.contentType === 'Data Source' && element.columnNameContent
       ? `{${element.columnNameContent}}`
       : element.contentType === 'Degrees'
-      ? applySerialOffset(element.text || 'TEXT', element.degreesOffset, 1)
+      ? applySerialOffset(element.text || 'TEXT', (element as any).degreesOffset ?? 1, 1)
       : element.text || 'TEXT';
 
   const lines = useMemo(() => (rawText || '').split('\n'), [rawText]);
@@ -121,7 +125,7 @@ export const SkiaText = memo(function SkiaText({
       )}
       {font &&
         lines.map((lineStr, idx) => {
-          const textW = font.getTextWidth(lineStr);
+          const textW = font.measureText(lineStr).width;
           let startX = 0;
           if (element.align === 'center') {
             startX = Math.max(0, (widthPx - textW) / 2);
@@ -192,10 +196,10 @@ export const SkiaBarcode = memo(function SkiaBarcode({
 
   const showLabel = textFlag !== 'Hide';
   const labelSize = fontSizePx(fontSizePt, scale);
-  const labelH = showLabel ? Math.max(8, labelSize * 1.3) : 0;
-  const barsH = Math.max(2, heightPx - labelH);
-  const barsY = textFlag === 'Top' ? labelH : 0;
-  const labelY = textFlag === 'Top' ? labelSize : heightPx - 2;
+  const labelH = showLabel ? Math.max(10, labelSize * 1.3) : 0;
+  const barsH = Math.max(2, heightPx - labelH - (showLabel ? 2 : 0));
+  const barsY = textFlag === 'Top' ? labelH + 2 : 0;
+  const labelY = textFlag === 'Top' ? labelSize : heightPx - 3;
 
   const font = useMemo(() => {
     if (!showLabel) return null;
@@ -211,36 +215,16 @@ export const SkiaBarcode = memo(function SkiaBarcode({
     }
   }, [showLabel, fontFamily, labelSize, bold]);
 
-  const totalModules = bars.length;
-  const moduleWidth = totalModules > 0 ? widthPx / totalModules : 1;
-
   const rects = useMemo(() => {
-    const list: { x: number; width: number }[] = [];
-    let currentStart = -1;
-    for (let i = 0; i < totalModules; i++) {
-      if (bars[i]) {
-        if (currentStart === -1) currentStart = i;
-      } else {
-        if (currentStart !== -1) {
-          list.push({
-            x: currentStart * moduleWidth,
-            width: (i - currentStart) * moduleWidth,
-          });
-          currentStart = -1;
-        }
-      }
-    }
-    if (currentStart !== -1) {
-      list.push({
-        x: currentStart * moduleWidth,
-        width: (totalModules - currentStart) * moduleWidth,
-      });
-    }
-    return list;
-  }, [bars, totalModules, moduleWidth]);
+    if (!bars) return [];
+    return bars.map((bar) => ({
+      x: bar.x * widthPx,
+      width: Math.max(0.6, bar.width * widthPx),
+    }));
+  }, [bars, widthPx]);
 
   const hri = formatBarcodeHri(encodeMode, content || '0123456789');
-  const hriWidth = font ? font.getTextWidth(hri) : 0;
+  const hriWidth = font ? font.measureText(hri).width : 0;
   const hriX = Math.max(0, (widthPx - hriWidth) / 2);
 
   return (
@@ -391,8 +375,8 @@ export const SkiaShape = memo(function SkiaShape({
     const rr = rrect(innerRect, rad, rad);
     return (
       <Group>
-        {resolvedFill !== 'transparent' && <RRect rect={rr} color={resolvedFill} />}
-        <RRect rect={rr} color={strokeCol} style="stroke" strokeWidth={strokeW} />
+        {resolvedFill !== 'transparent' && <RoundedRect rect={rr} color={resolvedFill} />}
+        <RoundedRect rect={rr} color={strokeCol} style="stroke" strokeWidth={strokeW} />
       </Group>
     );
   }
@@ -614,20 +598,56 @@ export const SkiaClipart = memo(function SkiaClipart({
   }
 
   // Draw sticker shapes
+  const stickerScale = size / 24;
+  const ox = (widthPx - size) / 2;
+  const oy = (heightPx - size) / 2;
+
   return (
-    <Group>
+    <Group transform={[{ translateX: ox }, { translateY: oy }, { scale: stickerScale }]}>
       {sticker?.shapes.map((s, idx) => {
-        const path = Skia.Path.MakeFromSVGString(s.d);
-        if (!path) return null;
-        return (
-          <Path
-            key={`clip-${idx}`}
-            path={path}
-            color={s.color === 'currentColor' ? color : s.color || color}
-            style={s.fill === false ? 'stroke' : 'fill'}
-            strokeWidth={s.strokeWidth ?? 1}
-          />
-        );
+        const stroke = 'f' in s && s.f === 0;
+        const sw = ('sw' in s && s.sw !== undefined) ? s.sw : 1.6;
+        if (s.t === 'c') {
+          return (
+            <Circle
+              key={`clip-${idx}`}
+              cx={s.x}
+              cy={s.y}
+              r={s.r}
+              color={color}
+              style={stroke ? 'stroke' : 'fill'}
+              strokeWidth={stroke ? sw : undefined}
+            />
+          );
+        }
+        if (s.t === 'r') {
+          return (
+            <Rect
+              key={`clip-${idx}`}
+              x={s.x}
+              y={s.y}
+              width={s.w}
+              height={s.h}
+              color={color}
+              style={stroke ? 'stroke' : 'fill'}
+              strokeWidth={stroke ? sw : undefined}
+            />
+          );
+        }
+        if (s.t === 'p') {
+          const path = Skia.Path.MakeFromSVGString(s.d);
+          if (!path) return null;
+          return (
+            <Path
+              key={`clip-${idx}`}
+              path={path}
+              color={color}
+              style={stroke ? 'stroke' : 'fill'}
+              strokeWidth={stroke ? sw : undefined}
+            />
+          );
+        }
+        return null;
       })}
     </Group>
   );
@@ -756,16 +776,17 @@ export const SkiaElementView = memo(function SkiaElementView({
 });
 
 /**
- * Native Skia vector Resize Handle per canvas.md §4.2.
- * Teal circle (#2FB6B2, 28px) with native Skia vector Path arrows (↔ or ↕).
+ * Native Skia vector Resize Handle per canvas.md §4.2 & Master Plan §1.2.
+ * Teal circle (#54C8C8, 28px diameter) with native Skia vector Path arrows (↔ or ↕).
+ * Supports both static numbers and Reanimated shared values without React re-renders.
  */
 export const SkiaResizeHandle = memo(function SkiaResizeHandle({
   cx,
   cy,
   direction,
 }: {
-  cx: number;
-  cy: number;
+  cx: SharedValue<number> | number;
+  cy: SharedValue<number> | number;
   direction: 'horizontal' | 'vertical';
 }) {
   const RADIUS = 14; // 28px diameter
@@ -776,8 +797,14 @@ export const SkiaResizeHandle = memo(function SkiaResizeHandle({
 
   const skPath = useMemo(() => Skia.Path.MakeFromSVGString(arrowPath), [arrowPath]);
 
+  const transform = useDerivedValue(() => {
+    const x = typeof cx === 'number' ? cx : cx.value;
+    const y = typeof cy === 'number' ? cy : cy.value;
+    return [{ translateX: x }, { translateY: y }];
+  });
+
   return (
-    <Group transform={[{ translateX: cx }, { translateY: cy }]}>
+    <Group transform={transform}>
       <Circle cx={0} cy={0} r={RADIUS} color="#54C8C8" />
       {skPath && (
         <Path
@@ -794,35 +821,52 @@ export const SkiaResizeHandle = memo(function SkiaResizeHandle({
 
 /**
  * Native Skia Selection Overlay:
- * Dashed outline (#E8543C) + middle-right & bottom-middle handles.
+ * Dashed red/orange outline (#E8543C, intervals [6, 4], strokeWidth 1.5) +
+ * middle-right width handle (↔) & bottom-middle height handle (↕).
+ * Bound to Reanimated shared values to update on the GPU at 60/120 fps.
  */
 export const SkiaSelectionOverlay = memo(function SkiaSelectionOverlay({
   widthPx,
   heightPx,
+  curWidth,
+  curHeight,
 }: {
   widthPx: number;
   heightPx: number;
+  curWidth?: SharedValue<number>;
+  curHeight?: SharedValue<number>;
 }) {
+  const boxPath = useDerivedValue(() => {
+    const w = curWidth ? curWidth.value : widthPx;
+    const h = curHeight ? curHeight.value : heightPx;
+    const p = Skia.Path.Make();
+    p.addRect(Skia.XYWHRect(0, 0, Math.max(1, w), Math.max(1, h)));
+    return p;
+  });
+
+  const rightHandleX = useDerivedValue(() => (curWidth ? curWidth.value : widthPx));
+  const rightHandleY = useDerivedValue(() => (curHeight ? curHeight.value / 2 : heightPx / 2));
+
+  const bottomHandleX = useDerivedValue(() => (curWidth ? curWidth.value / 2 : widthPx / 2));
+  const bottomHandleY = useDerivedValue(() => (curHeight ? curHeight.value : heightPx));
+
   return (
     <Group>
-      {/* Dashed red/orange bounding box outline */}
-      <Rect
-        x={0}
-        y={0}
-        width={widthPx}
-        height={heightPx}
+      {/* Dashed red/orange bounding box outline per Master Plan §1.2 */}
+      <Path
+        path={boxPath}
         color="#E8543C"
         style="stroke"
         strokeWidth={1.5}
       >
-        <DashPathEffect intervals={[4, 4]} />
-      </Rect>
+        <DashPathEffect intervals={[6, 4]} />
+      </Path>
 
       {/* Middle-right width handle (↔) */}
-      <SkiaResizeHandle cx={widthPx} cy={heightPx / 2} direction="horizontal" />
+      <SkiaResizeHandle cx={rightHandleX} cy={rightHandleY} direction="horizontal" />
 
       {/* Bottom-middle height handle (↕) */}
-      <SkiaResizeHandle cx={widthPx / 2} cy={heightPx} direction="vertical" />
+      <SkiaResizeHandle cx={bottomHandleX} cy={bottomHandleY} direction="vertical" />
     </Group>
   );
 });

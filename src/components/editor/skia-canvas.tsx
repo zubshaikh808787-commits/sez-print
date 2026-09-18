@@ -9,7 +9,9 @@ import {
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  makeMutable,
   runOnJS,
+  type SharedValue,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
@@ -28,7 +30,8 @@ import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { isCableFlagDieCutDocument } from '@/constants/cable-flag-diecut';
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
-import { isRatTailGeometry, ratTailBodyRectMm } from '@/lib/media-geometry';
+import { isRatTailGeometry } from '@/lib/media-geometry';
+import { type LiveRulerBounds } from '@/components/canvas-rulers';
 
 export type SkiaTransformCommitPayload = {
   id: string;
@@ -56,6 +59,7 @@ export type SkiaCanvasProps = {
   selectionColor?: string;
   surfaceColor?: string;
   showGrid?: boolean;
+  liveBounds?: LiveRulerBounds;
   onSelect: (id: string) => void;
   onDeselectAll: () => void;
   onOpenPanel: (id: string) => void;
@@ -78,6 +82,40 @@ export type SkiaCanvasProps = {
 const HANDLE_HIT_SIZE = 44; // 44×44pt touch target per canvas.md §4.3
 const MIN_ELEMENT_MM = 1;
 
+export type ElementSharedState = {
+  transX: SharedValue<number>;
+  transY: SharedValue<number>;
+  curWidth: SharedValue<number>;
+  curHeight: SharedValue<number>;
+  isInteracting: SharedValue<boolean>;
+};
+
+function getOrCreateElementSharedState(
+  map: Map<string, ElementSharedState>,
+  element: LabelElement,
+  pxPerMM: number,
+): ElementSharedState {
+  let state = map.get(element.id);
+  const sizeMm = elementSizeMm(element);
+  const widthPx = Math.max(1, mmToPx(sizeMm.width, pxPerMM));
+  const heightPx = Math.max(1, mmToPx(sizeMm.height, pxPerMM));
+
+  if (!state) {
+    state = {
+      transX: makeMutable(0),
+      transY: makeMutable(0),
+      curWidth: makeMutable(widthPx),
+      curHeight: makeMutable(heightPx),
+      isInteracting: makeMutable(false),
+    };
+    map.set(element.id, state);
+  } else if (!state.isInteracting.value) {
+    state.curWidth.value = widthPx;
+    state.curHeight.value = heightPx;
+  }
+  return state;
+}
+
 /**
  * Single Skia Element Node that renders the visual element in Skia and binds its GPU transform
  * directly to Reanimated shared values for buttery 60fps/120fps live dragging and resizing.
@@ -85,34 +123,13 @@ const MIN_ELEMENT_MM = 1;
 const SkiaElementNode = memo(function SkiaElementNode({
   element,
   pxPerMM,
-  padZoom,
   selected,
-  canvasWidthMm,
-  canvasHeightMm,
-  onSelect,
-  onEditText,
-  onTransformStart,
-  onTransformMove,
-  onTransformEnd,
   sharedState,
 }: {
   element: LabelElement;
   pxPerMM: number;
-  padZoom: number;
   selected: boolean;
-  canvasWidthMm: number;
-  canvasHeightMm: number;
-  onSelect: (id: string) => void;
-  onEditText: (id: string) => void;
-  onTransformStart?: (id: string) => void;
-  onTransformMove?: (payload: SkiaTransformMovePayload) => void;
-  onTransformEnd: (payload: SkiaTransformCommitPayload) => void;
-  sharedState: {
-    transX: Animated.SharedValue<number>;
-    transY: Animated.SharedValue<number>;
-    curWidth: Animated.SharedValue<number>;
-    curHeight: Animated.SharedValue<number>;
-  };
+  sharedState: ElementSharedState;
 }) {
   const sizeMm = elementSizeMm(element);
   const leftPx = mmToPx(element.left, pxPerMM);
@@ -122,22 +139,49 @@ const SkiaElementNode = memo(function SkiaElementNode({
 
   const { transX, transY, curWidth, curHeight } = sharedState;
 
-  const transform = useDerivedValue(() => [
-    { translateX: leftPx + transX.value },
-    { translateY: topPx + transY.value },
-    { rotate: (element.rotation * Math.PI) / 180 },
+  // Outer group handles translation and center-pivot rotation
+  const outerTransform = useDerivedValue(() => {
+    const rad = (element.rotation * Math.PI) / 180;
+    if (!element.rotation) {
+      return [
+        { translateX: leftPx + transX.value },
+        { translateY: topPx + transY.value },
+      ];
+    }
+    const cx = curWidth.value / 2;
+    const cy = curHeight.value / 2;
+    return [
+      { translateX: leftPx + transX.value + cx },
+      { translateY: topPx + transY.value + cy },
+      { rotate: rad },
+      { translateX: -cx },
+      { translateY: -cy },
+    ];
+  });
+
+  // Content group handles GPU live scaling during resize gestures (Option A)
+  const contentTransform = useDerivedValue(() => [
+    { scaleX: widthPx > 0 ? curWidth.value / widthPx : 1 },
+    { scaleY: heightPx > 0 ? curHeight.value / heightPx : 1 },
   ]);
 
   return (
-    <Group transform={transform}>
-      <SkiaElementView
-        element={element}
-        widthPx={widthPx}
-        heightPx={heightPx}
-        scale={pxPerMM}
-      />
+    <Group transform={outerTransform}>
+      <Group transform={contentTransform}>
+        <SkiaElementView
+          element={element}
+          widthPx={widthPx}
+          heightPx={heightPx}
+          scale={pxPerMM}
+        />
+      </Group>
       {selected && (
-        <SkiaSelectionOverlay widthPx={widthPx} heightPx={heightPx} />
+        <SkiaSelectionOverlay
+          widthPx={widthPx}
+          heightPx={heightPx}
+          curWidth={curWidth}
+          curHeight={curHeight}
+        />
       )}
     </Group>
   );
@@ -155,6 +199,7 @@ const ElementGestureNode = memo(function ElementGestureNode({
   selected,
   canvasWidthMm,
   canvasHeightMm,
+  liveBounds,
   onSelect,
   onEditText,
   onTransformStart,
@@ -168,17 +213,13 @@ const ElementGestureNode = memo(function ElementGestureNode({
   selected: boolean;
   canvasWidthMm: number;
   canvasHeightMm: number;
+  liveBounds?: LiveRulerBounds;
   onSelect: (id: string) => void;
   onEditText: (id: string) => void;
   onTransformStart?: (id: string) => void;
   onTransformMove?: (payload: SkiaTransformMovePayload) => void;
   onTransformEnd: (payload: SkiaTransformCommitPayload) => void;
-  sharedState: {
-    transX: Animated.SharedValue<number>;
-    transY: Animated.SharedValue<number>;
-    curWidth: Animated.SharedValue<number>;
-    curHeight: Animated.SharedValue<number>;
-  };
+  sharedState: ElementSharedState;
 }) {
   const sizeMm = elementSizeMm(element);
   const leftPx = mmToPx(element.left, pxPerMM);
@@ -186,28 +227,17 @@ const ElementGestureNode = memo(function ElementGestureNode({
   const widthPx = Math.max(1, mmToPx(sizeMm.width, pxPerMM));
   const heightPx = Math.max(1, mmToPx(sizeMm.height, pxPerMM));
 
-  const { transX, transY, curWidth, curHeight } = sharedState;
+  const { transX, transY, curWidth, curHeight, isInteracting } = sharedState;
   const startX = useSharedValue(0);
   const startY = useSharedValue(0);
   const startWidth = useSharedValue(widthPx);
   const startHeight = useSharedValue(heightPx);
 
-  const isInteracting = useSharedValue(false);
   const zoomSv = useSharedValue(padZoom || 1);
 
   useEffect(() => {
     zoomSv.value = padZoom || 1;
   }, [padZoom, zoomSv]);
-
-  // Seamless prop-sync: update base values only when not interacting
-  useEffect(() => {
-    if (!isInteracting.value) {
-      curWidth.value = widthPx;
-      curHeight.value = heightPx;
-      transX.value = 0;
-      transY.value = 0;
-    }
-  }, [element.left, element.top, widthPx, heightPx, isInteracting, curWidth, curHeight, transX, transY]);
 
   // Pure 1:1 Worklet Drag Gesture
   const dragGesture = useMemo(() => {
@@ -241,6 +271,22 @@ const ElementGestureNode = memo(function ElementGestureNode({
 
         transX.value = clampedLeftPx - leftPx;
         transY.value = clampedTopPx - topPx;
+
+        if (liveBounds) {
+          liveBounds.leftMm.value = pxToMm(clampedLeftPx, pxPerMM);
+          liveBounds.topMm.value = pxToMm(clampedTopPx, pxPerMM);
+          liveBounds.widthMm.value = sizeMm.width;
+          liveBounds.heightMm.value = sizeMm.height;
+          liveBounds.visible.value = true;
+        }
+
+        if (onTransformMove) {
+          runOnJS(onTransformMove)({
+            id: element.id,
+            leftMm: pxToMm(clampedLeftPx, pxPerMM),
+            topMm: pxToMm(clampedTopPx, pxPerMM),
+          });
+        }
       })
       .onEnd(() => {
         'worklet';
@@ -277,7 +323,9 @@ const ElementGestureNode = memo(function ElementGestureNode({
     transX,
     transY,
     zoomSv,
+    liveBounds,
     onTransformStart,
+    onTransformMove,
     onTransformEnd,
   ]);
 
@@ -290,19 +338,38 @@ const ElementGestureNode = memo(function ElementGestureNode({
         'worklet';
         isInteracting.value = true;
         startWidth.value = curWidth.value;
+        startHeight.value = curHeight.value;
         if (onTransformStart) {
           runOnJS(onTransformStart)(element.id);
         }
       })
       .onUpdate((e) => {
         'worklet';
-        const minW = mmToPx(MIN_ELEMENT_MM, pxPerMM);
+        const isSquare = element.type === 'qrcode';
         const maxW = mmToPx(canvasWidthMm - element.left, pxPerMM);
-        curWidth.value = Math.max(minW, Math.min(maxW, startWidth.value + e.translationX / zoomSv.value));
+        const maxH = mmToPx(canvasHeightMm - element.top, pxPerMM);
+        const maxAllowed = isSquare ? Math.min(maxW, maxH) : maxW;
+        const minAllowed = mmToPx(MIN_ELEMENT_MM, pxPerMM);
+
+        const newW = Math.max(minAllowed, Math.min(maxAllowed, startWidth.value + e.translationX / zoomSv.value));
+        curWidth.value = newW;
+        if (isSquare) {
+          curHeight.value = newW;
+        }
+
+        if (liveBounds) {
+          liveBounds.leftMm.value = element.left;
+          liveBounds.topMm.value = element.top;
+          liveBounds.widthMm.value = pxToMm(newW, pxPerMM);
+          liveBounds.heightMm.value = isSquare ? pxToMm(newW, pxPerMM) : sizeMm.height;
+          liveBounds.visible.value = true;
+        }
       })
       .onEnd(() => {
         'worklet';
+        const isSquare = element.type === 'qrcode';
         const finalWidthMm = pxToMm(curWidth.value, pxPerMM);
+        const finalHeightMm = isSquare ? finalWidthMm : sizeMm.height;
         isInteracting.value = false;
 
         runOnJS(onTransformEnd)({
@@ -310,22 +377,27 @@ const ElementGestureNode = memo(function ElementGestureNode({
           leftMm: roundMm(element.left, 4),
           topMm: roundMm(element.top, 4),
           widthMm: roundMm(finalWidthMm, 4),
-          heightMm: roundMm(sizeMm.height, 4),
+          heightMm: roundMm(finalHeightMm, 4),
           rotation: element.rotation,
         });
       });
   }, [
     element.id,
+    element.type,
     element.left,
     element.top,
     element.rotation,
     sizeMm.height,
     canvasWidthMm,
+    canvasHeightMm,
     pxPerMM,
     isInteracting,
     startWidth,
+    startHeight,
     curWidth,
+    curHeight,
     zoomSv,
+    liveBounds,
     onTransformStart,
     onTransformEnd,
   ]);
@@ -339,42 +411,66 @@ const ElementGestureNode = memo(function ElementGestureNode({
         'worklet';
         isInteracting.value = true;
         startHeight.value = curHeight.value;
+        startWidth.value = curWidth.value;
         if (onTransformStart) {
           runOnJS(onTransformStart)(element.id);
         }
       })
       .onUpdate((e) => {
         'worklet';
-        const minH = mmToPx(MIN_ELEMENT_MM, pxPerMM);
+        const isSquare = element.type === 'qrcode';
+        const maxW = mmToPx(canvasWidthMm - element.left, pxPerMM);
         const maxH = mmToPx(canvasHeightMm - element.top, pxPerMM);
-        curHeight.value = Math.max(minH, Math.min(maxH, startHeight.value + e.translationY / zoomSv.value));
+        const maxAllowed = isSquare ? Math.min(maxW, maxH) : maxH;
+        const minAllowed = mmToPx(MIN_ELEMENT_MM, pxPerMM);
+
+        const newH = Math.max(minAllowed, Math.min(maxAllowed, startHeight.value + e.translationY / zoomSv.value));
+        curHeight.value = newH;
+        if (isSquare) {
+          curWidth.value = newH;
+        }
+
+        if (liveBounds) {
+          liveBounds.leftMm.value = element.left;
+          liveBounds.topMm.value = element.top;
+          liveBounds.widthMm.value = isSquare ? pxToMm(newH, pxPerMM) : sizeMm.width;
+          liveBounds.heightMm.value = pxToMm(newH, pxPerMM);
+          liveBounds.visible.value = true;
+        }
       })
       .onEnd(() => {
         'worklet';
+        const isSquare = element.type === 'qrcode';
         const finalHeightMm = pxToMm(curHeight.value, pxPerMM);
+        const finalWidthMm = isSquare ? finalHeightMm : sizeMm.width;
         isInteracting.value = false;
 
         runOnJS(onTransformEnd)({
           id: element.id,
           leftMm: roundMm(element.left, 4),
           topMm: roundMm(element.top, 4),
-          widthMm: roundMm(sizeMm.width, 4),
+          widthMm: roundMm(finalWidthMm, 4),
           heightMm: roundMm(finalHeightMm, 4),
           rotation: element.rotation,
         });
       });
   }, [
     element.id,
+    element.type,
     element.left,
     element.top,
     element.rotation,
     sizeMm.width,
+    canvasWidthMm,
     canvasHeightMm,
     pxPerMM,
     isInteracting,
     startHeight,
+    startWidth,
     curHeight,
+    curWidth,
     zoomSv,
+    liveBounds,
     onTransformStart,
     onTransformEnd,
   ]);
@@ -452,76 +548,6 @@ const ElementGestureNode = memo(function ElementGestureNode({
 });
 
 /**
- * Container component managing shared values per element.
- */
-function ElementController({
-  element,
-  pxPerMM,
-  padZoom,
-  selected,
-  canvasWidthMm,
-  canvasHeightMm,
-  onSelect,
-  onEditText,
-  onTransformStart,
-  onTransformMove,
-  onTransformEnd,
-  children,
-}: {
-  element: LabelElement;
-  pxPerMM: number;
-  padZoom: number;
-  selected: boolean;
-  canvasWidthMm: number;
-  canvasHeightMm: number;
-  onSelect: (id: string) => void;
-  onEditText: (id: string) => void;
-  onTransformStart?: (id: string) => void;
-  onTransformMove?: (payload: SkiaTransformMovePayload) => void;
-  onTransformEnd: (payload: SkiaTransformCommitPayload) => void;
-  children: (sharedState: {
-    transX: Animated.SharedValue<number>;
-    transY: Animated.SharedValue<number>;
-    curWidth: Animated.SharedValue<number>;
-    curHeight: Animated.SharedValue<number>;
-  }) => React.ReactNode;
-}) {
-  const sizeMm = elementSizeMm(element);
-  const widthPx = Math.max(1, mmToPx(sizeMm.width, pxPerMM));
-  const heightPx = Math.max(1, mmToPx(sizeMm.height, pxPerMM));
-
-  const transX = useSharedValue(0);
-  const transY = useSharedValue(0);
-  const curWidth = useSharedValue(widthPx);
-  const curHeight = useSharedValue(heightPx);
-
-  const sharedState = useMemo(
-    () => ({ transX, transY, curWidth, curHeight }),
-    [transX, transY, curWidth, curHeight],
-  );
-
-  return (
-    <>
-      {children(sharedState)}
-      <ElementGestureNode
-        element={element}
-        pxPerMM={pxPerMM}
-        padZoom={padZoom}
-        selected={selected}
-        canvasWidthMm={canvasWidthMm}
-        canvasHeightMm={canvasHeightMm}
-        onSelect={onSelect}
-        onEditText={onEditText}
-        onTransformStart={onTransformStart}
-        onTransformMove={onTransformMove}
-        onTransformEnd={onTransformEnd}
-        sharedState={sharedState}
-      />
-    </>
-  );
-}
-
-/**
  * Full Native Skia Canvas for Label Designer.
  */
 export const SkiaCanvas = forwardRef<ViewShot, SkiaCanvasProps>(function SkiaCanvas(
@@ -535,6 +561,7 @@ export const SkiaCanvas = forwardRef<ViewShot, SkiaCanvasProps>(function SkiaCan
     selectionColor,
     surfaceColor,
     showGrid,
+    liveBounds,
     onSelect,
     onDeselectAll,
     onOpenPanel,
@@ -548,8 +575,20 @@ export const SkiaCanvas = forwardRef<ViewShot, SkiaCanvasProps>(function SkiaCan
 ) {
   const w = Math.max(1, canvasWidthPx);
   const h = Math.max(1, canvasHeightPx);
-  const canvasWidthMm = doc.width;
-  const canvasHeightMm = doc.height;
+  const canvasWidthMm = doc.widthMm;
+  const canvasHeightMm = doc.heightMm;
+
+  const sharedStatesRef = useRef<Map<string, ElementSharedState>>(new Map());
+
+  // Clean up removed elements from shared state map
+  useEffect(() => {
+    const currentIds = new Set(doc.elements.map((el) => el.id));
+    for (const id of sharedStatesRef.current.keys()) {
+      if (!currentIds.has(id)) {
+        sharedStatesRef.current.delete(id);
+      }
+    }
+  }, [doc.elements]);
 
   // Background deselect tap gesture
   const deselectGesture = useMemo(
@@ -607,52 +646,38 @@ export const SkiaCanvas = forwardRef<ViewShot, SkiaCanvasProps>(function SkiaCan
             </Group>
           )}
 
-          {/* Render All Elements in Skia */}
+          {/* Render All Elements in Skia with Live Reanimated Shared Values */}
           {doc.elements.map((element) => {
-            const isSelected = selectedIds.includes(element.id);
-            const sizeMm = elementSizeMm(element);
-            const elLeftPx = mmToPx(element.left, pxPerMM);
-            const elTopPx = mmToPx(element.top, pxPerMM);
-            const elWidthPx = Math.max(1, mmToPx(sizeMm.width, pxPerMM));
-            const elHeightPx = Math.max(1, mmToPx(sizeMm.height, pxPerMM));
-
+            const sharedState = getOrCreateElementSharedState(sharedStatesRef.current, element, pxPerMM);
             return (
-              <Group
+              <SkiaElementNode
                 key={element.id}
-                transform={[
-                  { translateX: elLeftPx },
-                  { translateY: elTopPx },
-                  { rotate: (element.rotation * Math.PI) / 180 },
-                ]}
-              >
-                <SkiaElementView
-                  element={element}
-                  widthPx={elWidthPx}
-                  heightPx={elHeightPx}
-                  scale={pxPerMM}
-                />
-                {isSelected && (
-                  <SkiaSelectionOverlay widthPx={elWidthPx} heightPx={elHeightPx} />
-                )}
-              </Group>
+                element={element}
+                pxPerMM={pxPerMM}
+                selected={selectedIds.includes(element.id)}
+                sharedState={sharedState}
+              />
             );
           })}
         </Canvas>
 
         {/* Diecut / Silhouette Overlays */}
-        {doc.mediaShape === 'diecut' && isCableFlagDieCutDocument(doc) && (
-          <CableFlagDieCutOverlay widthPx={w} heightPx={h} />
-        )}
-        {hasStockSilhouette(doc.mediaShape, doc.width, doc.height) && (
-          <StockSilhouetteOverlay
-            shape={doc.mediaShape}
+        {isCableFlagDieCutDocument(doc) && (
+          <CableFlagDieCutOverlay
+            document={doc}
+            scaleX={pxPerMM}
+            scaleY={pxPerMM}
             widthPx={w}
             heightPx={h}
-            bodyRectMm={
-              isRatTailGeometry(doc.width, doc.height)
-                ? ratTailBodyRectMm(doc.width, doc.height)
-                : undefined
-            }
+          />
+        )}
+        {(hasStockSilhouette(doc.templatePreviewType) || isRatTailGeometry(doc.mediaGeometry)) && (
+          <StockSilhouetteOverlay
+            document={doc}
+            scaleX={pxPerMM}
+            scaleY={pxPerMM}
+            widthPx={w}
+            heightPx={h}
           />
         )}
 
@@ -661,25 +686,28 @@ export const SkiaCanvas = forwardRef<ViewShot, SkiaCanvasProps>(function SkiaCan
           <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none" />
         </GestureDetector>
 
-        {/* Interactive Gesture Nodes */}
-        {doc.elements.map((element) => (
-          <ElementController
-            key={`ctrl-${element.id}`}
-            element={element}
-            pxPerMM={pxPerMM}
-            padZoom={padZoom}
-            selected={selectedIds.includes(element.id)}
-            canvasWidthMm={canvasWidthMm}
-            canvasHeightMm={canvasHeightMm}
-            onSelect={onSelect}
-            onEditText={onEditText}
-            onTransformStart={onTransformStart}
-            onTransformMove={onTransformMove}
-            onTransformEnd={onTransformEnd}
-          >
-            {() => null}
-          </ElementController>
-        ))}
+        {/* Interactive Gesture Hitbox Nodes */}
+        {doc.elements.map((element) => {
+          const sharedState = getOrCreateElementSharedState(sharedStatesRef.current, element, pxPerMM);
+          return (
+            <ElementGestureNode
+              key={`gesture-${element.id}`}
+              element={element}
+              pxPerMM={pxPerMM}
+              padZoom={padZoom}
+              selected={selectedIds.includes(element.id)}
+              canvasWidthMm={canvasWidthMm}
+              canvasHeightMm={canvasHeightMm}
+              liveBounds={liveBounds}
+              onSelect={onSelect}
+              onEditText={onEditText}
+              onTransformStart={onTransformStart}
+              onTransformMove={onTransformMove}
+              onTransformEnd={onTransformEnd}
+              sharedState={sharedState}
+            />
+          );
+        })}
       </ViewShot>
     </View>
   );

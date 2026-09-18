@@ -79,39 +79,37 @@ export function clampToLabelBounds(
     const maxAllowedWidth = Math.max(minMm, canvasW - left);
     width = Math.max(minMm, Math.min(width, maxAllowedWidth));
 
-    // 3. Vertical & auto-height handling
-    const targetH = Math.max(minMm, naturalH ?? height);
-    if (top + targetH > canvasH) {
-      // Nudge upward into available headroom
-      top = Math.max(0, canvasH - targetH);
-    }
-    if (targetH > canvasH) {
-      overflowed = true;
-      height = canvasH;
-      top = 0;
+    // 3. Vertical & auto-height handling (ONLY applies when naturalHeight is provided, e.g. text reflow)
+    if (naturalH !== undefined) {
+      const targetH = Math.max(minMm, naturalH);
+      if (top + targetH > canvasH) {
+        // Nudge upward into available headroom
+        top = Math.max(0, canvasH - targetH);
+      }
+      if (targetH > canvasH) {
+        overflowed = true;
+        height = canvasH;
+        top = 0;
+      } else {
+        overflowed = false;
+        height = targetH;
+        top = Math.max(0, Math.min(top, canvasH - height));
+      }
     } else {
+      // Non-text elements or fixed-height elements: top and height MUST remain unchanged during width resize
+      top = Math.max(0, Math.min(top, canvasH - minMm));
+      height = Math.max(minMm, Math.min(height, canvasH - top));
       overflowed = false;
-      height = targetH;
-      top = Math.max(0, Math.min(top, canvasH - height));
     }
   } else if (opts.anchor === 's') {
-    // 1. Fix top initially
-    top = Math.min(top, canvasH - minMm);
+    // 1. Fix top — MUST NEVER move during an 's' (bottom-handle) resize
+    top = Math.max(0, Math.min(top, canvasH - minMm));
 
-    // 2. Height handling
+    // 2. Height is clamped strictly to the remaining available space below the fixed top edge
+    const maxAllowedHeight = Math.max(minMm, canvasH - top);
     const targetH = Math.max(minMm, naturalH ?? height);
-    if (top + targetH > canvasH) {
-      // Nudge upward into available headroom
-      top = Math.max(0, canvasH - targetH);
-    }
-    if (targetH > canvasH) {
-      overflowed = true;
-      height = canvasH;
-      top = 0;
-    } else {
-      overflowed = false;
-      height = Math.min(targetH, canvasH - top);
-    }
+    height = Math.max(minMm, Math.min(targetH, maxAllowedHeight));
+    overflowed = targetH > maxAllowedHeight;
 
     // 3. Width handling
     width = Math.max(minMm, width);

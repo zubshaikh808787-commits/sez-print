@@ -84,6 +84,7 @@ import { EditingPad } from '@/components/editor/editing-pad';
 import { KonvaCanvas } from '@/components/editor/konva-canvas';
 import type { TransformCommitPayload, TransformMovePayload } from '@/components/editor/konva-transformer';
 import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
+import { useSharedValue } from 'react-native-reanimated';
 import {
   ArtboardFrame,
   CATALOG_STOCK_LINER,
@@ -92,7 +93,13 @@ import {
   fitLabelCanvas,
   LABEL_PAD_STAGE_MIN_HEIGHT,
 } from '@/components/label-preview';
-import { HorizontalRuler, RULER_SIZE, RulerCorner, VerticalRuler } from '@/components/canvas-rulers';
+import {
+  HorizontalRuler,
+  RULER_SIZE,
+  RulerCorner,
+  VerticalRuler,
+  type LiveRulerBounds,
+} from '@/components/canvas-rulers';
 import { LabelSizeEditor } from '@/components/label-size-editor';
 import { LabelSettingsMenu } from '@/components/editor/more-menu';
 import { LinePropertyPanel } from '@/components/editor/line-property-panel';
@@ -1188,6 +1195,43 @@ export default function EditScreen() {
     [doc.widthMm, doc.heightMm],
   );
 
+  const rulerLeftMm = useSharedValue(0);
+  const rulerTopMm = useSharedValue(0);
+  const rulerWidthMm = useSharedValue(0);
+  const rulerHeightMm = useSharedValue(0);
+  const rulerVisible = useSharedValue(false);
+
+  const liveRulerBounds = useMemo<LiveRulerBounds>(
+    () => ({
+      leftMm: rulerLeftMm,
+      topMm: rulerTopMm,
+      widthMm: rulerWidthMm,
+      heightMm: rulerHeightMm,
+      visible: rulerVisible,
+    }),
+    [rulerLeftMm, rulerTopMm, rulerWidthMm, rulerHeightMm, rulerVisible],
+  );
+
+  useEffect(() => {
+    if (selectedElement) {
+      rulerLeftMm.value = selectedElement.left;
+      rulerTopMm.value = selectedElement.top;
+      rulerWidthMm.value = selectedElement.width;
+      rulerHeightMm.value = selectedElementHeightMm;
+      rulerVisible.value = true;
+    } else {
+      rulerVisible.value = false;
+    }
+  }, [
+    selectedElement,
+    selectedElementHeightMm,
+    rulerLeftMm,
+    rulerTopMm,
+    rulerWidthMm,
+    rulerHeightMm,
+    rulerVisible,
+  ]);
+
   const handleTransformStart = useCallback((_id: string) => {
     transformingRef.current = true;
     historyRef.current.begin(docRef.current.elements);
@@ -2064,6 +2108,7 @@ export default function EditScreen() {
                         }
                       : null
                   }
+                  liveBounds={liveRulerBounds}
                 />
               </View>
               <View style={styles.rulerBodyRow}>
@@ -2080,6 +2125,7 @@ export default function EditScreen() {
                         }
                       : null
                   }
+                  liveBounds={liveRulerBounds}
                 />
                 <View
                   style={[
@@ -2100,6 +2146,7 @@ export default function EditScreen() {
                     selectionColor={selectionColor}
                     surfaceColor={artboardFill}
                     showGrid={Boolean(editorSettings.editorGrid)}
+                    liveBounds={liveRulerBounds}
                     onSelect={handleSelect}
                     onDeselectAll={handleDeselectAll}
                     onOpenPanel={openPanelFor}

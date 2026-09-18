@@ -7,6 +7,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
+import { type LiveRulerBounds } from '@/components/canvas-rulers';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
 import { type LabelDocument, type LabelElement, type MediaShape } from '@/lib/label-document';
@@ -31,6 +32,7 @@ type KonvaCanvasProps = {
   /** Editor nested artboard fill. Print capture keeps document white. */
   surfaceColor?: string;
   showGrid?: boolean;
+  liveBounds?: LiveRulerBounds;
   onSelect: (id: string) => void;
   onDeselectAll: () => void;
   onOpenPanel: (id: string) => void;
@@ -59,6 +61,7 @@ type ElementChrome = {
   canvasWidthMm: number;
   canvasHeightMm: number;
   mediaShape?: MediaShape;
+  liveBounds?: LiveRulerBounds;
   onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
@@ -96,6 +99,7 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           canvasWidthMm={chrome.canvasWidthMm}
           canvasHeightMm={chrome.canvasHeightMm}
           mediaShape={chrome.mediaShape}
+          liveBounds={chrome.liveBounds}
           onSelect={chrome.onSelect}
           onOpenPanel={chrome.onOpenPanel}
           onEditText={chrome.onEditText}
@@ -122,6 +126,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     selectionColor,
     surfaceColor,
     showGrid = false,
+    liveBounds,
     onSelect,
     onDeselectAll,
     onOpenPanel,
@@ -292,6 +297,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       canvasWidthMm,
       canvasHeightMm,
       mediaShape: doc.mediaShape,
+      liveBounds,
       onSelect,
       onOpenPanel,
       onEditText,
@@ -310,6 +316,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       canvasWidthMm,
       canvasHeightMm,
       doc.mediaShape,
+      liveBounds,
       onSelect,
       onOpenPanel,
       onEditText,

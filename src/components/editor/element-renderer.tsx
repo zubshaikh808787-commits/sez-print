@@ -33,6 +33,7 @@ import {
 } from '@/components/editor/types';
 import { FONT_LIBRARY } from '@/constants/font-library';
 import { barcodeBarsForMode } from '@/lib/barcode-code128';
+import { generateQrMatrix } from '@/printing/renderer/qrcode';
 import { applySerialOffset, lineSpacingMultiplier } from '@/lib/serial-content';
 import { useSettingsStore } from '@/stores/settings-store';
 import { ptToMm, type LabelElement } from '@/lib/label-document';
@@ -272,42 +273,41 @@ function BarcodeContent({
   const hri = formatBarcodeHri(element.encodeMode, content);
   const barsHeight = showLabel ? Math.max(2, heightPx - labelSize * 1.3) : heightPx;
   const label = showLabel ? (
-    <Text
-      numberOfLines={1}
-      allowFontScaling={false}
-      style={{
-        fontSize: labelSize,
-        lineHeight: labelSize * 1.2,
-        color,
-        textAlign: 'center',
-        fontFamily: resolveFontFamily(element.fontFamily),
-        fontWeight: element.bold ? '600' : '400',
-        includeFontPadding: false,
-      }}>
-      {hri}
-    </Text>
+    <View style={{ width: '100%', alignItems: 'center', justifyContent: 'center' }}>
+      <Text
+        numberOfLines={1}
+        allowFontScaling={false}
+        style={{
+          width: '100%',
+          fontSize: labelSize,
+          lineHeight: labelSize * 1.2,
+          color,
+          textAlign: 'center',
+          fontFamily: resolveFontFamily(element.fontFamily),
+          fontWeight: element.bold ? '600' : '400',
+          includeFontPadding: false,
+        }}>
+        {hri}
+      </Text>
+    </View>
   ) : null;
 
   return (
-    <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
+    <View style={[styles.fill, { backgroundColor: bgColor, justifyContent: 'center', alignItems: 'center' }]}>
       {element.textFlag === 'Top' ? label : null}
       {bars ? (
-        <Svg
-          width="100%"
-          height={Math.max(2, barsHeight)}
-          viewBox={`0 0 ${widthPx} ${Math.max(2, barsHeight)}`}
-          preserveAspectRatio="none">
-          {bars.map((bar, i) => (
-            <Rect
-              key={i}
-              x={bar.x * widthPx}
-              y={0}
-              width={Math.max(bar.width * widthPx, widthPx > 80 ? 0.85 : 0.55)}
-              height={Math.max(2, barsHeight)}
+        <View style={{ flex: 1, width: '100%', minHeight: 2, paddingBottom: showLabel && element.textFlag === 'Bottom' ? 1 : 0, paddingTop: showLabel && element.textFlag === 'Top' ? 1 : 0 }}>
+          <Svg
+            width="100%"
+            height="100%"
+            viewBox={`0 0 ${widthPx} ${Math.max(2, barsHeight)}`}
+            preserveAspectRatio="none">
+            <Path
+              d={bars.map((bar) => `M${bar.x * widthPx},0h${Math.max(bar.width * widthPx, widthPx > 80 ? 0.85 : 0.55)}v${Math.max(2, barsHeight)}h-${Math.max(bar.width * widthPx, widthPx > 80 ? 0.85 : 0.55)}Z`).join(' ')}
               fill={color}
             />
-          ))}
-        </Svg>
+          </Svg>
+        </View>
       ) : (
         <View style={styles.invalidBox}>
           <Text style={styles.invalidText}>Invalid barcode content</Text>
@@ -351,42 +351,73 @@ function QrcodeContent({
   const quietZone = parseInt(element.zoneSize, 10) * 2;
   const cols = element.encodeMode === 'PDF417' ? 24 : 16;
   const rows = element.encodeMode === 'PDF417' ? 10 : 16;
-  const cells = useMemo(() => pseudoMatrix(content, cols, rows), [content, cols, rows]);
+  const cells = useMemo(
+    () => (element.encodeMode !== 'QRCode' ? pseudoMatrix(content, cols, rows) : []),
+    [content, cols, rows, element.encodeMode],
+  );
+  const qrMatrix = useMemo(() => {
+    if (element.encodeMode === 'QRCode') {
+      return generateQrMatrix(content);
+    }
+    return null;
+  }, [element.encodeMode, content]);
 
-  if (element.encodeMode === 'QRCode') {
-    const size = Math.min(widthPx, heightPx) - quietZone * 2;
+  const qrPath = useMemo(() => {
+    if (element.encodeMode !== 'QRCode' || !qrMatrix) return '';
+    const qz = Math.max(0, parseInt(element.zoneSize, 10));
+    let d = '';
+    for (let r = 0; r < qrMatrix.size; r++) {
+      for (let c = 0; c < qrMatrix.size; c++) {
+        if (qrMatrix.data[r * qrMatrix.size + c]) {
+          const x = c + qz;
+          const y = r + qz;
+          d += `M${x},${y}h1v1h-1Z `;
+        }
+      }
+    }
+    return d;
+  }, [element.encodeMode, qrMatrix, element.zoneSize]);
+
+  const pseudoPath = useMemo(() => {
+    if (element.encodeMode === 'QRCode') return '';
+    let d = `M0,0h1v${rows}h-1ZM${cols - 1},0h1v${rows}h-1Z `;
+    for (let i = 0; i < cells.length; i++) {
+      if (cells[i]) {
+        const c = i % cols;
+        const r = Math.floor(i / cols);
+        d += `M${c},${r}h1v1h-1Z `;
+      }
+    }
+    return d;
+  }, [element.encodeMode, cells, cols, rows]);
+
+  if (element.encodeMode === 'QRCode' && qrMatrix) {
+    const qz = Math.max(0, parseInt(element.zoneSize, 10));
+    const totalSize = qrMatrix.size + qz * 2;
+
     return (
       <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
-        <QRCode
-          value={content}
-          size={Math.max(1, size)}
-          color={color}
-          backgroundColor="transparent"
-          ecl={element.errorLevel}
-        />
+        <Svg
+          width="100%"
+          height="100%"
+          viewBox={`0 0 ${totalSize} ${totalSize}`}
+          preserveAspectRatio="xMidYMid meet">
+          <Path d={qrPath} fill={color} />
+        </Svg>
       </View>
     );
   }
 
-  const cellW = widthPx / cols;
-  const cellH = heightPx / rows;
   return (
-    <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
-      {cells.map((on, i) =>
-        on ? (
-          <Rect
-            key={i}
-            x={(i % cols) * cellW}
-            y={Math.floor(i / cols) * cellH}
-            width={cellW}
-            height={cellH}
-            fill={color}
-          />
-        ) : null,
-      )}
-      <Rect x={0} y={0} width={cellW} height={heightPx} fill={color} />
-      <Rect x={widthPx - cellW} y={0} width={cellW} height={heightPx} fill={color} />
-    </Svg>
+    <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
+      <Svg
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${cols} ${rows}`}
+        preserveAspectRatio="none">
+        <Path d={pseudoPath} fill={color} />
+      </Svg>
+    </View>
   );
 }
 

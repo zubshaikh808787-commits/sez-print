@@ -13,6 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Path as SvgPath, Line as SvgLine } from 'react-native-svg';
 import { AppIcon } from '@/components/app-icon';
+import { type LiveRulerBounds } from '@/components/canvas-rulers';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, textBlockHeightMm, type LabelElement, type MediaShape } from '@/lib/label-document';
 import { computeTextElementHeightMm } from '@/lib/text-metrics';
@@ -65,6 +66,7 @@ type KonvaTransformerProps = {
   canvasHeightMm: number;
   /** Stock shape from the document — the print capture uses this, so the editor must too. */
   mediaShape?: MediaShape;
+  liveBounds?: LiveRulerBounds;
   onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
@@ -103,6 +105,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   canvasWidthMm,
   canvasHeightMm,
   mediaShape,
+  liveBounds,
   onSelect,
   onOpenPanel,
   onEditText,
@@ -156,6 +159,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const animRot = useSharedValue<number>(baseRotation);
   const minResizeMmSv = useSharedValue(resizePolicy.minMm);
   const aspectSv = useSharedValue(aspectRatio);
+  const lastTooltipTimeSv = useSharedValue(0);
 
   const isTextElement = element.type === 'text' || element.type === 'degrees';
   const isAutoHeight = isTextElement && element.autoTextHeight !== false && element.autoWrapping !== 'Close';
@@ -575,6 +579,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
           transX.value = targetLeftPx - originLeftSv.value;
           transY.value = targetTopPx - originTopSv.value;
+
+          if (liveBounds) {
+            liveBounds.leftMm.value = clamped.left;
+            liveBounds.topMm.value = clamped.top;
+            liveBounds.widthMm.value = clamped.width;
+            liveBounds.heightMm.value = clamped.height;
+            liveBounds.visible.value = true;
+          }
         })
         .onEnd((e) => {
           'worklet';
@@ -618,6 +630,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       canvasHMmSv,
       sxSv,
       sySv,
+      liveBounds,
     ],
   );
 
@@ -759,60 +772,31 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             nh = clamped.height * sySv.value;
             left = clamped.left * sxSv.value;
             top = clamped.top * sySv.value;
-          } else if (behavior === 'aspect' || behavior === 'square') {
-            const effectiveAspect = behavior === 'square' ? 1 : aspect;
+          } else if (behavior === 'square') {
+            const maxAvailable = Math.max(minPx, Math.min(canvasWPx - originLeft, canvasHPx - originTop));
+            const proposed = handle === 'e' ? originW + dx : originH + dy;
+            const targetSize = Math.max(minPx, Math.min(maxAvailable, proposed));
+            nw = targetSize;
+            nh = targetSize;
+            left = originLeft;
+            top = originTop;
+          } else if (behavior === 'aspect') {
             if (handle === 'e') {
-              const maxW = Math.max(minPx, canvasWPx - originLeft);
+              const maxW = Math.max(minPx, Math.min(canvasWPx - originLeft, (canvasHPx - originTop) * aspect));
               const proposedW = originW + dx;
-              let targetW = Math.max(minPx, Math.min(maxW, proposedW));
-              let targetH = targetW / effectiveAspect;
-
-              let targetTop = originTop + (originH - targetH) / 2;
-              if (targetTop < 0) {
-                targetH = Math.min(canvasHPx, originH + 2 * originTop);
-                targetW = targetH * effectiveAspect;
-                targetTop = 0;
-              }
-              if (targetTop + targetH > canvasHPx) {
-                targetH = Math.min(canvasHPx, originH + 2 * (canvasHPx - originTop - originH));
-                targetW = targetH * effectiveAspect;
-                targetTop = canvasHPx - targetH;
-              }
-              if (targetW < minPx) {
-                targetW = minPx;
-                targetH = targetW / effectiveAspect;
-              }
-
+              const targetW = Math.max(minPx, Math.min(maxW, proposedW));
               nw = targetW;
+              nh = targetW / aspect;
+              left = originLeft;
+              top = originTop;
+            } else {
+              const maxH = Math.max(minPx, Math.min(canvasHPx - originTop, (canvasWPx - originLeft) / aspect));
+              const proposedH = originH + dy;
+              const targetH = Math.max(minPx, Math.min(maxH, proposedH));
+              nw = targetH * aspect;
               nh = targetH;
               left = originLeft;
-              top = Math.max(0, Math.min(canvasHPx - nh, originTop + (originH - nh) / 2));
-            } else {
-              const maxH = Math.max(minPx, canvasHPx - originTop);
-              const proposedH = originH + dy;
-              let targetH = Math.max(minPx, Math.min(maxH, proposedH));
-              let targetW = targetH * effectiveAspect;
-
-              let targetLeft = originLeft + (originW - targetW) / 2;
-              if (targetLeft < 0) {
-                targetW = Math.min(canvasWPx, originW + 2 * originLeft);
-                targetH = targetW / effectiveAspect;
-                targetLeft = 0;
-              }
-              if (targetLeft + targetW > canvasWPx) {
-                targetW = Math.min(canvasWPx, originW + 2 * (canvasWPx - originLeft - originW));
-                targetH = targetW / effectiveAspect;
-                targetLeft = canvasWPx - targetW;
-              }
-              if (targetH < minPx) {
-                targetH = minPx;
-                targetW = targetH * effectiveAspect;
-              }
-
-              nw = targetW;
-              nh = targetH;
               top = originTop;
-              left = Math.max(0, Math.min(canvasWPx - nw, originLeft + (originW - nw) / 2));
             }
           }
 
@@ -820,7 +804,20 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           animH.value = nh;
           transX.value = left - originLeftSv.value;
           transY.value = top - originTopSv.value;
-          runOnJS(updateTooltipJS)(nw, nh);
+
+          if (liveBounds) {
+            liveBounds.leftMm.value = left / sxSv.value;
+            liveBounds.topMm.value = top / sySv.value;
+            liveBounds.widthMm.value = nw / sxSv.value;
+            liveBounds.heightMm.value = nh / sySv.value;
+            liveBounds.visible.value = true;
+          }
+
+          const now = Date.now();
+          if (now - lastTooltipTimeSv.value >= 80) {
+            lastTooltipTimeSv.value = now;
+            runOnJS(updateTooltipJS)(nw, nh);
+          }
         })
         .onEnd(() => {
           'worklet';
@@ -871,6 +868,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       charSpacingSv,
       boldSv,
       verticalDisplaySv,
+      liveBounds,
+      lastTooltipTimeSv,
     ],
   );
 
