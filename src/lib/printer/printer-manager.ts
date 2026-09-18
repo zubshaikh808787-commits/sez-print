@@ -2978,11 +2978,15 @@ class PrinterManager {
           options.media === 'bline' ? 'blacktag' : (options.media === 'continuous' ? 'continuous' : 'tag')
         );
 
+        const widthDots = options.widthMm
+          ? Math.round(options.widthMm * (options.dpi ? options.dpi / 25.4 : 8))
+          : 384;
+
         const result = await labelx.printLabelXPngLabel({
           pngBase64: options.pngBase64,
           copies: Math.max(1, Math.round(options.copies ?? 1)),
           widthMm: options.widthMm ?? 48,
-          widthDots: 384,
+          widthDots,
           paperType,
           density: options.density !== null && options.density !== undefined ? Math.min(2, Math.max(0, options.density)) : 1,
           threshold: options.threshold ?? 145,
