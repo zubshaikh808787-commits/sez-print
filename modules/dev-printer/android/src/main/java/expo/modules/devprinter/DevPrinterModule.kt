@@ -660,14 +660,20 @@ class DevPrinterModule : Module() {
     val rawW = Math.max(64, Math.round(widthMm * dpm).toInt())
     val headDots = Math.max(64, ((Math.round(printheadWidthMm * dpm).toInt() + 7) / 8) * 8) // 384 dots for 48mm head
 
-    // Safe active printable zone:
-    // On a 48mm head, allocate a 2mm safety buffer (1mm / 8 dots on each side) so that
-    // artwork scaled into this zone NEVER touches the physical head boundaries.
-    // This mathematically guarantees that borders are 100% complete and can never be cropped.
-    val safeHeadDots = Math.max(32, headDots - 16) // 368 dots (46.0mm)
-    val fit = if (rawW > safeHeadDots) safeHeadDots.toDouble() / rawW.toDouble() else 1.0
-    val targetW = Math.min(safeHeadDots, Math.max(8, ((Math.round(rawW * fit).toInt() + 7) / 8) * 8))
-    val targetH = Math.max(32, Math.round(bitmap.height * (targetW.toDouble() / bitmap.width)).toInt())
+    // Physical DEV thermal head geometry (DEV-7299 / 58mm mechanism):
+    // 1. The thermal head has 384 dots (48.0mm).
+    // 2. Head dot 0 is mounted at 1.37mm from the left edge of a 50mm label sticker.
+    // 3. Head dot 383 is mounted at 0.63mm from the right edge of a 50mm label sticker.
+    // 4. Physical symmetry condition for equal left & right margins on the label:
+    //    Left margin = 1.37mm + drawX * 0.125mm
+    //    Right margin = 0.63mm + (headDots - drawX - targetW) * 0.125mm
+    //    Setting Left margin = Right margin yields: 2 * drawX + targetW = 378 dots (47.25mm).
+    //    At drawX = 0, targetW = 378 dots gives:
+    //    Left margin = 1.37mm, Right margin = 1.38mm (<0.01mm error, perfect centering!).
+    val maxSymmetricDots = Math.min(headDots, 378) // 378 dots (47.25mm)
+    val fit = if (rawW > maxSymmetricDots) maxSymmetricDots.toDouble() / rawW.toDouble() else 1.0
+    val targetW = Math.min(headDots, Math.max(8, Math.round(rawW * fit).toInt()))
+    val targetH = Math.max(32, Math.round(bitmap.height * fit).toInt())
 
     val scaled: Bitmap = if (bitmap.width == targetW && bitmap.height == targetH) {
       bitmap
@@ -676,27 +682,22 @@ class DevPrinterModule : Module() {
     }
 
     // Centering & Alignment:
-    // 1. Center targetW inside the physical headDots (384 dots):
-    val baseCenterPadX = (headDots - targetW) / 2 // (384 - 368) / 2 = 8 dots (1.0mm)
-    val baseCenterPadY = 4 // 0.5mm top padding for optical centering
-
-    // 2. Hardware head mounting calibration for DEV printer:
-    // Physical measurements from actual prints show the 48mm (384 dot) thermal head
-    // is mounted +0.37mm (+3 dots) to the right relative to the paper center.
-    // Shifting left by 3 dots produces exact symmetrical margins (<0.02mm error) on physical prints.
-    val devMountOffsetDots = -3
-
-    // 3. User calibration offsets:
+    // 1. Horizontal centering in the symmetric zone:
+    val baseCenterPadX = Math.max(0, (maxSymmetricDots - targetW) / 2)
     val userHOffsetDots = Math.round(hOffsetMm * dpm).toInt()
-    val userVOffsetDots = Math.round(vOffsetMm * dpm).toInt()
+    val drawX = Math.max(0, Math.min(headDots - targetW, baseCenterPadX + userHOffsetDots))
 
-    // 4. Clamped draw coordinates: Guaranteed >= 0 and <= (headDots - targetW), so no border can ever be cropped!
-    val drawX = Math.max(0, Math.min(headDots - targetW, baseCenterPadX + devMountOffsetDots + userHOffsetDots))
+    // 2. Vertical centering:
+    // The physical label height in dots is round(heightMm * dpm).
+    // Center targetH inside the physical label height so top and bottom margins match left and right margins (~1.38mm).
+    val labelHeightDots = Math.max(targetH, Math.round(heightMm * dpm).toInt())
+    val baseCenterPadY = Math.max(0, (labelHeightDots - targetH) / 2)
+    val userVOffsetDots = Math.round(vOffsetMm * dpm).toInt()
     val drawY = Math.max(0, baseCenterPadY + userVOffsetDots)
 
     val printWidth = headDots
     val widthBytes = printWidth / 8
-    val height = targetH + drawY + 4
+    val height = Math.max(labelHeightDots, targetH + drawY + 4)
 
     val solidBitmap = Bitmap.createBitmap(printWidth, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(solidBitmap)
@@ -788,11 +789,11 @@ class DevPrinterModule : Module() {
     // being printed (that picked the wrong head class for labels near 58mm).
     val headDots = Math.max(64, ((Math.round(printheadWidthMm * dpm).toInt() + 7) / 8) * 8)
     val headBytes = headDots / 8
-    val safeHeadDots = Math.max(32, headDots - 16)
+    val maxSymmetricDots = Math.min(headDots, 378) // 378 dots (47.25mm)
 
-    val fit = if (rawW > safeHeadDots) safeHeadDots.toDouble() / rawW.toDouble() else 1.0
-    val targetW = Math.min(safeHeadDots, Math.max(8, ((Math.round(rawW * fit).toInt() + 7) / 8) * 8))
-    val targetH = Math.max(32, Math.round(bitmap.height * (targetW.toDouble() / bitmap.width)).toInt())
+    val fit = if (rawW > maxSymmetricDots) maxSymmetricDots.toDouble() / rawW.toDouble() else 1.0
+    val targetW = Math.min(headDots, Math.max(8, Math.round(rawW * fit).toInt()))
+    val targetH = Math.max(32, Math.round(bitmap.height * fit).toInt())
 
     val scaled = if (bitmap.width == targetW && bitmap.height == targetH) {
       bitmap
@@ -800,11 +801,10 @@ class DevPrinterModule : Module() {
       Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
     }
 
-    val baseCenterPadX = (headDots - targetW) / 2
-    val devMountOffsetDots = -3
+    val baseCenterPadX = Math.max(0, (maxSymmetricDots - targetW) / 2)
     val userHOffsetDots = Math.round(hOffsetMm * dpm).toInt()
     val userVOffsetDots = Math.round(vOffsetMm * dpm).toInt()
-    val drawX = Math.max(0, Math.min(headDots - targetW, baseCenterPadX + devMountOffsetDots + userHOffsetDots))
+    val drawX = Math.max(0, Math.min(headDots - targetW, baseCenterPadX + userHOffsetDots))
     val drawY = Math.max(0, userVOffsetDots)
 
     val height = ((targetH + drawY + 7) / 8) * 8
