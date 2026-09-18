@@ -257,18 +257,21 @@ class LabelXPrinterModule : Module() {
       val rawName = deviceName?.trim() ?: ""
 
       // Ensure proper prefix mapping for LuckPrinter SDK's internal PrinterEnum lookup:
-      // Seznik LabelX (GD985 SheetLabel) -> "Seznik LabelX_"
+      // Seznik LabelX (GD985 SheetLabel) -> "Seznik LabelX_" (exact case required by SDK)
       // Seznik MiniX (Normal Device)     -> "Seznik MiniX_"
       // Seznik Nexa                      -> "Seznik Nexa_"
       val normalizedName = when {
         rawName.contains("minix", ignoreCase = true) || rawName.contains("mini x", ignoreCase = true) -> {
-          if (rawName.startsWith("Seznik MiniX_", ignoreCase = true)) rawName else "Seznik MiniX_${rawName.substringAfterLast('_').ifEmpty { "0000" }}"
+          val suffix = if (rawName.contains("_")) rawName.substringAfterLast('_') else cleanMac.replace(":", "").takeLast(4)
+          "Seznik MiniX_$suffix"
         }
         rawName.contains("nexa", ignoreCase = true) -> {
-          if (rawName.startsWith("Seznik Nexa_", ignoreCase = true)) rawName else "Seznik Nexa_${rawName.substringAfterLast('_').ifEmpty { "0000" }}"
+          val suffix = if (rawName.contains("_")) rawName.substringAfterLast('_') else cleanMac.replace(":", "").takeLast(4)
+          "Seznik Nexa_$suffix"
         }
         else -> {
-          if (rawName.startsWith("Seznik LabelX_", ignoreCase = true)) rawName else "Seznik LabelX_${rawName.substringAfterLast('_').ifEmpty { "0000" }}"
+          val suffix = if (rawName.contains("_")) rawName.substringAfterLast('_') else cleanMac.replace(":", "").takeLast(4)
+          "Seznik LabelX_$suffix"
         }
       }
 
@@ -283,7 +286,7 @@ class LabelXPrinterModule : Module() {
               @SuppressLint("MissingPermission")
               adapter.cancelDiscovery()
             } catch (_: Throwable) {}
-            try { Thread.sleep(150) } catch (_: Throwable) {}
+            try { Thread.sleep(250) } catch (_: Throwable) {}
           }
 
           val helper = PrinterHelper.getInstance()
@@ -301,12 +304,25 @@ class LabelXPrinterModule : Module() {
               return@execute
             }
             helper.disconnectLuck()
-            Thread.sleep(200)
+            Thread.sleep(250)
           }
 
-          Log.i(TAG, "Connecting to LuckPrinter normalizedName=$normalizedName rawName=$rawName mac=$cleanMac type=$type...")
-          val result = helper.connectLuck(normalizedName, cleanMac, type)
-          Log.i(TAG, "LuckPrinter connectLuck result=$result isConnectedLuck=${helper.isConnectedLuck}")
+          val remoteDev = try {
+            adapter?.getRemoteDevice(cleanMac)
+          } catch (_: Throwable) { null }
+
+          @SuppressLint("MissingPermission")
+          val isBonded = remoteDev?.bondState == BluetoothDevice.BOND_BONDED
+          Log.i(TAG, "Connecting to LuckPrinter normalizedName=$normalizedName rawName=$rawName mac=$cleanMac isBonded=$isBonded type=$type (attempt 1)...")
+          var result = helper.connectLuck(normalizedName, cleanMac, type)
+          Log.i(TAG, "LuckPrinter connectLuck attempt 1 result=$result isConnectedLuck=${helper.isConnectedLuck}")
+
+          if (!result) {
+            Log.w(TAG, "LuckPrinter connect attempt 1 failed, allowing radio to settle for 400ms before retry...")
+            try { Thread.sleep(400) } catch (_: Throwable) {}
+            result = helper.connectLuck(normalizedName, cleanMac, type)
+            Log.i(TAG, "LuckPrinter connectLuck attempt 2 result=$result isConnectedLuck=${helper.isConnectedLuck}")
+          }
 
           if (result) {
             connectedName = if (rawName.isNotEmpty()) rawName else normalizedName
@@ -320,7 +336,12 @@ class LabelXPrinterModule : Module() {
               )
             )
           } else {
-            promise.reject("CONNECT_FAILED", "Failed to connect to printer $rawName ($cleanMac)", null)
+            val bondHint = if (!isBonded) {
+              " The printer is not paired in Android Bluetooth Settings. Open your phone Settings > Bluetooth, pair '$rawName' (PIN: 0000 or 1234), and tap Connect again."
+            } else {
+              " Ensure the printer is turned on, battery is charged, and within Bluetooth range."
+            }
+            promise.reject("CONNECT_FAILED", "Failed to connect to printer $rawName ($cleanMac).$bondHint", null)
           }
         } catch (e: Throwable) {
           Log.e(TAG, "Exception during LuckPrinter connect", e)

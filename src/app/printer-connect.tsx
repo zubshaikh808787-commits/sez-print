@@ -321,6 +321,22 @@ export default function PrinterConnectScreen() {
         device.id,
         device.name,
       );
+      if (mountedRef.current) {
+        Alert.alert(
+          'Connected!',
+          `${device.name ?? activeModelMeta.shortName} connected successfully. Would you like to print a test label?`,
+          [
+            {
+              text: 'Print Test Label',
+              onPress: () => void handleTestPrint(),
+            },
+            {
+              text: 'Done',
+              style: 'cancel',
+            },
+          ],
+        );
+      }
     } catch (error) {
       if (mountedRef.current) {
         Alert.alert(
@@ -349,7 +365,22 @@ export default function PrinterConnectScreen() {
     try {
       console.info(`[PRINTER-CONNECT] Manual MAC connect for ${selectedModel}: ${mac}`);
       await getPrinterManager().connectModel(selectedModel, mac, activeModelMeta.shortName);
-      Alert.alert('Connected', `${activeModelMeta.shortName} printer linked successfully.`);
+      if (mountedRef.current) {
+        Alert.alert(
+          'Connected!',
+          `${activeModelMeta.shortName} printer linked successfully. Would you like to print a test label?`,
+          [
+            {
+              text: 'Print Test Label',
+              onPress: () => void handleTestPrint(),
+            },
+            {
+              text: 'Done',
+              style: 'cancel',
+            },
+          ],
+        );
+      }
     } catch (error) {
       Alert.alert(
         'MAC Connect Failed',
