@@ -22,11 +22,10 @@ import android.os.Build
 import android.util.Base64
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.luckprinter.sdk_new.PrinterStatus
 import com.luckprinter.sdk_new.callback.OnClientConnectionListener
 import com.luckprinter.sdk_new.callback.OnPrintCallback
 import com.luckprinter.sdk_new.callback.OnReceiveDeviceStatusListener
-import com.luckprinter.sdk_new.constant.CompressWayEnum
-import com.luckprinter.sdk_new.constant.PrinterStatus
 import com.luckprinter.sdk_new.device.BaseDevice
 import com.luckprinter.sdk_new.device.PrinterHelper
 import com.luckprinter.sdk_new.device.custom.CmdType
@@ -162,7 +161,7 @@ class LabelXPrinterModule : Module() {
       .build()
 
     val command = PrinterCommand()
-    command.compressWay = CompressWayEnum.NORMAL.key
+    command.compressWay = "normal"
 
     // Continuous receipt command
     command.print = listOf(
@@ -377,7 +376,7 @@ class LabelXPrinterModule : Module() {
               )
             )
           } else {
-            promise.reject("CONNECT_FAILED", "Failed to connect to printer $name ($macAddress)")
+            promise.reject("CONNECT_FAILED", "Failed to connect to printer $name ($macAddress)", null)
           }
         } catch (e: Throwable) {
           promise.reject("CONNECT_EXCEPTION", e.message, e)
@@ -422,13 +421,13 @@ class LabelXPrinterModule : Module() {
       ensureSdkInitialized()
       val helper = PrinterHelper.getInstance()
       if (!helper.isConnectedLuck) {
-        promise.reject("NOT_CONNECTED", "Printer is not connected")
+        promise.reject("NOT_CONNECTED", "Printer is not connected", null)
         return@AsyncFunction
       }
 
       val pngBase64 = options["pngBase64"] as? String
       if (pngBase64.isNullOrEmpty()) {
-        promise.reject("INVALID_DATA", "Missing pngBase64 parameter")
+        promise.reject("INVALID_DATA", "Missing pngBase64 parameter", null)
         return@AsyncFunction
       }
 
@@ -506,7 +505,7 @@ class LabelXPrinterModule : Module() {
             override fun onPrintFail(status: Int) {
               Log.e(TAG, "Print job failed with status: $status (${decodeStatus(status)})")
               finalBmp.recycle()
-              promise.reject("PRINT_FAILED", "Print failed: ${decodeStatus(status)} (code $status)")
+              promise.reject("PRINT_FAILED", "Print failed: ${decodeStatus(status)} (code $status)", null)
             }
           }
 
@@ -535,7 +534,7 @@ class LabelXPrinterModule : Module() {
       ensureSdkInitialized()
       val helper = PrinterHelper.getInstance()
       if (!helper.isConnectedLuck) {
-        promise.reject("NOT_CONNECTED", "Printer is not connected")
+        promise.reject("NOT_CONNECTED", "Printer is not connected", null)
         return@AsyncFunction
       }
 
@@ -591,7 +590,7 @@ class LabelXPrinterModule : Module() {
             }
             override fun onPrintFail(status: Int) {
               finalBmp.recycle()
-              promise.reject("PRINT_FAILED", "Test print failed: ${decodeStatus(status)}")
+              promise.reject("PRINT_FAILED", "Test print failed: ${decodeStatus(status)}", null)
             }
           })
         } catch (e: Throwable) {
