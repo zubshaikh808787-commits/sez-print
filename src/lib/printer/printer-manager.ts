@@ -2751,8 +2751,8 @@ class PrinterManager {
           `[LABELX-PRINT] Label X print job dispatched in ${elapsed} ms: success=${result.success}`,
         );
         this.lastPrintTiming = [
-          { phase: 'labelx-dispatch', elapsedMs: elapsed },
-          { phase: 'total', elapsedMs: elapsed },
+          { stage: 'labelx-dispatch', durationMs: elapsed },
+          { stage: 'total', durationMs: elapsed },
         ];
       } finally {
         this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);

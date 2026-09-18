@@ -47,7 +47,7 @@ export async function extractEmbeddedImagesFromPdf(uri: string): Promise<Rendere
   try {
     const FileSystem = await import('expo-file-system');
     const base64Data = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: 'base64',
     });
     if (!base64Data) return [];
 
@@ -217,7 +217,9 @@ export async function printPdfToThermal(
         widthMm: page.widthMm,
         heightMm: page.heightMm,
         orientation: 0,
+        threshold: 160,
         dither,
+        hOffsetMm: 0,
         dpi,
       });
 
@@ -228,6 +230,7 @@ export async function printPdfToThermal(
         copies: 1,
         density,
         speed,
+        vOffsetMm: 0,
         media: mediaType,
         dpi,
       });

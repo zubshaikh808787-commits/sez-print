@@ -373,7 +373,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
           <View style={StyleSheet.absoluteFillObject} collapsable={false} />
         </GestureDetector>
 
-        <View pointerEvents="box-none" collapsable={false} style={[StyleSheet.absoluteFillObject, { overflow: 'hidden', ...shapeClip }]}>
+        <View pointerEvents="box-none" collapsable={false} style={[StyleSheet.absoluteFillObject, { overflow: 'hidden' }, shapeClip]}>
           {/* Stable single-layer element rendering: preserves component instances across drag without flicker */}
           <CanvasElementNodes elements={sortedElements} chrome={chrome} />
         </View>

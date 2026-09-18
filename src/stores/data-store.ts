@@ -27,6 +27,8 @@ export type ImportedPdfFile = {
   importedAt: number;
 };
 
+export type PdfFile = ImportedPdfFile;
+
 export type RemoteDataLink = {
   id: string;
   name: string;

@@ -290,9 +290,9 @@ export async function printPreparedGrayJob(
     return job;
   }
 
-  if (manager.activeTransport === 'td404-spp' || manager.usesTd404CommandSet) {
-    const printed = await defaultPrintQueue.enqueue(async () => {
-      return manager.printPngLabelFast({
+  if (manager.usesTd404CommandSet) {
+    await defaultPrintQueue.enqueue(async () => {
+      await manager.printPngLabelFast({
         pngBase64,
         widthMm: input.widthMm,
         heightMm: input.heightMm,
@@ -309,7 +309,7 @@ export async function printPreparedGrayJob(
         dither: Boolean(input.dither),
       });
     });
-    if (printed) return job;
+    return job;
   }
 
   const adapter = adapterFromManager();
@@ -424,14 +424,14 @@ export async function printArtworkJob(input: ArtworkPrintInput): Promise<Rendere
     return job;
   }
 
-  if (manager.activeTransport === 'td404-spp' || manager.usesTd404CommandSet) {
+  if (manager.usesTd404CommandSet) {
     const pngBase64 = grayToPngBase64({
       width: input.gray.width,
       height: input.gray.height,
       gray: input.gray.gray,
     });
-    const printed = await defaultPrintQueue.enqueue(async () => {
-      return manager.printPngLabelFast({
+    await defaultPrintQueue.enqueue(async () => {
+      await manager.printPngLabelFast({
         pngBase64,
         widthMm: input.widthMm,
         heightMm: input.heightMm,
@@ -448,7 +448,7 @@ export async function printArtworkJob(input: ArtworkPrintInput): Promise<Rendere
         dither: Boolean(input.dither),
       });
     });
-    if (printed) return job;
+    return job;
   }
 
   const adapter = adapterFromManager();
