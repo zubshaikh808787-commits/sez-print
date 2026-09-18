@@ -28,11 +28,6 @@ import com.luckprinter.sdk_new.callback.OnPrintCallback
 import com.luckprinter.sdk_new.callback.OnReceiveDeviceStatusListener
 import com.luckprinter.sdk_new.device.BaseDevice
 import com.luckprinter.sdk_new.device.PrinterHelper
-import com.luckprinter.sdk_new.device.custom.CmdType
-import com.luckprinter.sdk_new.device.custom.Command
-import com.luckprinter.sdk_new.device.custom.ICustomPrinter
-import com.luckprinter.sdk_new.device.custom.PrinterCommand
-import com.luckprinter.sdk_new.device.custom.PrinterProperty
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -84,7 +79,6 @@ class LabelXPrinterModule : Module() {
       Log.i(TAG, "LuckPrinter connected: name=$name mac=$address")
       connectedName = name
       connectedMac = address
-      applyCustomPrinterConfig()
       sendEvent(
         "onConnectionChanged",
         mapOf(
@@ -135,89 +129,10 @@ class LabelXPrinterModule : Module() {
       PrinterHelper.getInstance().init(context.applicationContext, key, false)
       PrinterHelper.getInstance().addConnectListener(connectionListener)
       PrinterHelper.getInstance().addDeviceStatusListener(statusListener)
-      registerCustomProfiles()
       isInitialized = true
       Log.i(TAG, "LuckPrinter SDK initialized successfully with key=${key.take(8)}...")
     } catch (e: Throwable) {
       Log.e(TAG, "Failed to initialize LuckPrinter SDK", e)
-    }
-  }
-
-  private fun registerCustomProfiles() {
-    val propertyMap = HashMap<String, PrinterProperty>()
-    val commandMap = HashMap<String, PrinterCommand>()
-
-    // Profile for Seznik MiniX / Label X (48mm printable width = 384 dots @ 203 DPI)
-    val property = PrinterProperty.Builder()
-      .speedList(emptyList())
-      .densityList(listOf(0, 1, 2))
-      .printerDpi(203)
-      .printerMaxWidth(48)
-      .btType("classic_ble")
-      .bleEnable(false)
-      .printerType("normal")
-      .supportSetSpeed(false)
-      .supportPrintGray(true)
-      .build()
-
-    val command = PrinterCommand()
-    command.compressWay = "normal"
-
-    // Continuous receipt command
-    command.print = listOf(
-      Command.Builder().type(CmdType.ENABLE.value).data("10fff103").build(),
-      Command.Builder().type(CmdType.WAKE_UP.value).data("000000000000000000000000").build(),
-      Command.Builder().type(CmdType.PRINT_BITMAP.value).build(),
-      Command.Builder().type(CmdType.FEED_PAPER.value).data("1b4a38").build(),
-      Command.Builder().type(CmdType.NO_SET.value).position("last").data("1bbbbb").build(),
-      Command.Builder().type(CmdType.DISABLE.value).data("10fff145").callback(true).callbackData(listOf("4f4b", "aa")).callbackTime(60 * 1000).build()
-    )
-
-    // Die-cut / gap label command
-    command.printTag = listOf(
-      Command.Builder().type(CmdType.ENABLE.value).data("10fff103").build(),
-      Command.Builder().type(CmdType.WAKE_UP.value).data("000000000000000000000000").build(),
-      Command.Builder().type(CmdType.SET_PAPER_TYPE.value).callback(true).callbackData(listOf("4f4b")).data("1f800120").build(),
-      Command.Builder().type(CmdType.SET_PAPER_TYPE.value).callback(true).callbackData(listOf("4f4b")).data("1f800110").build(),
-      Command.Builder().type(CmdType.PRINT_BITMAP.value).build(),
-      Command.Builder().type(CmdType.POSITION.value).data("1d0c").build(),
-      Command.Builder().type(CmdType.NO_SET.value).position("last").data("1bbbbb").build(),
-      Command.Builder().type(CmdType.DISABLE.value).data("10fff145").callback(true).callbackData(listOf("4f4b", "aa")).callbackTime(60 * 1000).build()
-    )
-
-    // Black mark label command
-    command.printBlackTag = listOf(
-      Command.Builder().type(CmdType.ENABLE.value).data("10fff103").build(),
-      Command.Builder().type(CmdType.WAKE_UP.value).data("000000000000000000000000").build(),
-      Command.Builder().type(CmdType.SET_PAPER_TYPE.value).callback(true).callbackData(listOf("4f4b")).data("1f800150").build(),
-      Command.Builder().type(CmdType.PRINT_BITMAP.value).build(),
-      Command.Builder().type(CmdType.POSITION.value).data("1d0c").build(),
-      Command.Builder().type(CmdType.NO_SET.value).position("last").data("1bbbbb").build(),
-      Command.Builder().type(CmdType.DISABLE.value).data("10fff145").callback(true).callbackData(listOf("4f4b", "aa")).callbackTime(60 * 1000).build()
-    )
-
-    val prefixes = listOf("Seznik MiniX_", "LabelX_", "GD985_", "MiniX_", "LuckP_", "BTW_")
-    for (prefix in prefixes) {
-      propertyMap[prefix] = property
-      commandMap[prefix] = command
-    }
-
-    try {
-      PrinterHelper.getInstance().setCustomPropertyMap(propertyMap)
-    } catch (e: Throwable) {
-      Log.w(TAG, "Failed setting custom property map: ${e.message}")
-    }
-  }
-
-  private fun applyCustomPrinterConfig() {
-    try {
-      val device: BaseDevice? = PrinterHelper.getInstance().printerDevice
-      if (device is ICustomPrinter) {
-        val namePrefix = PrinterHelper.getInstance().namePrefix
-        Log.i(TAG, "Configuring custom printer with prefix: $namePrefix")
-      }
-    } catch (e: Throwable) {
-      Log.w(TAG, "applyCustomPrinterConfig exception: ${e.message}")
     }
   }
 
@@ -366,7 +281,6 @@ class LabelXPrinterModule : Module() {
           if (result) {
             connectedName = name
             connectedMac = macAddress
-            applyCustomPrinterConfig()
             promise.resolve(
               mapOf(
                 "success" to true,
@@ -449,9 +363,20 @@ class LabelXPrinterModule : Module() {
           val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
             ?: throw IllegalArgumentException("Could not decode PNG data into Bitmap")
 
-          // Target dots: Seznik MiniX / Label X printable width is 48mm @ 203 DPI = 384 dots
-          val targetWidthDots = (options["widthDots"] as? Number)?.toInt()
-            ?: ((options["widthMm"] as? Number)?.toDouble()?.times(8.0)?.toInt() ?: 384)
+          // Target dots calculation:
+          // If explicit widthDots passed (or widthMm provided), use it; otherwise get from printer device
+          val widthMm = (options["widthMm"] as? Number)?.toDouble()
+          val requestedWidthDots = (options["widthDots"] as? Number)?.toInt()
+            ?: (if (widthMm != null && widthMm > 0) (widthMm * 8.0).toInt() else null)
+
+          val deviceMaxDots = try {
+            val maxW = helper.printWidth
+            if (maxW > 0) maxW else 384
+          } catch (_: Throwable) {
+            384
+          }
+
+          val targetWidthDots = requestedWidthDots ?: deviceMaxDots
 
           val srcW = srcBitmap.width
           val srcH = srcBitmap.height
@@ -493,7 +418,9 @@ class LabelXPrinterModule : Module() {
 
             override fun onPrintSuccess() {
               Log.i(TAG, "Print job completed successfully")
-              finalBmp.recycle()
+              try {
+                if (!finalBmp.isRecycled) finalBmp.recycle()
+              } catch (_: Throwable) {}
               promise.resolve(
                 mapOf(
                   "success" to true,
@@ -504,22 +431,24 @@ class LabelXPrinterModule : Module() {
 
             override fun onPrintFail(status: Int) {
               Log.e(TAG, "Print job failed with status: $status (${decodeStatus(status)})")
-              finalBmp.recycle()
+              try {
+                if (!finalBmp.isRecycled) finalBmp.recycle()
+              } catch (_: Throwable) {}
               promise.reject("PRINT_FAILED", "Print failed: ${decodeStatus(status)} (code $status)", null)
             }
           }
 
-          // Dispatch print according to paper type
-          when (paperType) {
-            "continuous", "receipt" -> {
-              helper.print(finalBmp, copies, printCallback)
+          // Dispatch print according to device type and paper type
+          if (helper.isSheetLabelPrinter()) {
+            when (paperType) {
+              "continuous", "receipt" -> helper.print(finalBmp, copies, printCallback)
+              else -> helper.printTag(finalBmp, copies, printCallback)
             }
-            "blacktag", "blackmark" -> {
-              helper.printBlackTag(finalBmp, copies, printCallback)
-            }
-            else -> {
-              // Default to Tag (die-cut gap labels)
-              helper.printTag(finalBmp, copies, printCallback)
+          } else {
+            when (paperType) {
+              "continuous", "receipt" -> helper.print(finalBmp, copies, printCallback)
+              "blacktag", "blackmark" -> helper.printBlackTag(finalBmp, copies, printCallback)
+              else -> helper.printTag(finalBmp, copies, printCallback)
             }
           }
 
@@ -542,8 +471,8 @@ class LabelXPrinterModule : Module() {
 
       ioExecutor.execute {
         try {
-          val width = 384
-          val height = 200
+          val width = if (helper.isSheetLabelPrinter()) 400 else 384
+          val height = 240
           val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
           val canvas = Canvas(bmp)
           canvas.drawColor(Color.WHITE)
@@ -572,9 +501,9 @@ class LabelXPrinterModule : Module() {
 
           // Status & date/info
           paint.textSize = 16f
-          val infoText = "203 DPI · 48mm · LuckPrinter SDK"
+          val infoText = "203 DPI · LuckPrinter SDK OEM"
           val infoW = paint.measureText(infoText)
-          canvas.drawText(infoText, (width - infoW) / 2f, 155f, paint)
+          canvas.drawText(infoText, (width - infoW) / 2f, 165f, paint)
 
           val finalBmp = applyThresholdBinarization(bmp, 145)
           bmp.recycle()
@@ -585,11 +514,15 @@ class LabelXPrinterModule : Module() {
             override fun onPrintIndexStart(b: Bitmap?, page: Int, total: Int) {}
             override fun onPrintIndexEnd(b: Bitmap?, page: Int, total: Int) {}
             override fun onPrintSuccess() {
-              finalBmp.recycle()
+              try {
+                if (!finalBmp.isRecycled) finalBmp.recycle()
+              } catch (_: Throwable) {}
               promise.resolve(mapOf("success" to true))
             }
             override fun onPrintFail(status: Int) {
-              finalBmp.recycle()
+              try {
+                if (!finalBmp.isRecycled) finalBmp.recycle()
+              } catch (_: Throwable) {}
               promise.reject("PRINT_FAILED", "Test print failed: ${decodeStatus(status)}", null)
             }
           })

@@ -21,7 +21,10 @@ export function isLikelyLabelXName(name: string | null | undefined): boolean {
     n.includes('labelx') ||
     n.includes('label x') ||
     n.includes('gd985') ||
+    n.includes('gd-985') ||
     n.includes('minix') ||
+    n.includes('mini x') ||
+    n.includes('nexa') ||
     n.includes('luckp') ||
     n.startsWith('u8_') ||
     n.startsWith('ppp1_') ||
