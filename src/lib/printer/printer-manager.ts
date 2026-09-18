@@ -1211,10 +1211,25 @@ class PrinterManager {
         if (!labelx?.isLabelXNativeAvailable()) {
           throw new Error('LABEL X module not available in this build.');
         }
-        const res = await labelx.connectLabelX(deviceId, deviceName ?? 'LABEL X');
+        const effectiveName = deviceName && deviceName.trim().length > 0 ? deviceName : 'Seznik LabelX_0000';
+        console.info(`[LABELX-CONN] Connecting to ${deviceId} (${effectiveName})...`);
+        const connectPromise = labelx.connectLabelX(deviceId, effectiveName);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Connection to ${effectiveName} timed out after 18s. Please ensure printer is powered on and paired in Android Bluetooth Settings.`,
+                ),
+              ),
+            18000,
+          ),
+        );
+        const res = await Promise.race([connectPromise, timeoutPromise]);
+        console.info(`[LABELX-CONN] Label X connected successfully:`, res);
         this.activeTransport = 'labelx-spp';
         this.connectionState = 'connected';
-        store.setConnectedDevice(res.mac || deviceId, res.name ?? deviceName ?? deviceId, {
+        store.setConnectedDevice(res.mac || deviceId, res.name ?? effectiveName, {
           transport: 'labelx-spp',
           sdkId: 'labelx',
           model: 'labelx',
