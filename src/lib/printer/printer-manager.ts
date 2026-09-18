@@ -1146,7 +1146,7 @@ class PrinterManager {
     const store = usePrinterStore.getState();
     store.setStatus('connecting');
     this.connectionState = 'connecting';
-    this.stopScan();
+    await this.stopScanAsync();
 
     // 1. Cleanly disconnect all existing bridges first
     await this.disconnect().catch(() => {});
@@ -1686,27 +1686,43 @@ class PrinterManager {
   }
 
   stopScan(): void {
+    void this.stopScanAsync();
+  }
+
+  async stopScanAsync(): Promise<void> {
     this.scanAbort?.();
     this.scanAbort = null;
     if (this.scanTimer) {
       clearTimeout(this.scanTimer);
       this.scanTimer = null;
     }
-    void this.td404ScanStop?.().catch(() => {});
-    this.td404ScanStop = null;
-    void this.joshScanStop?.().catch(() => {});
-    this.joshScanStop = null;
-    void this.tezScanStop?.().catch(() => {});
-    this.tezScanStop = null;
-    void this.devScanStop?.().catch(() => {});
-    this.devScanStop = null;
-    void this.labelxScanStop?.().catch(() => {});
-    this.labelxScanStop = null;
+    const stops: Promise<any>[] = [];
+    if (this.td404ScanStop) {
+      stops.push(this.td404ScanStop().catch(() => {}));
+      this.td404ScanStop = null;
+    }
+    if (this.joshScanStop) {
+      stops.push(this.joshScanStop().catch(() => {}));
+      this.joshScanStop = null;
+    }
+    if (this.tezScanStop) {
+      stops.push(this.tezScanStop().catch(() => {}));
+      this.tezScanStop = null;
+    }
+    if (this.devScanStop) {
+      stops.push(this.devScanStop().catch(() => {}));
+      this.devScanStop = null;
+    }
+    if (this.labelxScanStop) {
+      stops.push(this.labelxScanStop().catch(() => {}));
+      this.labelxScanStop = null;
+    }
     try {
       this.ble?.stopDeviceScan();
     } catch {
       // ignore
     }
+    await Promise.all(stops);
   }
 
   async connect(
@@ -1847,6 +1863,7 @@ class PrinterManager {
 
       try {
         await this.ensurePermissions('connect-only');
+        await this.stopScanAsync();
         console.info(
           `[LABELX-CONN] Initiating Label X connection: mac=${deviceId}, name=${deviceName ?? 'unknown'}, transport=${transport ?? 'auto'}`,
         );

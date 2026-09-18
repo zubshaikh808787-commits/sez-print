@@ -253,46 +253,77 @@ class LabelXPrinterModule : Module() {
 
     AsyncFunction("connect") { macAddress: String, deviceName: String?, btType: Int?, promise: Promise ->
       ensureSdkInitialized()
-      val name = deviceName ?: "LabelX"
+      val cleanMac = macAddress.trim().uppercase()
+      val rawName = deviceName?.trim() ?: ""
+
+      // Ensure proper prefix mapping for LuckPrinter SDK's internal PrinterEnum lookup:
+      // Seznik LabelX (GD985 SheetLabel) -> "Seznik LabelX_"
+      // Seznik MiniX (Normal Device)     -> "Seznik MiniX_"
+      // Seznik Nexa                      -> "Seznik Nexa_"
+      val normalizedName = when {
+        rawName.contains("minix", ignoreCase = true) || rawName.contains("mini x", ignoreCase = true) -> {
+          if (rawName.startsWith("Seznik MiniX_", ignoreCase = true)) rawName else "Seznik MiniX_${rawName.substringAfterLast('_').ifEmpty { "0000" }}"
+        }
+        rawName.contains("nexa", ignoreCase = true) -> {
+          if (rawName.startsWith("Seznik Nexa_", ignoreCase = true)) rawName else "Seznik Nexa_${rawName.substringAfterLast('_').ifEmpty { "0000" }}"
+        }
+        else -> {
+          if (rawName.startsWith("Seznik LabelX_", ignoreCase = true)) rawName else "Seznik LabelX_${rawName.substringAfterLast('_').ifEmpty { "0000" }}"
+        }
+      }
+
       val type = btType ?: BluetoothDevice.DEVICE_TYPE_CLASSIC
 
       ioExecutor.execute {
         try {
+          // 1. Cancel any active Bluetooth discovery to avoid RFCOMM connection delays/failures
+          val adapter = bluetoothAdapter
+          if (adapter != null && adapter.isDiscovering) {
+            try {
+              @SuppressLint("MissingPermission")
+              adapter.cancelDiscovery()
+            } catch (_: Throwable) {}
+            try { Thread.sleep(150) } catch (_: Throwable) {}
+          }
+
           val helper = PrinterHelper.getInstance()
           if (helper.isConnectedLuck) {
             val curMac = connectedMac
-            if (curMac != null && curMac.equals(macAddress, ignoreCase = true)) {
+            if (curMac != null && curMac.equals(cleanMac, ignoreCase = true)) {
               promise.resolve(
                 mapOf(
                   "success" to true,
-                  "name" to (connectedName ?: name),
-                  "mac" to macAddress,
+                  "name" to (connectedName ?: rawName.ifEmpty { normalizedName }),
+                  "mac" to cleanMac,
                   "type" to type
                 )
               )
               return@execute
             }
             helper.disconnectLuck()
-            Thread.sleep(300)
+            Thread.sleep(200)
           }
 
-          Log.i(TAG, "Connecting to LuckPrinter name=$name mac=$macAddress type=$type...")
-          val result = helper.connectLuck(name, macAddress, type)
+          Log.i(TAG, "Connecting to LuckPrinter normalizedName=$normalizedName rawName=$rawName mac=$cleanMac type=$type...")
+          val result = helper.connectLuck(normalizedName, cleanMac, type)
+          Log.i(TAG, "LuckPrinter connectLuck result=$result isConnectedLuck=${helper.isConnectedLuck}")
+
           if (result) {
-            connectedName = name
-            connectedMac = macAddress
+            connectedName = if (rawName.isNotEmpty()) rawName else normalizedName
+            connectedMac = cleanMac
             promise.resolve(
               mapOf(
                 "success" to true,
-                "name" to name,
-                "mac" to macAddress,
+                "name" to (connectedName ?: normalizedName),
+                "mac" to cleanMac,
                 "type" to type
               )
             )
           } else {
-            promise.reject("CONNECT_FAILED", "Failed to connect to printer $name ($macAddress)", null)
+            promise.reject("CONNECT_FAILED", "Failed to connect to printer $rawName ($cleanMac)", null)
           }
         } catch (e: Throwable) {
+          Log.e(TAG, "Exception during LuckPrinter connect", e)
           promise.reject("CONNECT_EXCEPTION", e.message, e)
         }
       }
