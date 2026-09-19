@@ -15,6 +15,7 @@ export const MIN_ELEMENT_MM = 0.5;
 export const MAX_ELEMENT_MM = 310;
 
 export function finiteMm(value: unknown, fallback = 0): number {
+  'worklet';
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
   if (n === Number.POSITIVE_INFINITY || n === Number.NEGATIVE_INFINITY) return fallback;
@@ -23,6 +24,7 @@ export function finiteMm(value: unknown, fallback = 0): number {
 }
 
 export function roundMm(value: number, digits = 2): number {
+  'worklet';
   const n = finiteMm(value, 0);
   const f = 10 ** digits;
   return Math.round(n * f) / f;

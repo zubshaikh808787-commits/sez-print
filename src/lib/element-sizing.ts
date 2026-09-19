@@ -1,6 +1,7 @@
 import { elementSizeMm, mmToPt, ptToMm, textBlockHeightMm, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { isRatTailGeometry, ratTailBodyRectMm, scaleMediaGeometry } from '@/lib/media-geometry';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
+import { computeTextElementHeightMm, computeWrappedLines, measureTextWidthMm } from '@/lib/text-metrics';
 export { computeTextElementHeightMm, computeWrappedLines, measureTextWidthMm } from '@/lib/text-metrics';
 export { textBlockHeightMm } from '@/lib/label-document';
 
@@ -286,32 +287,161 @@ export function normalizeDocumentElements(doc: LabelDocument): LabelElement[] {
  * font size, stroke/line width, corner radius — so glyphs and strokes don't
  * distort when width and height scale by different amounts.
  */
-function scaleElementFields(el: LabelElement, sx: number, sy: number, fontScale: number): LabelElement {
+/**
+ * Scale one element's dimensional fields for a label resize.
+ * `sx`/`sy` scale position/size (anisotropic — matches the new aspect ratio).
+ * `fontScale` (uniform, min(sx, sy)) scales ink-thickness fields —
+ * font size, stroke/line width, corner radius.
+ * Text height is reflowed via computeTextElementHeightMm.
+ * QR codes are constrained to 1:1 square ratio.
+ * Barcodes enforce an optical scan aspect proportion guard (<= 6:1) with a 3.5mm floor.
+ */
+function scaleElementFields(
+  el: LabelElement,
+  sx: number,
+  sy: number,
+  fontScale: number,
+  canvasWidthMm: number,
+  canvasHeightMm: number,
+): LabelElement {
+  const scaledLeft = el.left * sx;
+  const scaledTop = el.top * sy;
+  const scaledWidth = el.width * sx;
+
+  if (el.type === 'text' || el.type === 'degrees') {
+    const originalFs = 'fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : 12;
+    const scaledFs = Math.max(4, originalFs * fontScale);
+    const rawText =
+      el.contentType === 'Data Source' && el.columnNameContent
+        ? `{${el.columnNameContent}}`
+        : 'text' in el
+          ? el.text
+          : el.content;
+
+    const reflowedHeight = computeTextElementHeightMm({
+      text: rawText,
+      fontSize: scaledFs,
+      widthMm: Math.max(2, scaledWidth),
+      autoWrapping: el.autoWrapping ?? 'Word',
+      lineSpacing: el.lineSpacing ?? '1.0',
+      charSpacing: el.charSpacing ?? 0,
+      bold: el.bold ?? false,
+      verticalDisplay: el.verticalDisplay ?? false,
+    });
+
+    return {
+      ...el,
+      left: scaledLeft,
+      top: scaledTop,
+      width: Math.max(2, scaledWidth),
+      height: reflowedHeight,
+      fontSize: scaledFs,
+    };
+  }
+
+  if (el.type === 'time') {
+    const originalFs = 'fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : 12;
+    const scaledFs = Math.max(4, originalFs * fontScale);
+    const reflowedHeight = textBlockHeightMm(scaledFs, 1);
+    return {
+      ...el,
+      left: scaledLeft,
+      top: scaledTop,
+      width: Math.max(2, scaledWidth),
+      height: reflowedHeight,
+      fontSize: scaledFs,
+    };
+  }
+
+  if (el.type === 'qrcode') {
+    const rawW = el.width * sx;
+    const rawH = (typeof el.height === 'number' ? el.height : el.width) * sy;
+    // QR codes must strictly preserve 1:1 square ratio
+    const squareSize = Math.max(2, Math.min(rawW, rawH));
+    return {
+      ...el,
+      left: scaledLeft,
+      top: scaledTop,
+      width: squareSize,
+      height: squareSize,
+    };
+  }
+
+  if (el.type === 'barcode') {
+    const rawH = (typeof el.height === 'number' ? el.height : 10) * sy;
+    // Enforce 6:1 aspect ratio ceiling (height >= width / 6) if headroom permits, with 3.5mm absolute floor
+    const minScanH = 3.5;
+    const idealHeight = Math.max(rawH, scaledWidth / 6);
+    const availableH = Math.max(minScanH, canvasHeightMm - scaledTop);
+    const targetHeight = Math.max(minScanH, Math.min(idealHeight, availableH));
+
+    const originalFs = 'fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : 10;
+    const scaledFs = Math.max(4, originalFs * fontScale);
+    return {
+      ...el,
+      left: scaledLeft,
+      top: scaledTop,
+      width: Math.max(4, scaledWidth),
+      height: targetHeight,
+      fontSize: scaledFs,
+    };
+  }
+
+  if (el.type === 'clipart' || el.type === 'image') {
+    // Preserve aspect ratio for graphical assets using uniform fontScale
+    const scaledW = el.width * fontScale;
+    const scaledH = (typeof el.height === 'number' ? el.height : el.width) * fontScale;
+    return {
+      ...el,
+      left: scaledLeft,
+      top: scaledTop,
+      width: Math.max(2, scaledW),
+      height: Math.max(2, scaledH),
+    };
+  }
+
+  if (el.type === 'line') {
+    const vertical = (el.height ?? 0) >= el.width * 2;
+    const lineW = vertical ? el.width * fontScale : el.width * sx;
+    const lineH = vertical ? (el.height ?? 0.4) * sy : (el.height ?? 0.4) * fontScale;
+    return {
+      ...el,
+      left: scaledLeft,
+      top: scaledTop,
+      width: Math.max(0.1, lineW),
+      height: Math.max(0.1, lineH),
+    };
+  }
+
+  if (el.type === 'table') {
+    return {
+      ...el,
+      left: scaledLeft,
+      top: scaledTop,
+      width: Math.max(4, scaledWidth),
+      height: Math.max(4, (el.height ?? 10) * sy),
+      columnWidths: el.columnWidths.map((n) => n * sx),
+      rowHeights: el.rowHeights.map((n) => n * sy),
+    };
+  }
+
   const scaled: LabelElement = {
     ...el,
-    left: el.left * sx,
-    top: el.top * sy,
-    width: el.width * sx,
+    left: scaledLeft,
+    top: scaledTop,
+    width: Math.max(0.5, scaledWidth),
   };
-  if ('height' in scaled && typeof scaled.height === 'number' && scaled.type !== 'line') {
-    (scaled as { height: number }).height *= sy;
-  }
-  if (scaled.type === 'line' && typeof scaled.height === 'number') {
-    const vertical = scaled.height >= scaled.width * 2;
-    (scaled as { height: number }).height *= vertical ? sy : fontScale;
+  if ('height' in scaled && typeof scaled.height === 'number') {
+    (scaled as { height: number }).height = Math.max(0.5, (scaled as { height: number }).height * sy);
   }
   if ('fontSize' in scaled && typeof scaled.fontSize === 'number') {
     (scaled as { fontSize: number }).fontSize = Math.max(4, scaled.fontSize * fontScale);
   }
   if ('lineWidth' in scaled && typeof scaled.lineWidth === 'number') {
-    (scaled as { lineWidth: number }).lineWidth *= fontScale;
+    (scaled as { lineWidth: number }).lineWidth = Math.max(0.1, scaled.lineWidth * fontScale);
   }
   if ('roundRadius' in scaled && typeof scaled.roundRadius === 'number') {
     (scaled as { roundRadius: number }).roundRadius *= fontScale;
-  }
-  if (scaled.type === 'table') {
-    scaled.columnWidths = scaled.columnWidths.map((n) => n * sx);
-    scaled.rowHeights = scaled.rowHeights.map((n) => n * sy);
   }
   return scaled;
 }
@@ -319,8 +449,7 @@ function scaleElementFields(el: LabelElement, sx: number, sy: number, fontScale:
 /**
  * Border is locked to the label bounds, not scaled by sx/sy like other
  * elements — but its stroke thickness (`lineWidth`) is still an ink-thickness
- * field and must scale by `fontScale`, or it goes stale (a 2mm border on a
- * shrunk label prints as a near-solid block; on an enlarged one, hairline-thin).
+ * field and must scale by `fontScale`.
  */
 function scaleBorderElement(
   el: LabelElement & { type: 'border' },
@@ -337,7 +466,8 @@ function scaleBorderElement(
     width,
     height,
     rotation: 0 as const,
-    lineWidth: el.lineWidth * fontScale,
+    lockMovement: true,
+    lineWidth: Math.max(0.1, el.lineWidth * fontScale),
   };
 }
 
@@ -365,7 +495,10 @@ export function scaleDocumentToSize(
           nextDoc,
         );
       }
-      return clampElementToLabel(scaleElementFields(el, sx, sy, fontScale), nextDoc);
+      return clampElementToLabel(
+        scaleElementFields(el, sx, sy, fontScale, widthMm, heightMm),
+        nextDoc,
+      );
     });
 
   const elements = scaleElements(doc.elements);
@@ -409,7 +542,7 @@ export function fitDocumentCenteredOnPage(
         nextDoc,
       );
     }
-    const scaled = scaleElementFields(el, scale, scale, scale);
+    const scaled = scaleElementFields(el, scale, scale, scale, contentW, contentH);
     scaled.left = ox + scaled.left;
     scaled.top = oy + scaled.top;
     return clampElementToLabel(scaled, nextDoc);
@@ -438,7 +571,10 @@ export function fitDocumentToFillPage(
         nextDoc,
       );
     }
-    return clampElementToLabel(scaleElementFields(el, scaleX, scaleY, fontScale), nextDoc);
+    return clampElementToLabel(
+      scaleElementFields(el, scaleX, scaleY, fontScale, widthMm, heightMm),
+      nextDoc,
+    );
   });
   return { ...nextDoc, elements };
 }

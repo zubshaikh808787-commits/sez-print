@@ -884,6 +884,7 @@ export default function EditScreen() {
             ...DEFAULT_BARCODE_STATE,
             ...base,
             type: 'barcode',
+            content: '1234567890',
             encodeMode: defaults.barcodeEncodeMode,
             left: fit.left,
             top: fit.top,

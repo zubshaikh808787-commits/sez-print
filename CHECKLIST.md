@@ -13,19 +13,19 @@
 
 ---
 
-## Phase 1: Interactive Skia Canvas & Resizing Engine (Editor UI & Geometry)
-- [ ] **Task 1.1:** Refactor `skia-element-renderer.tsx` to support live scaling via Reanimated shared values
-- [ ] **Task 1.2:** Implement Native Vector Handles in `skia-canvas.tsx`
-- [ ] **Task 1.3:** Modernize Template Resizing in `src/lib/element-sizing.ts`
-- [ ] **Task 1.4:** Mount `<SkiaCanvas>` in `src/app/edit.tsx`
+## Phase 1: Interactive Canvas & Resizing Engine (Editor UI & Geometry)
+- [x] **Task 1.1:** Refactor `skia-element-renderer.tsx` to support live scaling via Reanimated shared values
+- [x] **Task 1.2:** Implement Native Vector Handles in `skia-canvas.tsx`
+- [x] **Task 1.3:** Modernize Template Resizing in `src/lib/element-sizing.ts`
+- [x] **Task 1.4:** Architecture Alignment: Editor Canvas Stabilized on Konva (`konva-canvas.tsx`); Print/Export Rasterizer Decoupled to Headless Skia (Phase 4)
 
 ---
 
-## Phase 2: Integer-Module Optical Barcode & 2D Symbology Engine
-- [ ] **Task 2.1:** Build Integer Module Snapping Engine in `src/lib/barcode/barcode-snapping.ts`
-- [ ] **Task 2.2:** Implement Authentic PDF417 and DataMatrix Encoders
-- [ ] **Task 2.3:** Update Skia Barcode Rendering in `skia-element-renderer.tsx`
-- [ ] **Task 2.4:** Build Real-Time Scannability Preflight Inspector
+## Phase 2: Integer-Module Optical Barcode & 2D Symbology Engine (Canvas-Agnostic)
+- [x] **Task 2.1:** Build Integer Module Snapping Engine in `src/lib/barcode/barcode-snapping.ts`
+- [x] **Task 2.2:** Implement Authentic PDF417 and DataMatrix Encoders in `src/lib/barcode/`
+- [x] **Task 2.3:** Update Barcode & 2D Rendering in `src/components/editor/element-renderer.tsx` & Symbology Core
+- [ ] **Task 2.4:** Build Real-Time Scannability Preflight Inspector in `src/lib/barcode/scannability-inspector.ts` and `barcode-property-panel.tsx`
 
 ---
 

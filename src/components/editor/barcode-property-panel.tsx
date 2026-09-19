@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useMemo } from 'react';
 
 import { PositionControls } from '@/components/editor/position-controls';
 import {
@@ -16,6 +17,11 @@ import {
 } from '@/components/editor/types';
 import { Palette } from '@/constants/ui';
 import { BARCODE_MODES } from '@/lib/barcode-code128';
+import {
+  computeOptimalDimensionsMm,
+  inspect1DBarcodeScannability,
+  type BarcodeScannabilityReport,
+} from '@/lib/barcode/scannability-inspector';
 
 const ACCENT = '#48C3C7';
 const TABS: BarcodePropertyTab[] = ['Regular', 'Position', 'Content', 'Encoding', 'Font'];
@@ -340,6 +346,109 @@ function FontSection({
   );
 }
 
+function ScannabilityInspectorCard({
+  report,
+  onAutoOptimize,
+}: {
+  report: BarcodeScannabilityReport;
+  onAutoOptimize: () => void;
+}) {
+  const isOptimal = report.status === 'optimal';
+  const isMarginal = report.status === 'marginal';
+  const isInvalid = report.status === 'invalid';
+
+  const badgeColor = isOptimal ? '#10B981' : isMarginal ? '#F59E0B' : '#EF4444';
+  const badgeBg = isOptimal ? '#ECFDF5' : isMarginal ? '#FFFBEB' : '#FEF2F2';
+
+  const badgeTitle = isOptimal
+    ? 'Grade A • Optimal'
+    : isMarginal
+    ? 'Grade B • Marginal'
+    : isInvalid
+    ? 'Invalid Barcode'
+    : 'Grade C/F • Sub-Optical';
+
+  return (
+    <View style={[styles.scannabilityCard, { borderColor: badgeColor }]}>
+      <View style={styles.scannabilityHeader}>
+        <View style={styles.scannabilityTitleGroup}>
+          <Text style={styles.scannabilityTitle}>Optical Scannability</Text>
+          <View style={[styles.scannabilityBadge, { backgroundColor: badgeBg }]}>
+            <View style={[styles.scannabilityDot, { backgroundColor: badgeColor }]} />
+            <Text style={[styles.scannabilityBadgeText, { color: badgeColor }]}>
+              {badgeTitle}
+            </Text>
+          </View>
+        </View>
+        <Text style={[styles.scannabilityScore, { color: badgeColor }]}>
+          {report.score}/100
+        </Text>
+      </View>
+
+      {!isInvalid && (
+        <View style={styles.scannabilityMetricsRow}>
+          <View style={styles.scannabilityMetricItem}>
+            <Text style={styles.scannabilityMetricLabel}>Narrow Bar (X)</Text>
+            <Text style={styles.scannabilityMetricValue}>
+              {report.metrics.xDimensionMm.toFixed(2)} mm
+            </Text>
+            <Text style={styles.scannabilityMetricSub}>
+              {report.metrics.moduleDots} dot{report.metrics.moduleDots !== 1 ? 's' : ''} @ 203 DPI
+            </Text>
+          </View>
+
+          <View style={styles.scannabilityMetricDivider} />
+
+          <View style={styles.scannabilityMetricItem}>
+            <Text style={styles.scannabilityMetricLabel}>Quiet Zone</Text>
+            <Text style={styles.scannabilityMetricValue}>
+              {report.metrics.quietZoneMm.toFixed(1)} mm
+            </Text>
+            <Text style={styles.scannabilityMetricSub}>10× module margin</Text>
+          </View>
+
+          <View style={styles.scannabilityMetricDivider} />
+
+          <View style={styles.scannabilityMetricItem}>
+            <Text style={styles.scannabilityMetricLabel}>Scan Height</Text>
+            <Text style={styles.scannabilityMetricValue}>
+              {report.metrics.heightMm.toFixed(1)} mm
+            </Text>
+            <Text style={styles.scannabilityMetricSub}>
+              {(report.metrics.aspectRatio * 100).toFixed(0)}% of width
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {report.issues.length > 0 && (
+        <View style={styles.scannabilityIssuesList}>
+          {report.issues.map((issue, idx) => {
+            const issueColor =
+              issue.severity === 'error' ? '#EF4444' : issue.severity === 'warning' ? '#F59E0B' : '#64748B';
+            return (
+              <View key={idx} style={styles.scannabilityIssueItem}>
+                <Text style={[styles.scannabilityIssueBullet, { color: issueColor }]}>•</Text>
+                <Text style={styles.scannabilityIssueText}>{issue.message}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      {report.needsOptimization && (
+        <Pressable
+          onPress={onAutoOptimize}
+          style={({ pressed }) => [styles.autoOptimizeBtn, pressed && styles.pressed]}>
+          <Text style={styles.autoOptimizeBtnText}>
+            ⚡ Auto-Optimize Dimensions ({report.suggestedWidthMm} × {report.suggestedHeightMm} mm)
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 type BarcodePropertyPanelProps = {
   activeTab: BarcodePropertyTab;
   onTabChange: (tab: BarcodePropertyTab) => void;
@@ -361,6 +470,21 @@ export function BarcodePropertyPanel({
   labelHeightMm,
   elementHeightMm,
 }: BarcodePropertyPanelProps) {
+  const scannabilityReport = useMemo(
+    () => inspect1DBarcodeScannability(state.encodeMode, state.content, state.width, elementHeightMm, 203),
+    [state.encodeMode, state.content, state.width, elementHeightMm],
+  );
+
+  const handleAutoOptimize = () => {
+    const optimal = computeOptimalDimensionsMm(state.encodeMode, state.content, elementHeightMm, 203);
+    const updates: Partial<BarcodeElementState> = {
+      width: Math.min(labelWidthMm, optimal.widthMm),
+    };
+    if (elementHeightMm < 3.5 || elementHeightMm / state.width < 0.15) {
+      updates.height = Math.min(labelHeightMm, optimal.heightMm);
+    }
+    patch(updates);
+  };
   const dimensionSteppers = (
     <>
       <StepperRow
@@ -515,6 +639,8 @@ export function BarcodePropertyPanel({
               onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
             />
             <SectionGap />
+            <ScannabilityInspectorCard report={scannabilityReport} onAutoOptimize={handleAutoOptimize} />
+            <SectionGap />
             {dimensionSteppers}
             <SectionGap />
             <ToggleRow
@@ -571,7 +697,13 @@ export function BarcodePropertyPanel({
           </>
         )}
 
-        {activeTab === 'Encoding' && encodingSection}
+        {activeTab === 'Encoding' && (
+          <>
+            <ScannabilityInspectorCard report={scannabilityReport} onAutoOptimize={handleAutoOptimize} />
+            <SectionGap />
+            {encodingSection}
+          </>
+        )}
 
         {activeTab === 'Font' && <FontSection state={state} patch={patch} />}
       </ScrollView>
@@ -774,4 +906,120 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pressed: { opacity: 0.65 },
+  scannabilityCard: {
+    marginHorizontal: 16,
+    marginVertical: 10,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    backgroundColor: '#FAFCFD',
+  },
+  scannabilityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  scannabilityTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  scannabilityTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  scannabilityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    gap: 5,
+  },
+  scannabilityDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  scannabilityBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  scannabilityScore: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  scannabilityMetricsRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    marginBottom: 8,
+  },
+  scannabilityMetricItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  scannabilityMetricLabel: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#64748B',
+    marginBottom: 2,
+  },
+  scannabilityMetricValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  scannabilityMetricSub: {
+    fontSize: 9,
+    color: '#94A3B8',
+    marginTop: 1,
+  },
+  scannabilityMetricDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#CBD5E1',
+  },
+  scannabilityIssuesList: {
+    marginTop: 4,
+    marginBottom: 6,
+    gap: 4,
+  },
+  scannabilityIssueItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  scannabilityIssueBullet: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  scannabilityIssueText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#475569',
+  },
+  autoOptimizeBtn: {
+    marginTop: 6,
+    backgroundColor: ACCENT,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  autoOptimizeBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });

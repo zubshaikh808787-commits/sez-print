@@ -112,7 +112,7 @@ export type BarcodeElementState = {
 
 export const DEFAULT_BARCODE_STATE: BarcodeElementState = {
   contentType: 'Manual',
-  content: '',
+  content: '0123456789',
   columnNameContent: '',
   encodeMode: 'CODE-128',
   textFlag: 'Bottom',

@@ -141,8 +141,9 @@ const SkiaElementNode = memo(function SkiaElementNode({
 
   // Outer group handles translation and center-pivot rotation
   const outerTransform = useDerivedValue(() => {
-    const rad = (element.rotation * Math.PI) / 180;
-    if (!element.rotation) {
+    const rot = element.rotation ?? 0;
+    const rad = (rot * Math.PI) / 180;
+    if (!rot) {
       return [
         { translateX: leftPx + transX.value },
         { translateY: topPx + transY.value },
@@ -499,7 +500,7 @@ const ElementGestureNode = memo(function ElementGestureNode({
   }, [element.id, element.type, onEditText]);
 
   const combinedElementGesture = useMemo(() => {
-    return Gesture.Exclusive(doubleTapGesture, dragGesture, tapSelectGesture);
+    return Gesture.Race(dragGesture, doubleTapGesture, tapSelectGesture);
   }, [doubleTapGesture, dragGesture, tapSelectGesture]);
 
   const boxStyle = useAnimatedStyle(() => ({
@@ -508,7 +509,7 @@ const ElementGestureNode = memo(function ElementGestureNode({
     top: topPx + transY.value,
     width: curWidth.value,
     height: curHeight.value,
-    transform: [{ rotate: `${element.rotation}deg` }],
+    transform: [{ rotate: `${element.rotation ?? 0}deg` }],
   }));
 
   const rightHandleStyle = useAnimatedStyle(() => ({
