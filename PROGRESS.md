@@ -230,4 +230,52 @@ Each completed sub-task is logged with the following structure:
   - `npx --yes tsx --tsconfig tsconfig.json src/lib/editor/__tests__/template-resizing.test.ts`: 100% PASS.
   - `npm run test:labelx`: 100% PASS.
   - `npx tsc --noEmit`: 0 errors.
-- **Notes & Next Step:** Ready for **Task 2.4**: Build Real-Time Scannability Preflight Inspector in `src/lib/barcode/scannability-inspector.ts` and `barcode-property-panel.tsx`.
+- **Notes & Next Step:** Proceeded to Task 2.4.
+
+---
+
+### Task 2.4: Real-Time Scannability Preflight Inspector
+- **Scope:** Building a real-time ISO/IEC 15416 preflight scannability engine (`src/lib/barcode/scannability-inspector.ts`) and integrating real-time diagnostic badges, metrics, and auto-optimization into the editor property panel (`src/components/editor/barcode-property-panel.tsx`).
+- **Date Completed:** 2026-09-19
+- **What Was Done:**
+  1. **Scannability Engine (`src/lib/barcode/scannability-inspector.ts`):**
+     - Implemented `inspect1DBarcodeScannability(mode, content, widthMm, heightMm, dpi)` returning a full preflight report with status (`optimal`, `marginal`, `sub-optical`, `invalid`), optical score (0–100), ISO grade (A, B, C, F), and concrete diagnostics.
+     - Implemented dual-axis `computeOptimalDimensionsMm(mode, content, currentHeightMm, dpi)` computing width for 2-dot modules and height ($\ge 3.5\text{ mm}$ floor, $\ge 15\%$ width, $\ge 5\text{ mm}$).
+  2. **UI Property Panel Integration (`src/components/editor/barcode-property-panel.tsx`):**
+     - Built `ScannabilityInspectorCard` with live status pill (🟢 Optimal / 🟡 Marginal / 🔴 Sub-Optical), diagnostic metrics grid ($X$-dimension, quiet zone, physical height), diagnostic warning bullet list, and "Auto-Optimize Dimensions" button.
+- **Verification & Quality Gate Results:**
+  - `src/lib/barcode/__tests__/scannability-inspector.test.ts`: 100% PASS (6/6 tests passing).
+  - `npx tsc --noEmit`: 0 errors.
+- **Notes & Next Step:** Proceeded to Barcode Bounding Box Sizing Alignment vs WePrint.
+
+---
+
+### Bugfix: Barcode Selection/Bounding Box Sizing Mismatch vs WePrint
+- **Scope:** Eliminating empty internal padding and vertical dead space inside the barcode selection bounding box to match WePrint's tight fit (`src/components/editor/element-renderer.tsx`, `src/lib/element-sizing.ts`, `src/components/editor/types.ts`).
+- **Date Completed:** 2026-09-19
+- **Problem & Root Cause:**
+  - **Horizontal Dead Space:** In `snap1DBarcodeModules`, passing `includeQuietZone = true` caused 20 modules of blank quiet zone to be rendered *inside* the element bounding box, and `offsetXMm` centered the barcode within oversized containers (e.g. 37.6mm–47.2mm from `fitBarcodeDefaults`), leaving 7.5mm (40% of the box) in dead gutters on left and right.
+  - **Vertical Dead Space ("above the bars"):** In `BarcodeContent`, the outer container used `justifyContent: 'center'`, which vertically centered the bars and text inside inflated containers, pushing the top of the bars down away from the top dashed border.
+  - **Reference WePrint Measurements (`media_1789801439229.jpg`):**
+    - Red dashed box: $255 \times 101\text{ px}$ (aspect ratio 0.396).
+    - Top gap: **0 px** (bars start on row 240, top border is row 240).
+    - Left gap: **2 px** (0.8%).
+    - Right gap: **1 px** (0.4%).
+    - Bars height: $71\text{ px}$ (70.3%), text height: $17\text{ px}$ (16.8%), gap: $7\text{ px}$ (6.9%), bottom handle clearance: $6\text{ px}$ (5.9%).
+- **What Was Done:**
+  1. **Tight Barcode Rendering (`element-renderer.tsx`):**
+     - Switched `snap1DBarcodeModules(rawModules, widthMm, 203, false)` to render with `includeQuietZone = false` inside the element bounding box. The first bar starts at $x = 0$ (left border) and the last bar reaches $x = \text{widthPx}$ (right border).
+     - Changed outer container `justifyContent` to `'flex-start'`.
+     - Pinned the top of the bars at $y = 0$ (touching top dashed border).
+     - Fixed `barsHeight = Math.max(2, heightPx - labelHeight)` so bars and text consume 100% of `heightPx` with zero dead space above the bars.
+  2. **Tight Default Sizing (`element-sizing.ts` & `types.ts`):**
+     - Updated `fitBarcodeDefaults` to set natural tight barcode proportions matching WePrint ($\approx 26\text{ mm}$ width, $\approx 10\text{ mm}$ height, aspect ratio $\approx 0.39$).
+     - Updated `DEFAULT_BARCODE_STATE` to $26\text{ mm} \times 10\text{ mm}$, `fontSize: 8`.
+- **Verification & Quality Gate Results:**
+  - `scannability-inspector.test.ts`: 100% PASS.
+  - `barcode-snapping.test.ts`: 100% PASS.
+  - `encoders.test.ts`: 100% PASS.
+  - `independent-decoder-verification.test.ts`: 100% PASS (ZXing).
+  - `template-resizing.test.ts`: 100% PASS.
+  - `npm run test:labelx`: 100% PASS.
+  - `npx tsc --noEmit`: 0 errors.

@@ -113,15 +113,18 @@ export function fitTextDefaults(widthMm: number, heightMm: number, existing: Lab
 
 export function fitBarcodeDefaults(widthMm: number, heightMm: number, existing: LabelElement[] = []) {
   const pad = padMm(widthMm, heightMm);
-  const width = Math.max(6, widthMm - pad * 2);
-  const height = Math.max(3, Math.min(heightMm * 0.36, heightMm - pad * 2, 12));
+  // Natural tight barcode proportions matching WePrint (aspect ratio ~0.40, hugging bars + HRI text)
+  const targetW = Math.min(28, Math.max(16, widthMm * 0.58));
+  const width = Math.min(targetW, Math.max(6, widthMm - pad * 2));
+  const targetH = Math.min(12, Math.max(6, width * 0.40));
+  const height = Math.min(targetH, Math.max(3, heightMm - pad * 2));
   const placed = placeInLabel(widthMm, heightMm, width, height, existing);
   return {
     left: placed.left,
     top: placed.top,
     width: placed.width,
     height: placed.height,
-    fontSize: Math.max(4, Math.min(mmToPt(heightMm * 0.1), 9)),
+    fontSize: Math.max(4, Math.min(mmToPt(height * 0.25), 8.5)),
   };
 }
 

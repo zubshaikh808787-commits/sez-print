@@ -274,24 +274,25 @@ function BarcodeContent({
   const labelSize = fontSizePx(element.fontSize, scale);
   const showLabel = element.textFlag !== 'Hide';
   const hri = formatBarcodeHri(element.encodeMode, content);
-  const barsHeight = showLabel ? Math.max(2, heightPx - labelSize * 1.3) : heightPx;
+  const labelHeight = showLabel ? Math.max(8, Math.round(labelSize * 1.2)) : 0;
   const widthMm = element.width > 0 ? element.width : widthPx / (scale || 1);
 
-  // Quantize barcode modules to integer hardware dots with quiet zone enforcement
+  // Quantize barcode modules to integer hardware dots without internal quiet zone padding,
+  // matching WePrint's tight fit where the selection box hugs the outermost bars and text exactly.
   const snapped = useMemo(() => {
     if (!rawModules) return null;
-    return snap1DBarcodeModules(rawModules, widthMm, 203, true);
+    return snap1DBarcodeModules(rawModules, widthMm, 203, false);
   }, [rawModules, widthMm]);
 
   const label = showLabel ? (
-    <View style={{ width: '100%', alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: '100%', height: labelHeight, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }}>
       <Text
         numberOfLines={1}
         allowFontScaling={false}
         style={{
           width: '100%',
           fontSize: labelSize,
-          lineHeight: labelSize * 1.2,
+          lineHeight: labelHeight,
           color,
           textAlign: 'center',
           fontFamily: resolveFontFamily(element.fontFamily),
@@ -304,29 +305,25 @@ function BarcodeContent({
   ) : null;
 
   return (
-    <View style={[styles.fill, { backgroundColor: bgColor, justifyContent: 'center', alignItems: 'center' }]}>
+    <View style={[styles.fill, { backgroundColor: bgColor, justifyContent: 'flex-start', alignItems: 'stretch' }]}>
       {element.textFlag === 'Top' ? label : null}
       {rawModules && snapped ? (
         <View
           style={{
             flex: 1,
             width: '100%',
-            minHeight: 2,
-            paddingBottom: showLabel && element.textFlag === 'Bottom' ? 1 : 0,
-            paddingTop: showLabel && element.textFlag === 'Top' ? 1 : 0,
           }}>
           <Svg
             width="100%"
             height="100%"
-            viewBox={`0 0 ${widthPx} ${Math.max(2, barsHeight)}`}
+            viewBox={`0 0 ${widthPx} 100`}
             preserveAspectRatio="none">
             <Path
               d={snapped.bars
                 .map((bar) => {
-                  const startX = (snapped.offsetXMm / widthMm) * widthPx;
-                  const barX = startX + bar.x * (snapped.quantizedWidthMm / widthMm) * widthPx;
-                  const barW = Math.max(bar.width * (snapped.quantizedWidthMm / widthMm) * widthPx, 0.55);
-                  return `M${barX},0h${barW}v${Math.max(2, barsHeight)}h-${barW}Z`;
+                  const barX = bar.x * widthPx;
+                  const barW = Math.max(bar.width * widthPx, 0.55);
+                  return `M${barX},0h${barW}v100h-${barW}Z`;
                 })
                 .join(' ')}
               fill={color}

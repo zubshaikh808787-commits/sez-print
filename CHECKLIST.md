@@ -25,7 +25,7 @@
 - [x] **Task 2.1:** Build Integer Module Snapping Engine in `src/lib/barcode/barcode-snapping.ts`
 - [x] **Task 2.2:** Implement Authentic PDF417 and DataMatrix Encoders in `src/lib/barcode/`
 - [x] **Task 2.3:** Update Barcode & 2D Rendering in `src/components/editor/element-renderer.tsx` & Symbology Core
-- [ ] **Task 2.4:** Build Real-Time Scannability Preflight Inspector in `src/lib/barcode/scannability-inspector.ts` and `barcode-property-panel.tsx`
+- [x] **Task 2.4:** Build Real-Time Scannability Preflight Inspector in `src/lib/barcode/scannability-inspector.ts` and `barcode-property-panel.tsx`
 
 ---
 
