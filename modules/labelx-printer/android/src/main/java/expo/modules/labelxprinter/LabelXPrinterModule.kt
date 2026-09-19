@@ -28,6 +28,11 @@ import com.luckprinter.sdk_new.callback.OnPrintCallback
 import com.luckprinter.sdk_new.callback.OnReceiveDeviceStatusListener
 import com.luckprinter.sdk_new.device.BaseDevice
 import com.luckprinter.sdk_new.device.PrinterHelper
+import com.luckprinter.sdk_new.device.custom.CmdType
+import com.luckprinter.sdk_new.device.custom.Command
+import com.luckprinter.sdk_new.device.custom.ICustomPrinter
+import com.luckprinter.sdk_new.device.custom.PrinterCommand
+import com.luckprinter.sdk_new.device.custom.PrinterProperty
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -129,10 +134,82 @@ class LabelXPrinterModule : Module() {
       PrinterHelper.getInstance().init(context.applicationContext, key, false)
       PrinterHelper.getInstance().addConnectListener(connectionListener)
       PrinterHelper.getInstance().addDeviceStatusListener(statusListener)
+      registerCustomProfiles()
       isInitialized = true
       Log.i(TAG, "LuckPrinter SDK initialized successfully with key=${key.take(8)}...")
     } catch (e: Throwable) {
       Log.e(TAG, "Failed to initialize LuckPrinter SDK", e)
+    }
+  }
+
+  private fun registerCustomProfiles() {
+    val propertyMap = HashMap<String, PrinterProperty>()
+
+    // Profile for 48mm portable thermal printer (384 dots @ 203 DPI)
+    val normalProperty = PrinterProperty.Builder()
+      .speedList(emptyList())
+      .densityList(listOf(0, 1, 2))
+      .printerDpi(203)
+      .printerMaxWidth(48)
+      .btType("classic_ble")
+      .bleEnable(false)
+      .printerType("normal")
+      .supportSetSpeed(false)
+      .supportPrintGray(true)
+      .build()
+
+    val normalPrefixes = listOf(
+      "Seznik MiniX_",
+      "BP 330",
+      "BP330",
+      "BP ",
+      "BP_",
+      "MiniX_",
+      "LuckP_",
+      "BTW_",
+      "P15_",
+      "L12_",
+      "L13_",
+      "L15_",
+      "D11_",
+      "D15_",
+      "SAM_",
+      "ITP07_",
+      "RPP02N"
+    )
+    for (prefix in normalPrefixes) {
+      propertyMap[prefix] = normalProperty
+    }
+
+    // Profile for SheetLabel printers (GD985 / Seznik LabelX)
+    val sheetProperty = PrinterProperty.Builder()
+      .speedList(emptyList())
+      .densityList(listOf(0, 1, 2))
+      .printerDpi(203)
+      .printerMaxWidth(48)
+      .btType("classic_ble")
+      .bleEnable(false)
+      .printerType("sheet_label")
+      .supportSetSpeed(false)
+      .supportPrintGray(true)
+      .build()
+
+    val sheetPrefixes = listOf(
+      "Seznik LabelX_",
+      "GD985_",
+      "GD-985_",
+      "GD-985",
+      "LabelX_"
+    )
+    for (prefix in sheetPrefixes) {
+      propertyMap[prefix] = sheetProperty
+    }
+
+    try {
+      PrinterHelper.getInstance().setCustomPropertyMap(propertyMap)
+      Log.i(TAG, "Registered ${propertyMap.size} custom LuckPrinter profiles")
+    } catch (e: Throwable) {
+      Log.w(TAG, "Failed setting custom property map: ${e.message}")
     }
   }
 
@@ -257,21 +334,31 @@ class LabelXPrinterModule : Module() {
       val rawName = deviceName?.trim() ?: ""
 
       // Ensure proper prefix mapping for LuckPrinter SDK's internal PrinterEnum lookup:
-      // Seznik LabelX (GD985 SheetLabel) -> "Seznik LabelX_" (exact case required by SDK)
-      // Seznik MiniX (Normal Device)     -> "Seznik MiniX_"
-      // Seznik Nexa                      -> "Seznik Nexa_"
+      // GD985 / SheetLabel printers -> "Seznik LabelX_" (exact case required by SDK for GD985)
+      // Seznik Nexa                 -> "Seznik Nexa_"
+      // Portable thermal / BP 330 / MiniX / LuckP / BTW -> "Seznik MiniX_" (Normal Device)
+      val isSheetLabel = rawName.startsWith("GD985", ignoreCase = true) ||
+                         rawName.startsWith("GD-985", ignoreCase = true) ||
+                         rawName.startsWith("LabelX", ignoreCase = true) ||
+                         rawName.startsWith("Label X", ignoreCase = true) ||
+                         rawName.startsWith("Seznik LabelX", ignoreCase = true) ||
+                         rawName.contains("SheetLabel", ignoreCase = true)
+
+      val isNexa = rawName.contains("nexa", ignoreCase = true)
+
       val normalizedName = when {
-        rawName.contains("minix", ignoreCase = true) || rawName.contains("mini x", ignoreCase = true) -> {
+        isSheetLabel -> {
           val suffix = if (rawName.contains("_")) rawName.substringAfterLast('_') else cleanMac.replace(":", "").takeLast(4)
-          "Seznik MiniX_$suffix"
+          "Seznik LabelX_$suffix"
         }
-        rawName.contains("nexa", ignoreCase = true) -> {
+        isNexa -> {
           val suffix = if (rawName.contains("_")) rawName.substringAfterLast('_') else cleanMac.replace(":", "").takeLast(4)
           "Seznik Nexa_$suffix"
         }
         else -> {
+          // Default to MiniX (Normal portable thermal printer: BP 330, MiniX, LuckP, BTW, etc.)
           val suffix = if (rawName.contains("_")) rawName.substringAfterLast('_') else cleanMac.replace(":", "").takeLast(4)
-          "Seznik LabelX_$suffix"
+          "Seznik MiniX_$suffix"
         }
       }
 
@@ -322,6 +409,13 @@ class LabelXPrinterModule : Module() {
             try { Thread.sleep(400) } catch (_: Throwable) {}
             result = helper.connectLuck(normalizedName, cleanMac, type)
             Log.i(TAG, "LuckPrinter connectLuck attempt 2 result=$result isConnectedLuck=${helper.isConnectedLuck}")
+          }
+
+          if (!result && rawName.isNotEmpty() && rawName != normalizedName) {
+            Log.w(TAG, "LuckPrinter connect with normalized name failed; retrying with rawName=$rawName...")
+            try { Thread.sleep(300) } catch (_: Throwable) {}
+            result = helper.connectLuck(rawName, cleanMac, type)
+            Log.i(TAG, "LuckPrinter connectLuck rawName attempt result=$result isConnectedLuck=${helper.isConnectedLuck}")
           }
 
           if (result) {
@@ -640,6 +734,12 @@ class LabelXPrinterModule : Module() {
                           promise.reject("PRINT_FAILED", "Direct test print failed", null)
                         }
                       })
+                      return
+                    } else if (dev is com.luckprinter.sdk_new.device.sheetlabel.base.BaseSheetLabelDevice) {
+                      dev.printTag(width / 8, height / 8, 8, 1, finalBmp, 1)
+                      Thread.sleep(300)
+                      try { if (!finalBmp.isRecycled) finalBmp.recycle() } catch (_: Throwable) {}
+                      promise.resolve(mapOf("success" to true))
                       return
                     }
                   } catch (_: Throwable) {}
