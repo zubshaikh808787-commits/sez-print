@@ -14,6 +14,9 @@ import { Discovery, registry, router } from '@/printer-core';
 import type { Dialect, KnownDevice, Route, TaggedDevice } from '@/printer-core';
 import { devDriver, DEV_DRIVER_ID } from '@/printer-dev';
 import { tejasDriver } from '@/printer-tejas';
+import { joshDriver } from '@/printer-josh';
+import { labelxDriver } from '@/printer-labelx';
+import { tezDriver } from '@/printer-tez';
 
 import { classicScanBackend } from './classic-scan';
 import { AsyncStorageDeviceMemory, AsyncStorageQueueStorage } from './storage';
@@ -49,6 +52,9 @@ export function initPrinterPlatform(): void {
   // `specificity` decides claim conflicts, not registration order.
   registry.replace(devDriver);
   registry.replace(tejasDriver);
+  registry.replace(joshDriver);
+  registry.replace(labelxDriver);
+  registry.replace(tezDriver);
 }
 
 export function isPrinterPlatformReady(): boolean {

@@ -112,6 +112,9 @@ class JoshPrinterManager(private val context: Context) {
     private val isPrinting = AtomicBoolean(false)
     private var printLatch: CountDownLatch? = null
     private var lastPrintSuccess = false
+    /** true only for a genuine PrintProgress.Success ACK from the printer hardware;
+     *  false when DataEnded's 200ms no-ACK fallback completed the job instead. */
+    private var lastPrintConfirmedByDevice = false
     private val jobIdCounter = AtomicInteger(0)
 
     // ─── Configuration ─────────────────────────────────────────────────
@@ -183,6 +186,7 @@ class JoshPrinterManager(private val context: Context) {
                 PrintProgress.Success -> {
                     Log.i(TAG, "[JOSH-PRINT-P4:HARDWARE-ACK] Physical print confirmed by printer hardware!")
                     lastPrintSuccess = true
+                    lastPrintConfirmedByDevice = true
                     printLatch?.countDown()
                     mainHandler.post { handlePrintSuccess() }
                 }
@@ -904,6 +908,7 @@ class JoshPrinterManager(private val context: Context) {
             )
 
             lastPrintSuccess = false
+            lastPrintConfirmedByDevice = false
             val latch = CountDownLatch(1)
             printLatch = latch
 
@@ -1020,6 +1025,7 @@ class JoshPrinterManager(private val context: Context) {
                 "submitMs" to (tSubmit - tFit),
                 "waitMs" to (tDone - tSubmit),
                 "totalMs" to (tDone - t0),
+                "confirmedByDevice" to lastPrintConfirmedByDevice,
             )
             Log.i(TAG, "[$jobId] [JOSH-PRINT-P5:FINALIZE] Print complete in ${tDone - t0}ms $result")
             return result

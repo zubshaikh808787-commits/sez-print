@@ -44,7 +44,11 @@ class PrintPipeline(
         val copies: Int,
         val durationMs: Long,
         val widthMm: Int,
-        val heightMm: Int
+        val heightMm: Int,
+        /** true when the OEM's readCall() fired (a real device ACK); false when the
+         *  15s safety timer completed the future instead — a write-complete guess,
+         *  not a confirmed physical print. */
+        val confirmedByDevice: Boolean
     )
 
     fun print(options: Options): CompletableFuture<PrintResult> {
@@ -140,7 +144,8 @@ class PrintPipeline(
                             copies = options.copies,
                             durationMs = System.currentTimeMillis() - startTime,
                             widthMm = options.widthMm,
-                            heightMm = options.heightMm
+                            heightMm = options.heightMm,
+                            confirmedByDevice = true
                         )
                     )
                 } else {
@@ -194,7 +199,8 @@ class PrintPipeline(
                         copies = options.copies,
                         durationMs = System.currentTimeMillis() - startTime,
                         widthMm = options.widthMm,
-                        heightMm = options.heightMm
+                        heightMm = options.heightMm,
+                        confirmedByDevice = false
                     )
                 )
             }
