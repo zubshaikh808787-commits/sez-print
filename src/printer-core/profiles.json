@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-19",
+  "defaults": {
+    "dev": "DEV-7299",
+    "josh": "JOSH-LP50",
+    "tejas": "TD-404",
+    "labelx": "GD985",
+    "tez": "TEZ-108",
+    "generic-spp": "GENERIC-203-48"
+  },
+  "models": {
+    "DEV-7299": {
+      "displayName": "DEV 2-in-1",
+      "dpi": 203,
+      "headWidthDots": 384,
+      "printableDots": 378,
+      "headOffsetLeftMm": 1.37,
+      "maxWidthMm": 48,
+      "maxLabelHeightMm": 1000,
+      "match": ["dev-", "dev_", "veer-", "veer_", "2in1", "caysn", "autoreply"]
+    },
+    "TD-404": {
+      "displayName": "TEJAS / RUDRA TD-404",
+      "dpi": 304,
+      "headWidthDots": 1280,
+      "printableDots": 1280,
+      "headOffsetLeftMm": 0,
+      "maxWidthMm": 108,
+      "maxLabelHeightMm": 1000,
+      "match": ["tejas", "rudra", "td-404", "td404"]
+    },
+    "TD-404-203": {
+      "displayName": "TEJAS / RUDRA TD-404 (203 dpi head)",
+      "dpi": 203,
+      "headWidthDots": 832,
+      "printableDots": 832,
+      "headOffsetLeftMm": 0,
+      "maxWidthMm": 104,
+      "maxLabelHeightMm": 1000,
+      "match": []
+    },
+    "GD985": {
+      "displayName": "LABELX / Seznik MiniX GD985",
+      "dpi": 203,
+      "headWidthDots": 384,
+      "printableDots": 384,
+      "headOffsetLeftMm": 0,
+      "maxWidthMm": 48,
+      "maxLabelHeightMm": 1000,
+      "match": ["gd985", "gd-985", "minix", "mini x", "labelx", "label x", "luckp", "nexa"]
+    },
+    "JOSH-LP50": {
+      "displayName": "JOSH LPAPI 50 mm",
+      "dpi": 203,
+      "headWidthDots": 400,
+      "printableDots": 400,
+      "headOffsetLeftMm": 0,
+      "maxWidthMm": 50,
+      "maxLabelHeightMm": 1000,
+      "match": ["josh", "lpapi", "dothan", "dzprinter", "ld08", "lp08", "lp12"]
+    },
+    "TEZ-108": {
+      "displayName": "TEZ / SHAKTI 108 mm",
+      "dpi": 203,
+      "headWidthDots": 864,
+      "printableDots": 864,
+      "headOffsetLeftMm": 0,
+      "maxWidthMm": 108,
+      "maxLabelHeightMm": 1000,
+      "match": ["tez", "shakti", "flashlabel", "y50", "tz-", "tz_"]
+    },
+    "GENERIC-203-48": {
+      "displayName": "Generic 48 mm TSPL (203 dpi)",
+      "dpi": 203,
+      "headWidthDots": 384,
+      "printableDots": 384,
+      "headOffsetLeftMm": 0,
+      "maxWidthMm": 48,
+      "maxLabelHeightMm": 1000,
+      "match": []
+    },
+    "GENERIC-203-104": {
+      "displayName": "Generic 104 mm TSPL (203 dpi)",
+      "dpi": 203,
+      "headWidthDots": 832,
+      "printableDots": 832,
+      "headOffsetLeftMm": 0,
+      "maxWidthMm": 104,
+      "maxLabelHeightMm": 1000,
+      "match": []
+    }
+  }
+}

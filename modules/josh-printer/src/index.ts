@@ -77,6 +77,7 @@ type NativeJoshPrinter = {
   }): Promise<void>;
   printTestText(text: string): Promise<boolean>;
   printPngLabel(options: Record<string, unknown>): Promise<JoshPrintResult>;
+  getBondedDevices?(): Promise<JoshDevice[]>;
   addListener(
     eventName: string,
     listener: (event: any) => void,
@@ -152,6 +153,17 @@ export function isJoshBluetoothEnabled(): boolean | null {
     return Boolean(mod.isBluetoothEnabled());
   } catch {
     return null;
+  }
+}
+
+export async function getJoshBondedDevices(): Promise<JoshDevice[]> {
+  const mod = getNative();
+  if (!mod || typeof mod.getBondedDevices !== 'function') return [];
+  try {
+    const list = await mod.getBondedDevices();
+    return list ?? [];
+  } catch {
+    return [];
   }
 }
 

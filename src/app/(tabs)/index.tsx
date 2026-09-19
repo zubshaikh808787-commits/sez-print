@@ -386,6 +386,12 @@ export default function HomeScreen() {
                 label="Img to Label"
                 href="/img-to-label"
               />
+              <Tile
+                style={[styles.menuQuarter, { width: quarterTileWidth }]}
+                iconComponent={<AppIcon name="list.number" tintColor={Palette.accent} size={28} />}
+                label="Serial Labels"
+                href="/serial-label"
+              />
             </View>
           </View>
         </View>

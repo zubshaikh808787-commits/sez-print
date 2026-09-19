@@ -286,3 +286,52 @@ export async function renderPdfPages(
   return mod.renderPdfPages(uriString, options as Record<string, unknown> | undefined);
 }
 
+export type Td404ConnectionEvent = {
+  connected: boolean;
+  id?: string;
+  name?: string;
+  transport?: string;
+  sdkId?: string;
+};
+
+/**
+ * Native `onConnectionChanged`. Fires both on explicit disconnect() and when a
+ * write throws IOException and the module closes the dead socket itself — the
+ * router needs both, not just the ones it initiated.
+ */
+export function addTd404ConnectionListener(
+  listener: (event: Td404ConnectionEvent) => void,
+): { remove: () => void } {
+  const mod = getNative();
+  if (!mod) return { remove: () => {} };
+  return mod.addListener('onConnectionChanged', (event) => {
+    listener((event ?? {}) as Td404ConnectionEvent);
+  });
+}
+
+export async function getTd404ConnectionInfo(): Promise<{
+  connected: boolean;
+  mac: string | null;
+  name: string | null;
+  transport: string;
+  sdkId: string;
+  socketClass: string;
+} | null> {
+  const mod = getNative() as (NativeTd404 & {
+    getConnectionInfo?(): {
+      connected: boolean;
+      mac: string | null;
+      name: string | null;
+      transport: string;
+      sdkId: string;
+      socketClass: string;
+    };
+  }) | null;
+  if (!mod || typeof mod.getConnectionInfo !== 'function') return null;
+  try {
+    return mod.getConnectionInfo();
+  } catch {
+    return null;
+  }
+}
+

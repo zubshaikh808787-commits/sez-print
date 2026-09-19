@@ -93,6 +93,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test:labelx": "npx --yes tsx --tsconfig tsconfig.json src/lib/printer/__tests__/labelx-print.test.ts",
+    "test:printer-core": "npx --yes tsx --tsconfig tsconfig.json src/printer-core/__tests__/router.test.ts",
     "print:calibration": "npx --yes tsx --tsconfig tsconfig.json scripts/print-calibration-box.ts",
     "print:phase1": "npx --yes tsx --tsconfig tsconfig.json scripts/print-phase1-demo.ts",
     "print:phase2": "npx --yes tsx --tsconfig tsconfig.json scripts/print-phase2-demo.ts",

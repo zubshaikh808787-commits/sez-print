@@ -104,6 +104,22 @@ class JoshPrinterModule : Module() {
       supported
     }
 
+    AsyncFunction("getBondedDevices") { promise: Promise ->
+      val mgr = getOrInitManager()
+      if (mgr == null) {
+        promise.resolve(emptyList<Map<String, Any?>>())
+        return@AsyncFunction
+      }
+      ioExecutor.execute {
+        try {
+          val list = mgr.getBondedDevices()
+          promise.resolve(list)
+        } catch (e: Exception) {
+          promise.resolve(emptyList<Map<String, Any?>>())
+        }
+      }
+    }
+
     AsyncFunction("startDiscovery") { promise: Promise ->
       val context = getContext()
       if (context == null) {

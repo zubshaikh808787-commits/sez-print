@@ -299,19 +299,17 @@ export default function PrinterConnectScreen() {
     setConnectingId(device.id);
     try {
       const targetModel: SeznikPrinterModelId =
-        device.sdkId && device.sdkId !== 'generic'
-          ? (device.sdkId as SeznikPrinterModelId)
-          : (device as any).likelyLabelX
+        selectedModel === 'josh' || device.sdkId === 'josh' || device.likelyJosh
+          ? 'josh'
+          : selectedModel === 'labelx' || device.sdkId === 'labelx' || (device as any).likelyLabelX
             ? 'labelx'
-            : (device as any).likelyDev
-              ? 'dev'
-              : (device as any).likelyTez || (device as any).likelyShakti
+            : selectedModel === 'td404' || device.sdkId === 'td404' || device.likelyTd404
+              ? 'td404'
+              : selectedModel === 'tez' || device.sdkId === 'tez' || (device as any).likelyTez || (device as any).likelyShakti
                 ? 'tez'
-                : device.likelyJosh
-                  ? 'josh'
-                  : device.likelyTd404
-                    ? 'td404'
-                    : selectedModel;
+                : selectedModel === 'dev' || device.sdkId === 'dev' || (device as any).likelyDev
+                  ? 'dev'
+                  : selectedModel;
 
       console.info(
         `[PRINTER-CONNECT] Connecting model ${targetModel} to ${device.id} (${device.name ?? 'unknown'})`,
