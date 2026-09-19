@@ -50,6 +50,9 @@ export function isLikelyLabelXName(name: string | null | undefined): boolean {
     upper.includes('LABEL X') ||
     upper.includes('GD985') ||
     upper.includes('LUCKP') ||
+    upper.startsWith('BP') ||
+    upper.includes('BP 330') ||
+    upper.includes('BP330') ||
     upper.startsWith('U8_') ||
     upper.startsWith('PPP1_') ||
     upper.startsWith('LPC50_') ||

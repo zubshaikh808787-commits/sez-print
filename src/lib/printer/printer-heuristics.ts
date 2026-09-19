@@ -26,6 +26,9 @@ export function isLikelyLabelXName(name: string | null | undefined): boolean {
     n.includes('mini x') ||
     n.includes('nexa') ||
     n.includes('luckp') ||
+    n.startsWith('bp') ||
+    n.includes('bp 330') ||
+    n.includes('bp330') ||
     n.startsWith('u8_') ||
     n.startsWith('ppp1_') ||
     n.startsWith('lpc50_') ||
