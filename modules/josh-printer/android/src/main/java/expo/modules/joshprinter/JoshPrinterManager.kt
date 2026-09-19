@@ -147,20 +147,19 @@ class JoshPrinterManager(private val context: Context) {
     private val lpapiCallback = object : LPAPI.Callback {
 
         override fun onStateChange(address: PrinterAddress?, printerState: PrinterState?) {
-            Log.i(TAG, "[JOSH-CONN-P4:STATE_CHANGE] address=${address?.shownName ?: address?.macAddress} state=$printerState")
-            when (printerState) {
-                PrinterState.Connected, PrinterState.Connected2 -> {
-                    mainHandler.post { handleConnected(address) }
-                }
-                PrinterState.Disconnected -> {
-                    mainHandler.post { handleDisconnected() }
-                }
-                PrinterState.Connecting -> {
-                    Log.d(TAG, "[JOSH-CONN-P3:STATE_CHANGE] Connecting in progress...")
-                }
-                else -> {
-                    Log.d(TAG, "[JOSH-CONN-P3:STATE_CHANGE] State: $printerState")
-                }
+            Log.i(TAG, "[JOSH-CONN-P4:STATE_CHANGE] address=${address?.shownName ?: address?.macAddress} state=$printerState (group=${printerState?.group()})")
+            val isConn = printerState == PrinterState.Connected ||
+                         printerState == PrinterState.Connected2 ||
+                         printerState?.group() == 2 ||
+                         (printerState?.name?.contains("Connected", ignoreCase = true) == true)
+            if (isConn) {
+                mainHandler.post { handleConnected(address) }
+            } else if (printerState == PrinterState.Disconnected || printerState?.group() == 0) {
+                mainHandler.post { handleDisconnected() }
+            } else if (printerState == PrinterState.Connecting || printerState?.group() == 1) {
+                Log.d(TAG, "[JOSH-CONN-P3:STATE_CHANGE] Connecting in progress...")
+            } else {
+                Log.d(TAG, "[JOSH-CONN-P3:STATE_CHANGE] State: $printerState")
             }
         }
 
@@ -366,6 +365,48 @@ class JoshPrinterManager(private val context: Context) {
         }
     }
 
+    /**
+     * Return bonded (paired) Bluetooth devices that are potential JOSH printers.
+     */
+    fun getBondedDevices(): List<Map<String, Any?>> {
+        val btAdapter = BluetoothAdapter.getDefaultAdapter() ?: return emptyList()
+        if (!btAdapter.isEnabled) return emptyList()
+        val bonded = try {
+            btAdapter.bondedDevices
+        } catch (e: Exception) {
+            Log.w(TAG, "[BONDED] getBondedDevices threw", e)
+            emptySet()
+        } ?: emptySet()
+
+        val list = mutableListOf<Map<String, Any?>>()
+        for (dev in bonded) {
+            val name = dev.name ?: ""
+            val mac = dev.address ?: continue
+            val lower = name.lowercase().trim()
+
+            // Skip obvious other non-JOSH printer families
+            if (lower.contains("tejas") ||
+                lower.contains("rudra") ||
+                lower.contains("td-404") ||
+                lower.contains("td404") ||
+                lower.contains("minix") ||
+                lower.contains("caysn")
+            ) {
+                continue
+            }
+
+            list.add(mapOf(
+                "id" to mac,
+                "name" to (if (name.isNotBlank()) name else mac),
+                "macAddress" to mac,
+                "transport" to "josh-lpapi",
+                "sdkId" to "josh",
+                "bonded" to true,
+            ))
+        }
+        return list
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  Connection
     // ═══════════════════════════════════════════════════════════════════
@@ -526,18 +567,10 @@ class JoshPrinterManager(private val context: Context) {
             val latch = CountDownLatch(1)
             connectLatch = latch
 
-            // Tier 1: Try openPrinterByAddress
-            Log.i(TAG, "[JOSH-CONN-P3:OPEN] Attempt $attempt — submitting openPrinterByAddress to LPAPI...")
-            var requestAccepted = try {
-                currentApi.openPrinterByAddress(targetAddress)
-            } catch (e: Exception) {
-                Log.w(TAG, "[JOSH-CONN-P3:OPEN] openPrinterByAddress threw", e)
-                false
-            }
-
-            // Tier 2: Try openPrinter(BluetoothDevice)
-            if (!requestAccepted && remoteDevice != null) {
-                Log.i(TAG, "[JOSH-CONN-P3:OPEN] openPrinterByAddress returned false; falling back to openPrinter(device)")
+            // Tier 1: Try openPrinter(BluetoothDevice) if remoteDevice is resolved
+            var requestAccepted = false
+            if (remoteDevice != null) {
+                Log.i(TAG, "[JOSH-CONN-P3:OPEN] Attempt $attempt — openPrinter(BluetoothDevice: ${remoteDevice.address})")
                 requestAccepted = try {
                     currentApi.openPrinter(remoteDevice)
                 } catch (e: Exception) {
@@ -546,13 +579,35 @@ class JoshPrinterManager(private val context: Context) {
                 }
             }
 
-            // Tier 3: Try openPrinter(String)
+            // Tier 2: Try openPrinterByAddress(targetAddress)
             if (!requestAccepted) {
-                Log.i(TAG, "[JOSH-CONN-P3:OPEN] falling back to openPrinter(name/mac)")
+                Log.i(TAG, "[JOSH-CONN-P3:OPEN] Attempt $attempt — openPrinterByAddress(${targetAddress.shownName}, ${targetAddress.macAddress})")
                 requestAccepted = try {
-                    currentApi.openPrinter(resolvedName) || currentApi.openPrinter(macAddress)
+                    currentApi.openPrinterByAddress(targetAddress)
                 } catch (e: Exception) {
-                    Log.w(TAG, "[JOSH-CONN-P3:OPEN] openPrinter(string) threw", e)
+                    Log.w(TAG, "[JOSH-CONN-P3:OPEN] openPrinterByAddress threw", e)
+                    false
+                }
+            }
+
+            // Tier 3: Try openPrinter(macAddress)
+            if (!requestAccepted) {
+                Log.i(TAG, "[JOSH-CONN-P3:OPEN] Attempt $attempt — openPrinter(mac: $macAddress)")
+                requestAccepted = try {
+                    currentApi.openPrinter(macAddress)
+                } catch (e: Exception) {
+                    Log.w(TAG, "[JOSH-CONN-P3:OPEN] openPrinter(mac) threw", e)
+                    false
+                }
+            }
+
+            // Tier 4: Try openPrinter(resolvedName)
+            if (!requestAccepted && resolvedName.isNotBlank()) {
+                Log.i(TAG, "[JOSH-CONN-P3:OPEN] Attempt $attempt — openPrinter(name: $resolvedName)")
+                requestAccepted = try {
+                    currentApi.openPrinter(resolvedName)
+                } catch (e: Exception) {
+                    Log.w(TAG, "[JOSH-CONN-P3:OPEN] openPrinter(name) threw", e)
                     false
                 }
             }
@@ -579,28 +634,32 @@ class JoshPrinterManager(private val context: Context) {
 
             connectLatch = null
 
-            val isNowConnected = state.get() == State.CONNECTED || currentApi.isPrinterOpened || currentApi.printerState?.group() == 2
+            val isNowConnected = state.get() == State.CONNECTED ||
+                                 currentApi.isPrinterOpened ||
+                                 currentApi.printerState?.group() == 2 ||
+                                 currentApi.printerState == PrinterState.Connected ||
+                                 currentApi.printerState == PrinterState.Connected2
             if (isNowConnected) {
                 // Success!
                 isConnecting.set(false)
                 setState(State.CONNECTED)
                 if (connectedPrinterAddress == null) {
                     connectedPrinterAddress = targetAddress
-                    connectedPrinterName = targetAddress.shownName ?: currentApi.printerName
+                    connectedPrinterName = targetAddress.shownName ?: currentApi.printerName ?: resolvedName
                     connectedMacAddress = macAddress
                     lastConnectedAt.set(System.currentTimeMillis())
                 }
                 lastConnectedAddress = targetAddress
                 Log.i(TAG, "[JOSH-CONN-P4:CONFIRMED] Connected to ${connectedPrinterName ?: macAddress} on attempt $attempt")
                 listener?.onStateChanged(State.CONNECTED, mapOf(
-                    "printerName" to (connectedPrinterName ?: targetAddress.shownName),
+                    "printerName" to (connectedPrinterName ?: targetAddress.shownName ?: resolvedName),
                     "macAddress" to macAddress,
                     "timestamp" to System.currentTimeMillis(),
                 ))
                 return true
             }
 
-            Log.w(TAG, "[JOSH-CONN-P3:TIMEOUT] Attempt $attempt — no Connected callback within ${CONNECT_TIMEOUT_MS}ms")
+            Log.w(TAG, "[JOSH-CONN-P3:TIMEOUT] Attempt $attempt — no Connected callback within ${CONNECT_TIMEOUT_MS}ms (state=${currentApi.printerState})")
             if (attempt < CONNECT_MAX_ATTEMPTS) {
                 // Reset state for retry
                 setState(State.CONNECTING)
@@ -1196,8 +1255,8 @@ class JoshPrinterManager(private val context: Context) {
     private fun handleConnected(address: PrinterAddress?) {
         Log.i(TAG, "[CONNECTED] ${address?.shownName ?: address?.macAddress}")
         connectedPrinterAddress = address
-        connectedPrinterName = address?.shownName ?: api?.printerName
-        connectedMacAddress = address?.macAddress
+        connectedPrinterName = address?.shownName ?: api?.printerName ?: connectingMacAddress
+        connectedMacAddress = address?.macAddress ?: connectingMacAddress
         connectingMacAddress = null
         lastConnectedAt.set(System.currentTimeMillis())
         isConnecting.set(false)
@@ -1206,7 +1265,7 @@ class JoshPrinterManager(private val context: Context) {
         connectLatch?.countDown()
 
         listener?.onStateChanged(State.CONNECTED, mapOf(
-            "printerName" to connectedPrinterName,
+            "printerName" to (connectedPrinterName ?: connectedMacAddress),
             "macAddress" to connectedMacAddress,
             "timestamp" to lastConnectedAt.get(),
         ))
@@ -1222,7 +1281,9 @@ class JoshPrinterManager(private val context: Context) {
         connectedPrinterAddress = null
         connectedPrinterName = null
         connectedMacAddress = null
-        connectingMacAddress = null
+        if (!isConnecting.get()) {
+            connectingMacAddress = null
+        }
 
         // If actively connecting, DO NOT abort the connection attempt or count down the latch!
         // Transient Disconnected callbacks from a prior session or initial state must not fail the handshake.
@@ -1241,12 +1302,8 @@ class JoshPrinterManager(private val context: Context) {
         }
 
         // Attempt auto-reconnect if unexpected disconnect while previously connected.
-        // Guard: do NOT auto-reconnect if a manual connect() call is already in progress,
-        // because the Disconnected callback may fire as part of the closePrinter() cleanup
-        // that precedes every connect attempt.
         if (wasConnected && lastConnectedAddress != null && !isConnecting.get()) {
             Log.i(TAG, "[AUTO_RECONNECT] Unexpected disconnect — scheduling reconnect")
-            // Don't block the main thread — run reconnect on a worker
             Thread({
                 try {
                     Thread.sleep(500) // brief pause before reconnect
@@ -1271,38 +1328,14 @@ class JoshPrinterManager(private val context: Context) {
         val lowerName = shownName.lowercase()
 
         // Filter: DO NOT claim devices that belong to TD-404, Tejas, Rudra, Tez, Shakti, or Dev printers!
-        // NOTE: "sez" or "seznik" is the brand prefix and must NOT be filtered out.
         if (lowerName.contains("tejas") ||
             lowerName.contains("rudra") ||
             lowerName.contains("td-404") ||
             lowerName.contains("td404") ||
-            lowerName.contains("tez") ||
-            lowerName.contains("shakti") ||
-            lowerName.contains("dev") ||
-            lowerName.contains("veer") ||
+            lowerName.contains("minix") ||
             lowerName.contains("caysn")
         ) {
             Log.d(TAG, "[PRINTER_IGNORED_NON_JOSH] Ignoring non-JOSH printer in JOSH scan: $shownName ($mac)")
-            return
-        }
-
-        // Only accept if verified by DothanTech SDK or matches known Josh/LPAPI name patterns
-        val isDothanModel = isDeviceNameSupported(shownName)
-        val isJoshName = lowerName.contains("josh") ||
-            lowerName.contains("lpapi") ||
-            lowerName.contains("dothan") ||
-            lowerName.contains("dzprinter") ||
-            lowerName.startsWith("ld08") ||
-            lowerName.startsWith("lp08") ||
-            lowerName.startsWith("lp12") ||
-            lowerName.startsWith("dt-") ||
-            lowerName.startsWith("dt_") ||
-            lowerName.startsWith("dp-") ||
-            lowerName.startsWith("dp_") ||
-            lowerName.startsWith("jc")
-
-        if (!isDothanModel && !isJoshName) {
-            Log.d(TAG, "[PRINTER_IGNORED_UNKNOWN] Ignoring non-JOSH device: $shownName ($mac)")
             return
         }
 
@@ -1310,13 +1343,17 @@ class JoshPrinterManager(private val context: Context) {
 
         Log.i(TAG, "[PRINTER_FOUND] name=${address.shownName} mac=$mac")
 
+        val btAdapter = BluetoothAdapter.getDefaultAdapter()
+        val dev = try { btAdapter?.getRemoteDevice(mac) } catch (_: Exception) { null }
+        val isBonded = dev?.bondState == android.bluetooth.BluetoothDevice.BOND_BONDED
+
         val data = mapOf<String, Any?>(
             "id" to mac,
-            "name" to (address.shownName ?: mac),
+            "name" to (if (shownName.isNotBlank()) shownName else mac),
             "macAddress" to mac,
             "transport" to "josh-lpapi",
             "sdkId" to "josh",
-            "bonded" to false,
+            "bonded" to isBonded,
         )
         listener?.onPrinterDiscovered(data)
     }

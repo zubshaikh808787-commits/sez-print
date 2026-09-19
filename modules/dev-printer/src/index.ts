@@ -257,3 +257,65 @@ export async function testDevPrint(mode?: 'tspl' | 'escpos'): Promise<{ success:
   if (!mod) throw new Error('Dev printer module not available');
   return mod.testPrint(mode ? { mode } : undefined);
 }
+
+export type DevConnectionEvent = {
+  connected: boolean;
+  id?: string;
+  name?: string;
+  transport?: string;
+  sdkId?: string;
+};
+
+/**
+ * Native `onConnectionChanged`. The router needs this to learn about a link the
+ * SDK dropped on its own, rather than discovering it on the next failed print.
+ */
+export function addDevConnectionListener(
+  listener: (event: DevConnectionEvent) => void,
+): { remove: () => void } {
+  const mod = getNative();
+  if (!mod) return { remove: () => {} };
+  return mod.addListener('onConnectionChanged', (event) => {
+    listener((event ?? {}) as DevConnectionEvent);
+  });
+}
+
+/**
+ * Raw scan subscription over the DEV module's BroadcastReceiver.
+ *
+ * The receiver is NOT brand-filtered — it emits every ACTION_FOUND device and
+ * every bonded device, tagging each with `likelyDev`. That makes it usable as the
+ * one shared classic-Bluetooth scan for all brands, which is what printer-core's
+ * discovery requires. Per-brand filtering happens in each driver's `claims()`.
+ */
+export function addDevScanListeners(handlers: {
+  onDevice: (device: DevDiscoveredDevice) => void;
+  onFinished?: () => void;
+}): { remove: () => void } {
+  const mod = getNative();
+  if (!mod) return { remove: () => {} };
+  const found = mod.addListener('onDeviceFound', (payload) => {
+    handlers.onDevice(payload as DevDiscoveredDevice);
+  });
+  const finished = handlers.onFinished
+    ? mod.addListener('onScanFinished', () => handlers.onFinished?.())
+    : null;
+  return {
+    remove: () => {
+      found.remove();
+      finished?.remove();
+    },
+  };
+}
+
+export async function startDevScanRaw(): Promise<{ discoveryStarted: boolean; bondedCount: number; reason?: string }> {
+  const mod = getNative();
+  if (!mod) return { discoveryStarted: false, bondedCount: 0, reason: 'Dev printer module not available' };
+  return mod.startScan();
+}
+
+export async function stopDevScanRaw(): Promise<void> {
+  const mod = getNative();
+  if (!mod) return;
+  await mod.stopScan().catch(() => {});
+}

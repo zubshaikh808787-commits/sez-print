@@ -1029,6 +1029,21 @@ class PrinterManager {
       const josh = this.getJosh();
       if (josh?.isJoshNativeAvailable()) {
         try {
+          const bonded = await josh.getJoshBondedDevices();
+          for (const b of bonded) {
+            paired++;
+            emit({
+              id: b.id,
+              name: b.name ?? b.id,
+              rssi: null,
+              transport: 'josh-lpapi',
+              sdkId: 'josh',
+              likelyJosh: true,
+              bonded: true,
+            });
+          }
+        } catch {}
+        try {
           await this.startJoshScan(josh, (d) => {
             nearby++;
             emit(d);
@@ -1172,10 +1187,25 @@ class PrinterManager {
         if (!josh?.isJoshNativeAvailable()) {
           throw new Error('JOSH module not available in this build.');
         }
-        const res = await josh.connectJosh(deviceId, deviceName ?? 'JOSH');
+        const effectiveName = deviceName && deviceName.trim().length > 0 ? deviceName : 'JOSH';
+        console.info(`[JOSH-CONN] Connecting to ${deviceId} (${effectiveName})...`);
+        const connectPromise = josh.connectJosh(deviceId, effectiveName);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Connection to ${effectiveName} timed out after 22s. Please ensure printer is powered on and paired in Android Bluetooth Settings.`,
+                ),
+              ),
+            22000,
+          ),
+        );
+        const res = await Promise.race([connectPromise, timeoutPromise]);
+        console.info(`[JOSH-CONN] JOSH connected successfully:`, res);
         this.activeTransport = 'josh-lpapi';
         this.connectionState = 'connected';
-        store.setConnectedDevice(res.id, res.name ?? deviceName ?? deviceId, {
+        store.setConnectedDevice(res.id || deviceId, res.name ?? effectiveName, {
           transport: 'josh-lpapi',
           sdkId: 'josh',
           model: 'josh',
