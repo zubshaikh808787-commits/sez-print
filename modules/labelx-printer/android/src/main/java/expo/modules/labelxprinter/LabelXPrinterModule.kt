@@ -482,6 +482,34 @@ class LabelXPrinterModule : Module() {
             }
 
             override fun onPrintFail(status: Int) {
+              if (status == 2147483647 || status == Integer.MAX_VALUE) {
+                Log.w(TAG, "LuckPrinter status probe timed out (code 2147483647); executing direct hardware print dispatch...")
+                try {
+                  val dev = helper.printerDevice
+                  if (dev is com.luckprinter.sdk_new.device.sheetlabel.base.BaseSheetLabelDevice) {
+                    val wMm = if (widthMm != null && widthMm > 0) widthMm.toInt() else (finalBmp.width / 8)
+                    val hMm = ((options["heightMm"] as? Number)?.toInt()) ?: (finalBmp.height / 8)
+                    dev.printTag(wMm, hMm, 8, density, finalBmp, copies)
+                    try { if (!finalBmp.isRecycled) finalBmp.recycle() } catch (_: Throwable) {}
+                    promise.resolve(mapOf("success" to true, "pagesPrinted" to copies))
+                    return
+                  } else if (dev is com.luckprinter.sdk_new.device.normal.base.BaseNormalDevice) {
+                    dev.printTagOnce(finalBmp, 1, copies, object : com.luckprinter.sdk_new.callback.ResultCallback<Int> {
+                      override fun onSuccess(data: Int?) {
+                        try { if (!finalBmp.isRecycled) finalBmp.recycle() } catch (_: Throwable) {}
+                        promise.resolve(mapOf("success" to true, "pagesPrinted" to copies))
+                      }
+                      override fun onFail() {
+                        try { if (!finalBmp.isRecycled) finalBmp.recycle() } catch (_: Throwable) {}
+                        promise.reject("PRINT_FAILED", "Direct hardware print failed after status probe timeout", null)
+                      }
+                    })
+                    return
+                  }
+                } catch (fallbackErr: Throwable) {
+                  Log.e(TAG, "Fallback direct print failed", fallbackErr)
+                }
+              }
               Log.e(TAG, "Print job failed with status: $status (${decodeStatus(status)})")
               try {
                 if (!finalBmp.isRecycled) finalBmp.recycle()
@@ -492,14 +520,33 @@ class LabelXPrinterModule : Module() {
 
           // Dispatch print according to device type and paper type
           if (helper.isSheetLabelPrinter()) {
+            val wMm = if (widthMm != null && widthMm > 0) widthMm.toInt() else (finalBmp.width / 8)
+            val hMm = ((options["heightMm"] as? Number)?.toInt()) ?: (finalBmp.height / 8)
+            val speed = (options["speed"] as? Number)?.toInt() ?: 8
+            val densityVal = density
+            Log.i(TAG, "Dispatching printSheetLabel: w=${wMm}mm h=${hMm}mm speed=$speed density=$densityVal copies=$copies paperType=$paperType")
             when (paperType) {
               "continuous", "receipt" -> helper.print(finalBmp, copies, printCallback)
-              else -> helper.printTag(finalBmp, copies, printCallback)
+              else -> {
+                // Direct SheetLabel print avoids getStatusBeforePrint timeout (2147483647)
+                helper.printSheetLabel(wMm, hMm, speed, densityVal, finalBmp, copies)
+                Thread.sleep((150 + (finalBmp.width * finalBmp.height / 8000)).toLong())
+                try {
+                  if (!finalBmp.isRecycled) finalBmp.recycle()
+                } catch (_: Throwable) {}
+                promise.resolve(
+                  mapOf(
+                    "success" to true,
+                    "pagesPrinted" to copies
+                  )
+                )
+              }
             }
           } else {
             when (paperType) {
               "continuous", "receipt" -> helper.print(finalBmp, copies, printCallback)
               "blacktag", "blackmark" -> helper.printBlackTag(finalBmp, copies, printCallback)
+              "circle", "circletag" -> helper.printCircleTag(finalBmp, copies, printCallback)
               else -> helper.printTag(finalBmp, copies, printCallback)
             }
           }
@@ -560,24 +607,48 @@ class LabelXPrinterModule : Module() {
           val finalBmp = applyThresholdBinarization(bmp, 145)
           bmp.recycle()
 
-          helper.printTag(finalBmp, 1, object : OnPrintCallback {
-            override fun onStartPrint() {}
-            override fun onPrinting(page: Int, total: Int) {}
-            override fun onPrintIndexStart(b: Bitmap?, page: Int, total: Int) {}
-            override fun onPrintIndexEnd(b: Bitmap?, page: Int, total: Int) {}
-            override fun onPrintSuccess() {
-              try {
-                if (!finalBmp.isRecycled) finalBmp.recycle()
-              } catch (_: Throwable) {}
-              promise.resolve(mapOf("success" to true))
-            }
-            override fun onPrintFail(status: Int) {
-              try {
-                if (!finalBmp.isRecycled) finalBmp.recycle()
-              } catch (_: Throwable) {}
-              promise.reject("PRINT_FAILED", "Test print failed: ${decodeStatus(status)}", null)
-            }
-          })
+          if (helper.isSheetLabelPrinter()) {
+            val wMm = width / 8
+            val hMm = height / 8
+            helper.printSheetLabel(wMm, hMm, 8, 1, finalBmp, 1)
+            Thread.sleep(300)
+            try { if (!finalBmp.isRecycled) finalBmp.recycle() } catch (_: Throwable) {}
+            promise.resolve(mapOf("success" to true))
+          } else {
+            helper.printTag(finalBmp, 1, object : OnPrintCallback {
+              override fun onStartPrint() {}
+              override fun onPrinting(page: Int, total: Int) {}
+              override fun onPrintIndexStart(b: Bitmap?, page: Int, total: Int) {}
+              override fun onPrintIndexEnd(b: Bitmap?, page: Int, total: Int) {}
+              override fun onPrintSuccess() {
+                try { if (!finalBmp.isRecycled) finalBmp.recycle() } catch (_: Throwable) {}
+                promise.resolve(mapOf("success" to true))
+              }
+              override fun onPrintFail(status: Int) {
+                if (status == 2147483647 || status == Integer.MAX_VALUE) {
+                  Log.w(TAG, "Test print status probe timed out (2147483647); executing direct dispatch...")
+                  try {
+                    val dev = helper.printerDevice
+                    if (dev is com.luckprinter.sdk_new.device.normal.base.BaseNormalDevice) {
+                      dev.printTagOnce(finalBmp, 1, 1, object : com.luckprinter.sdk_new.callback.ResultCallback<Int> {
+                        override fun onSuccess(data: Int?) {
+                          try { if (!finalBmp.isRecycled) finalBmp.recycle() } catch (_: Throwable) {}
+                          promise.resolve(mapOf("success" to true))
+                        }
+                        override fun onFail() {
+                          try { if (!finalBmp.isRecycled) finalBmp.recycle() } catch (_: Throwable) {}
+                          promise.reject("PRINT_FAILED", "Direct test print failed", null)
+                        }
+                      })
+                      return
+                    }
+                  } catch (_: Throwable) {}
+                }
+                try { if (!finalBmp.isRecycled) finalBmp.recycle() } catch (_: Throwable) {}
+                promise.reject("PRINT_FAILED", "Test print failed: ${decodeStatus(status)} (code $status)", null)
+              }
+            })
+          }
         } catch (e: Throwable) {
           promise.reject("PRINT_EXCEPTION", e.message, e)
         }

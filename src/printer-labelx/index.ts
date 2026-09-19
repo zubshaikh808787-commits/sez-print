@@ -53,7 +53,7 @@ const MEDIA_TO_PAPER_TYPE: Record<Media, LabelXPrintOptions['paperType']> = {
   gap: 'tag',
   bline: 'blacktag',
   continuous: 'continuous',
-  circle: 'tag',  // No dedicated circle method; caller should use gap stock
+  circle: 'circle',
 };
 
 function addLabelXConnectionListener(
@@ -194,6 +194,7 @@ export class LabelXDriver implements PrinterDriver {
         pngBase64: job.png,
         copies: 1,
         widthMm: job.widthMm,
+        heightMm: job.heightMm,
         widthDots,
         paperType: MEDIA_TO_PAPER_TYPE[job.media],
         density: Math.min(2, Math.max(0, Math.round(job.density / 5))),
