@@ -210,6 +210,7 @@ export async function printLabelXPngLabel(options: LabelXPrintOptions): Promise<
     pngBase64: options.pngBase64,
     copies: options.copies ?? 1,
     widthMm: options.widthMm ?? 48,
+    heightMm: options.heightMm,
     widthDots: options.widthDots ?? 384,
     paperType: options.paperType ?? 'tag',
     density: options.density ?? 1,

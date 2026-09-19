@@ -22,8 +22,9 @@ export interface LabelXPrintOptions {
   pngBase64: string;
   copies?: number;
   widthMm?: number;
+  heightMm?: number;
   widthDots?: number;
-  paperType?: 'tag' | 'continuous' | 'receipt' | 'blacktag' | 'blackmark';
+  paperType?: 'tag' | 'continuous' | 'receipt' | 'blacktag' | 'blackmark' | 'circle' | 'circletag';
   density?: number; // 0, 1, 2
   threshold?: number;
   dither?: boolean;

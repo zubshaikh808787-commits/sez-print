@@ -3037,7 +3037,13 @@ class PrinterManager {
         const t0 = Date.now();
 
         const paperType = options.paperType ?? (
-          options.media === 'bline' ? 'blacktag' : (options.media === 'continuous' ? 'continuous' : 'tag')
+          (options.media as string) === 'circle'
+            ? 'circle'
+            : options.media === 'bline'
+            ? 'blacktag'
+            : options.media === 'continuous'
+            ? 'continuous'
+            : 'tag'
         );
 
         const widthDots = options.widthMm
@@ -3048,6 +3054,7 @@ class PrinterManager {
           pngBase64: options.pngBase64,
           copies: Math.max(1, Math.round(options.copies ?? 1)),
           widthMm: options.widthMm ?? 48,
+          heightMm: options.heightMm,
           widthDots,
           paperType,
           density: options.density !== null && options.density !== undefined ? Math.min(2, Math.max(0, options.density)) : 1,

@@ -93,7 +93,7 @@ export default function SerialLabelScreen() {
     status === 'printing' ||
     Boolean(deviceId) ||
     getPrinterManager().isConnected;
-  const connectedName = deviceName || getPrinterManager().connectedDeviceName || 'Thermal Printer';
+  const connectedName = deviceName || (getPrinterManager().isConnected ? 'Connected Printer' : 'Thermal Printer');
 
   const [sampleText, setSampleText] = useState('Desk1');
   const [endNumber, setEndNumber] = useState('20');
