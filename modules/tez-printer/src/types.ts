@@ -33,6 +33,9 @@ export type TezPrintResult = {
   durationMs: number;
   widthMm: number;
   heightMm: number;
+  /** true when the OEM SDK's readCall() ACK fired; false when the native 15s
+   *  safety timer completed the job instead (bytes sent, completion unconfirmed). */
+  confirmedByDevice: boolean;
 };
 
 export type TezCalibrationResult = {

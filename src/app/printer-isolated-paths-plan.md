@@ -501,15 +501,12 @@ Point at `printer-generic-spp` meanwhile; many of these are TSPL-compatible over
 
 | # | Task | Why this position |
 |---|---|---|
-| 1 | ✅ `printer-core` — **done**, `src/printer-core/`, `npm run test:printer-core` | Nothing testable without it; every bridge is written against it |
-| 2 | ✅ Migrate **DEV** — **done**, `src/printer-dev/` + `src/printer-platform/` (additive; `printer-manager.ts` untouched) | Already built — cheapest way to prove the router |
-| 3 | ⚠️ **TEJAS/RUDRA** — bridge + `Td404PrinterModule.kt` built and registered, but honest about a real gap: the shipped module opens a raw socket and writes fire-and-forget (no `addQueryPrinterStatus`/`onReceive` handshake this plan calls for). `statusQuery: false`, `physicalCompletionCallback: false` until that native follow-up lands | Best feedback signal (per-label handshake) → prove the bulk queue here so later bridges inherit working logic |
-| 4 | ⚠️ **LABELX** — bridge + `LabelXPrinterModule.kt` built, now registered in `initPrinterPlatform()` (was previously written but never wired in). `requiresLicenseKey: true` against a bundled default abroad key — still needs vendor confirmation per §12 | Start `asKey` request day 1, runs in parallel. Then bitmap-only = straightforward |
-| 5 | ✅ **JOSH** — bridge + `JoshPrinterModule.kt`/`JoshPrinterManager.kt` built, now registered. Bitmap-only path only (vector/ESC-POS/raw LPAPI routes still not exposed, `statusQuery: false` stands). But `printBitmap()` already blocks on the SDK's real `PrintProgress.Success` hardware ACK (with a 200ms `DataEnded` fallback for models that never send it) — added `confirmedByDevice` through the native result → TS `RasterJob.confirmed`, and flipped `physicalCompletionCallback: true` to match | Hardest: vector path + persistent device language switch. Do it once the rest is settled |
-| 6 | ✅ **TEZ/SHAKTI** — no longer blocked: `PrintSDK-68.jar` arrived and `modules/tez-printer/` has a full native stack (`TezPrinterManager`, `PrintPipeline`, `SerialTaskQueue`, `RetryPolicy`, `ConnectionGuard`, `CalibrationController`) plus a TS bridge, now registered. Confirmed `PrintPipeline.executePrint()` already resolves from the OEM SDK's `readCall()` ACK, not on write-complete (a 15s safety timer is the only fallback) — added `confirmedByDevice` through the native result → TS `RasterJob.confirmed`, and flipped `physicalCompletionCallback: true` to match | Blocked on SDK; generic SPP fallback meanwhile |
-| — | `printer-generic-spp` bridge exists (`src/printer-generic-spp/`, wraps the existing `vardrz-printer.ts`) but is **not yet registered** — `claims()` always returns `true`, so registering it means every scanned Bluetooth device (not just printers) becomes connectable. Left as a deliberate decision point, see chat | Safety net / next brand before its SDK arrives |
-
-Everything in rows 3–6 was already sitting in the working tree as of 2026-09-19 (native Kotlin + TS bridges written, `all-drivers-claims.test.ts` already covered all 5 brands) but **not wired into `initPrinterPlatform()`** — the three new drivers registered in this pass. Fixed in the same pass: `isLikelyDevName` had a blanket `seznik_`/`seznik-` exclusion that made `isLikelyTezName`'s Seznik catch-all also claim names like `"Seznik_Dev-14"`, double-claiming a DEV device as TEZ too (see [printer-heuristics.ts](../../../../../../../../../src/lib/printer/printer-heuristics.ts) — an isolation break, since with `tez` ranked above `dev` in `CLAIM_SPECIFICITY` the job would have routed to the wrong native bridge entirely.
+| 1 | `printer-core` | Nothing testable without it; every bridge is written against it |
+| 2 | Migrate **DEV** | Already built — cheapest way to prove the router |
+| 3 | **TEJAS/RUDRA** | Best feedback signal (per-label handshake) → prove the bulk queue here so later bridges inherit working logic |
+| 4 | **LABELX** | Start `asKey` request day 1, runs in parallel. Then bitmap-only = straightforward |
+| 5 | **JOSH** | Hardest: vector path + persistent device language switch. Do it once the rest is settled |
+| 6 | **TEZ/SHAKTI** | Blocked on SDK; generic SPP fallback meanwhile |
 
 ---
 
@@ -518,9 +515,8 @@ Everything in rows 3–6 was already sitting in the working tree as of 2026-09-1
 | Owner | Item |
 |---|---|
 | LuckPrinter (LABELX) | `asKey`; confirm China vs Abroad AAR for India; **does connect+print work offline?**; is GD985 Bluetooth or AI50 WiFi? |
-| Ninestar (TEJAS/RUDRA) | Re-send `Print Label SDK-IOS` — current upload is `._` stubs only; native follow-up to wire the real per-label handshake (`addQueryPrinterStatus` / `onReceive`) instead of fire-and-forget writes |
-| DothanTech (JOSH) | iOS LPAPI framework; `supportedLanguages[]` integer enum; ✅ `onPrintProgress` is already wired to the print-completion path (`confirmedByDevice`) — still open: surface it as a standalone `getStatus()` too, and wire the vector/ESC-POS/raw LPAPI routes |
-| Y50 vendor (TEZ/SHAKTI) | ✅ Confirmed `PrintPipeline`'s `readCall()` ACK is what resolves the job (not write-complete) — `confirmedByDevice` now surfaces whether that ACK actually fired vs. the 15s safety-timer fallback. Still open: does `readCall` mean *paper physically fed out*, or just *OEM state machine done*? No vendor doc to confirm either way |
+| Ninestar (TEJAS/RUDRA) | Re-send `Print Label SDK-IOS` — current upload is `._` stubs only |
+| DothanTech (JOSH) | iOS LPAPI framework; `supportedLanguages[]` integer enum |
+| Y50 vendor (TEZ/SHAKTI) | The actual library (`.aar`/`.jar`); demo re-sent as `.zip` |
 | You | **Bluetooth name prefix for all 5 brands** as shown in the pairing list — needed for `claims()` |
 | You | Per-model specs: dpi, head width in dots, max label width, media types → `profiles.json` |
-| You | Decide whether/when to register `printer-generic-spp` given it claims every scanned device |

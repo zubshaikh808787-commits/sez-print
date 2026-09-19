@@ -39,6 +39,9 @@ export type JoshPrintResult = {
   submitMs: number;
   waitMs: number;
   totalMs: number;
+  /** true only for a genuine PrintProgress.Success hardware ACK; false when the
+   *  DataEnded 200ms no-ACK fallback completed the job instead. */
+  confirmedByDevice: boolean;
 };
 
 export type JoshPngLabelOptions = {

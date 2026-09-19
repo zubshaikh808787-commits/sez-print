@@ -41,7 +41,17 @@ export function isLikelyDevName(name: string | null | undefined): boolean {
   if (isLikelyLabelXName(name)) return false;
   if (n.includes('tejas') || n.includes('rudra') || n.includes('josh')) return false;
   if (n.includes('tez') || n.includes('shakti') || n.includes('flashlabel') || hasTejToken(n)) return false;
-  if (n.startsWith('seznik_') || n.startsWith('seznik-') || n === 'seznik' || n === 'seznek') return false;
+  // A bare "Seznik" name with no other token defers to Tez (see isLikelyTezName's
+  // catch-all). But "Seznik_Dev-14" / "Seznik_Veer-1" carry an explicit brand
+  // token and must win here — otherwise both isLikelyDevName and isLikelyTezName
+  // claim the same device (isolation break: job could route to the wrong bridge).
+  if (
+    (n.startsWith('seznik_') || n.startsWith('seznik-') || n === 'seznik' || n === 'seznek') &&
+    !hasDevToken(n) &&
+    !hasVeerToken(n)
+  ) {
+    return false;
+  }
   return (
     hasDevToken(n) ||
     hasVeerToken(n) ||

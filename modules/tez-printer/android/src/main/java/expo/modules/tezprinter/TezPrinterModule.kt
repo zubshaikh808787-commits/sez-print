@@ -171,7 +171,8 @@ class TezPrinterModule : Module() {
                             "copies" to result.copies,
                             "durationMs" to result.durationMs,
                             "widthMm" to result.widthMm,
-                            "heightMm" to result.heightMm
+                            "heightMm" to result.heightMm,
+                            "confirmedByDevice" to result.confirmedByDevice
                         )
                     )
                 }
@@ -221,7 +222,8 @@ class TezPrinterModule : Module() {
                                 "copies" to result.copies,
                                 "durationMs" to result.durationMs,
                                 "widthMm" to result.widthMm,
-                                "heightMm" to result.heightMm
+                                "heightMm" to result.heightMm,
+                                "confirmedByDevice" to result.confirmedByDevice
                             )
                         )
                     }
