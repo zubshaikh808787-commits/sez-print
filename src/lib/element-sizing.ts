@@ -280,7 +280,19 @@ export function clampElementToLabel(
 }
 
 export function normalizeDocumentElements(doc: LabelDocument): LabelElement[] {
-  return doc.elements.map((el) => clampElementToLabel(el, doc));
+  const elements = doc.mediaShape === 'circle'
+    ? doc.elements.filter((el) => {
+        if (el.type === 'shape' && (el.figureShape === 'circle' || el.figureShape === 'oval')) {
+          const minDim = Math.min(doc.widthMm, doc.heightMm);
+          const isFullCanvas = el.width >= minDim - 1.5 && el.height >= minDim - 1.5;
+          if (isFullCanvas && el.fill && (el.fillColor === '#FFFFFF' || el.fillColor === '#ffffff')) {
+            return false;
+          }
+        }
+        return true;
+      })
+    : doc.elements;
+  return elements.map((el) => clampElementToLabel(el, doc));
 }
 
 /**

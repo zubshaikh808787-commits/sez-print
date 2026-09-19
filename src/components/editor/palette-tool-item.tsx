@@ -3,13 +3,13 @@ import { Platform, StyleSheet, Text, View, type StyleProp, type ViewStyle } from
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
-import { AppIcon, type AppIconName } from '@/components/app-icon';
-import { Palette, Type } from '@/constants/ui';
+import { ToolMenuIcon } from '@/components/editor/editor-menu-icons';
+import type { AppIconName } from '@/components/app-icon';
 
 const DRAG_START_PX = 10;
 
 export function PaletteToolItem({
-  icon,
+  icon: _icon,
   label,
   onPress,
   onDragStart,
@@ -59,7 +59,7 @@ export function PaletteToolItem({
       <View
         style={[styles.hit, style, Platform.OS === 'web' ? (webHitStyle as object) : null]}
         collapsable={false}>
-        <AppIcon name={icon} tintColor={Palette.accent} size={26} />
+        <ToolMenuIcon name={label} size={30} />
         <Text numberOfLines={1} style={styles.label}>
           {label}
         </Text>
@@ -76,10 +76,13 @@ const webHitStyle = {
 const styles = StyleSheet.create({
   hit: {
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'center',
+    gap: 6,
   },
   label: {
-    ...Type.action,
-    color: Palette.ink,
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#475569',
+    textAlign: 'center',
   },
 });

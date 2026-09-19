@@ -122,7 +122,13 @@ function circleAt(
   left: number,
   top: number,
   diameter: number,
-  opts: { lockMovement?: boolean } = {},
+  opts: {
+    lineWidth?: number;
+    fill?: boolean;
+    fillColor?: string;
+    lockMovement?: boolean;
+    needPrinting?: boolean;
+  } = {},
 ): LabelElement {
   return {
     ...DEFAULT_SHAPE_STATE,
@@ -133,11 +139,12 @@ function circleAt(
     top,
     width: diameter,
     height: diameter,
-    lineWidth: 0.4,
-    fill: true,
-    fillColor: '#FFFFFF',
+    lineWidth: opts.lineWidth ?? 0.4,
+    fill: opts.fill ?? false,
+    fillColor: opts.fillColor,
     drawingColorIndex: 1,
     lockMovement: opts.lockMovement ?? false,
+    needPrinting: opts.needPrinting ?? true,
   };
 }
 
@@ -734,7 +741,6 @@ export function buildIndustryPreviewElements(
     case 'circle-40':
     case 'circle-50':
       return [
-        circle(w, h),
         text({ left: w * 0.12, top: h * 0.38, width: w * 0.76 }, 'QC PASS', bodyPt, {
           align: 'center',
           bold: true,

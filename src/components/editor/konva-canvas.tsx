@@ -2,7 +2,7 @@ import React, { forwardRef, memo, useMemo } from 'react';
 import { Image } from 'expo-image';
 import { StyleSheet, Text, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
-import Svg, { Line } from 'react-native-svg';
+import Svg, { Ellipse, Line, Rect } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
@@ -11,7 +11,6 @@ import { type LiveRulerBounds } from '@/components/canvas-rulers';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
 import { type LabelDocument, type LabelElement, type MediaShape } from '@/lib/label-document';
-import { mediaShapeClipStyle } from '@/lib/label-geometry';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
 import { isCableFlagDieCutDocument } from '@/constants/cable-flag-diecut';
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
@@ -143,7 +142,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 ) {
   const w = Math.max(1, canvasWidthPx);
   const h = Math.max(1, canvasHeightPx);
-  const shapeClip = mediaShapeClipStyle(doc.mediaShape, w, h);
 
   const cableFlag = isCableFlagDieCutDocument(doc);
   const stockCut = hasStockSilhouette(doc.templatePreviewType) || isRatTailGeometry(doc.mediaGeometry);
@@ -269,6 +267,49 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     );
   }, [doc, pxPerMM, w, h]);
 
+  const mediaShapeGuide = useMemo(() => {
+    if (!doc.mediaShape || doc.mediaShape === 'rectangle' || doc.mediaShape === 'diecut') return null;
+    if (doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse') {
+      const isCircle = doc.mediaShape === 'circle';
+      const rx = isCircle ? Math.min(w, h) / 2 : w / 2;
+      const ry = isCircle ? Math.min(w, h) / 2 : h / 2;
+      return (
+        <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
+          <Ellipse
+            cx={w / 2}
+            cy={h / 2}
+            rx={Math.max(1, rx - 0.5)}
+            ry={Math.max(1, ry - 0.5)}
+            stroke="rgba(94, 234, 212, 0.75)"
+            strokeWidth={1}
+            strokeDasharray="5,4"
+            fill="none"
+          />
+        </Svg>
+      );
+    }
+    if (doc.mediaShape === 'roundedRectangle') {
+      const radius = Math.min(w, h) * 0.1;
+      return (
+        <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
+          <Rect
+            x={0.5}
+            y={0.5}
+            width={w - 1}
+            height={h - 1}
+            rx={radius}
+            ry={radius}
+            stroke="rgba(94, 234, 212, 0.75)"
+            strokeWidth={1}
+            strokeDasharray="5,4"
+            fill="none"
+          />
+        </Svg>
+      );
+    }
+    return null;
+  }, [doc.mediaShape, w, h]);
+
   const deselectGesture = useMemo(
     () =>
       Gesture.Tap()
@@ -332,17 +373,14 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   return (
     <View
       collapsable={false}
-      style={[
-        {
-          width: w,
-          height: h,
-          backgroundColor,
-          overflow: 'hidden',
-        },
-        shapeClip,
-      ]}>
+      style={{
+        width: w,
+        height: h,
+        backgroundColor,
+        overflow: 'hidden',
+      }}>
       {stockOutline}
-      <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={[{ width: w, height: h, overflow: 'hidden' }, shapeClip]}>
+      <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={{ width: w, height: h, overflow: 'hidden' }}>
         <View
           pointerEvents="none"
           collapsable={false}
@@ -352,7 +390,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
               width: w,
               height: h,
               backgroundColor,
-              ...shapeClip,
             },
           ]}>
           {/* pageLayer: static artboard / page boundary. listening: false */}
@@ -375,7 +412,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             </View>
           ) : null}
 
-          {doc.mediaShape === 'diecut' || cableFlag || stockCut ? null : (
+          {cableFlag || stockCut ? null : (
             <View style={styles.artboardBorder} />
           )}
         </View>
@@ -384,11 +421,12 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
           <View style={StyleSheet.absoluteFillObject} collapsable={false} />
         </GestureDetector>
 
-        <View pointerEvents="box-none" collapsable={false} style={[StyleSheet.absoluteFillObject, { overflow: 'hidden' }, shapeClip]}>
+        <View pointerEvents="box-none" collapsable={false} style={[StyleSheet.absoluteFillObject, { overflow: 'hidden' }]}>
           {/* Stable single-layer element rendering: preserves component instances across drag without flicker */}
           <CanvasElementNodes elements={sortedElements} chrome={chrome} />
         </View>
       </ViewShot>
+      {mediaShapeGuide}
       {cableFlagOutline}
       {snapGuides.length > 0 ? (
         <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">

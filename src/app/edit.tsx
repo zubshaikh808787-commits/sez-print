@@ -20,6 +20,8 @@ import {
   Vibration,
   useWindowDimensions,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import { useFocusEffect } from '@react-navigation/native';
@@ -74,6 +76,7 @@ import {
 import { chromeStrokeForFill, paletteGhostSizePx } from '@/lib/editor/canvas-chrome';
 import { PaletteDragGhost } from '@/components/editor/palette-drag-ghost';
 import { PaletteToolItem } from '@/components/editor/palette-tool-item';
+import { ToolMenuIcon, TopToolbarIcon } from '@/components/editor/editor-menu-icons';
 import { DegreesPropertyPanel } from '@/components/editor/degrees-property-panel';
 import { ArcTextPropertyPanel } from '@/components/editor/arctext-property-panel';
 import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel';
@@ -184,26 +187,36 @@ import {
 
 type IconName = AppIconName;
 
-const TOOLS: { icon: IconName; label: string }[] = [
-  { icon: 'textformat', label: 'Text' },
-  { icon: 'barcode', label: 'Barcode' },
-  { icon: 'qrcode', label: 'QRCode' },
-  { icon: 'photo', label: 'Image' },
-  { icon: 'photo.artframe', label: 'Clipart' },
-  { icon: 'line.diagonal', label: 'Line' },
-  { icon: 'square.on.circle', label: 'Shapes' },
-  { icon: 'tablecells', label: 'Table' },
-  { icon: 'clock', label: 'Time' },
-  { icon: 'character', label: 'ArcText' },
-  { icon: 'list.number', label: 'Degrees' },
-  { icon: 'tablecells.badge.ellipsis', label: 'Excel' },
-  { icon: 'viewfinder', label: 'Scan' },
-  { icon: 'eye', label: 'OCR' },
-  { icon: 'mic', label: 'ASR' },
-  { icon: 'square.on.square', label: '2ups Label' },
-  { icon: 'square.dashed', label: 'Border' },
-  { icon: 'signature', label: 'Signature' },
+const TOOL_ROWS: { icon: IconName; label: string }[][] = [
+  [
+    { icon: 'textformat', label: 'Text' },
+    { icon: 'barcode', label: 'Barcode' },
+    { icon: 'qrcode', label: 'QRCode' },
+    { icon: 'photo', label: 'Image' },
+    { icon: 'photo.artframe', label: 'Clipart' },
+  ],
+  [
+    { icon: 'line.diagonal', label: 'Line' },
+    { icon: 'square.on.circle', label: 'Shapes' },
+    { icon: 'tablecells', label: 'Table' },
+    { icon: 'clock', label: 'Time' },
+    { icon: 'character', label: 'ArcText' },
+  ],
+  [
+    { icon: 'list.number', label: 'Counter' },
+    { icon: 'tablecells.badge.ellipsis', label: 'Excel' },
+    { icon: 'viewfinder', label: 'Scan' },
+    { icon: 'eye', label: 'OCR' },
+    { icon: 'mic', label: 'ASR' },
+  ],
+  [
+    { icon: 'square.on.square', label: 'Label Clone' },
+    { icon: 'square.dashed', label: 'Border' },
+    { icon: 'signature', label: 'Signature' },
+  ],
 ];
+
+const TOOLS = TOOL_ROWS.flat();
 
 const MAX_HISTORY = 60;
 
@@ -242,21 +255,19 @@ function HeaderAction({
 }
 
 function ToolbarItem({
-  icon,
+  name,
   label,
   active,
   disabled,
-  withDivider,
   onPress,
 }: {
-  icon: IconName;
+  name: string;
   label: string;
   active?: boolean;
   disabled?: boolean;
-  withDivider?: boolean;
   onPress?: () => void;
 }) {
-  const color = disabled ? Palette.disabled : active ? Palette.accent : Palette.ink;
+  const color = disabled ? '#CBD5E1' : active ? '#06B6D4' : '#64748B';
   return (
     <Pressable
       disabled={disabled}
@@ -265,11 +276,10 @@ function ToolbarItem({
       android_ripple={androidRipple}
       style={({ pressed }) => [
         styles.toolbarItem,
-        withDivider && styles.toolbarDivider,
         pressed && !disabled && styles.pressed,
       ]}>
-      <AppIcon name={icon} tintColor={active ? Palette.accent : color} size={22} />
-      <Text numberOfLines={1} style={[styles.toolbarLabel, { color: active ? Palette.accent : color }]}>
+      <TopToolbarIcon name={name} size={22} color={color} active={active} />
+      <Text numberOfLines={1} style={[styles.toolbarLabel, { color }]}>
         {label}
       </Text>
     </Pressable>
@@ -277,21 +287,23 @@ function ToolbarItem({
 }
 
 function ToolItem({
-  icon,
+  icon: _icon,
   label,
   onPress,
+  style,
 }: {
-  icon: IconName;
+  icon?: IconName;
   label: string;
   onPress?: () => void;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
     <Pressable
       onPress={onPress}
       hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
       android_ripple={androidRipple}
-      style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}>
-      <AppIcon name={icon} tintColor={Palette.accent} size={26} />
+      style={({ pressed }) => [styles.toolItem, style, pressed && styles.pressed]}>
+      <ToolMenuIcon name={label} size={32} />
       <Text numberOfLines={1} style={styles.toolLabel}>
         {label}
       </Text>
@@ -1073,6 +1085,8 @@ export default function EditScreen() {
           return null;
       }
       element = clampElementToLabel(element, docRef.current);
+      const maxZ = docRef.current.elements.reduce((max, el) => Math.max(max, el.zIndex ?? 0), 0);
+      element.zIndex = maxZ + 1;
       setElements((items) => [...items, element], true);
       setSelectedIds([element.id]);
       return element;
@@ -1906,9 +1920,10 @@ export default function EditScreen() {
         addElement('arctext');
         openAddedElementPanel(label);
         break;
+      case 'Counter':
       case 'Degrees':
         addElement('degrees');
-        openAddedElementPanel(label);
+        openAddedElementPanel('Degrees');
         break;
       case 'Image':
         void handlePickImage();
@@ -1932,6 +1947,7 @@ export default function EditScreen() {
       case 'ASR':
         router.push({ pathname: '/asr', params: { from: 'edit' } });
         break;
+      case 'Label Clone':
       case '2ups Label':
         saveDocument(false);
         router.push({
@@ -1989,13 +2005,13 @@ export default function EditScreen() {
   const renderToolbar = () => (
     <View ref={toolbarRef} collapsable={false} style={styles.toolbarRow}>
       <ToolbarItem
-        icon="gearshape"
+        name="Label"
         label="Label"
         active={showLabelMenu}
         onPress={openLabelMenu}
       />
       <ToolbarItem
-        icon="checkmark.square"
+        name="Multiple"
         label="Multiple"
         active={multipleMode}
         onPress={() => {
@@ -2004,61 +2020,39 @@ export default function EditScreen() {
         }}
       />
       <ToolbarItem
-        icon="arrow.uturn.backward"
+        name="Undo"
         label="Undo"
         disabled={!canUndo}
         onPress={undo}
       />
       <ToolbarItem
-        icon="arrow.uturn.forward"
+        name="Redo"
         label="Redo"
         disabled={!canRedo}
         onPress={redo}
       />
       <ToolbarItem
-        icon="lock"
+        name="Lock"
         label="Lock"
         disabled={selectedIds.length === 0}
         onPress={() => setLockOnSelection(true)}
       />
       <ToolbarItem
-        icon="lock.open"
-        label="Unlock"
+        name="UnLock"
+        label="UnLock"
         disabled={selectedIds.length === 0}
         onPress={() => setLockOnSelection(false)}
       />
       <ToolbarItem
-        icon="arrow.clockwise"
-        label="Rotate"
-        disabled={selectedIds.length === 0}
-        onPress={() => rotateSelectedBy(90)}
+        name="Drag"
+        label="Drag"
+        active={canvasFullscreen}
+        onPress={toggleCanvasFullscreen}
       />
-      <ToolbarItem
-        icon="square.on.square"
-        label="Duplicate"
-        disabled={selectedIds.length === 0}
-        onPress={duplicateSelected}
-      />
-      <ToolbarItem
-        icon="trash"
-        label="Delete"
-        withDivider
-        disabled={selectedIds.length === 0}
-        onPress={deleteSelected}
-      />
-      {selectedElement?.type === 'image' ? (
-        <ToolbarItem
-          icon="photo"
-          label="Edit Image"
-          active={panelOpen}
-          onPress={() => {
-            setImageTab('Regular');
-            setPanelOpen((o) => !o);
-          }}
-        />
-      ) : null}
     </View>
-  );  const renderCanvas = () => (
+  );
+
+  const renderCanvas = () => (
     <View
       style={[styles.stage, { height: canvasSplitH, minHeight: 0, backgroundColor: stageBg }]}
       onLayout={(event) => {
@@ -2067,6 +2061,64 @@ export default function EditScreen() {
           setStageWidth(next);
         }
       }}>
+      {selectedIds.length > 0 ? (
+        <View style={styles.contextualTopBar} pointerEvents="box-none">
+          <View style={styles.contextualBarPill}>
+            <Pressable
+              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+              onPress={deleteSelected}
+              hitSlop={6}
+              accessibilityLabel="Delete selected element">
+              <AppIcon name="trash" tintColor="#EF4444" size={15} />
+              <Text style={[styles.contextualBarText, { color: '#EF4444' }]}>Delete</Text>
+            </Pressable>
+            <View style={styles.contextualBarDivider} />
+            <Pressable
+              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+              onPress={() => rotateSelectedBy(90)}
+              hitSlop={6}
+              accessibilityLabel="Rotate selected element 90 degrees">
+              <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={15} />
+              <Text style={styles.contextualBarText}>Rotate</Text>
+            </Pressable>
+            <View style={styles.contextualBarDivider} />
+            <Pressable
+              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+              onPress={duplicateSelected}
+              hitSlop={6}
+              accessibilityLabel="Duplicate selected element">
+              <AppIcon name="square.on.square" tintColor="#FFFFFF" size={15} />
+              <Text style={styles.contextualBarText}>Duplicate</Text>
+            </Pressable>
+            <View style={styles.contextualBarDivider} />
+            <Pressable
+              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+              onPress={() => setLockOnSelection(!(selectedElement?.lockMovement ?? false))}
+              hitSlop={6}
+              accessibilityLabel={selectedElement?.lockMovement ? 'Unlock element' : 'Lock element'}>
+              <AppIcon
+                name={selectedElement?.lockMovement ? 'lock.open' : 'lock'}
+                tintColor="#FFFFFF"
+                size={15}
+              />
+              <Text style={styles.contextualBarText}>
+                {selectedElement?.lockMovement ? 'Unlock' : 'Lock'}
+              </Text>
+            </Pressable>
+            <View style={styles.contextualBarDivider} />
+            <Pressable
+              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+              onPress={() => {
+                if (selectedElement) openPanelFor(selectedElement.id);
+              }}
+              hitSlop={6}
+              accessibilityLabel="Element properties">
+              <AppIcon name="slider.horizontal.3" tintColor="#38BDF8" size={15} />
+              <Text style={[styles.contextualBarText, { color: '#38BDF8' }]}>Properties</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       <ZoomableEditPad
         style={styles.stageZoom}
         zoom={padZoom}
@@ -2518,25 +2570,39 @@ export default function EditScreen() {
             keyboardShouldPersistTaps="handled"
             scrollEnabled={paletteGhost == null}>
             {propertyMode ? renderPanel() : (
-              <View style={styles.toolsGrid}>
-                {TOOLS.map((t) => {
-                  const dropType = paletteDropTypeForLabel(t.label);
-                  if (dropType) {
-                    return (
-                      <PaletteToolItem
-                        key={t.label}
-                        icon={t.icon}
-                        label={t.label}
-                        style={styles.toolItem}
-                        onPress={() => handleToolPress(t.label)}
-                        onDragStart={(x, y) => beginPaletteDrag(dropType, t.label, t.icon, x, y)}
-                        onDragMove={movePaletteDrag}
-                        onDragEnd={endPaletteDrag}
-                      />
-                    );
-                  }
-                  return <ToolItem key={t.label} {...t} onPress={() => handleToolPress(t.label)} />;
-                })}
+              <View style={styles.toolsContainer}>
+                {TOOL_ROWS.map((row, rowIndex) => (
+                  <View key={`row-${rowIndex}`} style={styles.toolRow}>
+                    {row.map((t) => {
+                      const dropType = paletteDropTypeForLabel(t.label);
+                      return (
+                        <View key={t.label} style={styles.toolCell}>
+                          {dropType ? (
+                            <PaletteToolItem
+                              icon={t.icon}
+                              label={t.label}
+                              style={styles.toolItem}
+                              onPress={() => handleToolPress(t.label)}
+                              onDragStart={(x, y) => beginPaletteDrag(dropType, t.label, t.icon, x, y)}
+                              onDragMove={movePaletteDrag}
+                              onDragEnd={endPaletteDrag}
+                            />
+                          ) : (
+                            <ToolItem
+                              icon={t.icon}
+                              label={t.label}
+                              style={styles.toolItem}
+                              onPress={() => handleToolPress(t.label)}
+                            />
+                          )}
+                        </View>
+                      );
+                    })}
+                    {Array.from({ length: Math.max(0, 5 - row.length) }).map((_, i) => (
+                      <View key={`spacer-${rowIndex}-${i}`} style={styles.toolCell} pointerEvents="none" />
+                    ))}
+                  </View>
+                ))}
               </View>
             )}
           </ScrollView>
@@ -3080,39 +3146,61 @@ const styles = StyleSheet.create({
   toolbarRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.two,
-    paddingBottom: Spacing.three,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.hairline,
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
   },
   toolbarItem: {
     flex: 1,
     alignItems: 'center',
-    gap: Spacing.one,
+    justifyContent: 'center',
+    gap: 3,
     minWidth: 0,
+    paddingVertical: 2,
   },
   toolbarDivider: {
     borderLeftWidth: 1,
     borderLeftColor: Palette.hairline,
   },
   toolbarLabel: {
-    ...Type.caption,
     fontSize: 11,
+    fontWeight: '400',
+    color: '#64748B',
+    textAlign: 'center',
   },
-  toolsGrid: {
+  toolsContainer: {
+    width: '100%',
+    paddingVertical: 6,
+    backgroundColor: '#FFFFFF',
+  },
+  toolRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingVertical: Spacing.three,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  toolCell: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 0,
   },
   toolItem: {
-    width: '20%',
+    width: '100%',
     alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: Spacing.three,
+    justifyContent: 'center',
+    gap: 6,
   },
   toolLabel: {
-    ...Type.action,
-    color: Palette.ink,
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#475569',
+    textAlign: 'center',
   },
   pressed: {
     opacity: 0.6,
@@ -3265,5 +3353,47 @@ const styles = StyleSheet.create({
   openCloseBtn: {
     flex: 0,
     marginTop: 4,
+  },
+  contextualTopBar: {
+    position: 'absolute',
+    top: 10,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 50,
+  },
+  contextualBarPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172AEE',
+    borderRadius: 20,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  contextualBarBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    gap: 4,
+  },
+  contextualBarText: {
+    color: '#F8FAFC',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  contextualBarDivider: {
+    width: 1,
+    height: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    marginHorizontal: 1,
   },
 });

@@ -6,7 +6,7 @@
 > **Hardware Targets:** 203 DPI (8.0 dots/mm) & 304 DPI (11.9685 dots/mm) Thermal Label Printers  
 
 ---
-
+                  
 ## Executive Architectural Blueprint & Vision
 
 Modern industrial-grade label software relies on a strict mathematical foundation: physical dimensions (mm) are the single ground truth, the UI is an interactive GPU projection of that space, and the print output is a discrete, hardware-aligned binary dot raster.

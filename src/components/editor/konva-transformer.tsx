@@ -897,7 +897,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       height: liveH,
       transform: [{ rotate: `${liveRot}deg` }],
       opacity: (element.opacity ?? 1) * liftSv.value,
-      zIndex: selectedSv.value ? 10 : 1,
+      zIndex: selectedSv.value ? 100 : (element.zIndex ?? 1),
     };
   });
 
@@ -916,7 +916,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           opacity: element.opacity ?? 1,
         }}>
         <ElementContentView
-          element={element}
+            element={element}
           widthPx={baseWidthPx}
           heightPx={baseHeightPx}
           scale={pxPerMMSafe}
