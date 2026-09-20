@@ -10,6 +10,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  type SharedValue,
 } from 'react-native-reanimated';
 import Svg, { Path as SvgPath, Line as SvgLine } from 'react-native-svg';
 import { AppIcon } from '@/components/app-icon';
@@ -67,7 +68,8 @@ type KonvaTransformerProps = {
   /** Stock shape from the document — the print capture uses this, so the editor must too. */
   mediaShape?: MediaShape;
   liveBounds?: LiveRulerBounds;
-  onSelect: (id: string) => void;
+  toolbarVisibleSv?: SharedValue<number>;
+  onSelect: (id: string, options?: { toggle?: boolean; openPanel?: boolean; isDragStart?: boolean }) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
   onTransformStart?: (id: string) => void;
@@ -106,6 +108,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   canvasHeightMm,
   mediaShape,
   liveBounds,
+  toolbarVisibleSv,
   onSelect,
   onOpenPanel,
   onEditText,
@@ -530,6 +533,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     };
   }, [baseHeightPx, baseWidthPx]);
 
+  const notifySelectJS = useCallback((id: string) => {
+    callbacksRef.current.onSelect(id, { isDragStart: true });
+  }, []);
+
   const notifyTransformStartJS = useCallback((id: string) => {
     callbacksRef.current.onTransformStart?.(id);
   }, []);
@@ -540,7 +547,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     const isDouble = last.id === element.id && now - last.time < DOUBLE_TAP_MS;
     lastTapRef.current = { id: element.id, time: now };
 
-    callbacksRef.current.onSelect(element.id);
+    callbacksRef.current.onSelect(element.id, { toggle: true });
 
     if (isDouble) {
       if (element.type === 'text' || element.type === 'degrees') {
@@ -570,10 +577,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           // so positions and visual boundary are locked instantly with 0ms delay
           isInteracting.value = true;
           selectedSv.value = true;
+          if (toolbarVisibleSv) {
+            toolbarVisibleSv.value = 1;
+          }
           originLeftSv.value = originLeftSv.value + transX.value;
           originTopSv.value = originTopSv.value + transY.value;
           transX.value = 0;
           transY.value = 0;
+          runOnJS(notifySelectJS)(element.id);
         })
         .onStart((_e) => {
           'worklet';
@@ -676,6 +687,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       hasMovedSv,
       notifyTransformStartJS,
       triggerTapJS,
+      notifySelectJS,
+      toolbarVisibleSv,
     ],
   );
 

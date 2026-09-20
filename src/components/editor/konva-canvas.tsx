@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import Svg, { Ellipse, Line, Rect } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import { runOnJS, type SharedValue } from 'react-native-reanimated';
 
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
 import { type LiveRulerBounds } from '@/components/canvas-rulers';
@@ -32,7 +32,8 @@ type KonvaCanvasProps = {
   surfaceColor?: string;
   showGrid?: boolean;
   liveBounds?: LiveRulerBounds;
-  onSelect: (id: string) => void;
+  toolbarVisibleSv?: SharedValue<number>;
+  onSelect: (id: string, options?: { toggle?: boolean; openPanel?: boolean; isDragStart?: boolean }) => void;
   onDeselectAll: () => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
@@ -61,7 +62,8 @@ type ElementChrome = {
   canvasHeightMm: number;
   mediaShape?: MediaShape;
   liveBounds?: LiveRulerBounds;
-  onSelect: (id: string) => void;
+  toolbarVisibleSv?: SharedValue<number>;
+  onSelect: (id: string, options?: { toggle?: boolean; openPanel?: boolean; isDragStart?: boolean }) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
   onTransformStart?: (id: string) => void;
@@ -99,6 +101,7 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           canvasHeightMm={chrome.canvasHeightMm}
           mediaShape={chrome.mediaShape}
           liveBounds={chrome.liveBounds}
+          toolbarVisibleSv={chrome.toolbarVisibleSv}
           onSelect={chrome.onSelect}
           onOpenPanel={chrome.onOpenPanel}
           onEditText={chrome.onEditText}
@@ -126,6 +129,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     surfaceColor,
     showGrid = false,
     liveBounds,
+    toolbarVisibleSv,
     onSelect,
     onDeselectAll,
     onOpenPanel,
@@ -314,10 +318,16 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     () =>
       Gesture.Tap()
         .maxDuration(2000)
+        .onBegin(() => {
+          'worklet';
+          if (toolbarVisibleSv) {
+            toolbarVisibleSv.value = 0;
+          }
+        })
         .onEnd((_e, success) => {
           if (success) runOnJS(onDeselectAll)();
         }),
-    [onDeselectAll],
+    [onDeselectAll, toolbarVisibleSv],
   );
 
   const canvasWidthMm = isRatTailGeometry(doc.mediaGeometry)
@@ -339,6 +349,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       canvasHeightMm,
       mediaShape: doc.mediaShape,
       liveBounds,
+      toolbarVisibleSv,
       onSelect,
       onOpenPanel,
       onEditText,
@@ -358,6 +369,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       canvasHeightMm,
       doc.mediaShape,
       liveBounds,
+      toolbarVisibleSv,
       onSelect,
       onOpenPanel,
       onEditText,

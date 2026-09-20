@@ -550,6 +550,20 @@ export default function EditScreen() {
   const panelMinForSplit =
     PANEL_MIN_HEIGHT_PX + (editorSettings.showNudgePad ? NUDGE_PAD_SPLIT_EXTRA_PX : 0);
   const panelMinForSplitSv = useSharedValue(panelMinForSplit);
+
+  const toolbarVisibleSv = useSharedValue(selectedIds.length > 0 ? 1 : 0);
+  useEffect(() => {
+    toolbarVisibleSv.value = selectedIds.length > 0 ? 1 : 0;
+  }, [selectedIds.length, toolbarVisibleSv]);
+
+  const defaultToolbarAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: toolbarVisibleSv.value > 0.5 ? 0 : 1,
+  }));
+
+  const contextualToolbarAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: toolbarVisibleSv.value > 0.5 ? 1 : 0,
+  }));
+
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
   const [padZoom, setPadZoom] = useState(1);
   const padPanRef = useRef({ x: 0, y: 0 });
@@ -1194,10 +1208,11 @@ export default function EditScreen() {
 
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
+    toolbarVisibleSv.value = 0;
     setElements((elements) => elements.filter((el) => !selectedIds.includes(el.id)), true);
     setSelectedIds([]);
     setPanelOpen(false);
-  }, [selectedIds, setElements]);
+  }, [selectedIds, setElements, toolbarVisibleSv]);
 
   const duplicateSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
@@ -1209,22 +1224,26 @@ export default function EditScreen() {
   }, [selectedIds, setElements]);
 
   const handleDeselectAll = useCallback(() => {
+    toolbarVisibleSv.value = 0;
     setSelectedIds([]);
     setPanelOpen(false);
-  }, []);
+  }, [toolbarVisibleSv]);
 
   const handleSelect = useCallback(
-    (id: string) => {
+    (id: string, options?: { toggle?: boolean; isDragStart?: boolean }) => {
       const element = docRef.current.elements.find((el) => el.id === id);
       if (!element || element.needPrinting === false || element.type === 'border') return;
       setSelectedIds((prev) => {
         if (multipleMode) {
-           return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+          if (options?.toggle) {
+            return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+          }
+          return prev.includes(id) ? prev : [...prev, id];
         }
         if (prev.length === 1 && prev[0] === id) return prev;
         return [id];
       });
-      if (!multipleMode) {
+      if (!multipleMode && !options?.isDragStart) {
         if (element.type === 'signature') {
           setShowSignatureBoard(true);
         } else if (element.type === 'image') {
@@ -2292,6 +2311,7 @@ export default function EditScreen() {
                     surfaceColor={artboardFill}
                     showGrid={Boolean(editorSettings.editorGrid)}
                     liveBounds={liveRulerBounds}
+                    toolbarVisibleSv={toolbarVisibleSv}
                     onSelect={handleSelect}
                     onDeselectAll={handleDeselectAll}
                     onOpenPanel={openPanelFor}
@@ -2494,59 +2514,63 @@ export default function EditScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.body, { maxWidth: MaxContentWidth }]}>
         <View style={styles.subToolbarSlot}>
-          {selectedIds.length > 0 ? (
-            renderContextualToolbar()
-          ) : (
-            <View style={styles.subToolbarRow}>
-              <Pressable
-                onPress={() => {
-                  if (isRatTail143Document(doc)) return;
-                  setSizeModalVisible(true);
-                }}
-                style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
-                <Text style={styles.dimText}>
-                  {doc.widthMm.toFixed(1)} × {doc.heightMm.toFixed(1)} mm · {doc.paperType}
-                  {doc.orientation ? ` · ${doc.orientation}°` : ''}
-                  {doc.ups ? ` · ${doc.ups.columns}ups` : ''}
-                </Text>
-                <Text style={styles.sizeHint}>
-                  {isRatTail143Document(doc)
-                    ? 'Prints 14.3 × 101.6 mm wrap stock · content locked on the paddle'
-                    : 'Tap to customize size'}
-                </Text>
-              </Pressable>
+          <Animated.View
+            pointerEvents={selectedIds.length > 0 ? 'none' : 'auto'}
+            style={[styles.subToolbarRow, defaultToolbarAnimatedStyle]}>
+            <Pressable
+              onPress={() => {
+                if (isRatTail143Document(doc)) return;
+                setSizeModalVisible(true);
+              }}
+              style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
+              <Text style={styles.dimText}>
+                {doc.widthMm.toFixed(1)} × {doc.heightMm.toFixed(1)} mm · {doc.paperType}
+                {doc.orientation ? ` · ${doc.orientation}°` : ''}
+                {doc.ups ? ` · ${doc.ups.columns}ups` : ''}
+              </Text>
+              <Text style={styles.sizeHint}>
+                {isRatTail143Document(doc)
+                  ? 'Prints 14.3 × 101.6 mm wrap stock · content locked on the paddle'
+                  : 'Tap to customize size'}
+              </Text>
+            </Pressable>
 
-              {Math.abs(padZoom - 1) > 0.02 ? (
-                <Pressable
-                  onPress={() => setPadZoom(1)}
-                  hitSlop={8}
-                  style={({ pressed }) => [styles.fitZoomBtn, pressed && styles.pressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Reset zoom to fit">
-                  <Text style={styles.fitZoomBtnText}>
-                    Fit ({Math.round(padZoom * 100)}%)
-                  </Text>
-                </Pressable>
-              ) : null}
-
+            {Math.abs(padZoom - 1) > 0.02 ? (
               <Pressable
-                onPress={toggleCanvasFullscreen}
-                hitSlop={10}
+                onPress={() => setPadZoom(1)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.fitZoomBtn, pressed && styles.pressed]}
                 accessibilityRole="button"
-                accessibilityLabel={canvasFullscreen ? 'Restore editing panel' : 'Maximize canvas'}
-                style={({ pressed }) => [styles.splitMaxBtn, pressed && styles.pressed]}>
-                <AppIcon
-                  name={
-                    canvasFullscreen
-                      ? 'arrow.down.right.and.arrow.up.left'
-                      : 'arrow.up.left.and.arrow.down.right'
-                  }
-                  tintColor={Palette.accent}
-                  size={18}
-                />
+                accessibilityLabel="Reset zoom to fit">
+                <Text style={styles.fitZoomBtnText}>
+                  Fit ({Math.round(padZoom * 100)}%)
+                </Text>
               </Pressable>
-            </View>
-          )}
+            ) : null}
+
+            <Pressable
+              onPress={toggleCanvasFullscreen}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={canvasFullscreen ? 'Restore editing panel' : 'Maximize canvas'}
+              style={({ pressed }) => [styles.splitMaxBtn, pressed && styles.pressed]}>
+              <AppIcon
+                name={
+                  canvasFullscreen
+                    ? 'arrow.down.right.and.arrow.up.left'
+                    : 'arrow.up.left.and.arrow.down.right'
+                }
+                tintColor={Palette.accent}
+                size={18}
+              />
+            </Pressable>
+          </Animated.View>
+
+          <Animated.View
+            pointerEvents={selectedIds.length > 0 ? 'auto' : 'none'}
+            style={[StyleSheet.absoluteFillObject, contextualToolbarAnimatedStyle]}>
+            {renderContextualToolbar()}
+          </Animated.View>
         </View>
 
         {doc.ups && doc.ups.columns > 1 ? (
