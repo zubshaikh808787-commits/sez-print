@@ -77,12 +77,17 @@ export function ZoomableEditPad({
   const viewW = useSharedValue(1);
   const viewH = useSharedValue(1);
   const lastZoomReportAt = useSharedValue(0);
+  const oneFingerPanEnabledSv = useSharedValue(oneFingerPanEnabled);
   const rootRef = useRef<View>(null);
 
   useEffect(() => {
     minZoomSv.value = minZoom;
     maxZoomSv.value = maxZoom;
   }, [minZoom, maxZoom, minZoomSv, maxZoomSv]);
+
+  useEffect(() => {
+    oneFingerPanEnabledSv.value = oneFingerPanEnabled;
+  }, [oneFingerPanEnabled, oneFingerPanEnabledSv]);
 
   const reportView = useCallback(
     (nextZoom: number, nextPanX: number, nextPanY: number) => {
@@ -211,18 +216,19 @@ export function ZoomableEditPad({
   const oneFingerPan = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(oneFingerPanEnabled && zoom > 1.05)
         .minPointers(1)
         .maxPointers(1)
         .minDistance(12)
         .shouldCancelWhenOutside(false)
         .onStart(() => {
           'worklet';
+          if (!oneFingerPanEnabledSv.value || zoomSv.value <= 1.05) return;
           panStartX.value = panX.value;
           panStartY.value = panY.value;
         })
         .onUpdate((e) => {
           'worklet';
+          if (!oneFingerPanEnabledSv.value || zoomSv.value <= 1.05) return;
           if (zoomSv.value <= 1.01) return;
           const z = zoomSv.value;
           const limitX = panLimit(viewW.value, z);
@@ -234,9 +240,10 @@ export function ZoomableEditPad({
         })
         .onEnd(() => {
           'worklet';
+          if (!oneFingerPanEnabledSv.value || zoomSv.value <= 1.05) return;
           runOnJS(reportView)(zoomSv.value, panX.value, panY.value);
         }),
-    [oneFingerPanEnabled, zoom, panStartX, panStartY, panX, panY, reportView, viewH, viewW, zoomSv],
+    [oneFingerPanEnabledSv, panStartX, panStartY, panX, panY, reportView, viewH, viewW, zoomSv],
   );
 
   const setZoomAnimated = useCallback(

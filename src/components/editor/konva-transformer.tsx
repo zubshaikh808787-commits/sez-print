@@ -188,7 +188,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const isInteracting = useSharedValue(false);
   const liftSv = useSharedValue(1);
   const selectedSv = useSharedValue(selected);
-  const [moving, setMoving] = React.useState(false);
+  const hasMovedSv = useSharedValue(false);
   const tooltipRef = useRef<TooltipHandle | null>(null);
   const lastTooltipAt = useRef(0);
 
@@ -404,9 +404,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       dragMovePump.cancel();
       const leftMm = pxToMm(fallbackLeftPx, pxPerMMSafe);
       const topMm = pxToMm(fallbackTopPx, pxPerMMSafe);
+      callbacksRef.current.onSelect(element.id);
       dispatchDragCommitMm(leftMm, topMm);
     },
-    [dispatchDragCommitMm, dragMovePump, pxPerMMSafe],
+    [dispatchDragCommitMm, dragMovePump, element.id, pxPerMMSafe],
   );
 
   const captureResizeStartFromPx = useCallback(
@@ -519,49 +520,79 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     [pxPerMMSafe],
   );
 
-  const setMoveLift = useCallback((on: boolean) => {
-    setMoving(on);
-  }, []);
-
   const bodyHitSlop = useMemo(() => {
-    const target = selected ? HIT_TARGET_PX : 42;
+    const target = 42;
     return {
       top: Math.max(12, (target - Math.max(1, baseHeightPx)) / 2),
       bottom: Math.max(12, (target - Math.max(1, baseHeightPx)) / 2),
       left: Math.max(12, (target - Math.max(1, baseWidthPx)) / 2),
       right: Math.max(12, (target - Math.max(1, baseWidthPx)) / 2),
     };
-  }, [selected, baseHeightPx, baseWidthPx]);
+  }, [baseHeightPx, baseWidthPx]);
+
+  const notifyTransformStartJS = useCallback((id: string) => {
+    callbacksRef.current.onTransformStart?.(id);
+  }, []);
+
+  const handleSingleTap = useCallback(() => {
+    const now = Date.now();
+    const last = lastTapRef.current;
+    const isDouble = last.id === element.id && now - last.time < DOUBLE_TAP_MS;
+    lastTapRef.current = { id: element.id, time: now };
+
+    callbacksRef.current.onSelect(element.id);
+
+    if (isDouble) {
+      if (element.type === 'text' || element.type === 'degrees') {
+        callbacksRef.current.onEditText(element.id);
+      } else {
+        callbacksRef.current.onOpenPanel(element.id);
+      }
+    }
+  }, [element.id, element.type]);
+
+  const triggerTapJS = useCallback(() => {
+    handleSingleTap();
+  }, [handleSingleTap]);
 
   const bodyDragGesture = useMemo(
     () =>
       Gesture.Pan()
         .enabled(!element.lockMovement)
-        .minDistance(2)
+        .minDistance(0)
         .maxPointers(1)
         .shouldCancelWhenOutside(false)
         .hitSlop(bodyHitSlop)
         .onBegin((_e) => {
           'worklet';
-          selectedSv.value = true;
-          runOnJS(callbacksRef.current.onSelect)(element.id);
-        })
-        .onStart((_e) => {
-          'worklet';
+          hasMovedSv.value = false;
+          // Immediately prime interaction and selection on UI thread
+          // so positions and visual boundary are locked instantly with 0ms delay
           isInteracting.value = true;
           selectedSv.value = true;
           originLeftSv.value = originLeftSv.value + transX.value;
           originTopSv.value = originTopSv.value + transY.value;
           transX.value = 0;
           transY.value = 0;
-          liftSv.value = DRAG_LIFT_OPACITY;
-          runOnJS(setMoveLift)(true);
-          if (callbacksRef.current.onTransformStart) {
-            runOnJS(callbacksRef.current.onTransformStart)(element.id);
-          }
+        })
+        .onStart((_e) => {
+          'worklet';
+          isInteracting.value = true;
+          selectedSv.value = true;
         })
         .onUpdate((e) => {
           'worklet';
+          const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
+          if (!hasMovedSv.value) {
+            if (distSq < 6.25) {
+              // Less than 2.5px: stationary touch noise, ignore so taps are rock solid
+              return;
+            }
+            hasMovedSv.value = true;
+            liftSv.value = DRAG_LIFT_OPACITY;
+            runOnJS(notifyTransformStartJS)(element.id);
+          }
+
           const z = padZoomSv.value > 0 ? padZoomSv.value : 1;
           const dx = e.translationX / z;
           const dy = e.translationY / z;
@@ -593,31 +624,39 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         })
         .onEnd((e) => {
           'worklet';
-          // Fold the gesture offset into the origin now, so the view is
-          // already sitting at its final pixel position — no round trip
-          // through React props needed to look settled.
-          originLeftSv.value = originLeftSv.value + transX.value;
-          originTopSv.value = originTopSv.value + transY.value;
-          transX.value = 0;
-          transY.value = 0;
-          // isInteracting stays true until the JS-side commit callback below
-          // has actually queued the store update — otherwise an unrelated
-          // re-render landing in the gap could snap this back to the stale
-          // pre-drag props.
           liftSv.value = 1;
-          runOnJS(setMoveLift)(false);
-          runOnJS(commitDragFromPointer)(
-            e.absoluteX,
-            e.absoluteY,
-            originLeftSv.value,
-            originTopSv.value,
-          );
+          if (!hasMovedSv.value) {
+            // Finger lifted without significant translation -> tap event
+            transX.value = 0;
+            transY.value = 0;
+            isInteracting.value = false;
+            runOnJS(triggerTapJS)();
+          } else {
+            originLeftSv.value = originLeftSv.value + transX.value;
+            originTopSv.value = originTopSv.value + transY.value;
+            transX.value = 0;
+            transY.value = 0;
+            runOnJS(commitDragFromPointer)(
+              e.absoluteX,
+              e.absoluteY,
+              originLeftSv.value,
+              originTopSv.value,
+            );
+          }
+        })
+        .onFinalize((_e, success) => {
+          'worklet';
+          if (!success) {
+            isInteracting.value = false;
+            liftSv.value = 1;
+            transX.value = 0;
+            transY.value = 0;
+          }
         }),
     [
       element.lockMovement,
       bodyHitSlop,
       commitDragFromPointer,
-      setMoveLift,
       element.id,
       originLeftSv,
       originTopSv,
@@ -634,45 +673,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       sxSv,
       sySv,
       liveBounds,
+      hasMovedSv,
+      notifyTransformStartJS,
+      triggerTapJS,
     ],
-  );
-
-  const handleSingleTap = useCallback(() => {
-    const now = Date.now();
-    const last = lastTapRef.current;
-    const isDouble = last.id === element.id && now - last.time < DOUBLE_TAP_MS;
-    lastTapRef.current = { id: element.id, time: now };
-
-    callbacksRef.current.onSelect(element.id);
-
-    if (isDouble) {
-      if (element.type === 'text' || element.type === 'degrees') {
-        callbacksRef.current.onEditText(element.id);
-      } else {
-        callbacksRef.current.onOpenPanel(element.id);
-      }
-    }
-  }, [element.id, element.type]);
-
-  const tapGesture = useMemo(
-    () =>
-      Gesture.Tap()
-        .maxDuration(350)
-        .maxDistance(16)
-        .onBegin((_e) => {
-          'worklet';
-          selectedSv.value = true;
-          runOnJS(callbacksRef.current.onSelect)(element.id);
-        })
-        .onEnd((_e, success) => {
-          if (success) runOnJS(handleSingleTap)();
-        }),
-    [handleSingleTap, selectedSv, element.id],
-  );
-
-  const combinedBodyGesture = useMemo(
-    () => Gesture.Exclusive(bodyDragGesture, tapGesture),
-    [bodyDragGesture, tapGesture],
   );
 
   const createHandleGesture = useCallback(
@@ -699,9 +703,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             startW.value,
             startH.value,
           );
-          if (callbacksRef.current.onTransformStart) {
-            runOnJS(callbacksRef.current.onTransformStart)(element.id);
-          }
+          runOnJS(notifyTransformStartJS)(element.id);
         })
         .onUpdate((e) => {
           'worklet';
@@ -860,6 +862,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       dispatchResizeCommit,
       captureResizeStartFromPx,
       updateTooltipJS,
+      notifyTransformStartJS,
       bodyDragGesture,
       padZoomSv,
       canvasWMmSv,
@@ -999,9 +1002,15 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     };
   });
 
+  const overflowBadgeStyle = useAnimatedStyle(() => {
+    return {
+      opacity: isInteracting.value ? 0 : 1,
+    };
+  });
+
   return (
     <Animated.View style={containerStyle} collapsable={false}>
-      <GestureDetector gesture={combinedBodyGesture}>
+      <GestureDetector gesture={bodyDragGesture}>
         <View collapsable={false} style={styles.fillContainer}>
           <View pointerEvents="none" style={styles.fillContainer}>
             <ElementContentView
@@ -1029,15 +1038,17 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
         <ResizeTooltip tooltipRef={tooltipRef} />
 
-        {isOverflowed && !moving ? (
-          <Pressable
-            onPress={handleFitToLabelAction}
-            style={styles.overflowBadge}>
-            <AppIcon name="exclamationmark.triangle.fill" tintColor="#FFFFFF" size={11} />
-            <Text style={styles.overflowBadgeText}>
-              Overflow: text exceeds label height • <Text style={styles.overflowBadgeAction}>Fit</Text>
-            </Text>
-          </Pressable>
+        {isOverflowed ? (
+          <Animated.View style={overflowBadgeStyle}>
+            <Pressable
+              onPress={handleFitToLabelAction}
+              style={styles.overflowBadge}>
+              <AppIcon name="exclamationmark.triangle.fill" tintColor="#FFFFFF" size={11} />
+              <Text style={styles.overflowBadgeText}>
+                Overflow: text exceeds label height • <Text style={styles.overflowBadgeAction}>Fit</Text>
+              </Text>
+            </Pressable>
+          </Animated.View>
         ) : null}
 
         {element.lockMovement ? null : (

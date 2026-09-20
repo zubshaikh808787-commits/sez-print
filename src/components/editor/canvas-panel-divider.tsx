@@ -10,7 +10,7 @@
  * Computes `resolveSplitRelease` on the UI thread and notifies `onDragEnd` to persist settled state.
  */
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -67,6 +67,18 @@ export function CanvasPanelDivider({
   const callbacksRef = useRef({ onDragStart, onDragEnd, onCanvasHeightChange });
   callbacksRef.current = { onDragStart, onDragEnd, onCanvasHeightChange };
 
+  const fireDragStart = useCallback(() => {
+    callbacksRef.current.onDragStart?.();
+  }, []);
+
+  const fireCanvasHeightChange = useCallback((nextPx: number) => {
+    callbacksRef.current.onCanvasHeightChange?.(nextPx);
+  }, []);
+
+  const fireDragEnd = useCallback((result: SplitReleaseResult) => {
+    callbacksRef.current.onDragEnd?.(result);
+  }, []);
+
   const gesture = useMemo(() => {
     return Gesture.Pan()
       .minDistance(1)
@@ -79,9 +91,7 @@ export function CanvasPanelDivider({
         if (isDraggingSv) {
           isDraggingSv.value = true;
         }
-        if (callbacksRef.current.onDragStart) {
-          runOnJS(callbacksRef.current.onDragStart)();
-        }
+        runOnJS(fireDragStart)();
       })
       .onUpdate((e) => {
         'worklet';
@@ -92,9 +102,7 @@ export function CanvasPanelDivider({
           panelMinPx: panelMinPxSv.value,
         });
         activeHeightSv.value = nextPx;
-        if (callbacksRef.current.onCanvasHeightChange) {
-          runOnJS(callbacksRef.current.onCanvasHeightChange)(nextPx);
-        }
+        runOnJS(fireCanvasHeightChange)(nextPx);
       })
       .onEnd((e) => {
         'worklet';
@@ -113,9 +121,7 @@ export function CanvasPanelDivider({
         if (isDraggingSv) {
           isDraggingSv.value = false;
         }
-        if (callbacksRef.current.onDragEnd) {
-          runOnJS(callbacksRef.current.onDragEnd)(result);
-        }
+        runOnJS(fireDragEnd)(result);
       })
       .onFinalize(() => {
         'worklet';
@@ -123,7 +129,16 @@ export function CanvasPanelDivider({
           isDraggingSv.value = false;
         }
       });
-  }, [activeHeightSv, isDraggingSv, panelMinPxSv, startPxSv, viewportPxSv]);
+  }, [
+    activeHeightSv,
+    fireCanvasHeightChange,
+    fireDragEnd,
+    fireDragStart,
+    isDraggingSv,
+    panelMinPxSv,
+    startPxSv,
+    viewportPxSv,
+  ]);
 
   return (
     <GestureDetector gesture={gesture}>

@@ -1219,8 +1219,9 @@ export default function EditScreen() {
       if (!element || element.needPrinting === false || element.type === 'border') return;
       setSelectedIds((prev) => {
         if (multipleMode) {
-          return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+           return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
         }
+        if (prev.length === 1 && prev[0] === id) return prev;
         return [id];
       });
       if (!multipleMode) {
