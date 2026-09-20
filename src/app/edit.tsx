@@ -2301,6 +2301,11 @@ export default function EditScreen() {
                   width: RULER_SIZE + (canvasWidthPx || 1),
                   height: RULER_SIZE + (canvasHeightPx || 1),
                 },
+                (doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse') && {
+                  backgroundColor: 'transparent',
+                  shadowOpacity: 0,
+                  elevation: 0,
+                },
               ]}>
               <View style={styles.rulerTopRow}>
                 <RulerCorner />
@@ -2342,6 +2347,11 @@ export default function EditScreen() {
                     {
                       width: canvasWidthPx || 1,
                       height: canvasHeightPx || 1,
+                    },
+                    (doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse') && {
+                      backgroundColor: 'transparent',
+                      borderRightWidth: 0,
+                      borderBottomWidth: 0,
                     },
                   ]}>
                   <KonvaCanvas

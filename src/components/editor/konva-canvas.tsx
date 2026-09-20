@@ -153,15 +153,22 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   const w = Math.max(1, canvasWidthPx);
   const h = Math.max(1, canvasHeightPx);
 
+  const isCircle = doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse';
   const cableFlag = isCableFlagDieCutDocument(doc);
   const stockCut = hasStockSilhouette(doc.templatePreviewType) || isRatTailGeometry(doc.mediaGeometry);
-  const backgroundColor = cableFlag || stockCut
+  const backgroundColor = cableFlag || stockCut || isCircle
     ? 'transparent'
     : surfaceColor
       ? surfaceColor
       : doc.background?.type === 'color'
         ? doc.background.color
         : '#FFFFFF';
+
+  const stickerFillColor = surfaceColor
+    ? surfaceColor
+    : doc.background?.type === 'color'
+      ? doc.background.color
+      : '#FFFFFF';
 
   // Grid lines — engraved 1 / 5 / 10 mm like a machinist scale
   const gridLines = useMemo(() => {
@@ -280,38 +287,22 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   const mediaShapeGuide = useMemo(() => {
     if (!doc.mediaShape || doc.mediaShape === 'rectangle' || doc.mediaShape === 'diecut') return null;
     if (doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse') {
-      const isCircle = doc.mediaShape === 'circle';
-      const rx = isCircle ? Math.min(w, h) / 2 : w / 2;
-      const ry = isCircle ? Math.min(w, h) / 2 : h / 2;
-      return (
-        <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
-          <Ellipse
-            cx={w / 2}
-            cy={h / 2}
-            rx={Math.max(1, rx - 0.5)}
-            ry={Math.max(1, ry - 0.5)}
-            stroke="rgba(94, 234, 212, 0.75)"
-            strokeWidth={1}
-            strokeDasharray="5,4"
-            fill="none"
-          />
-        </Svg>
-      );
+      // Rendered directly on pageLayer inside canvasPad with stickerFillColor fill + 1px black stroke
+      return null;
     }
     if (doc.mediaShape === 'roundedRectangle') {
       const radius = Math.min(w, h) * 0.1;
       return (
         <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
           <Rect
-            x={0.5}
-            y={0.5}
-            width={w - 1}
-            height={h - 1}
+            x={1}
+            y={1}
+            width={Math.max(1, w - 2)}
+            height={Math.max(1, h - 2)}
             rx={radius}
             ry={radius}
-            stroke="rgba(94, 234, 212, 0.75)"
+            stroke="#000000"
             strokeWidth={1}
-            strokeDasharray="5,4"
             fill="none"
           />
         </Svg>
@@ -428,6 +419,20 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             </View>
           ) : null}
 
+          {isCircle ? (
+            <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
+              <Ellipse
+                cx={w / 2}
+                cy={h / 2}
+                rx={Math.max(1, (doc.mediaShape === 'circle' ? Math.min(w, h) / 2 : w / 2) - 1)}
+                ry={Math.max(1, (doc.mediaShape === 'circle' ? Math.min(w, h) / 2 : h / 2) - 1)}
+                fill={stickerFillColor}
+                stroke="#000000"
+                strokeWidth={1}
+              />
+            </Svg>
+          ) : null}
+
           {jewelryGuides}
           {gridLines}
 
@@ -437,7 +442,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             </View>
           ) : null}
 
-          {cableFlag || stockCut ? null : (
+          {cableFlag || stockCut || isCircle ? null : (
             <View style={styles.artboardBorder} />
           )}
         </View>
