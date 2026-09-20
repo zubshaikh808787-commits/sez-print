@@ -90,6 +90,7 @@ import type { TransformCommitPayload, TransformMovePayload } from '@/components/
 import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
 import { StaticToolPalette } from '@/components/editor/static-tool-palette';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { logPerf } from '@/lib/perf-logger';
 import {
   ArtboardFrame,
   CATALOG_STOCK_LINER,
@@ -551,17 +552,44 @@ export default function EditScreen() {
     PANEL_MIN_HEIGHT_PX + (editorSettings.showNudgePad ? NUDGE_PAD_SPLIT_EXTRA_PX : 0);
   const panelMinForSplitSv = useSharedValue(panelMinForSplit);
 
-  const toolbarVisibleSv = useSharedValue(selectedIds.length > 0 ? 1 : 0);
+  const topBarSelectionVisibleSv = useSharedValue(selectedIds.length > 0 ? 1 : 0);
+  const bottomPanelVisibleSv = useSharedValue(panelOpen && selectedIds.length > 0 ? 1 : 0);
+
   useEffect(() => {
-    toolbarVisibleSv.value = selectedIds.length > 0 ? 1 : 0;
-  }, [selectedIds.length, toolbarVisibleSv]);
+    topBarSelectionVisibleSv.value = selectedIds.length > 0 ? 1 : 0;
+  }, [selectedIds.length, topBarSelectionVisibleSv]);
+
+  useEffect(() => {
+    bottomPanelVisibleSv.value = panelOpen && selectedIds.length > 0 ? 1 : 0;
+  }, [panelOpen, selectedIds.length, bottomPanelVisibleSv]);
 
   const defaultToolbarAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: toolbarVisibleSv.value > 0.5 ? 0 : 1,
+    opacity: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
+    zIndex: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
+    pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'none' : 'auto',
   }));
 
   const contextualToolbarAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: toolbarVisibleSv.value > 0.5 ? 1 : 0,
+    opacity: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
+    zIndex: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
+    pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'auto' : 'none',
+  }));
+
+  const staticPaletteAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
+    zIndex: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
+    pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'none' : 'auto',
+  }));
+
+  const propertyPanelAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
+    zIndex: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
+    pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
+  }));
+
+  const panelCloseBtnAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
+    pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
   }));
 
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
@@ -874,6 +902,15 @@ export default function EditScreen() {
     selectedIds.length === 1
       ? doc.elements.find((el) => el.id === selectedIds[0]) ?? null
       : null;
+
+  const lastSelectedElementRef = useRef<LabelElement | null>(null);
+  if (selectedElement) {
+    lastSelectedElementRef.current = selectedElement;
+  }
+  const displayElement =
+    selectedElement ??
+    lastSelectedElementRef.current ??
+    (doc.elements.length > 0 ? doc.elements[0] : null);
 
   const docRef = useRef(doc);
   docRef.current = doc;
@@ -1208,42 +1245,47 @@ export default function EditScreen() {
 
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
-    toolbarVisibleSv.value = 0;
+    topBarSelectionVisibleSv.value = 0;
+    bottomPanelVisibleSv.value = 0;
     setElements((elements) => elements.filter((el) => !selectedIds.includes(el.id)), true);
     setSelectedIds([]);
     setPanelOpen(false);
-  }, [selectedIds, setElements, toolbarVisibleSv]);
+  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const duplicateSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     const bounds = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
     const result = duplicateElements(docRef.current.elements, selectedIds, bounds);
     if (result.newIds.length === 0) return;
+    topBarSelectionVisibleSv.value = 1;
+    bottomPanelVisibleSv.value = 1;
     setElements(() => result.elements, true);
     setSelectedIds(result.newIds);
-  }, [selectedIds, setElements]);
+  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const handleDeselectAll = useCallback(() => {
-    toolbarVisibleSv.value = 0;
+    logPerf('[JS_THREAD] handleDeselectAll');
+    topBarSelectionVisibleSv.value = 0;
+    bottomPanelVisibleSv.value = 0;
     setSelectedIds([]);
     setPanelOpen(false);
-  }, [toolbarVisibleSv]);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const handleSelect = useCallback(
-    (id: string, options?: { toggle?: boolean; isDragStart?: boolean }) => {
+    (id: string) => {
       const element = docRef.current.elements.find((el) => el.id === id);
       if (!element || element.needPrinting === false || element.type === 'border') return;
+      logPerf(`[JS_THREAD] handleSelect el=${id}`);
+      topBarSelectionVisibleSv.value = 1;
+      bottomPanelVisibleSv.value = 1;
       setSelectedIds((prev) => {
         if (multipleMode) {
-          if (options?.toggle) {
-            return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-          }
-          return prev.includes(id) ? prev : [...prev, id];
+           return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
         }
         if (prev.length === 1 && prev[0] === id) return prev;
         return [id];
       });
-      if (!multipleMode && !options?.isDragStart) {
+      if (!multipleMode) {
         if (element.type === 'signature') {
           setShowSignatureBoard(true);
         } else if (element.type === 'image') {
@@ -1254,12 +1296,14 @@ export default function EditScreen() {
         }
       }
     },
-    [multipleMode],
+    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv],
   );
 
   const openPanelFor = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
     if (!element) return;
+    topBarSelectionVisibleSv.value = 1;
+    bottomPanelVisibleSv.value = 1;
     setSelectedIds([id]);
     if (element.type === 'signature') {
       setShowSignatureBoard(true);
@@ -1279,7 +1323,7 @@ export default function EditScreen() {
       return;
     }
     setPanelOpen(true);
-  }, []);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const beginTextEdit = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
@@ -2114,6 +2158,7 @@ export default function EditScreen() {
 
   const closePanel = () => {
     commitTextEdit();
+    bottomPanelVisibleSv.value = 0;
     setPanelOpen(false);
   };
 
@@ -2311,7 +2356,8 @@ export default function EditScreen() {
                     surfaceColor={artboardFill}
                     showGrid={Boolean(editorSettings.editorGrid)}
                     liveBounds={liveRulerBounds}
-                    toolbarVisibleSv={toolbarVisibleSv}
+                    topBarSelectionVisibleSv={topBarSelectionVisibleSv}
+                    bottomPanelVisibleSv={bottomPanelVisibleSv}
                     onSelect={handleSelect}
                     onDeselectAll={handleDeselectAll}
                     onOpenPanel={openPanelFor}
@@ -2333,15 +2379,15 @@ export default function EditScreen() {
     </Animated.View>
   );
 
-  const renderPanel = () => {
-    if (!selectedElement) return null;
-    switch (selectedElement.type) {
+  const renderPanel = (targetEl: LabelElement | null = displayElement) => {
+    if (!targetEl) return null;
+    switch (targetEl.type) {
       case 'text':
         return (
           <TextPropertyPanel
             activeTab={textTab}
             onTabChange={setTextTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2354,7 +2400,7 @@ export default function EditScreen() {
           <BarcodePropertyPanel
             activeTab={barcodeTab}
             onTabChange={setBarcodeTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
@@ -2367,7 +2413,7 @@ export default function EditScreen() {
           <QrcodePropertyPanel
             activeTab={qrcodeTab}
             onTabChange={setQrcodeTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
@@ -2380,7 +2426,7 @@ export default function EditScreen() {
           <LinePropertyPanel
             activeTab={lineTab}
             onTabChange={setLineTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2392,7 +2438,7 @@ export default function EditScreen() {
           <ShapePropertyPanel
             activeTab={shapeTab}
             onTabChange={setShapeTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2404,7 +2450,7 @@ export default function EditScreen() {
           <TablePropertyPanel
             activeTab={tableTab}
             onTabChange={setTableTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2416,7 +2462,7 @@ export default function EditScreen() {
           <TimePropertyPanel
             activeTab={timeTab}
             onTabChange={setTimeTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2428,7 +2474,7 @@ export default function EditScreen() {
           <ArcTextPropertyPanel
             activeTab={arcTextTab}
             onTabChange={setArcTextTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
@@ -2441,7 +2487,7 @@ export default function EditScreen() {
           <DegreesPropertyPanel
             activeTab={degreesTab}
             onTabChange={setDegreesTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
@@ -2455,7 +2501,7 @@ export default function EditScreen() {
           <ImagePropertyPanel
             activeTab={imageTab}
             onTabChange={setImageTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2468,7 +2514,7 @@ export default function EditScreen() {
     }
   };
 
-  const propertyMode = panelOpen && selectedElement !== null && renderPanel() !== null;
+  const propertyMode = panelOpen && selectedElement !== null && renderPanel(displayElement) !== null;
 
   return (
     <View style={styles.root}>
@@ -2515,7 +2561,6 @@ export default function EditScreen() {
         style={[styles.body, { maxWidth: MaxContentWidth }]}>
         <View style={styles.subToolbarSlot}>
           <Animated.View
-            pointerEvents={selectedIds.length > 0 ? 'none' : 'auto'}
             style={[styles.subToolbarRow, defaultToolbarAnimatedStyle]}>
             <Pressable
               onPress={() => {
@@ -2567,7 +2612,6 @@ export default function EditScreen() {
           </Animated.View>
 
           <Animated.View
-            pointerEvents={selectedIds.length > 0 ? 'auto' : 'none'}
             style={[StyleSheet.absoluteFillObject, contextualToolbarAnimatedStyle]}>
             {renderContextualToolbar()}
           </Animated.View>
@@ -2689,41 +2733,39 @@ export default function EditScreen() {
           <View style={styles.sheet} pointerEvents="auto">
             {/* Pinned Toolbar Row - ALWAYS VISIBLE AT ALL SHEET HEIGHTS */}
             <View style={styles.pinnedToolbar}>
-              {propertyMode ? (
-                <View style={styles.panelHeader}>
-                  {renderToolbar()}
+              <View style={styles.panelHeader}>
+                {renderToolbar()}
+                <Animated.View style={panelCloseBtnAnimatedStyle}>
                   <Pressable
                     onPress={closePanel}
                     hitSlop={10}
                     style={({ pressed }) => [styles.panelCloseBtn, pressed && styles.pressed]}>
                     <AppIcon name="xmark" tintColor={Palette.muted} size={16} />
                   </Pressable>
-                </View>
-              ) : (
-                renderToolbar()
-              )}
+                </Animated.View>
+              </View>
             </View>
 
             {/* Collapsible Reveal Window for Tool Grid / Property Panel */}
             <Animated.View style={[styles.toolGridRevealWindow, toolGridAnimatedStyle]}>
-              {propertyMode ? (
+              <Animated.View style={[styles.staticPaletteContainer, staticPaletteAnimatedStyle]}>
+                <StaticToolPalette
+                  onToolPress={handleToolPress}
+                  onBeginDrag={beginPaletteDrag}
+                  onMoveDrag={movePaletteDrag}
+                  onEndDrag={endPaletteDrag}
+                />
+              </Animated.View>
+
+              <Animated.View style={[StyleSheet.absoluteFillObject, propertyPanelAnimatedStyle]}>
                 <ScrollView
                   style={styles.sheetScroll}
                   contentContainerStyle={{ paddingBottom: Math.max(Spacing.two, insets.bottom) }}
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled">
-                  {renderPanel()}
+                  {renderPanel(displayElement)}
                 </ScrollView>
-              ) : (
-                <View style={styles.staticPaletteContainer}>
-                  <StaticToolPalette
-                    onToolPress={handleToolPress}
-                    onBeginDrag={beginPaletteDrag}
-                    onMoveDrag={movePaletteDrag}
-                    onEndDrag={endPaletteDrag}
-                  />
-                </View>
-              )}
+              </Animated.View>
             </Animated.View>
           </View>
         </View>

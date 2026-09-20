@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { StyleSheet, Text, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import Svg, { Ellipse, Line, Rect } from 'react-native-svg';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import { runOnJS, type SharedValue } from 'react-native-reanimated';
 
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
@@ -32,8 +32,9 @@ type KonvaCanvasProps = {
   surfaceColor?: string;
   showGrid?: boolean;
   liveBounds?: LiveRulerBounds;
-  toolbarVisibleSv?: SharedValue<number>;
-  onSelect: (id: string, options?: { toggle?: boolean; openPanel?: boolean; isDragStart?: boolean }) => void;
+  topBarSelectionVisibleSv?: SharedValue<number>;
+  bottomPanelVisibleSv?: SharedValue<number>;
+  onSelect: (id: string) => void;
   onDeselectAll: () => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
@@ -62,8 +63,10 @@ type ElementChrome = {
   canvasHeightMm: number;
   mediaShape?: MediaShape;
   liveBounds?: LiveRulerBounds;
-  toolbarVisibleSv?: SharedValue<number>;
-  onSelect: (id: string, options?: { toggle?: boolean; openPanel?: boolean; isDragStart?: boolean }) => void;
+  deselectGesture?: GestureType;
+  topBarSelectionVisibleSv?: SharedValue<number>;
+  bottomPanelVisibleSv?: SharedValue<number>;
+  onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
   onTransformStart?: (id: string) => void;
@@ -101,7 +104,9 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           canvasHeightMm={chrome.canvasHeightMm}
           mediaShape={chrome.mediaShape}
           liveBounds={chrome.liveBounds}
-          toolbarVisibleSv={chrome.toolbarVisibleSv}
+          deselectGesture={chrome.deselectGesture}
+          topBarSelectionVisibleSv={chrome.topBarSelectionVisibleSv}
+          bottomPanelVisibleSv={chrome.bottomPanelVisibleSv}
           onSelect={chrome.onSelect}
           onOpenPanel={chrome.onOpenPanel}
           onEditText={chrome.onEditText}
@@ -129,7 +134,8 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     surfaceColor,
     showGrid = false,
     liveBounds,
-    toolbarVisibleSv,
+    topBarSelectionVisibleSv,
+    bottomPanelVisibleSv,
     onSelect,
     onDeselectAll,
     onOpenPanel,
@@ -318,16 +324,19 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     () =>
       Gesture.Tap()
         .maxDuration(2000)
-        .onBegin(() => {
-          'worklet';
-          if (toolbarVisibleSv) {
-            toolbarVisibleSv.value = 0;
-          }
-        })
         .onEnd((_e, success) => {
-          if (success) runOnJS(onDeselectAll)();
+          'worklet';
+          if (success) {
+            if (topBarSelectionVisibleSv) {
+              topBarSelectionVisibleSv.value = 0;
+            }
+            if (bottomPanelVisibleSv) {
+              bottomPanelVisibleSv.value = 0;
+            }
+            runOnJS(onDeselectAll)();
+          }
         }),
-    [onDeselectAll, toolbarVisibleSv],
+    [onDeselectAll, topBarSelectionVisibleSv, bottomPanelVisibleSv],
   );
 
   const canvasWidthMm = isRatTailGeometry(doc.mediaGeometry)
@@ -349,7 +358,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       canvasHeightMm,
       mediaShape: doc.mediaShape,
       liveBounds,
-      toolbarVisibleSv,
+      deselectGesture,
+      topBarSelectionVisibleSv,
+      bottomPanelVisibleSv,
       onSelect,
       onOpenPanel,
       onEditText,
@@ -369,7 +380,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       canvasHeightMm,
       doc.mediaShape,
       liveBounds,
-      toolbarVisibleSv,
+      deselectGesture,
+      topBarSelectionVisibleSv,
+      bottomPanelVisibleSv,
       onSelect,
       onOpenPanel,
       onEditText,

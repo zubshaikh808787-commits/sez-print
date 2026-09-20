@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect } from 'react-native-svg';
 import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
@@ -53,8 +53,14 @@ function tickLen(kind: Tick['kind'], major: number, mid: number, minor: number) 
   return minor;
 }
 
-/** Stable millimetre scale along the main canvas. Ticks align flush to the nested artboard. */
-export function HorizontalRuler({
+/**
+ * Stable millimetre scale along the main canvas. Ticks align flush to the nested artboard.
+ *
+ * Memoised on purpose: a ruler is ~100 native SVG nodes, and it used to be
+ * rebuilt on every editor render — including every selection change — for a
+ * selection band that `liveBounds` already draws on the UI thread.
+ */
+export const HorizontalRuler = memo(function HorizontalRuler({
   trackWidthPx,
   originPx,
   contentWidthPx,
@@ -209,9 +215,9 @@ export function HorizontalRuler({
       })}
     </View>
   );
-}
+});
 
-export function VerticalRuler({
+export const VerticalRuler = memo(function VerticalRuler({
   trackHeightPx,
   originPx,
   contentHeightPx,
@@ -365,15 +371,15 @@ export function VerticalRuler({
       })}
     </View>
   );
-}
+});
 
-export function RulerCorner() {
+export const RulerCorner = memo(function RulerCorner() {
   return (
     <View style={styles.corner}>
       <Text style={styles.cornerText}>mm</Text>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   hTrack: {

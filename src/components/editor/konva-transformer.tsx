@@ -5,7 +5,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -24,6 +24,7 @@ import { finiteMm, roundMm } from '@/lib/editor/engine';
 import { mmToPx, pxToMm } from '@/lib/label-coordinate-system';
 import { dropTopLeftMm, grabOffsetMm } from '@/lib/editor/view-transform';
 import { createFrameThrottled } from '@/lib/editor/drag-layer';
+import { logPerf } from '@/lib/perf-logger';
 import {
   aspectRatioOf,
   boundBoxMm,
@@ -68,8 +69,10 @@ type KonvaTransformerProps = {
   /** Stock shape from the document — the print capture uses this, so the editor must too. */
   mediaShape?: MediaShape;
   liveBounds?: LiveRulerBounds;
-  toolbarVisibleSv?: SharedValue<number>;
-  onSelect: (id: string, options?: { toggle?: boolean; openPanel?: boolean; isDragStart?: boolean }) => void;
+  deselectGesture?: GestureType;
+  topBarSelectionVisibleSv?: SharedValue<number>;
+  bottomPanelVisibleSv?: SharedValue<number>;
+  onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
   onTransformStart?: (id: string) => void;
@@ -108,7 +111,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   canvasHeightMm,
   mediaShape,
   liveBounds,
-  toolbarVisibleSv,
+  deselectGesture,
+  topBarSelectionVisibleSv,
+  bottomPanelVisibleSv,
   onSelect,
   onOpenPanel,
   onEditText,
@@ -192,6 +197,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const liftSv = useSharedValue(1);
   const selectedSv = useSharedValue(selected);
   const hasMovedSv = useSharedValue(false);
+  const beginTimeSv = useSharedValue(0);
   const tooltipRef = useRef<TooltipHandle | null>(null);
   const lastTooltipAt = useRef(0);
 
@@ -405,6 +411,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const commitDragFromPointer = useCallback(
     (_windowX: number, _windowY: number, fallbackLeftPx: number, fallbackTopPx: number) => {
       dragMovePump.cancel();
+      logPerf(`[BODY_DRAG] commitDragFromPointer el=${element.id}`);
       const leftMm = pxToMm(fallbackLeftPx, pxPerMMSafe);
       const topMm = pxToMm(fallbackTopPx, pxPerMMSafe);
       callbacksRef.current.onSelect(element.id);
@@ -533,12 +540,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     };
   }, [baseHeightPx, baseWidthPx]);
 
-  const notifySelectJS = useCallback((id: string) => {
-    callbacksRef.current.onSelect(id, { isDragStart: true });
-  }, []);
-
   const notifyTransformStartJS = useCallback((id: string) => {
     callbacksRef.current.onTransformStart?.(id);
+  }, []);
+
+  const notifySelectJS = useCallback((id: string, tBegin: number) => {
+    const transit = Date.now() - tBegin;
+    logPerf(`[JS_THREAD] onSelect arrived for el=${id} (bridge transit: ${transit}ms)`);
+    callbacksRef.current.onSelect(id);
   }, []);
 
   const handleSingleTap = useCallback(() => {
@@ -547,7 +556,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     const isDouble = last.id === element.id && now - last.time < DOUBLE_TAP_MS;
     lastTapRef.current = { id: element.id, time: now };
 
-    callbacksRef.current.onSelect(element.id, { toggle: true });
+    logPerf(`[BODY_DRAG] handleSingleTap el=${element.id}`);
+    callbacksRef.current.onSelect(element.id);
 
     if (isDouble) {
       if (element.type === 'text' || element.type === 'degrees') {
@@ -562,142 +572,166 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     handleSingleTap();
   }, [handleSingleTap]);
 
-  const bodyDragGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(!element.lockMovement)
-        .minDistance(0)
-        .maxPointers(1)
-        .shouldCancelWhenOutside(false)
-        .hitSlop(bodyHitSlop)
-        .onBegin((_e) => {
-          'worklet';
-          hasMovedSv.value = false;
-          // Immediately prime interaction and selection on UI thread
-          // so positions and visual boundary are locked instantly with 0ms delay
-          isInteracting.value = true;
-          selectedSv.value = true;
-          if (toolbarVisibleSv) {
-            toolbarVisibleSv.value = 1;
+  const bodyDragGesture = useMemo(() => {
+    const pan = Gesture.Pan()
+      .enabled(!element.lockMovement)
+      .minDistance(0)
+      .maxPointers(1)
+      .shouldCancelWhenOutside(false)
+      .hitSlop(bodyHitSlop);
+
+    if (deselectGesture) {
+      pan.blocksExternalGesture(deselectGesture);
+    }
+
+    return pan
+      .onBegin((_e) => {
+        'worklet';
+        const tNow = Date.now();
+        beginTimeSv.value = tNow;
+        hasMovedSv.value = false;
+        // Immediately prime interaction and selection on UI thread
+        // so positions and visual boundary are locked instantly with 0ms delay
+        isInteracting.value = true;
+        selectedSv.value = true;
+        if (topBarSelectionVisibleSv) {
+          topBarSelectionVisibleSv.value = 1;
+        }
+        if (bottomPanelVisibleSv) {
+          bottomPanelVisibleSv.value = 1;
+        }
+        originLeftSv.value = originLeftSv.value + transX.value;
+        originTopSv.value = originTopSv.value + transY.value;
+        transX.value = 0;
+        transY.value = 0;
+        runOnJS(notifySelectJS)(element.id, tNow);
+      })
+      .onStart((_e) => {
+        'worklet';
+        const delta = Date.now() - beginTimeSv.value;
+        isInteracting.value = true;
+        selectedSv.value = true;
+        runOnJS(logPerf)(`[BODY_DRAG] onStart el=${element.id} (begin->start: ${delta}ms)`);
+      })
+      .onUpdate((e) => {
+        'worklet';
+        const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
+        if (!hasMovedSv.value) {
+          if (distSq < 6.25) {
+            // Less than 2.5px: stationary touch noise, ignore so taps are rock solid
+            return;
           }
+          hasMovedSv.value = true;
+          liftSv.value = DRAG_LIFT_OPACITY;
+          const updateDelta = Date.now() - beginTimeSv.value;
+          runOnJS(logPerf)(`[BODY_DRAG] first onUpdate el=${element.id} (begin->update: ${updateDelta}ms)`);
+          runOnJS(notifyTransformStartJS)(element.id);
+        }
+
+        const z = padZoomSv.value > 0 ? padZoomSv.value : 1;
+        const dx = e.translationX / z;
+        const dy = e.translationY / z;
+
+        const curLeftMm = (originLeftSv.value + dx) / sxSv.value;
+        const curTopMm = (originTopSv.value + dy) / sySv.value;
+        const curWMm = animW.value / sxSv.value;
+        const curHMm = animH.value / sySv.value;
+
+        const clamped = clampToLabelBounds(
+          { left: curLeftMm, top: curTopMm, width: curWMm, height: curHMm },
+          { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
+          { anchor: 'body' },
+        );
+
+        const targetLeftPx = clamped.left * sxSv.value;
+        const targetTopPx = clamped.top * sySv.value;
+
+        transX.value = targetLeftPx - originLeftSv.value;
+        transY.value = targetTopPx - originTopSv.value;
+
+        if (liveBounds) {
+          liveBounds.leftMm.value = clamped.left;
+          liveBounds.topMm.value = clamped.top;
+          liveBounds.widthMm.value = clamped.width;
+          liveBounds.heightMm.value = clamped.height;
+          liveBounds.visible.value = true;
+        }
+      })
+      .onEnd((e) => {
+        'worklet';
+        liftSv.value = 1;
+        if (!hasMovedSv.value) {
+          // Finger lifted without significant translation -> tap event
+          transX.value = 0;
+          transY.value = 0;
+          isInteracting.value = false;
+          runOnJS(triggerTapJS)();
+        } else {
           originLeftSv.value = originLeftSv.value + transX.value;
           originTopSv.value = originTopSv.value + transY.value;
           transX.value = 0;
           transY.value = 0;
-          runOnJS(notifySelectJS)(element.id);
-        })
-        .onStart((_e) => {
-          'worklet';
-          isInteracting.value = true;
-          selectedSv.value = true;
-        })
-        .onUpdate((e) => {
-          'worklet';
-          const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
-          if (!hasMovedSv.value) {
-            if (distSq < 6.25) {
-              // Less than 2.5px: stationary touch noise, ignore so taps are rock solid
-              return;
-            }
-            hasMovedSv.value = true;
-            liftSv.value = DRAG_LIFT_OPACITY;
-            runOnJS(notifyTransformStartJS)(element.id);
-          }
-
-          const z = padZoomSv.value > 0 ? padZoomSv.value : 1;
-          const dx = e.translationX / z;
-          const dy = e.translationY / z;
-
-          const curLeftMm = (originLeftSv.value + dx) / sxSv.value;
-          const curTopMm = (originTopSv.value + dy) / sySv.value;
-          const curWMm = animW.value / sxSv.value;
-          const curHMm = animH.value / sySv.value;
-
-          const clamped = clampToLabelBounds(
-            { left: curLeftMm, top: curTopMm, width: curWMm, height: curHMm },
-            { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
-            { anchor: 'body' },
+          runOnJS(commitDragFromPointer)(
+            e.absoluteX,
+            e.absoluteY,
+            originLeftSv.value,
+            originTopSv.value,
           );
-
-          const targetLeftPx = clamped.left * sxSv.value;
-          const targetTopPx = clamped.top * sySv.value;
-
-          transX.value = targetLeftPx - originLeftSv.value;
-          transY.value = targetTopPx - originTopSv.value;
-
-          if (liveBounds) {
-            liveBounds.leftMm.value = clamped.left;
-            liveBounds.topMm.value = clamped.top;
-            liveBounds.widthMm.value = clamped.width;
-            liveBounds.heightMm.value = clamped.height;
-            liveBounds.visible.value = true;
-          }
-        })
-        .onEnd((e) => {
-          'worklet';
+        }
+      })
+      .onFinalize((_e, success) => {
+        'worklet';
+        if (!success) {
+          isInteracting.value = false;
           liftSv.value = 1;
-          if (!hasMovedSv.value) {
-            // Finger lifted without significant translation -> tap event
-            transX.value = 0;
-            transY.value = 0;
-            isInteracting.value = false;
-            runOnJS(triggerTapJS)();
-          } else {
-            originLeftSv.value = originLeftSv.value + transX.value;
-            originTopSv.value = originTopSv.value + transY.value;
-            transX.value = 0;
-            transY.value = 0;
-            runOnJS(commitDragFromPointer)(
-              e.absoluteX,
-              e.absoluteY,
-              originLeftSv.value,
-              originTopSv.value,
-            );
-          }
-        })
-        .onFinalize((_e, success) => {
-          'worklet';
-          if (!success) {
-            isInteracting.value = false;
-            liftSv.value = 1;
-            transX.value = 0;
-            transY.value = 0;
-          }
-        }),
-    [
-      element.lockMovement,
-      bodyHitSlop,
-      commitDragFromPointer,
-      element.id,
-      originLeftSv,
-      originTopSv,
-      transX,
-      transY,
-      animW,
-      animH,
-      isInteracting,
-      liftSv,
-      selectedSv,
-      padZoomSv,
-      canvasWMmSv,
-      canvasHMmSv,
-      sxSv,
-      sySv,
-      liveBounds,
-      hasMovedSv,
-      notifyTransformStartJS,
-      triggerTapJS,
-      notifySelectJS,
-      toolbarVisibleSv,
-    ],
-  );
+          transX.value = 0;
+          transY.value = 0;
+        }
+      });
+  }, [
+    element.lockMovement,
+    bodyHitSlop,
+    deselectGesture,
+    commitDragFromPointer,
+    element.id,
+    originLeftSv,
+    originTopSv,
+    transX,
+    transY,
+    animW,
+    animH,
+    isInteracting,
+    liftSv,
+    selectedSv,
+    topBarSelectionVisibleSv,
+    bottomPanelVisibleSv,
+    padZoomSv,
+    canvasWMmSv,
+    canvasHMmSv,
+    sxSv,
+    sySv,
+    liveBounds,
+    hasMovedSv,
+    beginTimeSv,
+    notifySelectJS,
+    notifyTransformStartJS,
+    triggerTapJS,
+  ]);
 
   const createHandleGesture = useCallback(
-    (handle: HandlePosition, behavior: ResizeBehavior) =>
-      Gesture.Pan()
+    (handle: HandlePosition, behavior: ResizeBehavior) => {
+      const handlePan = Gesture.Pan()
         .minDistance(0)
         .maxPointers(1)
-        .shouldCancelWhenOutside(false)
+        .shouldCancelWhenOutside(false);
+
+      if (deselectGesture) {
+        handlePan.blocksExternalGesture(bodyDragGesture, deselectGesture);
+      } else {
+        handlePan.blocksExternalGesture(bodyDragGesture);
+      }
+
+      return handlePan
         .onStart((_e) => {
           'worklet';
           isInteracting.value = true;
@@ -855,9 +889,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           // re-render landing in the gap could snap this back to the stale
           // pre-resize props.
           runOnJS(dispatchResizeCommit)(handle, animW.value, animH.value, animRot.value);
-        })
-        .blocksExternalGesture(bodyDragGesture),
+        });
+    },
     [
+      deselectGesture,
       originLeftSv,
       originTopSv,
       animW,
