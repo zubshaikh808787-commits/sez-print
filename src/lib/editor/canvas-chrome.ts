@@ -18,13 +18,13 @@ export const CHROME_STROKE_DARK = 'rgba(153, 246, 228, 0.92)';
 export const CHROME_SELECTION_STROKE = '#E8543C';
 export const CHROME_SELECTION_DASH = [6, 4];
 
-/** Circular resize handle per vendor UI (#42BCC7 cyan-teal, 28px diameter). */
+/** Circular resize handle per vendor UI (#42BCC7 cyan-teal, 34px diameter). */
 export const CHROME_HANDLE_FILL = '#42BCC7';
 export const CHROME_HANDLE_COLOR = '#42BCC7';
-export const CHROME_HANDLE_SIZE_PX = 28;
-export const CHROME_HANDLE_RADIUS_PX = 14;
+export const CHROME_HANDLE_SIZE_PX = 34;
+export const CHROME_HANDLE_RADIUS_PX = 17;
 export const CHROME_HANDLE_ICON_COLOR = '#FFFFFF';
-export const CHROME_HANDLE_ICON_SIZE = 16;
+export const CHROME_HANDLE_ICON_SIZE = 18;
 
 /** Task 6.1: no drop shadow on the transformer border or anchors. */
 export const CHROME_HAS_SHADOW = false;

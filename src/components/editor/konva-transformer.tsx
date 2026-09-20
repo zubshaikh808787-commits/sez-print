@@ -1097,14 +1097,14 @@ const EdgeResizeHandle = memo(function EdgeResizeHandle({
         style={[styles.handleCircle, position === 'e' ? styles.handleE : styles.handleS]}>
         <View pointerEvents="none">
           {position === 'e' ? (
-            <Svg width={16} height={16} viewBox="-10 -10 20 20">
+            <Svg width={CHROME_HANDLE_ICON_SIZE} height={CHROME_HANDLE_ICON_SIZE} viewBox="-10 -10 20 20">
               <SvgPath
                 d="M -3 -5 L -8.5 0 L -3 5 L -3 1.5 L 3 1.5 L 3 5 L 8.5 0 L 3 -5 L 3 -1.5 L -3 -1.5 Z"
                 fill="#FFFFFF"
               />
             </Svg>
           ) : (
-            <Svg width={16} height={16} viewBox="-10 -10 20 20">
+            <Svg width={CHROME_HANDLE_ICON_SIZE} height={CHROME_HANDLE_ICON_SIZE} viewBox="-10 -10 20 20">
               <SvgPath
                 d="M -5 -3 L 0 -8.5 L 5 -3 L 1.5 -3 L 1.5 3 L 5 3 L 0 8.5 L -5 3 L -1.5 3 L -1.5 -3 Z"
                 fill="#FFFFFF"
@@ -1131,10 +1131,10 @@ const styles = StyleSheet.create({
   },
   handleCircle: {
     position: 'absolute',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#42BCC7',
+    width: CHROME_HANDLE_SIZE_PX,
+    height: CHROME_HANDLE_SIZE_PX,
+    borderRadius: CHROME_HANDLE_RADIUS_PX,
+    backgroundColor: CHROME_HANDLE_FILL,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
@@ -1145,14 +1145,14 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   handleS: {
-    bottom: -14,
+    bottom: -CHROME_HANDLE_RADIUS_PX,
     left: '50%',
-    marginLeft: -14,
+    marginLeft: -CHROME_HANDLE_RADIUS_PX,
   },
   handleE: {
     top: '50%',
-    right: -14,
-    marginTop: -14,
+    right: -CHROME_HANDLE_RADIUS_PX,
+    marginTop: -CHROME_HANDLE_RADIUS_PX,
   },
   tooltipPill: {
     position: 'absolute',

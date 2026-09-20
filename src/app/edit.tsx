@@ -46,15 +46,16 @@ import {
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
 import {
   DEFAULT_CANVAS_SPLIT_RATIO,
+  DIVIDER_HIT_SIZE_PX,
   NUDGE_PAD_SPLIT_EXTRA_PX,
+  PANEL_DEFAULT_HEIGHT_PX,
   PANEL_MIN_HEIGHT_PX,
-  RULER_DEBOUNCE_MS,
   SPLIT_ANIMATION_MS,
   clampCanvasSplitHeight,
   clampStoredSplitRatio,
   persistableSplitRatio,
   restoreCanvasSplitHeight,
-  workspaceHeightFromSplit,
+  usableSplitViewportPx,
   type SplitReleaseResult,
 } from '@/lib/editor/canvas-split';
 import {
@@ -87,7 +88,8 @@ import { EditingPad } from '@/components/editor/editing-pad';
 import { KonvaCanvas } from '@/components/editor/konva-canvas';
 import type { TransformCommitPayload, TransformMovePayload } from '@/components/editor/konva-transformer';
 import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
-import { useSharedValue } from 'react-native-reanimated';
+import { StaticToolPalette } from '@/components/editor/static-tool-palette';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import {
   ArtboardFrame,
   CATALOG_STOCK_LINER,
@@ -154,7 +156,7 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
-import { clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
+import { CANVAS_BOTTOM_CHIP_CLEARANCE_PX, clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { computeTextElementHeightMm, textBlockHeightMm } from '@/lib/element-sizing';
@@ -511,6 +513,8 @@ export default function EditScreen() {
   const [padInner, setPadInner] = useState({ width: 0, height: 0 });
   const [splitViewportH, setSplitViewportH] = useState(0);
   const [splitDragging, setSplitDragging] = useState(false);
+  const splitDraggingRef = useRef(false);
+  splitDraggingRef.current = splitDragging;
   const [canvasFullscreen, setCanvasFullscreen] = useState(() =>
     Boolean(editorSettings.canvasSplitFullscreen),
   );
@@ -527,18 +531,25 @@ export default function EditScreen() {
       fullscreen: Boolean(editorSettings.canvasSplitFullscreen),
       viewportPx: Math.max(Dimensions.get('window').height, 560) * 0.62,
       panelMinPx: PANEL_MIN_HEIGHT_PX,
+      panelDefaultPx: PANEL_DEFAULT_HEIGHT_PX,
     }),
   );
-  const [rulerView, setRulerView] = useState({
-    innerWidthPx: 1,
-    innerHeightPx: 1,
-    boardOffsetXPx: 0,
-    boardOffsetYPx: 0,
-    canvasWidthPx: 1,
-    canvasHeightPx: 1,
-  });
+
+  const canvasHeightSv = useSharedValue(canvasSplitH);
+  const isDividerDraggingSv = useSharedValue(false);
+  const splitViewportHSv = useSharedValue(
+    splitViewportH > 0 ? splitViewportH : Math.max(Dimensions.get('window').height, 560) * 0.62,
+  );
+  const workspaceWSv = useSharedValue(120);
+  const docWidthMmSv = useSharedValue(doc.widthMm);
+  const docHeightMmSv = useSharedValue(doc.heightMm);
+  const basePxPerMMSv = useSharedValue(1);
+  const liveScaleSv = useSharedValue(1);
+  const panelDefaultForSplit =
+    PANEL_DEFAULT_HEIGHT_PX + (editorSettings.showNudgePad ? NUDGE_PAD_SPLIT_EXTRA_PX : 0);
   const panelMinForSplit =
     PANEL_MIN_HEIGHT_PX + (editorSettings.showNudgePad ? NUDGE_PAD_SPLIT_EXTRA_PX : 0);
+  const panelMinForSplitSv = useSharedValue(panelMinForSplit);
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
   const [padZoom, setPadZoom] = useState(1);
   const padPanRef = useRef({ x: 0, y: 0 });
@@ -579,31 +590,74 @@ export default function EditScreen() {
   const textEditInputRef = useRef<TextInput>(null);
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
 
+  const initialSplitRestoredRef = useRef(false);
+  const lastViewportHRef = useRef(0);
+  const lastPanelMinRef = useRef(panelMinForSplit);
+
   useEffect(() => {
-    if (splitViewportH <= 0 || splitDragging) return;
-    setCanvasSplitH(
-      restoreCanvasSplitHeight({
-        ratio: effectiveSplitRatio,
-        fullscreen: canvasFullscreen,
-        viewportPx: splitViewportH,
-        panelMinPx: panelMinForSplit,
-      }),
-    );
-  }, [
-    splitViewportH,
-    panelMinForSplit,
-    effectiveSplitRatio,
-    canvasFullscreen,
-    splitDragging,
-  ]);
+    if (splitViewportH <= 0) return;
+
+    if (!initialSplitRestoredRef.current) {
+      initialSplitRestoredRef.current = true;
+      lastViewportHRef.current = splitViewportH;
+      lastPanelMinRef.current = panelMinForSplit;
+      setCanvasSplitH(
+        restoreCanvasSplitHeight({
+          ratio: effectiveSplitRatio,
+          fullscreen: canvasFullscreen,
+          viewportPx: splitViewportH,
+          panelMinPx: panelMinForSplit,
+          panelDefaultPx: panelDefaultForSplit,
+        }),
+      );
+      return;
+    }
+
+    const prevVp = lastViewportHRef.current;
+    const vpChanged = Math.abs(splitViewportH - prevVp) > 2;
+    const panelMinChanged = panelMinForSplit !== lastPanelMinRef.current;
+
+    if (vpChanged || panelMinChanged) {
+      lastViewportHRef.current = splitViewportH;
+      lastPanelMinRef.current = panelMinForSplit;
+      setCanvasSplitH((prevH) => {
+        if (canvasFullscreen) {
+          return clampCanvasSplitHeight({
+            viewportPx: splitViewportH,
+            requestedCanvasPx: splitViewportH,
+            panelMinPx: panelMinForSplit,
+          });
+        }
+        if (vpChanged && prevVp > 0) {
+          const prevUsable = usableSplitViewportPx(prevVp);
+          const ratio = prevUsable > 0 ? prevH / prevUsable : DEFAULT_CANVAS_SPLIT_RATIO;
+          const newUsable = usableSplitViewportPx(splitViewportH);
+          return clampCanvasSplitHeight({
+            viewportPx: splitViewportH,
+            requestedCanvasPx: Math.round(newUsable * ratio),
+            panelMinPx: panelMinForSplit,
+          });
+        }
+        return clampCanvasSplitHeight({
+          viewportPx: splitViewportH,
+          requestedCanvasPx: prevH,
+          panelMinPx: panelMinForSplit,
+        });
+      });
+    }
+  }, [splitViewportH, panelMinForSplit, canvasFullscreen, effectiveSplitRatio]);
 
   const layoutWidth = stageWidth > 0 ? stageWidth : initialStageWidth;
   // Phone workspace is constant. Label millimetres only change the inner artboard.
   const workspaceW = padInner.width > 1 ? padInner.width : Math.max(120, layoutWidth);
-  const workspaceH = padInner.height > 1 ? padInner.height : workspaceHeightFromSplit(canvasSplitH);
+  // Canonical base workspace: uses maximum viewport height so canvas elements are rendered
+  // at high resolution once. Sheet divider movement purely applies GPU transform (scale: s)
+  // without re-running fitEditorPadBoard or causing React reconciliation flicker.
+  const baseWorkspaceH =
+    splitViewportH > 0 ? splitViewportH : Math.max(Dimensions.get('window').height, 560) * 0.62;
   const { canvasWidthPx, canvasHeightPx, pxPerMM, boardOffsetXPx, boardOffsetYPx, innerWidthPx, innerHeightPx } =
     useMemo(() => {
-      const fitted = fitEditorPadBoard(doc.widthMm, doc.heightMm, workspaceW, workspaceH, RULER_SIZE);
+      const fitted = fitEditorPadBoard(doc.widthMm, doc.heightMm, workspaceW, baseWorkspaceH, RULER_SIZE);
       return {
         canvasWidthPx: Math.max(1, fitted.widthPx),
         canvasHeightPx: Math.max(1, fitted.heightPx),
@@ -613,17 +667,29 @@ export default function EditScreen() {
         innerWidthPx: Math.max(1, fitted.innerWidthPx),
         innerHeightPx: Math.max(1, fitted.innerHeightPx),
       };
-    }, [workspaceW, workspaceH, doc.widthMm, doc.heightMm]);
+    }, [workspaceW, baseWorkspaceH, doc.widthMm, doc.heightMm]);
+
+  const committedScale = useMemo(() => {
+    if (pxPerMM <= 0) return 1;
+    const liveInnerH = Math.max(32, canvasSplitH - RULER_SIZE - CANVAS_BOTTOM_CHIP_CLEARANCE_PX);
+    const liveInnerW = Math.max(32, workspaceW - 4 - RULER_SIZE);
+    const livePxPerMM = Math.min(
+      liveInnerW / (doc.widthMm > 0 ? doc.widthMm : 1),
+      liveInnerH / (doc.heightMm > 0 ? doc.heightMm : 1),
+    );
+    return livePxPerMM / pxPerMM;
+  }, [canvasSplitH, workspaceW, doc.widthMm, doc.heightMm, pxPerMM]);
 
   const writeEditorView = useCallback(
     (zoom: number, panX: number, panY: number) => {
+      const effectiveZoom = zoom * committedScale;
       editorViewRef.current = editorViewTransform({
         pxPerMM,
-        viewZoom: zoom,
+        viewZoom: effectiveZoom,
         panX,
         panY,
         viewWidthPx: workspaceW,
-        viewHeightPx: workspaceH,
+        viewHeightPx: canvasSplitH,
         innerWidthPx,
         innerHeightPx,
         rulerSizePx: RULER_SIZE,
@@ -632,8 +698,61 @@ export default function EditScreen() {
         workspacePaddingBottomPx: EDITOR_WORKSPACE_PAD_BOTTOM_PX,
       });
     },
-    [pxPerMM, workspaceW, workspaceH, innerWidthPx, innerHeightPx, boardOffsetXPx, boardOffsetYPx],
+    [pxPerMM, committedScale, workspaceW, canvasSplitH, innerWidthPx, innerHeightPx, boardOffsetXPx, boardOffsetYPx],
   );
+
+  useEffect(() => {
+    if (!splitDragging) {
+      canvasHeightSv.value = canvasSplitH;
+    }
+  }, [canvasSplitH, splitDragging, canvasHeightSv]);
+
+  useEffect(() => {
+    splitViewportHSv.value = splitViewportH;
+  }, [splitViewportH, splitViewportHSv]);
+
+  useEffect(() => {
+    workspaceWSv.value = workspaceW;
+  }, [workspaceW, workspaceWSv]);
+
+  useEffect(() => {
+    docWidthMmSv.value = doc.widthMm;
+    docHeightMmSv.value = doc.heightMm;
+    basePxPerMMSv.value = pxPerMM;
+  }, [doc.widthMm, doc.heightMm, pxPerMM, docWidthMmSv, docHeightMmSv, basePxPerMMSv]);
+
+  useEffect(() => {
+    panelMinForSplitSv.value = panelMinForSplit;
+  }, [panelMinForSplit, panelMinForSplitSv]);
+
+  const stageAnimatedStyle = useAnimatedStyle(() => ({
+    height: canvasHeightSv.value,
+  }));
+
+  const toolGridAnimatedStyle = useAnimatedStyle(() => {
+    const vpH = splitViewportHSv.value > 0 ? splitViewportHSv.value : 600;
+    const belowDividerH = Math.max(0, vpH - canvasHeightSv.value - DIVIDER_HIT_SIZE_PX);
+    const nudgeH = panelMinForSplitSv.value - PANEL_MIN_HEIGHT_PX;
+    const gridH = Math.max(0, belowDividerH - nudgeH - PANEL_MIN_HEIGHT_PX);
+    return {
+      height: gridH,
+    };
+  });
+
+  const canvasAssemblyAnimatedStyle = useAnimatedStyle(() => {
+    const liveH = canvasHeightSv.value;
+    const liveInnerH = Math.max(32, liveH - RULER_SIZE - CANVAS_BOTTOM_CHIP_CLEARANCE_PX);
+    const liveInnerW = Math.max(32, workspaceWSv.value - 4 - RULER_SIZE);
+    const wMm = docWidthMmSv.value > 0 ? docWidthMmSv.value : 1;
+    const hMm = docHeightMmSv.value > 0 ? docHeightMmSv.value : 1;
+    const livePxPerMM = Math.min(liveInnerW / wMm, liveInnerH / hMm);
+    const base = basePxPerMMSv.value > 0 ? basePxPerMMSv.value : 1;
+    const s = livePxPerMM / base;
+    liveScaleSv.value = s;
+    return {
+      transform: [{ scale: s }],
+    };
+  });
 
   useEffect(() => {
     writeEditorView(padZoom, padPanRef.current.x, padPanRef.current.y);
@@ -661,30 +780,6 @@ export default function EditScreen() {
     setSnapGuides((prev) => (guidesEqual(prev, next) ? prev : next));
   }, []);
 
-  useEffect(() => {
-    const next = {
-      innerWidthPx,
-      innerHeightPx,
-      boardOffsetXPx,
-      boardOffsetYPx,
-      canvasWidthPx,
-      canvasHeightPx,
-    };
-    if (!splitDragging) {
-      setRulerView(next);
-      return;
-    }
-    const timer = setTimeout(() => setRulerView(next), RULER_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [
-    splitDragging,
-    innerWidthPx,
-    innerHeightPx,
-    boardOffsetXPx,
-    boardOffsetYPx,
-    canvasWidthPx,
-    canvasHeightPx,
-  ]);
 
   const persistSplit = useCallback(
     (canvasPx: number, fullscreen: boolean) => {
@@ -710,6 +805,7 @@ export default function EditScreen() {
       fullscreen: next,
       viewportPx: viewport,
       panelMinPx: panelMinForSplit,
+      panelDefaultPx: panelDefaultForSplit,
     });
     setCanvasFullscreen(next);
     setCanvasSplitH(height);
@@ -724,20 +820,15 @@ export default function EditScreen() {
   ]);
 
   const handleSplitDragStart = useCallback(() => {
+    splitDraggingRef.current = true;
     setSplitDragging(true);
     if (!canvasFullscreen) return;
     setCanvasFullscreen(false);
-    setCanvasSplitH((height) =>
-      clampCanvasSplitHeight({
-        viewportPx: splitViewportH,
-        requestedCanvasPx: height,
-        panelMinPx: panelMinForSplit,
-      }),
-    );
-  }, [canvasFullscreen, panelMinForSplit, splitViewportH]);
+  }, [canvasFullscreen]);
 
   const handleSplitDragEnd = useCallback(
     (result: SplitReleaseResult) => {
+      splitDraggingRef.current = false;
       setSplitDragging(false);
       if (result.snapped) {
         try {
@@ -1547,11 +1638,11 @@ export default function EditScreen() {
   );
 
   const handlePadLayout = useCallback((size: { width: number; height: number }) => {
+    if (splitDraggingRef.current) return;
     setPadInner((prev) => {
       const width = Math.round(size.width);
-      const height = Math.round(size.height);
-      if (Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1) return prev;
-      return { width, height };
+      if (Math.abs(prev.width - width) < 1) return prev;
+      return { width, height: 0 };
     });
   }, []);
 
@@ -2050,12 +2141,6 @@ export default function EditScreen() {
         disabled={selectedIds.length === 0}
         onPress={() => setLockOnSelection(false)}
       />
-      <ToolbarItem
-        name="Drag"
-        label="Drag"
-        active={canvasFullscreen}
-        onPress={toggleCanvasFullscreen}
-      />
     </View>
   );
 
@@ -2115,8 +2200,9 @@ export default function EditScreen() {
   );
 
   const renderCanvas = () => (
-    <View
-      style={[styles.stage, { height: canvasSplitH, minHeight: 0, backgroundColor: stageBg }]}
+    <Animated.View
+      pointerEvents={splitDragging ? 'none' : 'auto'}
+      style={[styles.stage, stageAnimatedStyle, { minHeight: 0, backgroundColor: stageBg }]}
       onLayout={(event) => {
         const next = Math.round(event.nativeEvent.layout.width);
         if (next > 0 && Math.abs(next - stageWidth) > 1) {
@@ -2140,9 +2226,10 @@ export default function EditScreen() {
                 height: RULER_SIZE + innerHeightPx,
               },
             ]}>
-            <View
+            <Animated.View
               style={[
                 styles.flushCanvasAssembly,
+                canvasAssemblyAnimatedStyle,
                 {
                   left: boardOffsetXPx,
                   top: boardOffsetYPx,
@@ -2198,7 +2285,7 @@ export default function EditScreen() {
                     canvasWidthPx={canvasWidthPx}
                     canvasHeightPx={canvasHeightPx}
                     pxPerMM={pxPerMM}
-                    padZoom={padZoom}
+                    padZoom={padZoom * committedScale}
                     selectedIds={selectedIds}
                     selectionColor={selectionColor}
                     surfaceColor={artboardFill}
@@ -2218,11 +2305,11 @@ export default function EditScreen() {
                   />
                 </View>
               </View>
-            </View>
+            </Animated.View>
           </View>
         </View>
       </ZoomableEditPad>
-    </View>
+    </Animated.View>
   );
 
   const renderPanel = () => {
@@ -2540,9 +2627,10 @@ export default function EditScreen() {
 
           <CanvasPanelDivider
             canvasHeightPx={canvasSplitH}
+            canvasHeightSv={canvasHeightSv}
+            isDraggingSv={isDividerDraggingSv}
             viewportPx={splitViewportH > 0 ? splitViewportH : canvasSplitH + panelMinForSplit}
             panelMinPx={panelMinForSplit}
-            onCanvasHeightChange={setCanvasSplitH}
             onDragStart={handleSplitDragStart}
             onDragEnd={handleSplitDragEnd}
           />
@@ -2573,64 +2661,46 @@ export default function EditScreen() {
             />
           ) : null}
 
-          <View style={[styles.sheet, canvasFullscreen && styles.sheetCollapsed]} pointerEvents={canvasFullscreen ? 'none' : 'auto'}>
-          {propertyMode ? (
-            <View style={styles.panelHeader}>
-              {renderToolbar()}
-              <Pressable
-                onPress={closePanel}
-                hitSlop={10}
-                style={({ pressed }) => [styles.panelCloseBtn, pressed && styles.pressed]}>
-                <AppIcon name="xmark" tintColor={Palette.muted} size={16} />
-              </Pressable>
+          <View style={styles.sheet} pointerEvents="auto">
+            {/* Pinned Toolbar Row - ALWAYS VISIBLE AT ALL SHEET HEIGHTS */}
+            <View style={styles.pinnedToolbar}>
+              {propertyMode ? (
+                <View style={styles.panelHeader}>
+                  {renderToolbar()}
+                  <Pressable
+                    onPress={closePanel}
+                    hitSlop={10}
+                    style={({ pressed }) => [styles.panelCloseBtn, pressed && styles.pressed]}>
+                    <AppIcon name="xmark" tintColor={Palette.muted} size={16} />
+                  </Pressable>
+                </View>
+              ) : (
+                renderToolbar()
+              )}
             </View>
-          ) : (
-            renderToolbar()
-          )}
-          <ScrollView
-            style={styles.sheetScroll}
-            contentContainerStyle={{ paddingBottom: Math.max(Spacing.two, insets.bottom) }}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            scrollEnabled={paletteGhost == null}>
-            {propertyMode ? renderPanel() : (
-              <View style={styles.toolsContainer}>
-                {TOOL_ROWS.map((row, rowIndex) => (
-                  <View key={`row-${rowIndex}`} style={styles.toolRow}>
-                    {row.map((t) => {
-                      const dropType = paletteDropTypeForLabel(t.label);
-                      return (
-                        <View key={t.label} style={styles.toolCell}>
-                          {dropType ? (
-                            <PaletteToolItem
-                              icon={t.icon}
-                              label={t.label}
-                              style={styles.toolItem}
-                              onPress={() => handleToolPress(t.label)}
-                              onDragStart={(x, y) => beginPaletteDrag(dropType, t.label, t.icon, x, y)}
-                              onDragMove={movePaletteDrag}
-                              onDragEnd={endPaletteDrag}
-                            />
-                          ) : (
-                            <ToolItem
-                              icon={t.icon}
-                              label={t.label}
-                              style={styles.toolItem}
-                              onPress={() => handleToolPress(t.label)}
-                            />
-                          )}
-                        </View>
-                      );
-                    })}
-                    {Array.from({ length: Math.max(0, 5 - row.length) }).map((_, i) => (
-                      <View key={`spacer-${rowIndex}-${i}`} style={styles.toolCell} pointerEvents="none" />
-                    ))}
-                  </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
-        </View>
+
+            {/* Collapsible Reveal Window for Tool Grid / Property Panel */}
+            <Animated.View style={[styles.toolGridRevealWindow, toolGridAnimatedStyle]}>
+              {propertyMode ? (
+                <ScrollView
+                  style={styles.sheetScroll}
+                  contentContainerStyle={{ paddingBottom: Math.max(Spacing.two, insets.bottom) }}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled">
+                  {renderPanel()}
+                </ScrollView>
+              ) : (
+                <View style={styles.staticPaletteContainer}>
+                  <StaticToolPalette
+                    onToolPress={handleToolPress}
+                    onBeginDrag={beginPaletteDrag}
+                    onMoveDrag={movePaletteDrag}
+                    onEndDrag={endPaletteDrag}
+                  />
+                </View>
+              )}
+            </Animated.View>
+          </View>
         </View>
 
         {textEditId ? (
@@ -3155,21 +3225,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sheet: {
-    flex: 1,
-    backgroundColor: Palette.card,
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: Spacing.four,
     borderTopRightRadius: Spacing.four,
-    paddingTop: Spacing.two,
-    minHeight: 0,
+    overflow: 'hidden',
     ...cardShadow,
   },
-  sheetCollapsed: {
-    flex: 0,
-    height: 0,
-    minHeight: 0,
-    paddingTop: 0,
+  pinnedToolbar: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+  },
+  toolGridRevealWindow: {
+    width: '100%',
     overflow: 'hidden',
-    opacity: 0,
+    backgroundColor: '#FFFFFF',
+  },
+  staticPaletteContainer: {
+    width: '100%',
+    height: 270,
+    backgroundColor: '#FFFFFF',
   },
   sheetScroll: {
     flex: 1,
@@ -3180,7 +3254,7 @@ const styles = StyleSheet.create({
   panelCloseBtn: {
     position: 'absolute',
     right: Spacing.two,
-    top: -Spacing.one,
+    top: 11,
     width: 26,
     height: 26,
     borderRadius: 13,
@@ -3190,12 +3264,13 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   toolbarRow: {
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 8,
     paddingTop: 4,
-    paddingBottom: 6,
+    paddingBottom: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',

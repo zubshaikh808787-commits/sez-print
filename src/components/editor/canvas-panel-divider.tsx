@@ -1,12 +1,23 @@
 /**
  * Horizontal split handle between the label artboard and the bottom tools sheet.
- * Lean bar, 44px hit target, PanResponder (not HTML5 drag-and-drop).
- * Height reports are animation-frame throttled; snap-to-fullscreen happens on release.
- * iOS: `onPanResponderTerminationRequest` is false so sheet bounce cannot steal the drag (Phase 7.2).
+ * Lean bar, 44px hit target, Gesture.Pan (Reanimated UI thread worklet).
+ *
+ * During active drag:
+ * Updates `canvasHeightSv` directly on the UI thread worklet for 60/120fps live resize.
+ * Zero React component re-renders on the JS thread during active dragging.
+ *
+ * On release:
+ * Computes `resolveSplitRelease` on the UI thread and notifies `onDragEnd` to persist settled state.
  */
 
-import { useRef } from 'react';
-import { PanResponder, Platform, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useRef } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useSharedValue,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import { Palette } from '@/constants/ui';
 import {
@@ -20,120 +31,110 @@ import {
 
 type CanvasPanelDividerProps = {
   canvasHeightPx: number;
+  canvasHeightSv?: SharedValue<number>;
+  isDraggingSv?: SharedValue<boolean>;
   viewportPx: number;
   panelMinPx?: number;
-  onCanvasHeightChange: (nextCanvasPx: number) => void;
+  onCanvasHeightChange?: (nextCanvasPx: number) => void;
   onDragStart?: () => void;
   onDragEnd?: (result: SplitReleaseResult) => void;
 };
 
 export function CanvasPanelDivider({
   canvasHeightPx,
+  canvasHeightSv,
+  isDraggingSv,
   viewportPx,
   panelMinPx = PANEL_MIN_HEIGHT_PX,
   onCanvasHeightChange,
   onDragStart,
   onDragEnd,
 }: CanvasPanelDividerProps) {
-  const startPx = useRef(canvasHeightPx);
-  const raf = useRef<number | null>(null);
-  const pendingPx = useRef<number | null>(null);
-  const live = useRef({
-    canvasHeightPx,
-    viewportPx,
-    panelMinPx,
-    onCanvasHeightChange,
-    onDragStart,
-    onDragEnd,
-  });
-  live.current = {
-    canvasHeightPx,
-    viewportPx,
-    panelMinPx,
-    onCanvasHeightChange,
-    onDragStart,
-    onDragEnd,
-  };
+  const fallbackHeightSv = useSharedValue(canvasHeightPx);
+  const activeHeightSv = canvasHeightSv ?? fallbackHeightSv;
+  const startPxSv = useSharedValue(canvasHeightPx);
+  const viewportPxSv = useSharedValue(viewportPx);
+  const panelMinPxSv = useSharedValue(panelMinPx);
 
-  const flushPending = () => {
-    raf.current = null;
-    const px = pendingPx.current;
-    pendingPx.current = null;
-    if (px != null) live.current.onCanvasHeightChange(px);
-  };
+  useEffect(() => {
+    viewportPxSv.value = viewportPx;
+  }, [viewportPx, viewportPxSv]);
 
-  const queueHeight = (next: number) => {
-    pendingPx.current = next;
-    if (raf.current != null) return;
-    raf.current = requestAnimationFrame(flushPending);
-  };
+  useEffect(() => {
+    panelMinPxSv.value = panelMinPx;
+  }, [panelMinPx, panelMinPxSv]);
 
-  const cancelRaf = () => {
-    if (raf.current != null) {
-      cancelAnimationFrame(raf.current);
-      raf.current = null;
-    }
-    pendingPx.current = null;
-  };
+  const callbacksRef = useRef({ onDragStart, onDragEnd, onCanvasHeightChange });
+  callbacksRef.current = { onDragStart, onDragEnd, onCanvasHeightChange };
 
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
-      onPanResponderGrant: () => {
-        startPx.current = live.current.canvasHeightPx;
-        live.current.onDragStart?.();
-      },
-      onPanResponderMove: (_event, gesture) => {
-        queueHeight(
-          canvasHeightAfterDrag({
-            startCanvasPx: startPx.current,
-            deltaY: gesture.dy,
-            viewportPx: live.current.viewportPx,
-            panelMinPx: live.current.panelMinPx,
-          }),
-        );
-      },
-      onPanResponderRelease: (_event, gesture) => {
-        cancelRaf();
-        const canvasPx = canvasHeightAfterDrag({
-          startCanvasPx: startPx.current,
-          deltaY: gesture.dy,
-          viewportPx: live.current.viewportPx,
-          panelMinPx: live.current.panelMinPx,
+  const gesture = useMemo(() => {
+    return Gesture.Pan()
+      .minDistance(1)
+      .activeOffsetY([-1, 1])
+      .shouldCancelWhenOutside(false)
+      .hitSlop({ top: 12, bottom: 12 })
+      .onBegin(() => {
+        'worklet';
+        startPxSv.value = activeHeightSv.value;
+        if (isDraggingSv) {
+          isDraggingSv.value = true;
+        }
+        if (callbacksRef.current.onDragStart) {
+          runOnJS(callbacksRef.current.onDragStart)();
+        }
+      })
+      .onUpdate((e) => {
+        'worklet';
+        const nextPx = canvasHeightAfterDrag({
+          startCanvasPx: startPxSv.value,
+          deltaY: e.translationY,
+          viewportPx: viewportPxSv.value,
+          panelMinPx: panelMinPxSv.value,
+        });
+        activeHeightSv.value = nextPx;
+        if (callbacksRef.current.onCanvasHeightChange) {
+          runOnJS(callbacksRef.current.onCanvasHeightChange)(nextPx);
+        }
+      })
+      .onEnd((e) => {
+        'worklet';
+        const rawFinalPx = canvasHeightAfterDrag({
+          startCanvasPx: startPxSv.value,
+          deltaY: e.translationY,
+          viewportPx: viewportPxSv.value,
+          panelMinPx: panelMinPxSv.value,
         });
         const result = resolveSplitRelease({
-          canvasPx,
-          viewportPx: live.current.viewportPx,
-          panelMinPx: live.current.panelMinPx,
+          canvasPx: rawFinalPx,
+          viewportPx: viewportPxSv.value,
+          panelMinPx: panelMinPxSv.value,
         });
-        live.current.onCanvasHeightChange(result.canvasPx);
-        live.current.onDragEnd?.(result);
-      },
-      onPanResponderTerminate: () => {
-        cancelRaf();
-        live.current.onDragEnd?.(
-          resolveSplitRelease({
-            canvasPx: live.current.canvasHeightPx,
-            viewportPx: live.current.viewportPx,
-            panelMinPx: live.current.panelMinPx,
-          }),
-        );
-      },
-    }),
-  ).current;
+        activeHeightSv.value = result.canvasPx;
+        if (isDraggingSv) {
+          isDraggingSv.value = false;
+        }
+        if (callbacksRef.current.onDragEnd) {
+          runOnJS(callbacksRef.current.onDragEnd)(result);
+        }
+      })
+      .onFinalize(() => {
+        'worklet';
+        if (isDraggingSv) {
+          isDraggingSv.value = false;
+        }
+      });
+  }, [activeHeightSv, isDraggingSv, panelMinPxSv, startPxSv, viewportPxSv]);
 
   return (
-    <View
-      collapsable={false}
-      accessibilityRole="adjustable"
-      accessibilityLabel="Resize canvas and editing panel"
-      {...pan.panHandlers}
-      style={[styles.hit, Platform.OS === 'web' ? (webHandleStyle as object) : null]}>
-      <View pointerEvents="none" style={styles.bar} />
-    </View>
+    <GestureDetector gesture={gesture}>
+      <Animated.View
+        collapsable={false}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Resize canvas and editing panel"
+        style={[styles.hit, Platform.OS === 'web' ? (webHandleStyle as object) : null]}>
+        <View pointerEvents="none" style={styles.bar} />
+      </Animated.View>
+    </GestureDetector>
   );
 }
 
@@ -150,7 +151,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Palette.screen,
-    zIndex: 4,
+    zIndex: 10,
   },
   bar: {
     width: 44,
