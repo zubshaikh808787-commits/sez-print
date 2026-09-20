@@ -10,15 +10,13 @@
  * by a parent native scroll (Phase 7.2).
  */
 
-import { formatViewZoomLabel } from '@/lib/label-geometry';
 import {
   VIEW_ZOOM_MAX,
   VIEW_ZOOM_MIN,
-  VIEW_ZOOM_STEP,
   clampViewZoom,
 } from '@/lib/editor/view-transform';
 import { ReactNode, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -241,15 +239,6 @@ export function ZoomableEditPad({
     [oneFingerPanEnabled, zoom, panStartX, panStartY, panX, panY, reportView, viewH, viewW, zoomSv],
   );
 
-  const composed = useMemo(
-    () => Gesture.Simultaneous(pinch, twoFingerPan, oneFingerPan),
-    [oneFingerPan, pinch, twoFingerPan],
-  );
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: panX.value }, { translateY: panY.value }, { scale: zoomSv.value }],
-  }));
-
   const setZoomAnimated = useCallback(
     (next: number) => {
       const clamped = Math.min(maxZoom, Math.max(minZoom, next));
@@ -274,11 +263,34 @@ export function ZoomableEditPad({
     [maxZoom, minZoom, reportView, zoomSv, panX, panY, viewW, viewH],
   );
 
-  const zoomIn = () => setZoomAnimated(zoom * VIEW_ZOOM_STEP);
-  const zoomOut = () => setZoomAnimated(zoom / VIEW_ZOOM_STEP);
-  const zoomFit = () => setZoomAnimated(1);
+  const zoomFit = useCallback(() => {
+    setZoomAnimated(1);
+  }, [setZoomAnimated]);
 
-  const zoomLabel = formatViewZoomLabel(zoom);
+  const doubleTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .numberOfTaps(2)
+        .maxDuration(250)
+        .onEnd(() => {
+          'worklet';
+          runOnJS(zoomFit)();
+        }),
+    [zoomFit],
+  );
+
+  const composed = useMemo(
+    () =>
+      Gesture.Exclusive(
+        doubleTap,
+        Gesture.Simultaneous(pinch, twoFingerPan, oneFingerPan),
+      ),
+    [doubleTap, oneFingerPan, pinch, twoFingerPan],
+  );
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: panX.value }, { translateY: panY.value }, { scale: zoomSv.value }],
+  }));
 
   return (
     <View
@@ -302,37 +314,6 @@ export function ZoomableEditPad({
           {children}
         </Animated.View>
       </GestureDetector>
-
-      <View pointerEvents="box-none" style={styles.controls}>
-        <Pressable
-          onPress={zoomOut}
-          disabled={zoom <= minZoom + 0.01}
-          hitSlop={8}
-          style={({ pressed }) => [
-            styles.ctrlBtn,
-            zoom <= minZoom + 0.01 && styles.ctrlBtnDisabled,
-            pressed && styles.pressed,
-          ]}>
-          <Text style={styles.ctrlGlyph}>−</Text>
-        </Pressable>
-        <Pressable
-          onPress={zoomFit}
-          hitSlop={6}
-          style={({ pressed }) => [styles.zoomBadge, pressed && styles.pressed]}>
-          <Text style={styles.zoomText}>{zoomLabel}</Text>
-        </Pressable>
-        <Pressable
-          onPress={zoomIn}
-          disabled={zoom >= maxZoom - 0.01}
-          hitSlop={8}
-          style={({ pressed }) => [
-            styles.ctrlBtn,
-            zoom >= maxZoom - 0.01 && styles.ctrlBtnDisabled,
-            pressed && styles.pressed,
-          ]}>
-          <Text style={styles.ctrlGlyph}>+</Text>
-        </Pressable>
-      </View>
     </View>
   );
 }
@@ -346,57 +327,5 @@ const styles = StyleSheet.create({
   },
   viewport: {
     ...StyleSheet.absoluteFillObject,
-  },
-  controls: {
-    position: 'absolute',
-    right: 10,
-    bottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(14, 20, 28, 0.94)',
-    borderRadius: 20,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#2C3642',
-    elevation: 3,
-    shadowColor: '#0B1016',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-  },
-  ctrlBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1C2430',
-  },
-  ctrlBtnDisabled: {
-    opacity: 0.35,
-  },
-  ctrlGlyph: {
-    color: '#E8EEF4',
-    fontSize: 20,
-    fontWeight: '600',
-    lineHeight: 22,
-    marginTop: -1,
-  },
-  zoomBadge: {
-    minWidth: 56,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    alignItems: 'center',
-  },
-  zoomText: {
-    color: '#5EEAD4',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-  },
-  pressed: {
-    opacity: 0.75,
   },
 });

@@ -514,9 +514,16 @@ export default function EditScreen() {
   const [canvasFullscreen, setCanvasFullscreen] = useState(() =>
     Boolean(editorSettings.canvasSplitFullscreen),
   );
+  const effectiveSplitRatio =
+    editorSettings.canvasSplitRatio == null ||
+    editorSettings.canvasSplitRatio === 0.55 ||
+    editorSettings.canvasSplitRatio === 0.42
+      ? null
+      : editorSettings.canvasSplitRatio;
+
   const [canvasSplitH, setCanvasSplitH] = useState(() =>
     restoreCanvasSplitHeight({
-      ratio: clampStoredSplitRatio(editorSettings.canvasSplitRatio ?? DEFAULT_CANVAS_SPLIT_RATIO),
+      ratio: effectiveSplitRatio,
       fullscreen: Boolean(editorSettings.canvasSplitFullscreen),
       viewportPx: Math.max(Dimensions.get('window').height, 560) * 0.62,
       panelMinPx: PANEL_MIN_HEIGHT_PX,
@@ -576,7 +583,7 @@ export default function EditScreen() {
     if (splitViewportH <= 0 || splitDragging) return;
     setCanvasSplitH(
       restoreCanvasSplitHeight({
-        ratio: clampStoredSplitRatio(editorSettings.canvasSplitRatio ?? DEFAULT_CANVAS_SPLIT_RATIO),
+        ratio: effectiveSplitRatio,
         fullscreen: canvasFullscreen,
         viewportPx: splitViewportH,
         panelMinPx: panelMinForSplit,
@@ -585,15 +592,15 @@ export default function EditScreen() {
   }, [
     splitViewportH,
     panelMinForSplit,
-    editorSettings.canvasSplitRatio,
+    effectiveSplitRatio,
     canvasFullscreen,
     splitDragging,
   ]);
 
   const layoutWidth = stageWidth > 0 ? stageWidth : initialStageWidth;
   // Phone workspace is constant. Label millimetres only change the inner artboard.
-  const workspaceW = padInner.width > 1 ? padInner.width : Math.max(120, layoutWidth - 16);
-  const workspaceH = workspaceHeightFromSplit(canvasSplitH);
+  const workspaceW = padInner.width > 1 ? padInner.width : Math.max(120, layoutWidth);
+  const workspaceH = padInner.height > 1 ? padInner.height : workspaceHeightFromSplit(canvasSplitH);
   const { canvasWidthPx, canvasHeightPx, pxPerMM, boardOffsetXPx, boardOffsetYPx, innerWidthPx, innerHeightPx } =
     useMemo(() => {
       const fitted = fitEditorPadBoard(doc.widthMm, doc.heightMm, workspaceW, workspaceH, RULER_SIZE);
@@ -687,11 +694,11 @@ export default function EditScreen() {
           canvasPx,
           viewportPx: splitViewportH,
           fullscreen,
-          lastRatio: editorSettings.canvasSplitRatio,
+          lastRatio: effectiveSplitRatio ?? undefined,
         }),
       });
     },
-    [patchEditor, splitViewportH, editorSettings.canvasSplitRatio],
+    [patchEditor, splitViewportH, effectiveSplitRatio],
   );
 
   const toggleCanvasFullscreen = useCallback(() => {
@@ -699,7 +706,7 @@ export default function EditScreen() {
     const next = !canvasFullscreen;
     const viewport = splitViewportH > 0 ? splitViewportH : canvasSplitH + panelMinForSplit;
     const height = restoreCanvasSplitHeight({
-      ratio: clampStoredSplitRatio(editorSettings.canvasSplitRatio ?? DEFAULT_CANVAS_SPLIT_RATIO),
+      ratio: effectiveSplitRatio,
       fullscreen: next,
       viewportPx: viewport,
       panelMinPx: panelMinForSplit,
@@ -710,7 +717,7 @@ export default function EditScreen() {
   }, [
     canvasFullscreen,
     canvasSplitH,
-    editorSettings.canvasSplitRatio,
+    effectiveSplitRatio,
     panelMinForSplit,
     persistSplit,
     splitViewportH,
@@ -2052,6 +2059,61 @@ export default function EditScreen() {
     </View>
   );
 
+  const renderContextualToolbar = () => (
+    <View style={styles.contextualTopBar}>
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={deleteSelected}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Delete selected element">
+        <AppIcon name="trash" tintColor="#FFFFFF" size={18} />
+      </Pressable>
+      <View style={styles.contextualBarDivider} />
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={() => rotateSelectedBy(90)}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Rotate selected element 90 degrees">
+        <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={18} />
+      </Pressable>
+      <View style={styles.contextualBarDivider} />
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={duplicateSelected}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Duplicate selected element">
+        <AppIcon name="square.on.square" tintColor="#FFFFFF" size={18} />
+      </Pressable>
+      <View style={styles.contextualBarDivider} />
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={() => setLockOnSelection(!(selectedElement?.lockMovement ?? false))}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={selectedElement?.lockMovement ? 'Unlock element' : 'Lock element'}>
+        <AppIcon
+          name={selectedElement?.lockMovement ? 'lock.open' : 'lock'}
+          tintColor="#FFFFFF"
+          size={18}
+        />
+      </Pressable>
+      <View style={styles.contextualBarDivider} />
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={() => {
+          if (selectedElement) openPanelFor(selectedElement.id);
+        }}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Element properties">
+        <AppIcon name="slider.horizontal.3" tintColor="#FFFFFF" size={18} />
+      </Pressable>
+    </View>
+  );
+
   const renderCanvas = () => (
     <View
       style={[styles.stage, { height: canvasSplitH, minHeight: 0, backgroundColor: stageBg }]}
@@ -2061,64 +2123,6 @@ export default function EditScreen() {
           setStageWidth(next);
         }
       }}>
-      {selectedIds.length > 0 ? (
-        <View style={styles.contextualTopBar} pointerEvents="box-none">
-          <View style={styles.contextualBarPill}>
-            <Pressable
-              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
-              onPress={deleteSelected}
-              hitSlop={6}
-              accessibilityLabel="Delete selected element">
-              <AppIcon name="trash" tintColor="#EF4444" size={15} />
-              <Text style={[styles.contextualBarText, { color: '#EF4444' }]}>Delete</Text>
-            </Pressable>
-            <View style={styles.contextualBarDivider} />
-            <Pressable
-              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
-              onPress={() => rotateSelectedBy(90)}
-              hitSlop={6}
-              accessibilityLabel="Rotate selected element 90 degrees">
-              <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={15} />
-              <Text style={styles.contextualBarText}>Rotate</Text>
-            </Pressable>
-            <View style={styles.contextualBarDivider} />
-            <Pressable
-              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
-              onPress={duplicateSelected}
-              hitSlop={6}
-              accessibilityLabel="Duplicate selected element">
-              <AppIcon name="square.on.square" tintColor="#FFFFFF" size={15} />
-              <Text style={styles.contextualBarText}>Duplicate</Text>
-            </Pressable>
-            <View style={styles.contextualBarDivider} />
-            <Pressable
-              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
-              onPress={() => setLockOnSelection(!(selectedElement?.lockMovement ?? false))}
-              hitSlop={6}
-              accessibilityLabel={selectedElement?.lockMovement ? 'Unlock element' : 'Lock element'}>
-              <AppIcon
-                name={selectedElement?.lockMovement ? 'lock.open' : 'lock'}
-                tintColor="#FFFFFF"
-                size={15}
-              />
-              <Text style={styles.contextualBarText}>
-                {selectedElement?.lockMovement ? 'Unlock' : 'Lock'}
-              </Text>
-            </Pressable>
-            <View style={styles.contextualBarDivider} />
-            <Pressable
-              style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
-              onPress={() => {
-                if (selectedElement) openPanelFor(selectedElement.id);
-              }}
-              hitSlop={6}
-              accessibilityLabel="Element properties">
-              <AppIcon name="slider.horizontal.3" tintColor="#38BDF8" size={15} />
-              <Text style={[styles.contextualBarText, { color: '#38BDF8' }]}>Properties</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
       <ZoomableEditPad
         style={styles.stageZoom}
         zoom={padZoom}
@@ -2401,40 +2405,60 @@ export default function EditScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.body, { maxWidth: MaxContentWidth }]}>
-        <View style={styles.subToolbarRow}>
-        <Pressable
-          onPress={() => {
-            if (isRatTail143Document(doc)) return;
-            setSizeModalVisible(true);
-          }}
-          style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
-          <Text style={styles.dimText}>
-            {doc.widthMm.toFixed(1)} × {doc.heightMm.toFixed(1)} mm · {doc.paperType}
-            {doc.orientation ? ` · ${doc.orientation}°` : ''}
-            {doc.ups ? ` · ${doc.ups.columns}ups` : ''}
-          </Text>
-          <Text style={styles.sizeHint}>
-            {isRatTail143Document(doc)
-              ? 'Prints 14.3 × 101.6 mm wrap stock · content locked on the paddle'
-              : 'Tap to customize size'}
-          </Text>
-        </Pressable>
-          <Pressable
-            onPress={toggleCanvasFullscreen}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel={canvasFullscreen ? 'Restore editing panel' : 'Maximize canvas'}
-            style={({ pressed }) => [styles.splitMaxBtn, pressed && styles.pressed]}>
-            <AppIcon
-              name={
-                canvasFullscreen
-                  ? 'arrow.down.right.and.arrow.up.left'
-                  : 'arrow.up.left.and.arrow.down.right'
-              }
-              tintColor={Palette.accent}
-              size={18}
-            />
-          </Pressable>
+        <View style={styles.subToolbarSlot}>
+          {selectedIds.length > 0 ? (
+            renderContextualToolbar()
+          ) : (
+            <View style={styles.subToolbarRow}>
+              <Pressable
+                onPress={() => {
+                  if (isRatTail143Document(doc)) return;
+                  setSizeModalVisible(true);
+                }}
+                style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
+                <Text style={styles.dimText}>
+                  {doc.widthMm.toFixed(1)} × {doc.heightMm.toFixed(1)} mm · {doc.paperType}
+                  {doc.orientation ? ` · ${doc.orientation}°` : ''}
+                  {doc.ups ? ` · ${doc.ups.columns}ups` : ''}
+                </Text>
+                <Text style={styles.sizeHint}>
+                  {isRatTail143Document(doc)
+                    ? 'Prints 14.3 × 101.6 mm wrap stock · content locked on the paddle'
+                    : 'Tap to customize size'}
+                </Text>
+              </Pressable>
+
+              {Math.abs(padZoom - 1) > 0.02 ? (
+                <Pressable
+                  onPress={() => setPadZoom(1)}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.fitZoomBtn, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reset zoom to fit">
+                  <Text style={styles.fitZoomBtnText}>
+                    Fit ({Math.round(padZoom * 100)}%)
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable
+                onPress={toggleCanvasFullscreen}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={canvasFullscreen ? 'Restore editing panel' : 'Maximize canvas'}
+                style={({ pressed }) => [styles.splitMaxBtn, pressed && styles.pressed]}>
+                <AppIcon
+                  name={
+                    canvasFullscreen
+                      ? 'arrow.down.right.and.arrow.up.left'
+                      : 'arrow.up.left.and.arrow.down.right'
+                  }
+                  tintColor={Palette.accent}
+                  size={18}
+                />
+              </Pressable>
+            </View>
+          )}
         </View>
 
         {doc.ups && doc.ups.columns > 1 ? (
@@ -2496,7 +2520,7 @@ export default function EditScreen() {
                 <Text
                   style={[
                     styles.upsPagerChevron,
-                    doc.ups.activeIndex >= doc.ups.columns - 1 && styles.upsPagerChevronDisabled,
+                    doc.ups!.activeIndex >= doc.ups!.columns - 1 && styles.upsPagerChevronDisabled,
                   ]}>
                   ›
                 </Text>
@@ -2565,7 +2589,7 @@ export default function EditScreen() {
           )}
           <ScrollView
             style={styles.sheetScroll}
-            contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.three }}
+            contentContainerStyle={{ paddingBottom: Math.max(Spacing.two, insets.bottom) }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             scrollEnabled={paletteGhost == null}>
@@ -2905,7 +2929,17 @@ const styles = StyleSheet.create({
   propertyModeShell: {
     flex: 1,
   },
+  subToolbarSlot: {
+    width: '100%',
+    height: 44,
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E2E8F0',
+  },
   subToolbarRow: {
+    width: '100%',
+    height: 44,
     flexDirection: 'row',
     alignItems: 'center',
     paddingRight: Spacing.two,
@@ -2915,8 +2949,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    paddingVertical: 2,
     gap: 2,
+  },
+  fitZoomBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(23, 166, 184, 0.15)',
+    marginRight: 6,
+  },
+  fitZoomBtnText: {
+    color: '#06B6D4',
+    fontSize: 12,
+    fontWeight: '700',
   },
   splitMaxBtn: {
     width: 44,
@@ -3001,8 +3047,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: EDITOR_WORKSPACE_COLOR,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
     minHeight: LABEL_PAD_STAGE_MIN_HEIGHT,
     overflow: 'hidden',
   },
@@ -3017,7 +3063,7 @@ const styles = StyleSheet.create({
     backgroundColor: EDITOR_WORKSPACE_COLOR,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingBottom: EDITOR_WORKSPACE_PAD_BOTTOM_PX,
+    paddingBottom: 0,
   },
   rulerFrame: {
     position: 'relative',
@@ -3113,7 +3159,7 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.card,
     borderTopLeftRadius: Spacing.four,
     borderTopRightRadius: Spacing.four,
-    paddingTop: Spacing.three,
+    paddingTop: Spacing.two,
     minHeight: 0,
     ...cardShadow,
   },
@@ -3148,8 +3194,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 8,
-    paddingTop: 6,
-    paddingBottom: 8,
+    paddingTop: 4,
+    paddingBottom: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
@@ -3174,7 +3220,7 @@ const styles = StyleSheet.create({
   },
   toolsContainer: {
     width: '100%',
-    paddingVertical: 6,
+    paddingVertical: 4,
     backgroundColor: '#FFFFFF',
   },
   toolRow: {
@@ -3182,7 +3228,7 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
+    paddingVertical: 6,
   },
   toolCell: {
     flex: 1,
@@ -3194,7 +3240,7 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 4,
   },
   toolLabel: {
     fontSize: 12,
@@ -3355,45 +3401,24 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   contextualTopBar: {
-    position: 'absolute',
-    top: 10,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 50,
-  },
-  contextualBarPill: {
+    width: '100%',
+    height: 44,
+    backgroundColor: '#374151',
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172AEE',
-    borderRadius: 20,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'space-around',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
   },
   contextualBarBtn: {
-    flexDirection: 'row',
+    flex: 1,
+    height: '100%',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    gap: 4,
-  },
-  contextualBarText: {
-    color: '#F8FAFC',
-    fontSize: 11,
-    fontWeight: '600',
+    justifyContent: 'center',
   },
   contextualBarDivider: {
-    width: 1,
-    height: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    marginHorizontal: 1,
+    width: StyleSheet.hairlineWidth,
+    height: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
 });

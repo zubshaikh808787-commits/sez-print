@@ -30,21 +30,19 @@ function formatTick(mm: number) {
   return Number.isInteger(mm) ? String(mm) : mm.toFixed(1);
 }
 
-function spacedMajor(ticks: Tick[], minGapPx: number) {
+function spacedMajor(ticks: Tick[], minGapPx: number, lengthMm?: number) {
   const majors = ticks.filter((t) => t.kind === 'major');
   const kept: Tick[] = [];
   for (const tick of majors) {
+    // If this is the exact end-boundary tick of the ruler (e.g. 80mm on an 80mm label),
+    // omit its label so it doesn't compress or crowd the final segment.
+    // The ruler boundary is clearly demarcated by the end tick mark line and artboard edge.
+    if (lengthMm !== undefined && Math.abs(tick.mm - lengthMm) < 0.01) {
+      continue;
+    }
     const prev = kept[kept.length - 1];
     if (prev && Math.abs(tick.px - prev.px) < minGapPx) continue;
     kept.push(tick);
-  }
-  const last = majors[majors.length - 1];
-  if (last && kept[kept.length - 1] !== last) {
-    if (kept.length && Math.abs(last.px - kept[kept.length - 1].px) < minGapPx) {
-      kept[kept.length - 1] = last;
-    } else {
-      kept.push(last);
-    }
   }
   return kept;
 }
@@ -75,7 +73,7 @@ export function HorizontalRuler({
   const content = Math.max(1, contentWidthPx);
   const origin = Math.max(0, originPx);
   const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
-  const labels = useMemo(() => spacedMajor(ticks, 22), [ticks]);
+  const labels = useMemo(() => spacedMajor(ticks, 22, lengthMm), [ticks, lengthMm]);
 
   // Selected element projection on horizontal ruler (fallback for static prop)
   const selectionProjection = useMemo(() => {
@@ -144,15 +142,24 @@ export function HorizontalRuler({
 
         {/* Ticks: touching the bottom divider line at y = RULER_SIZE - 1 */}
         {ticks.map((tick) => {
-          const x = origin + tick.px;
           const h = tickLen(tick.kind, 10, 7, 4);
-          const end = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
-          const isMajor = tick.kind === 'major' || end;
+          const isStart = tick.mm < 0.001;
+          const isEnd = Math.abs(tick.mm - lengthMm) < 0.01;
+          const isMajor = tick.kind === 'major' || isStart || isEnd;
           const stroke = isMajor
             ? TICK_MAJOR
             : tick.kind === 'mid'
               ? TICK_MID
               : TICK_MINOR;
+          const strokeWidth = isMajor ? 1.25 : 1;
+          const halfStroke = strokeWidth / 2;
+          // Inset stroke at bounds so boundary ticks are crisp and not clipped by overflow: 'hidden'
+          let x = origin + tick.px;
+          if (isStart) {
+            x = origin + halfStroke;
+          } else if (isEnd) {
+            x = origin + track - halfStroke;
+          }
           return (
             <Line
               key={`h-${tick.mm}`}
@@ -161,7 +168,7 @@ export function HorizontalRuler({
               x2={x}
               y2={RULER_SIZE - 1}
               stroke={stroke}
-              strokeWidth={isMajor ? 1.25 : 1}
+              strokeWidth={strokeWidth}
               strokeLinecap="square"
             />
           );
@@ -187,14 +194,14 @@ export function HorizontalRuler({
       )}
 
       {labels.map((tick) => {
-        const isEnd = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
+        const isStart = tick.mm < 0.001;
         return (
           <Text
             key={`hl-${tick.mm}`}
             style={[
               styles.hLabel,
-              isEnd ? styles.endLabel : null,
-              { left: Math.min(origin + tick.px + 2, Math.max(0, track - 22)) },
+              isStart ? styles.endLabel : null,
+              { left: origin + tick.px + 2 },
             ]}>
             {formatTick(tick.mm)}
           </Text>
@@ -223,7 +230,7 @@ export function VerticalRuler({
   const content = Math.max(1, contentHeightPx);
   const origin = Math.max(0, originPx);
   const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
-  const labels = useMemo(() => spacedMajor(ticks, 16), [ticks]);
+  const labels = useMemo(() => spacedMajor(ticks, 16, lengthMm), [ticks, lengthMm]);
 
   // Selected element projection on vertical ruler (fallback for static prop)
   const selectionProjection = useMemo(() => {
@@ -292,15 +299,23 @@ export function VerticalRuler({
 
         {/* Ticks: touching the right divider line at x = RULER_SIZE - 1 */}
         {ticks.map((tick) => {
-          const y = origin + tick.px;
           const w = tickLen(tick.kind, 10, 7, 4);
-          const end = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
-          const isMajor = tick.kind === 'major' || end;
+          const isStart = tick.mm < 0.001;
+          const isEnd = Math.abs(tick.mm - lengthMm) < 0.01;
+          const isMajor = tick.kind === 'major' || isStart || isEnd;
           const stroke = isMajor
             ? TICK_MAJOR
             : tick.kind === 'mid'
               ? TICK_MID
               : TICK_MINOR;
+          const strokeWidth = isMajor ? 1.25 : 1;
+          const halfStroke = strokeWidth / 2;
+          let y = origin + tick.px;
+          if (isStart) {
+            y = origin + halfStroke;
+          } else if (isEnd) {
+            y = origin + track - halfStroke;
+          }
           return (
             <Line
               key={`v-${tick.mm}`}
@@ -309,7 +324,7 @@ export function VerticalRuler({
               x2={RULER_SIZE - 1}
               y2={y}
               stroke={stroke}
-              strokeWidth={isMajor ? 1.25 : 1}
+              strokeWidth={strokeWidth}
               strokeLinecap="square"
             />
           );
@@ -335,14 +350,14 @@ export function VerticalRuler({
       )}
 
       {labels.map((tick) => {
-        const isEnd = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
+        const isStart = tick.mm < 0.001;
         return (
           <Text
             key={`vl-${tick.mm}`}
             style={[
               styles.vLabel,
-              isEnd ? styles.endLabel : null,
-              { top: Math.min(origin + tick.px + 2, Math.max(0, track - 12)) },
+              isStart ? styles.endLabel : null,
+              { top: origin + tick.px + 2 },
             ]}>
             {formatTick(tick.mm)}
           </Text>

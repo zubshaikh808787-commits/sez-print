@@ -541,18 +541,21 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         .maxPointers(1)
         .shouldCancelWhenOutside(false)
         .hitSlop(bodyHitSlop)
+        .onBegin((_e) => {
+          'worklet';
+          selectedSv.value = true;
+          runOnJS(callbacksRef.current.onSelect)(element.id);
+        })
         .onStart((_e) => {
           'worklet';
           isInteracting.value = true;
+          selectedSv.value = true;
           originLeftSv.value = originLeftSv.value + transX.value;
           originTopSv.value = originTopSv.value + transY.value;
           transX.value = 0;
           transY.value = 0;
           liftSv.value = DRAG_LIFT_OPACITY;
           runOnJS(setMoveLift)(true);
-          if (!selectedSv.value) {
-            runOnJS(callbacksRef.current.onSelect)(element.id);
-          }
           if (callbacksRef.current.onTransformStart) {
             runOnJS(callbacksRef.current.onTransformStart)(element.id);
           }
@@ -656,10 +659,15 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       Gesture.Tap()
         .maxDuration(350)
         .maxDistance(16)
+        .onBegin((_e) => {
+          'worklet';
+          selectedSv.value = true;
+          runOnJS(callbacksRef.current.onSelect)(element.id);
+        })
         .onEnd((_e, success) => {
           if (success) runOnJS(handleSingleTap)();
         }),
-    [handleSingleTap],
+    [handleSingleTap, selectedSv, element.id],
   );
 
   const combinedBodyGesture = useMemo(
@@ -985,6 +993,12 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
   const borderStrokeColor = isOverflowed ? '#EF4444' : selectionColor || CHROME_SELECTION_STROKE;
 
+  const selectionOverlayStyle = useAnimatedStyle(() => {
+    return {
+      opacity: selectedSv.value ? 1 : 0,
+    };
+  });
+
   return (
     <Animated.View style={containerStyle} collapsable={false}>
       <GestureDetector gesture={combinedBodyGesture}>
@@ -1001,48 +1015,48 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         </View>
       </GestureDetector>
 
-      {selected ? (
-        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-          <View
-            pointerEvents="none"
-            style={[
-              styles.selectionOutline,
-              { borderColor: borderStrokeColor },
-              isOverflowed && styles.selectionOutlineOverflow,
-            ]}
-          />
+      <Animated.View
+        pointerEvents={selected ? 'box-none' : 'none'}
+        style={[StyleSheet.absoluteFill, selectionOverlayStyle]}>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.selectionOutline,
+            { borderColor: borderStrokeColor },
+            isOverflowed && styles.selectionOutlineOverflow,
+          ]}
+        />
 
-          <ResizeTooltip tooltipRef={tooltipRef} />
+        <ResizeTooltip tooltipRef={tooltipRef} />
 
-          {isOverflowed && !moving ? (
-            <Pressable
-              onPress={handleFitToLabelAction}
-              style={styles.overflowBadge}>
-              <AppIcon name="exclamationmark.triangle.fill" tintColor="#FFFFFF" size={11} />
-              <Text style={styles.overflowBadgeText}>
-                Overflow: text exceeds label height • <Text style={styles.overflowBadgeAction}>Fit</Text>
-              </Text>
-            </Pressable>
-          ) : null}
+        {isOverflowed && !moving ? (
+          <Pressable
+            onPress={handleFitToLabelAction}
+            style={styles.overflowBadge}>
+            <AppIcon name="exclamationmark.triangle.fill" tintColor="#FFFFFF" size={11} />
+            <Text style={styles.overflowBadgeText}>
+              Overflow: text exceeds label height • <Text style={styles.overflowBadgeAction}>Fit</Text>
+            </Text>
+          </Pressable>
+        ) : null}
 
-          {element.lockMovement || moving ? null : (
-            <>
-              {handleGestures.e ? (
-                <EdgeResizeHandle position="e" gesture={handleGestures.e} />
-              ) : null}
-              {handleGestures.s ? (
-                <EdgeResizeHandle position="s" gesture={handleGestures.s} />
-              ) : null}
-            </>
-          )}
+        {element.lockMovement ? null : (
+          <>
+            {handleGestures.e ? (
+              <EdgeResizeHandle position="e" gesture={handleGestures.e} />
+            ) : null}
+            {handleGestures.s ? (
+              <EdgeResizeHandle position="s" gesture={handleGestures.s} />
+            ) : null}
+          </>
+        )}
 
-          {element.lockMovement ? (
-            <View pointerEvents="none" style={styles.lockBadge}>
-              <AppIcon name="lock.fill" tintColor="#FFFFFF" size={9} />
-            </View>
-          ) : null}
-        </View>
-      ) : null}
+        {element.lockMovement ? (
+          <View pointerEvents="none" style={styles.lockBadge}>
+            <AppIcon name="lock.fill" tintColor="#FFFFFF" size={9} />
+          </View>
+        ) : null}
+      </Animated.View>
     </Animated.View>
   );
 });

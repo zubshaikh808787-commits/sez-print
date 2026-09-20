@@ -6,10 +6,10 @@
  */
 
 /** Canvas region may not shrink below this share of the usable split column. */
-export const CANVAS_SPLIT_MIN_RATIO = 0.35;
+export const CANVAS_SPLIT_MIN_RATIO = 0.30;
 
-/** Default opening split: canvas gets the majority of the column. */
-export const DEFAULT_CANVAS_SPLIT_RATIO = 0.55;
+/** Default opening split: canvas gets remaining space above the full tool palette. */
+export const DEFAULT_CANVAS_SPLIT_RATIO = 0.42;
 
 /** Visible hairline. Hit target is `DIVIDER_HIT_SIZE_PX`. */
 export const DIVIDER_BAR_THICKNESS_PX = 3;
@@ -18,10 +18,10 @@ export const DIVIDER_BAR_THICKNESS_PX = 3;
 export const DIVIDER_HIT_SIZE_PX = 44;
 
 /**
- * Enough for the Label/Undo toolbar row plus one row of tool icons
- * (Text / QR / Barcode / Time / Material) with a sliver of the editor sheet.
+ * Height required to fit the entire tool palette (toolbar row + all 4 tool rows:
+ * Text through Signature) without scrolling or clipping (exact measured requirement).
  */
-export const PANEL_MIN_HEIGHT_PX = 148;
+export const PANEL_MIN_HEIGHT_PX = 315;
 
 /** Extra sheet reservation when the millimetre nudge pad is visible. */
 export const NUDGE_PAD_SPLIT_EXTRA_PX = 96;
@@ -35,8 +35,8 @@ export const SPLIT_ANIMATION_MS = 200;
 /** Debounce rulers/guides while the divider is moving (Task 1.3). */
 export const RULER_DEBOUNCE_MS = 48;
 
-/** `styles.stage` paddingVertical 8 on each edge. */
-export const STAGE_PADDING_Y_PX = 16;
+/** Padding on stage vertical edges. Zeroed so workspace uses the full container. */
+export const STAGE_PADDING_Y_PX = 0;
 
 export type ClampCanvasSplitInput = {
   viewportPx: number;
@@ -87,9 +87,10 @@ export function defaultCanvasSplitHeight(
   extras?: Pick<ClampCanvasSplitInput, 'canvasMinRatio' | 'panelMinPx' | 'dividerPx'>,
 ): number {
   const usable = usableSplitViewportPx(viewportPx, extras?.dividerPx);
+  const panelMin = Math.max(0, finitePx(extras?.panelMinPx ?? PANEL_MIN_HEIGHT_PX, PANEL_MIN_HEIGHT_PX));
   return clampCanvasSplitHeight({
     viewportPx,
-    requestedCanvasPx: usable * DEFAULT_CANVAS_SPLIT_RATIO,
+    requestedCanvasPx: Math.max(0, usable - panelMin),
     ...extras,
   });
 }
@@ -135,7 +136,7 @@ export function workspaceHeightFromSplit(
 }
 
 export function restoreCanvasSplitHeight(input: {
-  ratio: number;
+  ratio?: number | null;
   fullscreen: boolean;
   viewportPx: number;
   panelMinPx?: number;
@@ -150,9 +151,14 @@ export function restoreCanvasSplitHeight(input: {
     });
   }
   const usable = usableSplitViewportPx(input.viewportPx, input.dividerPx);
+  const panelMin = Math.max(0, finitePx(input.panelMinPx ?? PANEL_MIN_HEIGHT_PX, PANEL_MIN_HEIGHT_PX));
+  const requestedCanvasPx =
+    input.ratio != null && Number.isFinite(input.ratio)
+      ? usable * clampStoredSplitRatio(input.ratio)
+      : Math.max(0, usable - panelMin);
   return clampCanvasSplitHeight({
     viewportPx: input.viewportPx,
-    requestedCanvasPx: usable * clampStoredSplitRatio(input.ratio),
+    requestedCanvasPx,
     panelMinPx: input.panelMinPx,
     dividerPx: input.dividerPx,
   });
