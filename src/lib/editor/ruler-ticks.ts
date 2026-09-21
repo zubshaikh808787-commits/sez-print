@@ -13,12 +13,13 @@ export function rulerTickPx(mm: number, lengthMm: number, contentPx: number): nu
   return (mm / length) * size;
 }
 
-function tickStepMm(lengthMm: number, sizePx: number) {
+export function tickStepMm(lengthMm: number, sizePx: number): number {
   const pxPerMm = sizePx / Math.max(lengthMm, 0.01);
-  if (pxPerMm >= 6) return 0.5;
+  if (pxPerMm >= 30) return 0.5;
   if (pxPerMm >= 3) return 1;
-  if (pxPerMm >= 1.6) return 2;
-  return 5;
+  if (pxPerMm >= 1.5) return 2;
+  if (pxPerMm >= 0.8) return 5;
+  return 10;
 }
 
 export function rulerTicksFor(lengthMm: number, sizePx: number): RulerTick[] {
