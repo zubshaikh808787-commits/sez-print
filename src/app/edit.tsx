@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -67,7 +67,6 @@ import {
   windowPointToMm,
   type EditorViewTransform,
 } from '@/lib/editor/view-transform';
-import { applyLiveDragPosition } from '@/lib/editor/drag-layer';
 import { collectImageFileUris, placeImportedImageMm } from '@/lib/editor/image-ingest';
 import { ingestEditorImage, sweepEditorImageFiles } from '@/lib/editor/image-ingest-native';
 import {
@@ -87,7 +86,11 @@ import { ElementContentView } from '@/components/editor/element-renderer';
 import { ZoomableEditPad } from '@/components/editor/zoomable-edit-pad';
 import { EditingPad } from '@/components/editor/editing-pad';
 import { KonvaCanvas } from '@/components/editor/konva-canvas';
-import type { TransformCommitPayload, TransformMovePayload } from '@/components/editor/konva-transformer';
+import type {
+  TransformCommitPayload,
+  TransformMovePayload,
+  TransformStartKind,
+} from '@/components/editor/konva-transformer';
 import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
 import { StaticToolPalette } from '@/components/editor/static-tool-palette';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
@@ -120,6 +123,7 @@ import { TableSizePicker } from '@/components/editor/table-size-picker';
 import { TextPropertyPanel } from '@/components/editor/text-property-panel';
 import { TimePropertyPanel } from '@/components/editor/time-property-panel';
 import { QuickValueModal } from '@/components/editor/quick-value-modal';
+import { MultiSelectPropertyPanel } from '@/components/editor/multi-select-property-panel';
 import {
   getQuickEditPatch,
   getQuickEditPlaceholder,
@@ -128,6 +132,12 @@ import {
   isQuickEditableType,
   type ElementAnchorRect,
 } from '@/lib/editor/quick-value';
+import {
+  alignGroupBounds,
+  reduceTapSelect,
+  selectionFromIds,
+  supportsMultiSelectPanel,
+} from '@/lib/editor/selection';
 import {
   DEFAULT_ARCTEXT_STATE,
   DEFAULT_BARCODE_STATE,
@@ -493,7 +503,28 @@ export default function EditScreen() {
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
     params.selectedElementId ? [params.selectedElementId] : []
   );
+  const [primaryId, setPrimaryId] = useState<string | null>(() =>
+    params.selectedElementId ? params.selectedElementId : null,
+  );
   const [multipleMode, setMultipleMode] = useState(false);
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const primaryIdRef = useRef(primaryId);
+  primaryIdRef.current = primaryId;
+  const dragStartPositionsRef = useRef<Map<string, { left: number; top: number }> | null>(null);
+  const transformKindRef = useRef<TransformStartKind | null>(null);
+  const groupDragDeltaLeftSv = useSharedValue(0);
+  const groupDragDeltaTopSv = useSharedValue(0);
+  const groupDragAnchorIdSv = useSharedValue('');
+  const groupDragEligibleSv = useSharedValue(0);
+  const transformSettlePulseSv = useSharedValue(0);
+  const groupDragSettleAnchorIdSv = useSharedValue('');
+  const groupDragSettleDeltaLeftSv = useSharedValue(0);
+  const groupDragSettleDeltaTopSv = useSharedValue(0);
+  const groupDragCommitPendingRef = useRef<{
+    ids: string[];
+    expected: Map<string, { left: number; top: number }>;
+  } | null>(null);
   const [panelOpen, setPanelOpen] = useState(() =>
     Boolean(params.autoOpenPanel === 'true' && params.selectedElementId)
   );
@@ -575,6 +606,10 @@ export default function EditScreen() {
   useEffect(() => {
     bottomPanelVisibleSv.value = panelOpen && selectedIds.length > 0 ? 1 : 0;
   }, [panelOpen, selectedIds.length, bottomPanelVisibleSv]);
+
+  useEffect(() => {
+    groupDragEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
+  }, [selectedIds.length, groupDragEligibleSv]);
 
   const defaultToolbarAnimatedStyle = useAnimatedStyle(() => ({
     opacity: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
@@ -918,19 +953,23 @@ export default function EditScreen() {
   }, [doc.widthMm, doc.heightMm, doc.templatePreviewType]);
   const selectionColor = chromeStrokeForFill(artboardFill);
 
-  const selectedElement =
-    selectedIds.length === 1
-      ? doc.elements.find((el) => el.id === selectedIds[0]) ?? null
-      : null;
+  const primaryElement = useMemo(() => {
+    if (primaryId) {
+      return doc.elements.find((el) => el.id === primaryId) ?? null;
+    }
+    if (selectedIds.length === 1) {
+      return doc.elements.find((el) => el.id === selectedIds[0]) ?? null;
+    }
+    return null;
+  }, [doc.elements, primaryId, selectedIds]);
 
-  const lastSelectedElementRef = useRef<LabelElement | null>(null);
-  if (selectedElement) {
-    lastSelectedElementRef.current = selectedElement;
-  }
-  const displayElement =
-    selectedElement ??
-    lastSelectedElementRef.current ??
-    (doc.elements.length > 0 ? doc.elements[0] : null);
+  const selectedElement = selectedIds.length === 1 ? primaryElement : null;
+  const displayElement = primaryElement;
+  const selectedElements = useMemo(
+    () => doc.elements.filter((el) => selectedIds.includes(el.id)),
+    [doc.elements, selectedIds],
+  );
+  const isMultiSelect = selectedIds.length > 1;
 
   const docRef = useRef(doc);
   docRef.current = doc;
@@ -984,12 +1023,23 @@ export default function EditScreen() {
       return switchUpsPanel(prev, nextIndex);
     });
     setSelectedIds([]);
+    setPrimaryId(null);
     setPanelOpen(false);
     historyRef.current.clear();
     bumpHistory();
     setTextEditId(null);
     setDirty(true);
   }, [bumpHistory]);
+
+  const syncSelectionAfterSnapshot = useCallback((snapshot: LabelElement[]) => {
+    setSelectedIds((ids) => {
+      const filtered = ids.filter((id) => snapshot.some((el) => el.id === id));
+      setPrimaryId((pid) =>
+        pid && filtered.includes(pid) ? pid : filtered[filtered.length - 1] ?? null,
+      );
+      return filtered;
+    });
+  }, []);
 
   const undo = useCallback(() => {
     const snapshot = historyRef.current.undo(docRef.current.elements);
@@ -1001,8 +1051,8 @@ export default function EditScreen() {
     });
     setDirty(true);
     bumpHistory();
-    setSelectedIds((ids) => ids.filter((id) => snapshot.some((el) => el.id === id)));
-  }, [bumpHistory]);
+    syncSelectionAfterSnapshot(snapshot);
+  }, [bumpHistory, syncSelectionAfterSnapshot]);
 
   const redo = useCallback(() => {
     const snapshot = historyRef.current.redo(docRef.current.elements);
@@ -1014,8 +1064,8 @@ export default function EditScreen() {
     });
     setDirty(true);
     bumpHistory();
-    setSelectedIds((ids) => ids.filter((id) => snapshot.some((el) => el.id === id)));
-  }, [bumpHistory]);
+    syncSelectionAfterSnapshot(snapshot);
+  }, [bumpHistory, syncSelectionAfterSnapshot]);
 
   const patchElement = useCallback(
     (id: string, updates: Record<string, unknown>) => {
@@ -1034,6 +1084,29 @@ export default function EditScreen() {
       patchElement(selectedIds[0], updates);
     },
     [selectedIds, patchElement],
+  );
+
+  const patchPrimary = useCallback(
+    (updates: Record<string, unknown>) => {
+      const id = primaryId ?? (selectedIds.length === 1 ? selectedIds[0] : null);
+      if (!id) return;
+      patchElement(id, updates);
+    },
+    [primaryId, selectedIds, patchElement],
+  );
+
+  const patchAllSelected = useCallback(
+    (updates: Record<string, unknown>) => {
+      if (selectedIds.length === 0) return;
+      historyRef.current.begin(docRef.current.elements);
+      setElements((elements) =>
+        elements.map((el) =>
+          selectedIds.includes(el.id) ? ({ ...el, ...updates } as LabelElement) : el,
+        ),
+      );
+      scheduleHistoryCommit();
+    },
+    [selectedIds, setElements, scheduleHistoryCommit],
   );
 
   const addElement = useCallback(
@@ -1259,6 +1332,7 @@ export default function EditScreen() {
       element.zIndex = maxZ + 1;
       setElements((items) => [...items, element], true);
       setSelectedIds([element.id]);
+      setPrimaryId(element.id);
       return element;
     },
     [defaults, pickerRows, pickerColumns, setElements],
@@ -1270,6 +1344,7 @@ export default function EditScreen() {
     bottomPanelVisibleSv.value = 0;
     setElements((elements) => elements.filter((el) => !selectedIds.includes(el.id)), true);
     setSelectedIds([]);
+    setPrimaryId(null);
     setPanelOpen(false);
   }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
@@ -1281,13 +1356,16 @@ export default function EditScreen() {
     topBarSelectionVisibleSv.value = 1;
     bottomPanelVisibleSv.value = 1;
     setElements(() => result.elements, true);
-    setSelectedIds(result.newIds);
+    const next = selectionFromIds(result.newIds);
+    setSelectedIds(next.ids);
+    setPrimaryId(next.primaryId);
   }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const handleDeselectAll = useCallback(() => {
     topBarSelectionVisibleSv.value = 0;
     bottomPanelVisibleSv.value = 0;
     setSelectedIds([]);
+    setPrimaryId(null);
     setPanelOpen(false);
   }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
@@ -1334,13 +1412,13 @@ export default function EditScreen() {
       if (!element || element.needPrinting === false || element.type === 'border') return;
       topBarSelectionVisibleSv.value = 1;
       bottomPanelVisibleSv.value = 1;
-      setSelectedIds((prev) => {
-        if (multipleMode) {
-           return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-        }
-        if (prev.length === 1 && prev[0] === id) return prev;
-        return [id];
+      const next = reduceTapSelect({
+        id,
+        multipleMode,
+        current: { ids: selectedIdsRef.current, primaryId: primaryIdRef.current },
       });
+      setSelectedIds(next.ids);
+      setPrimaryId(next.primaryId);
       if (!multipleMode) {
         if (element.type === 'signature') {
           setShowSignatureBoard(true);
@@ -1348,6 +1426,11 @@ export default function EditScreen() {
           resetTabToRegularForElement(element.type);
           setPanelOpen(true);
         }
+      } else if (next.ids.length >= 2) {
+        setPanelOpen(true);
+      } else if (next.ids.length === 1) {
+        resetTabToRegularForElement(element.type);
+        setPanelOpen(true);
       }
     },
     [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement],
@@ -1359,6 +1442,7 @@ export default function EditScreen() {
     topBarSelectionVisibleSv.value = 1;
     bottomPanelVisibleSv.value = 1;
     setSelectedIds([id]);
+    setPrimaryId(id);
     if (element.type === 'signature') {
       setShowSignatureBoard(true);
       return;
@@ -1379,6 +1463,7 @@ export default function EditScreen() {
     const element = docRef.current.elements.find((el) => el.id === id);
     if (!element) return;
     setSelectedIds([id]);
+    setPrimaryId(id);
     setPanelOpen(true);
 
     if (element.type === 'text') {
@@ -1406,6 +1491,7 @@ export default function EditScreen() {
     const element = docRef.current.elements.find((el) => el.id === id);
     if (!element || !isQuickEditableType(element.type)) return;
     setSelectedIds([id]);
+    setPrimaryId(id);
     // Wait for the double-tap gesture to finish so it doesn't steal focus from the input.
     InteractionManager.runAfterInteractions(() => {
       setTimeout(() => {
@@ -1450,7 +1536,7 @@ export default function EditScreen() {
     [patchElement, textEditField, textEditId],
   );
 
-  const selectedElementHeightMm = selectedElement ? elementSizeMm(selectedElement).height : 0;
+  const selectedElementHeightMm = primaryElement ? elementSizeMm(primaryElement).height : 0;
   const labelBounds = useMemo(
     () => ({ widthMm: doc.widthMm, heightMm: doc.heightMm }),
     [doc.widthMm, doc.heightMm],
@@ -1493,11 +1579,98 @@ export default function EditScreen() {
     rulerVisible,
   ]);
 
-  const handleTransformStart = useCallback((_id: string) => {
-    transformingRef.current = true;
-    historyRef.current.begin(docRef.current.elements);
-    publishSnapGuides([]);
-  }, [publishSnapGuides]);
+  const clearGroupDragPreview = useCallback(() => {
+    groupDragAnchorIdSv.value = '';
+    groupDragDeltaLeftSv.value = 0;
+    groupDragDeltaTopSv.value = 0;
+  }, [groupDragAnchorIdSv, groupDragDeltaLeftSv, groupDragDeltaTopSv]);
+
+  const trySettleTransformCommit = useCallback(() => {
+    const pending = groupDragCommitPendingRef.current;
+    if (!pending) return;
+    const elements = docRef.current.elements;
+    const allMatch = pending.ids.every((id) => {
+      const el = elements.find((e) => e.id === id);
+      const exp = pending.expected.get(id);
+      if (!el || !exp) return false;
+      return Math.abs(el.left - exp.left) < 0.005 && Math.abs(el.top - exp.top) < 0.005;
+    });
+    if (!allMatch) {
+      if (__DEV__) {
+        console.log('[group-drag-settle-pulse]', {
+          phase: 'blocked',
+          tPulse: Date.now(),
+          pendingIds: pending.ids,
+          mismatch: pending.ids.map((id) => {
+            const el = elements.find((e) => e.id === id);
+            const exp = pending.expected.get(id);
+            if (!el || !exp) return { id, ok: false };
+            return {
+              id,
+              ok:
+                Math.abs(el.left - exp.left) < 0.005 &&
+                Math.abs(el.top - exp.top) < 0.005,
+              expected: exp,
+              actual: { left: el.left, top: el.top },
+            };
+          }),
+        });
+      }
+      return;
+    }
+    groupDragCommitPendingRef.current = null;
+    groupDragSettleAnchorIdSv.value = groupDragAnchorIdSv.value;
+    groupDragSettleDeltaLeftSv.value = groupDragDeltaLeftSv.value;
+    groupDragSettleDeltaTopSv.value = groupDragDeltaTopSv.value;
+    if (__DEV__) {
+      console.log('[group-drag-settle-pulse]', {
+        phase: 'fire',
+        tPulse: Date.now(),
+        anchorId: groupDragSettleAnchorIdSv.value,
+        settleDeltaMm: {
+          left: groupDragSettleDeltaLeftSv.value,
+          top: groupDragSettleDeltaTopSv.value,
+        },
+        pendingIds: pending.ids,
+      });
+    }
+    transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
+  }, [
+    groupDragAnchorIdSv,
+    groupDragDeltaLeftSv,
+    groupDragDeltaTopSv,
+    groupDragSettleAnchorIdSv,
+    groupDragSettleDeltaLeftSv,
+    groupDragSettleDeltaTopSv,
+    transformSettlePulseSv,
+  ]);
+
+  useLayoutEffect(() => {
+    trySettleTransformCommit();
+  }, [doc.elements, trySettleTransformCommit]);
+
+  const handleTransformStart = useCallback(
+    (id: string, kind: TransformStartKind) => {
+      transformingRef.current = true;
+      historyRef.current.begin(docRef.current.elements);
+      publishSnapGuides([]);
+      transformKindRef.current = kind;
+
+      const ids = selectedIdsRef.current;
+      if (kind === 'move' && ids.length > 1 && ids.includes(id)) {
+        const map = new Map<string, { left: number; top: number }>();
+        for (const el of docRef.current.elements) {
+          if (ids.includes(el.id)) {
+            map.set(el.id, { left: el.left, top: el.top });
+          }
+        }
+        dragStartPositionsRef.current = map;
+      } else {
+        dragStartPositionsRef.current = null;
+      }
+    },
+    [publishSnapGuides],
+  );
 
   const snapMoveMm = useCallback(
     (input: { id: string; leftMm: number; topMm: number; widthMm: number; heightMm: number }) => {
@@ -1506,12 +1679,9 @@ export default function EditScreen() {
     [],
   );
 
-  const handleTransformMove = useCallback(
-    (_payload: TransformMovePayload) => {
-      // Free-motion 1:1 gesture without intermediate React re-renders
-    },
-    [],
-  );
+  const handleTransformMove = useCallback((_payload: TransformMovePayload) => {
+    // Group-drag live preview is driven on the UI thread in konva-transformer worklets.
+  }, []);
 
   const handleTransformEnd = useCallback(
     (payload: TransformCommitPayload) => {
@@ -1523,6 +1693,60 @@ export default function EditScreen() {
         transformingRef.current = false;
         bumpHistory();
       }
+
+      const startPositions = dragStartPositionsRef.current;
+      dragStartPositionsRef.current = null;
+      const kind = transformKindRef.current;
+      transformKindRef.current = null;
+      const ids = selectedIdsRef.current;
+      const dragged = docRef.current.elements.find((el) => el.id === payload.id);
+      const isGroupMoveCandidate =
+        kind === 'move' &&
+        ids.length > 1 &&
+        ids.includes(payload.id) &&
+        startPositions &&
+        dragged;
+
+      if (isGroupMoveCandidate) {
+        const start = startPositions.get(payload.id);
+        if (start) {
+          const prevSize = elementSizeMm(dragged);
+          const resized =
+            Math.abs(prevSize.width - clean.widthMm) > 0.04 ||
+            Math.abs(prevSize.height - clean.heightMm) > 0.04;
+          const deltaLeft = groupDragDeltaLeftSv.value;
+          const deltaTop = groupDragDeltaTopSv.value;
+          if (
+            !resized &&
+            (Math.abs(deltaLeft) > 0.005 || Math.abs(deltaTop) > 0.005)
+          ) {
+            const expected = new Map<string, { left: number; top: number }>();
+            const committedIds: string[] = [];
+            const docSnapshot = docRef.current;
+            setElements(
+              (elements) =>
+                elements.map((el) => {
+                  if (!ids.includes(el.id) || el.lockMovement || el.type === 'border') {
+                    return el;
+                  }
+                  const orig = startPositions.get(el.id);
+                  if (!orig) return el;
+                  const left = orig.left + deltaLeft;
+                  const top = orig.top + deltaTop;
+                  const clamped = clampElementToLabel({ ...el, left, top }, docSnapshot);
+                  expected.set(el.id, { left: clamped.left, top: clamped.top });
+                  committedIds.push(el.id);
+                  return clamped;
+                }),
+              recordHistory,
+            );
+            groupDragCommitPendingRef.current = { ids: committedIds, expected };
+            return;
+          }
+        }
+      }
+
+      let moveCommitExpected: { left: number; top: number } | null = null;
       setElements(
         (elements) =>
           elements.map((el) => {
@@ -1582,12 +1806,31 @@ export default function EditScreen() {
             ) {
               (next as { height: number }).height = clamped.height;
             }
-            return next;
+            const committed = clampElementToLabel(next, docRef.current);
+            if (kind === 'move') {
+              moveCommitExpected = { left: committed.left, top: committed.top };
+            }
+            return committed;
           }),
         recordHistory,
       );
+      if (kind === 'move' && moveCommitExpected) {
+        groupDragCommitPendingRef.current = {
+          ids: [payload.id],
+          expected: new Map([[payload.id, moveCommitExpected]]),
+        };
+      } else {
+        clearGroupDragPreview();
+      }
     },
-    [setElements, bumpHistory, publishSnapGuides],
+    [
+      setElements,
+      bumpHistory,
+      publishSnapGuides,
+      clearGroupDragPreview,
+      groupDragDeltaLeftSv,
+      groupDragDeltaTopSv,
+    ],
   );
 
 
@@ -1646,6 +1889,22 @@ export default function EditScreen() {
   const alignSelected = useCallback(
     (kind: 'left' | 'right' | 'top' | 'bottom' | 'center') => {
       if (selectedIds.length === 0) return;
+      if (selectedIds.length > 1) {
+        setElements(
+          (elements) => {
+            const patches = alignGroupBounds(elements, selectedIds, canvasMm, kind);
+            return elements.map((el) => {
+              if (!selectedIds.includes(el.id) || el.lockMovement || el.type === 'border') {
+                return el;
+              }
+              const patch = patches.get(el.id);
+              return patch ? { ...el, ...patch } : el;
+            });
+          },
+          true,
+        );
+        return;
+      }
       setElements(
         (elements) =>
           elements.map((el) => {
@@ -1669,7 +1928,9 @@ export default function EditScreen() {
     const result = pasteElementsFromClipboard(docRef.current.elements, canvasMm);
     if (result.newIds.length === 0) return;
     setElements(() => result.elements, true);
-    setSelectedIds(result.newIds);
+    const next = selectionFromIds(result.newIds);
+    setSelectedIds(next.ids);
+    setPrimaryId(next.primaryId);
   }, [canvasMm, setElements]);
 
   const reorderSelected = useCallback(
@@ -1765,6 +2026,7 @@ export default function EditScreen() {
     setSavedToStore(true);
     setDirty(false);
     setSelectedIds([]);
+    setPrimaryId(null);
     setPanelOpen(false);
     historyRef.current.clear();
     bumpHistory();
@@ -2261,10 +2523,7 @@ export default function EditScreen() {
         name="Multiple"
         label="Multiple"
         active={multipleMode}
-        onPress={() => {
-          setMultipleMode((m) => !m);
-          setSelectedIds([]);
-        }}
+        onPress={() => setMultipleMode((m) => !m)}
       />
       <ToolbarItem
         name="Undo"
@@ -2324,12 +2583,16 @@ export default function EditScreen() {
       <View style={styles.contextualBarDivider} />
       <Pressable
         style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
-        onPress={() => setLockOnSelection(!(selectedElement?.lockMovement ?? false))}
+        onPress={() =>
+          setLockOnSelection(!selectedElements.every((el) => el.lockMovement))
+        }
         hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel={selectedElement?.lockMovement ? 'Unlock element' : 'Lock element'}>
+        accessibilityLabel={
+          selectedElements.every((el) => el.lockMovement) ? 'Unlock element' : 'Lock element'
+        }>
         <AppIcon
-          name={selectedElement?.lockMovement ? 'lock.open' : 'lock'}
+          name={selectedElements.every((el) => el.lockMovement) ? 'lock.open' : 'lock'}
           tintColor="#FFFFFF"
           size={18}
         />
@@ -2338,7 +2601,11 @@ export default function EditScreen() {
       <Pressable
         style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
         onPress={() => {
-          if (selectedElement) openPanelFor(selectedElement.id);
+          if (selectedIds.length > 1) {
+            setPanelOpen(true);
+          } else if (primaryElement) {
+            openPanelFor(primaryElement.id);
+          }
         }}
         hitSlop={8}
         accessibilityRole="button"
@@ -2453,6 +2720,14 @@ export default function EditScreen() {
                     liveBounds={liveRulerBounds}
                     topBarSelectionVisibleSv={topBarSelectionVisibleSv}
                     bottomPanelVisibleSv={bottomPanelVisibleSv}
+                    groupDragDeltaLeftMm={groupDragDeltaLeftSv}
+                    groupDragDeltaTopMm={groupDragDeltaTopSv}
+                    groupDragAnchorIdSv={groupDragAnchorIdSv}
+                    groupDragEligibleSv={groupDragEligibleSv}
+                    transformSettlePulseSv={transformSettlePulseSv}
+                    groupDragSettleAnchorIdSv={groupDragSettleAnchorIdSv}
+                    groupDragSettleDeltaLeftSv={groupDragSettleDeltaLeftSv}
+                    groupDragSettleDeltaTopSv={groupDragSettleDeltaTopSv}
                     onSelect={handleSelect}
                     onDeselectAll={handleDeselectAll}
                     onOpenPanel={openPanelFor}
@@ -2474,6 +2749,25 @@ export default function EditScreen() {
       </ZoomableEditPad>
     </Animated.View>
   );
+
+  const canShowMultiSelectPanel =
+    isMultiSelect &&
+    primaryElement !== null &&
+    selectedElements.every(supportsMultiSelectPanel);
+
+  const renderMultiSelectPanel = () => {
+    if (!canShowMultiSelectPanel || !primaryElement) return null;
+    return (
+      <MultiSelectPropertyPanel
+        primary={primaryElement}
+        selectedElements={selectedElements}
+        labelWidthMm={labelBounds.widthMm}
+        labelHeightMm={labelBounds.heightMm}
+        onPatchPrimary={patchPrimary}
+        onPatchAllSelected={patchAllSelected}
+      />
+    );
+  };
 
   const renderPanel = (targetEl: LabelElement | null = displayElement) => {
     if (!targetEl) return null;
@@ -2610,7 +2904,10 @@ export default function EditScreen() {
     }
   };
 
-  const propertyMode = panelOpen && selectedElement !== null && renderPanel(displayElement) !== null;
+  const activePanelContent = isMultiSelect
+    ? renderMultiSelectPanel()
+    : renderPanel(displayElement);
+  const propertyMode = panelOpen && selectedIds.length > 0 && activePanelContent !== null;
 
   return (
     <View style={styles.root}>
@@ -2859,7 +3156,7 @@ export default function EditScreen() {
                   contentContainerStyle={{ paddingBottom: Math.max(Spacing.two, insets.bottom) }}
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled">
-                  {renderPanel(displayElement)}
+                  {activePanelContent}
                 </ScrollView>
               </Animated.View>
             </Animated.View>

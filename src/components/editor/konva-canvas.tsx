@@ -5,6 +5,7 @@ import ViewShot from 'react-native-view-shot';
 import Svg, { Ellipse, Line, Rect } from 'react-native-svg';
 import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import { runOnJS, type SharedValue } from 'react-native-reanimated';
+import type { TransformStartKind } from './konva-transformer';
 
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
 import { type LiveRulerBounds } from '@/components/canvas-rulers';
@@ -35,12 +36,20 @@ type KonvaCanvasProps = {
   liveBounds?: LiveRulerBounds;
   topBarSelectionVisibleSv?: SharedValue<number>;
   bottomPanelVisibleSv?: SharedValue<number>;
+  groupDragDeltaLeftMm?: SharedValue<number>;
+  groupDragDeltaTopMm?: SharedValue<number>;
+  groupDragAnchorIdSv?: SharedValue<string>;
+  groupDragEligibleSv?: SharedValue<number>;
+  transformSettlePulseSv?: SharedValue<number>;
+  groupDragSettleAnchorIdSv?: SharedValue<string>;
+  groupDragSettleDeltaLeftSv?: SharedValue<number>;
+  groupDragSettleDeltaTopSv?: SharedValue<number>;
   onSelect: (id: string) => void;
   onDeselectAll: () => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
   onQuickEdit?: (id: string, anchorRect?: ElementAnchorRect) => void;
-  onTransformStart?: (id: string) => void;
+  onTransformStart?: (id: string, kind: TransformStartKind) => void;
   onTransformMove?: (payload: TransformMovePayload) => void;
   onTransformEnd: (payload: TransformCommitPayload) => void;
   onQuickRotate?: (id: string) => void;
@@ -68,11 +77,19 @@ type ElementChrome = {
   deselectGesture?: GestureType;
   topBarSelectionVisibleSv?: SharedValue<number>;
   bottomPanelVisibleSv?: SharedValue<number>;
+  groupDragDeltaLeftMm?: SharedValue<number>;
+  groupDragDeltaTopMm?: SharedValue<number>;
+  groupDragAnchorIdSv?: SharedValue<string>;
+  groupDragEligibleSv?: SharedValue<number>;
+  transformSettlePulseSv?: SharedValue<number>;
+  groupDragSettleAnchorIdSv?: SharedValue<string>;
+  groupDragSettleDeltaLeftSv?: SharedValue<number>;
+  groupDragSettleDeltaTopSv?: SharedValue<number>;
   onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
   onQuickEdit?: (id: string, anchorRect?: ElementAnchorRect) => void;
-  onTransformStart?: (id: string) => void;
+  onTransformStart?: (id: string, kind: TransformStartKind) => void;
   onTransformMove?: (payload: TransformMovePayload) => void;
   onTransformEnd: (payload: TransformCommitPayload) => void;
   onQuickRotate?: (id: string) => void;
@@ -110,6 +127,14 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           deselectGesture={chrome.deselectGesture}
           topBarSelectionVisibleSv={chrome.topBarSelectionVisibleSv}
           bottomPanelVisibleSv={chrome.bottomPanelVisibleSv}
+          groupDragDeltaLeftMm={chrome.groupDragDeltaLeftMm}
+          groupDragDeltaTopMm={chrome.groupDragDeltaTopMm}
+          groupDragAnchorIdSv={chrome.groupDragAnchorIdSv}
+          groupDragEligibleSv={chrome.groupDragEligibleSv}
+          transformSettlePulseSv={chrome.transformSettlePulseSv}
+          groupDragSettleAnchorIdSv={chrome.groupDragSettleAnchorIdSv}
+          groupDragSettleDeltaLeftSv={chrome.groupDragSettleDeltaLeftSv}
+          groupDragSettleDeltaTopSv={chrome.groupDragSettleDeltaTopSv}
           onSelect={chrome.onSelect}
           onOpenPanel={chrome.onOpenPanel}
           onEditText={chrome.onEditText}
@@ -140,6 +165,14 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     liveBounds,
     topBarSelectionVisibleSv,
     bottomPanelVisibleSv,
+    groupDragDeltaLeftMm,
+    groupDragDeltaTopMm,
+    groupDragAnchorIdSv,
+    groupDragEligibleSv,
+    transformSettlePulseSv,
+    groupDragSettleAnchorIdSv,
+    groupDragSettleDeltaLeftSv,
+    groupDragSettleDeltaTopSv,
     onSelect,
     onDeselectAll,
     onOpenPanel,
@@ -357,6 +390,14 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       deselectGesture,
       topBarSelectionVisibleSv,
       bottomPanelVisibleSv,
+      groupDragDeltaLeftMm,
+      groupDragDeltaTopMm,
+      groupDragAnchorIdSv,
+      groupDragEligibleSv,
+      transformSettlePulseSv,
+      groupDragSettleAnchorIdSv,
+      groupDragSettleDeltaLeftSv,
+      groupDragSettleDeltaTopSv,
       onSelect,
       onOpenPanel,
       onEditText,
@@ -380,6 +421,14 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       deselectGesture,
       topBarSelectionVisibleSv,
       bottomPanelVisibleSv,
+      groupDragDeltaLeftMm,
+      groupDragDeltaTopMm,
+      groupDragAnchorIdSv,
+      groupDragEligibleSv,
+      transformSettlePulseSv,
+      groupDragSettleAnchorIdSv,
+      groupDragSettleDeltaLeftSv,
+      groupDragSettleDeltaTopSv,
       onSelect,
       onOpenPanel,
       onEditText,
