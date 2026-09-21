@@ -448,11 +448,17 @@ class LabelXPrinterModule : Module() {
       ioExecutor.execute {
         try {
           val helper = PrinterHelper.getInstance()
+          Log.i(TAG, "LuckPrinter disconnect requested (mac=$connectedMac name=$connectedName)")
           val success = helper.disconnectLuck()
           connectedName = null
           connectedMac = null
+          lastStatus = -1
+          Log.i(TAG, "LuckPrinter disconnectLuck result=$success — session cleared")
           promise.resolve(success)
         } catch (e: Throwable) {
+          connectedName = null
+          connectedMac = null
+          lastStatus = -1
           promise.reject("DISCONNECT_FAILED", e.message, e)
         }
       }

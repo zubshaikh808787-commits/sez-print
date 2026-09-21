@@ -40,6 +40,8 @@ type PrinterStoreState = {
   lastDeviceId: string | null;
   lastDeviceName: string | null;
   lastDeviceForModel: Partial<Record<SeznikPrinterModelId, { id: string; name: string }>>;
+  /** MAC → model pin. Overrides name heuristics on reconnect (addendum §5). */
+  pinnedDriverByMac: Partial<Record<string, SeznikPrinterModelId>>;
   history: PrintHistoryEntry[];
   devCommandSet: 'tspl' | 'escpos';
   /**
@@ -67,9 +69,17 @@ type PrinterStoreState = {
     },
   ) => void;
   clearConnection: () => void;
+  pinDriverForMac: (mac: string, model: SeznikPrinterModelId, userPinned?: boolean) => void;
   addHistoryEntry: (entry: Omit<PrintHistoryEntry, 'id' | 'printedAt'>) => void;
   clearHistory: () => void;
 };
+
+/** Normalize Bluetooth MAC for stable pin keys (AA:BB:CC:DD:EE:FF). */
+export function normalizePrinterMac(mac: string): string {
+  const hex = mac.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (hex.length !== 12) return mac.trim().toUpperCase();
+  return `${hex.slice(0, 2)}:${hex.slice(2, 4)}:${hex.slice(4, 6)}:${hex.slice(6, 8)}:${hex.slice(8, 10)}:${hex.slice(10, 12)}`;
+}
 
 export const usePrinterStore = create<PrinterStoreState>()(
   persist(
@@ -84,6 +94,7 @@ export const usePrinterStore = create<PrinterStoreState>()(
       lastDeviceId: null,
       lastDeviceName: null,
       lastDeviceForModel: {},
+      pinnedDriverByMac: {},
       history: [],
       devCommandSet: 'tspl',
       printCalibration: {},
@@ -99,6 +110,7 @@ export const usePrinterStore = create<PrinterStoreState>()(
       setConnectedDevice: (deviceId, deviceName, meta) =>
         set((state) => {
           const model = meta?.model ?? (meta?.sdkId as SeznikPrinterModelId) ?? state.selectedPrinterModel;
+          const macKey = normalizePrinterMac(deviceId);
           return {
             status: 'connected',
             deviceId,
@@ -113,8 +125,20 @@ export const usePrinterStore = create<PrinterStoreState>()(
               ...state.lastDeviceForModel,
               [model]: { id: deviceId, name: deviceName },
             },
+            pinnedDriverByMac: {
+              ...state.pinnedDriverByMac,
+              [macKey]: model,
+            },
           };
         }),
+
+      pinDriverForMac: (mac, model, userPinned = true) =>
+        set((state) => ({
+          pinnedDriverByMac: {
+            ...state.pinnedDriverByMac,
+            [normalizePrinterMac(mac)]: model,
+          },
+        })),
 
       clearConnection: () =>
         set({
@@ -144,6 +168,7 @@ export const usePrinterStore = create<PrinterStoreState>()(
         lastDeviceId: state.lastDeviceId,
         lastDeviceName: state.lastDeviceName,
         lastDeviceForModel: state.lastDeviceForModel,
+        pinnedDriverByMac: state.pinnedDriverByMac,
         history: state.history,
         printCalibration: state.printCalibration,
       }),

@@ -280,6 +280,25 @@ export function addDevConnectionListener(
   });
 }
 
+export type DevAclLinkEvent = {
+  mac: string;
+  connected: boolean;
+};
+
+/**
+ * OS-level ACL link events — independent of SDK socket state.
+ * Catches sleep/radio drops before the print SDK notices.
+ */
+export function addDevAclListener(
+  listener: (event: DevAclLinkEvent) => void,
+): { remove: () => void } {
+  const mod = getNative();
+  if (!mod) return { remove: () => {} };
+  return mod.addListener('onAclLinkChanged', (event) => {
+    listener((event ?? {}) as DevAclLinkEvent);
+  });
+}
+
 /**
  * Raw scan subscription over the DEV module's BroadcastReceiver.
  *

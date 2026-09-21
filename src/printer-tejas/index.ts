@@ -77,7 +77,7 @@ export class TejasDriver implements PrinterDriver {
     nativeCopies: false,
     statusQuery: false,
     physicalCompletionCallback: false,
-    maxChunkBytes: 4096,
+    maxChunkBytes: 1024,
     mediaTypes: ['gap', 'bline', 'continuous'],
     requiresLicenseKey: false,
   };
