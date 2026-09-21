@@ -253,6 +253,7 @@ export const SkiaQRCode = memo(function SkiaQRCode({
   drawingColorIndex = 0,
   antiColor = false,
   zoneSize = '1',
+  errorLevel = 'M',
 }: {
   encodeMode: string;
   content: string;
@@ -261,6 +262,7 @@ export const SkiaQRCode = memo(function SkiaQRCode({
   drawingColorIndex?: number;
   antiColor?: boolean;
   zoneSize?: string;
+  errorLevel?: string;
 }) {
   const color = antiColor ? '#FFFFFF' : inkColor(drawingColorIndex);
   const bgColor = antiColor ? inkColor(drawingColorIndex) : '#00000000';
@@ -268,10 +270,13 @@ export const SkiaQRCode = memo(function SkiaQRCode({
 
   const qrMatrix = useMemo(() => {
     if (encodeMode === 'QRCode') {
-      return generateQrMatrix(content || 'https://example.com');
+      return generateQrMatrix(
+        content || 'https://example.com',
+        (errorLevel as 'L' | 'M' | 'Q' | 'H') || 'M',
+      );
     }
     return null;
-  }, [encodeMode, content]);
+  }, [encodeMode, content, errorLevel]);
 
   if (encodeMode === 'QRCode' && qrMatrix) {
     const size = Math.max(1, Math.min(widthPx, heightPx) - quietZone * 2);
@@ -725,6 +730,7 @@ export const SkiaElementView = memo(function SkiaElementView({
           drawingColorIndex={element.drawingColorIndex}
           antiColor={element.antiColor}
           zoneSize={element.zoneSize}
+          errorLevel={element.errorLevel}
         />
       );
     case 'shape':

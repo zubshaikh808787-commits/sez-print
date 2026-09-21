@@ -363,10 +363,10 @@ function QrcodeContent({
   // 1. QR Code
   const qrMatrix = useMemo(() => {
     if (element.encodeMode === 'QRCode') {
-      return generateQrMatrix(content);
+      return generateQrMatrix(content, (element.errorLevel as 'L' | 'M' | 'Q' | 'H') || 'M');
     }
     return null;
-  }, [element.encodeMode, content]);
+  }, [element.encodeMode, content, element.errorLevel]);
 
   const qrPath = useMemo(() => {
     if (element.encodeMode !== 'QRCode' || !qrMatrix) return '';
