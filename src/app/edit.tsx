@@ -46,6 +46,14 @@ import {
 } from '@/lib/element-sizing';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
 import {
+  applyGroupResize,
+  buildGroupResizeSnapshots,
+  getGroupResizeScaleLimits,
+  groupResizeFrameFromSnapshots,
+  selectionHasBlockedRotation,
+} from '@/lib/editor/group-resize';
+import type { MmBox } from '@/lib/editor/resize-policy';
+import {
   DEFAULT_CANVAS_SPLIT_RATIO,
   DIVIDER_HIT_SIZE_PX,
   NUDGE_PAD_SPLIT_EXTRA_PX,
@@ -525,6 +533,29 @@ export default function EditScreen() {
     ids: string[];
     expected: Map<string, { left: number; top: number }>;
   } | null>(null);
+  const resizeStartSnapshotsRef = useRef<Map<string, MmBox> | null>(null);
+  const groupResizeCommitPendingRef = useRef<{
+    ids: string[];
+    expected: Map<string, { left: number; top: number; width: number; height: number }>;
+  } | null>(null);
+  const groupResizeEligibleSv = useSharedValue(0);
+  const groupResizeReadySv = useSharedValue(0);
+  const groupResizeAnchorIdSv = useSharedValue('');
+  const groupResizeScaleXSv = useSharedValue(1);
+  const groupResizeScaleYSv = useSharedValue(1);
+  const groupResizeHandleSv = useSharedValue(0);
+  const groupResizeFixedOriginLeftSv = useSharedValue(0);
+  const groupResizeFixedOriginTopSv = useSharedValue(0);
+  const groupResizeMinScaleXSv = useSharedValue(0.001);
+  const groupResizeMaxScaleXSv = useSharedValue(1000);
+  const groupResizeMinScaleYSv = useSharedValue(0.001);
+  const groupResizeMaxScaleYSv = useSharedValue(1000);
+  const groupResizeSettleAnchorIdSv = useSharedValue('');
+  const groupResizeSettleScaleXSv = useSharedValue(1);
+  const groupResizeSettleScaleYSv = useSharedValue(1);
+  const groupResizeSettleHandleSv = useSharedValue(0);
+  const groupResizeSettleFixedOriginLeftSv = useSharedValue(0);
+  const groupResizeSettleFixedOriginTopSv = useSharedValue(0);
   const [panelOpen, setPanelOpen] = useState(() =>
     Boolean(params.autoOpenPanel === 'true' && params.selectedElementId)
   );
@@ -609,7 +640,8 @@ export default function EditScreen() {
 
   useEffect(() => {
     groupDragEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
-  }, [selectedIds.length, groupDragEligibleSv]);
+    groupResizeEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
+  }, [selectedIds.length, groupDragEligibleSv, groupResizeEligibleSv]);
 
   const defaultToolbarAnimatedStyle = useAnimatedStyle(() => ({
     opacity: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
@@ -1369,6 +1401,13 @@ export default function EditScreen() {
     setPanelOpen(false);
   }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
+  const toggleMultipleMode = useCallback(() => {
+    // Leaving Multiple mode drops the whole multi-selection rather than
+    // carrying it into single-select.
+    if (multipleMode) handleDeselectAll();
+    setMultipleMode((prev) => !prev);
+  }, [multipleMode, handleDeselectAll]);
+
   const resetTabToRegularForElement = useCallback((type: ElementType) => {
     switch (type) {
       case 'barcode':
@@ -1585,56 +1624,105 @@ export default function EditScreen() {
     groupDragDeltaTopSv.value = 0;
   }, [groupDragAnchorIdSv, groupDragDeltaLeftSv, groupDragDeltaTopSv]);
 
+  const clearGroupResizePreview = useCallback(() => {
+    groupResizeAnchorIdSv.value = '';
+    groupResizeScaleXSv.value = 1;
+    groupResizeScaleYSv.value = 1;
+    groupResizeReadySv.value = 0;
+    resizeStartSnapshotsRef.current = null;
+  }, [
+    groupResizeAnchorIdSv,
+    groupResizeScaleXSv,
+    groupResizeScaleYSv,
+    groupResizeReadySv,
+  ]);
+
   const trySettleTransformCommit = useCallback(() => {
-    const pending = groupDragCommitPendingRef.current;
-    if (!pending) return;
     const elements = docRef.current.elements;
-    const allMatch = pending.ids.every((id) => {
-      const el = elements.find((e) => e.id === id);
-      const exp = pending.expected.get(id);
-      if (!el || !exp) return false;
-      return Math.abs(el.left - exp.left) < 0.005 && Math.abs(el.top - exp.top) < 0.005;
-    });
-    if (!allMatch) {
+    const dragPending = groupDragCommitPendingRef.current;
+    const resizePending = groupResizeCommitPendingRef.current;
+
+    if (dragPending) {
+      const allMatch = dragPending.ids.every((id) => {
+        const el = elements.find((e) => e.id === id);
+        const exp = dragPending.expected.get(id);
+        if (!el || !exp) return false;
+        return Math.abs(el.left - exp.left) < 0.005 && Math.abs(el.top - exp.top) < 0.005;
+      });
+      if (!allMatch) {
+        if (__DEV__) {
+          console.log('[group-drag-settle-pulse]', {
+            phase: 'blocked',
+            tPulse: Date.now(),
+            pendingIds: dragPending.ids,
+          });
+        }
+        return;
+      }
+      groupDragCommitPendingRef.current = null;
+      groupDragSettleAnchorIdSv.value = groupDragAnchorIdSv.value;
+      groupDragSettleDeltaLeftSv.value = groupDragDeltaLeftSv.value;
+      groupDragSettleDeltaTopSv.value = groupDragDeltaTopSv.value;
       if (__DEV__) {
         console.log('[group-drag-settle-pulse]', {
-          phase: 'blocked',
+          phase: 'fire',
           tPulse: Date.now(),
-          pendingIds: pending.ids,
-          mismatch: pending.ids.map((id) => {
-            const el = elements.find((e) => e.id === id);
-            const exp = pending.expected.get(id);
-            if (!el || !exp) return { id, ok: false };
-            return {
-              id,
-              ok:
-                Math.abs(el.left - exp.left) < 0.005 &&
-                Math.abs(el.top - exp.top) < 0.005,
-              expected: exp,
-              actual: { left: el.left, top: el.top },
-            };
-          }),
+          anchorId: groupDragSettleAnchorIdSv.value,
+          settleDeltaMm: {
+            left: groupDragSettleDeltaLeftSv.value,
+            top: groupDragSettleDeltaTopSv.value,
+          },
+          pendingIds: dragPending.ids,
         });
       }
+      transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
       return;
     }
-    groupDragCommitPendingRef.current = null;
-    groupDragSettleAnchorIdSv.value = groupDragAnchorIdSv.value;
-    groupDragSettleDeltaLeftSv.value = groupDragDeltaLeftSv.value;
-    groupDragSettleDeltaTopSv.value = groupDragDeltaTopSv.value;
-    if (__DEV__) {
-      console.log('[group-drag-settle-pulse]', {
-        phase: 'fire',
-        tPulse: Date.now(),
-        anchorId: groupDragSettleAnchorIdSv.value,
-        settleDeltaMm: {
-          left: groupDragSettleDeltaLeftSv.value,
-          top: groupDragSettleDeltaTopSv.value,
-        },
-        pendingIds: pending.ids,
+
+    if (resizePending) {
+      const allMatch = resizePending.ids.every((id) => {
+        const el = elements.find((e) => e.id === id);
+        const exp = resizePending.expected.get(id);
+        if (!el || !exp) return false;
+        const size = elementSizeMm(el);
+        return (
+          Math.abs(el.left - exp.left) < 0.005 &&
+          Math.abs(el.top - exp.top) < 0.005 &&
+          Math.abs(size.width - exp.width) < 0.005 &&
+          Math.abs(size.height - exp.height) < 0.005
+        );
       });
+      if (!allMatch) {
+        if (__DEV__) {
+          console.log('[group-resize-settle-pulse]', {
+            phase: 'blocked',
+            tPulse: Date.now(),
+            pendingIds: resizePending.ids,
+          });
+        }
+        return;
+      }
+      groupResizeCommitPendingRef.current = null;
+      groupResizeSettleAnchorIdSv.value = groupResizeAnchorIdSv.value;
+      groupResizeSettleScaleXSv.value = groupResizeScaleXSv.value;
+      groupResizeSettleScaleYSv.value = groupResizeScaleYSv.value;
+      groupResizeSettleHandleSv.value = groupResizeHandleSv.value;
+      groupResizeSettleFixedOriginLeftSv.value = groupResizeFixedOriginLeftSv.value;
+      groupResizeSettleFixedOriginTopSv.value = groupResizeFixedOriginTopSv.value;
+      if (__DEV__) {
+        console.log('[group-resize-settle-pulse]', {
+          phase: 'fire',
+          tPulse: Date.now(),
+          anchorId: groupResizeSettleAnchorIdSv.value,
+          scale: {
+            x: groupResizeSettleScaleXSv.value,
+            y: groupResizeSettleScaleYSv.value,
+          },
+          pendingIds: resizePending.ids,
+        });
+      }
+      transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
     }
-    transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
   }, [
     groupDragAnchorIdSv,
     groupDragDeltaLeftSv,
@@ -1642,6 +1730,18 @@ export default function EditScreen() {
     groupDragSettleAnchorIdSv,
     groupDragSettleDeltaLeftSv,
     groupDragSettleDeltaTopSv,
+    groupResizeAnchorIdSv,
+    groupResizeScaleXSv,
+    groupResizeScaleYSv,
+    groupResizeHandleSv,
+    groupResizeFixedOriginLeftSv,
+    groupResizeFixedOriginTopSv,
+    groupResizeSettleAnchorIdSv,
+    groupResizeSettleScaleXSv,
+    groupResizeSettleScaleYSv,
+    groupResizeSettleHandleSv,
+    groupResizeSettleFixedOriginLeftSv,
+    groupResizeSettleFixedOriginTopSv,
     transformSettlePulseSv,
   ]);
 
@@ -1665,11 +1765,73 @@ export default function EditScreen() {
           }
         }
         dragStartPositionsRef.current = map;
+        resizeStartSnapshotsRef.current = null;
+        groupResizeReadySv.value = 0;
+      } else if (kind === 'resize' && ids.length > 1 && ids.includes(id)) {
+        dragStartPositionsRef.current = null;
+        const docSnapshot = docRef.current;
+        if (selectionHasBlockedRotation(docSnapshot.elements, ids)) {
+          resizeStartSnapshotsRef.current = null;
+          groupResizeReadySv.value = 0;
+        } else {
+          const snapshots = buildGroupResizeSnapshots(docSnapshot.elements, ids);
+          if (snapshots.size > 1) {
+            resizeStartSnapshotsRef.current = snapshots;
+            const { fixedOrigin } = groupResizeFrameFromSnapshots(docSnapshot.elements, snapshots);
+            groupResizeFixedOriginLeftSv.value = fixedOrigin.left;
+            groupResizeFixedOriginTopSv.value = fixedOrigin.top;
+            groupResizeReadySv.value = 1;
+          } else {
+            resizeStartSnapshotsRef.current = null;
+            groupResizeReadySv.value = 0;
+          }
+        }
       } else {
         dragStartPositionsRef.current = null;
+        resizeStartSnapshotsRef.current = null;
+        groupResizeReadySv.value = 0;
       }
     },
-    [publishSnapGuides],
+    [
+      publishSnapGuides,
+      groupResizeReadySv,
+      groupResizeFixedOriginLeftSv,
+      groupResizeFixedOriginTopSv,
+    ],
+  );
+
+  const prepareGroupResizeHandle = useCallback(
+    (handle: 'e' | 's') => {
+      const snapshots = resizeStartSnapshotsRef.current;
+      const ids = selectedIdsRef.current;
+      if (!snapshots || ids.length < 2) return;
+      const docSnapshot = docRef.current;
+      const { fixedOrigin } = groupResizeFrameFromSnapshots(docSnapshot.elements, snapshots);
+      groupResizeFixedOriginLeftSv.value = fixedOrigin.left;
+      groupResizeFixedOriginTopSv.value = fixedOrigin.top;
+      groupResizeHandleSv.value = handle === 'e' ? 0 : 1;
+      const limits = getGroupResizeScaleLimits({
+        elements: docSnapshot.elements,
+        snapshots,
+        selectedIds: ids,
+        handle,
+        fixedOrigin,
+        canvas: { widthMm: docSnapshot.widthMm, heightMm: docSnapshot.heightMm },
+      });
+      groupResizeMinScaleXSv.value = limits.minScaleX;
+      groupResizeMaxScaleXSv.value = limits.maxScaleX;
+      groupResizeMinScaleYSv.value = limits.minScaleY;
+      groupResizeMaxScaleYSv.value = limits.maxScaleY;
+    },
+    [
+      groupResizeFixedOriginLeftSv,
+      groupResizeFixedOriginTopSv,
+      groupResizeHandleSv,
+      groupResizeMinScaleXSv,
+      groupResizeMaxScaleXSv,
+      groupResizeMinScaleYSv,
+      groupResizeMaxScaleYSv,
+    ],
   );
 
   const snapMoveMm = useCallback(
@@ -1696,10 +1858,118 @@ export default function EditScreen() {
 
       const startPositions = dragStartPositionsRef.current;
       dragStartPositionsRef.current = null;
+      const resizeSnapshots = resizeStartSnapshotsRef.current;
       const kind = transformKindRef.current;
       transformKindRef.current = null;
       const ids = selectedIdsRef.current;
       const dragged = docRef.current.elements.find((el) => el.id === payload.id);
+      const isGroupResizeCandidate =
+        kind === 'resize' &&
+        ids.length > 1 &&
+        ids.includes(payload.id) &&
+        resizeSnapshots &&
+        resizeSnapshots.size > 1 &&
+        dragged;
+
+      if (isGroupResizeCandidate) {
+        const handle: 'e' | 's' = groupResizeHandleSv.value === 1 ? 's' : 'e';
+        const fixedOrigin = {
+          left: groupResizeFixedOriginLeftSv.value,
+          top: groupResizeFixedOriginTopSv.value,
+        };
+        const scaleX = groupResizeScaleXSv.value;
+        const scaleY = groupResizeScaleYSv.value;
+        const docSnapshot = docRef.current;
+        const result = applyGroupResize({
+          elements: docSnapshot.elements,
+          selectedIds: ids,
+          snapshots: resizeSnapshots,
+          handle,
+          fixedOrigin,
+          scaleX,
+          scaleY,
+          canvas: { widthMm: docSnapshot.widthMm, heightMm: docSnapshot.heightMm },
+        });
+        resizeStartSnapshotsRef.current = null;
+        if (result.ok) {
+          const expected = new Map<string, { left: number; top: number; width: number; height: number }>();
+          const committedIds: string[] = [];
+          setElements(
+            (elements) =>
+              elements.map((el) => {
+                if (!ids.includes(el.id)) return el;
+
+                const isAnchor = el.id === payload.id;
+                const patch = isAnchor
+                  ? {
+                      left: clean.leftMm,
+                      top: clean.topMm,
+                      width: clean.widthMm,
+                      height: clean.heightMm,
+                    }
+                  : result.patches.get(el.id);
+                if (!patch) return el;
+
+                let targetHeight = patch.height;
+                const fs =
+                  clean.fontSize ??
+                  ('fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : undefined);
+                if (el.type === 'text' || el.type === 'degrees') {
+                  const rawText =
+                    el.contentType === 'Data Source' && el.columnNameContent
+                      ? `{${el.columnNameContent}}`
+                      : 'text' in el
+                        ? el.text
+                        : el.content;
+                  targetHeight = computeTextElementHeightMm({
+                    text: rawText,
+                    fontSize: fs ?? 12,
+                    widthMm: patch.width,
+                    autoWrapping: el.autoWrapping ?? 'Word',
+                    lineSpacing: el.lineSpacing ?? '1.0',
+                    charSpacing: el.charSpacing ?? 0,
+                    bold: el.bold ?? false,
+                    verticalDisplay: el.verticalDisplay ?? false,
+                  });
+                } else if (el.type === 'time') {
+                  targetHeight = textBlockHeightMm(fs ?? 12, 1);
+                }
+
+                const next: LabelElement = {
+                  ...el,
+                  left: patch.left,
+                  top: patch.top,
+                  width: patch.width,
+                  rotation: clean.rotation,
+                };
+                if (fs !== undefined && 'fontSize' in next) {
+                  (next as { fontSize: number }).fontSize = fs;
+                }
+                if (
+                  el.type === 'text' ||
+                  el.type === 'degrees' ||
+                  el.type === 'time' ||
+                  typeof (el as { height?: number }).height === 'number'
+                ) {
+                  (next as { height: number }).height = targetHeight;
+                }
+                const committed = clampElementToLabel(next, docSnapshot);
+                expected.set(el.id, {
+                  left: committed.left,
+                  top: committed.top,
+                  width: committed.width,
+                  height: elementSizeMm(committed).height,
+                });
+                committedIds.push(el.id);
+                return committed;
+              }),
+            recordHistory,
+          );
+          groupResizeCommitPendingRef.current = { ids: committedIds, expected };
+          return;
+        }
+      }
+
       const isGroupMoveCandidate =
         kind === 'move' &&
         ids.length > 1 &&
@@ -1819,6 +2089,8 @@ export default function EditScreen() {
           ids: [payload.id],
           expected: new Map([[payload.id, moveCommitExpected]]),
         };
+      } else if (kind === 'resize') {
+        clearGroupResizePreview();
       } else {
         clearGroupDragPreview();
       }
@@ -1828,8 +2100,14 @@ export default function EditScreen() {
       bumpHistory,
       publishSnapGuides,
       clearGroupDragPreview,
+      clearGroupResizePreview,
       groupDragDeltaLeftSv,
       groupDragDeltaTopSv,
+      groupResizeHandleSv,
+      groupResizeFixedOriginLeftSv,
+      groupResizeFixedOriginTopSv,
+      groupResizeScaleXSv,
+      groupResizeScaleYSv,
     ],
   );
 
@@ -2523,7 +2801,7 @@ export default function EditScreen() {
         name="Multiple"
         label="Multiple"
         active={multipleMode}
-        onPress={() => setMultipleMode((m) => !m)}
+        onPress={toggleMultipleMode}
       />
       <ToolbarItem
         name="Undo"
@@ -2728,6 +3006,25 @@ export default function EditScreen() {
                     groupDragSettleAnchorIdSv={groupDragSettleAnchorIdSv}
                     groupDragSettleDeltaLeftSv={groupDragSettleDeltaLeftSv}
                     groupDragSettleDeltaTopSv={groupDragSettleDeltaTopSv}
+                    groupResizeEligibleSv={groupResizeEligibleSv}
+                    groupResizeReadySv={groupResizeReadySv}
+                    groupResizeAnchorIdSv={groupResizeAnchorIdSv}
+                    groupResizeScaleXSv={groupResizeScaleXSv}
+                    groupResizeScaleYSv={groupResizeScaleYSv}
+                    groupResizeHandleSv={groupResizeHandleSv}
+                    groupResizeFixedOriginLeftMm={groupResizeFixedOriginLeftSv}
+                    groupResizeFixedOriginTopMm={groupResizeFixedOriginTopSv}
+                    groupResizeMinScaleXSv={groupResizeMinScaleXSv}
+                    groupResizeMaxScaleXSv={groupResizeMaxScaleXSv}
+                    groupResizeMinScaleYSv={groupResizeMinScaleYSv}
+                    groupResizeMaxScaleYSv={groupResizeMaxScaleYSv}
+                    groupResizeSettleAnchorIdSv={groupResizeSettleAnchorIdSv}
+                    groupResizeSettleScaleXSv={groupResizeSettleScaleXSv}
+                    groupResizeSettleScaleYSv={groupResizeSettleScaleYSv}
+                    groupResizeSettleHandleSv={groupResizeSettleHandleSv}
+                    groupResizeSettleFixedOriginLeftMm={groupResizeSettleFixedOriginLeftSv}
+                    groupResizeSettleFixedOriginTopMm={groupResizeSettleFixedOriginTopSv}
+                    onGroupResizeHandleBegin={prepareGroupResizeHandle}
                     onSelect={handleSelect}
                     onDeselectAll={handleDeselectAll}
                     onOpenPanel={openPanelFor}
