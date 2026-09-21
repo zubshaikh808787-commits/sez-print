@@ -247,6 +247,69 @@ class PrinterManager {
   /** Number of pending jobs in the serial print chain. */
   private printQueueDepth: number = 0;
   private aclListener: { remove: () => void } | undefined;
+  private aclDisconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingAclDisconnectMac: string | null = null;
+
+  private decrementPrintQueue(): void {
+    this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+    if (this.printQueueDepth === 0) {
+      this.flushPendingAclDisconnect();
+    }
+  }
+
+  /** Debounced ACL drop — transient BT profile swaps must not kill an active print job. */
+  private scheduleAclDisconnectVerify(droppedMac: string): void {
+    if (this.connectionState === 'printing' || this.printQueueDepth > 0) {
+      console.warn(
+        `[printer] ACL_DISCONNECTED during print for ${droppedMac} — deferring until queue idle`,
+      );
+      this.pendingAclDisconnectMac = droppedMac;
+      return;
+    }
+    if (this.aclDisconnectTimer) {
+      clearTimeout(this.aclDisconnectTimer);
+    }
+    this.aclDisconnectTimer = setTimeout(() => {
+      this.aclDisconnectTimer = null;
+      void this.applyAclDisconnectIfStillDead(droppedMac);
+    }, 2000);
+  }
+
+  private flushPendingAclDisconnect(): void {
+    if (!this.pendingAclDisconnectMac) return;
+    const mac = this.pendingAclDisconnectMac;
+    this.pendingAclDisconnectMac = null;
+    if (this.aclDisconnectTimer) {
+      clearTimeout(this.aclDisconnectTimer);
+      this.aclDisconnectTimer = null;
+    }
+    setTimeout(() => {
+      void this.applyAclDisconnectIfStillDead(mac);
+    }, 500);
+  }
+
+  private async applyAclDisconnectIfStillDead(droppedMac: string): Promise<void> {
+    if (this.connectionState === 'printing' || this.printQueueDepth > 0) {
+      this.pendingAclDisconnectMac = droppedMac;
+      return;
+    }
+    const store = usePrinterStore.getState();
+    const connectedMac = store.deviceId ? normalizePrinterMac(store.deviceId) : null;
+    if (!connectedMac || connectedMac !== droppedMac) return;
+
+    // SDK may still hold a live RFCOMM session after a spurious ACL drop.
+    if (this.isConnectionHealthy()) {
+      console.info(`[printer] ACL drop for ${droppedMac} was transient — SDK still connected`);
+      return;
+    }
+
+    console.warn(`[printer] ACL_DISCONNECTED confirmed for active printer ${droppedMac}`);
+    this.activeTransport = null;
+    this.connectionState = 'disconnected';
+    this.connectedDevice = null;
+    this.writableTarget = null;
+    store.clearConnection();
+  }
 
   /** OS-level ACL link events — catches drops the SDK read loop misses. */
   setupAclListener(): void {
@@ -260,12 +323,7 @@ class PrinterManager {
           const connectedMac = store.deviceId ? normalizePrinterMac(store.deviceId) : null;
           const droppedMac = event.mac ? normalizePrinterMac(event.mac) : null;
           if (!connectedMac || !droppedMac || connectedMac !== droppedMac) return;
-          console.warn(`[printer] ACL_DISCONNECTED for active printer ${droppedMac}`);
-          this.activeTransport = null;
-          this.connectionState = 'disconnected';
-          this.connectedDevice = null;
-          this.writableTarget = null;
-          store.clearConnection();
+          this.scheduleAclDisconnectVerify(droppedMac);
         });
       })
       .catch(() => {});
@@ -3011,10 +3069,10 @@ class PrinterManager {
     });
     this.printChain = run.then(
       () => {
-        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        this.decrementPrintQueue();
       },
       () => {
-        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        this.decrementPrintQueue();
       },
     );
     try {
@@ -3107,7 +3165,7 @@ class PrinterManager {
           { stage: 'total', durationMs: elapsed },
         ];
       } finally {
-        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        this.decrementPrintQueue();
         if (this.printQueueDepth === 0) {
           this.connectionState = 'connected';
           store.setStatus('connected');
@@ -3197,10 +3255,10 @@ class PrinterManager {
     });
     this.printChain = run.then(
       () => {
-        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        this.decrementPrintQueue();
       },
       () => {
-        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        this.decrementPrintQueue();
       },
     );
     try {
@@ -3286,10 +3344,10 @@ class PrinterManager {
     });
     this.printChain = run.then(
       () => {
-        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        this.decrementPrintQueue();
       },
       () => {
-        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        this.decrementPrintQueue();
       },
     );
     try {
@@ -3368,10 +3426,10 @@ class PrinterManager {
     });
     this.printChain = run.then(
       () => {
-        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        this.decrementPrintQueue();
       },
       () => {
-        this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
+        this.decrementPrintQueue();
       },
     );
     try {
@@ -3408,8 +3466,8 @@ class PrinterManager {
     this.printQueueDepth++;
     const run = this.printChain.then(() => this.printWithRetry(bytes));
     this.printChain = run.then(
-      () => { this.printQueueDepth = Math.max(0, this.printQueueDepth - 1); },
-      () => { this.printQueueDepth = Math.max(0, this.printQueueDepth - 1); },
+      () => { this.decrementPrintQueue(); },
+      () => { this.decrementPrintQueue(); },
     );
     return run;
   }

@@ -674,7 +674,9 @@ class Td404PrinterModule : Module() {
       "REFERENCE 0,0\r\n" +
       "CLS\r\n" +
       "BITMAP $bitmapX,$bitmapY,$bytesPerRow,$contentH,0,"
-    val footer = "\r\nPRINT 1\r\n"
+    // TSPL PRINT m,n — one socket write for all copies (avoids re-sending bitmap per copy).
+    val printCmd = if (copies <= 1) "PRINT 1\r\n" else "PRINT 1,$copies\r\n"
+    val footer = "\r\n$printCmd"
 
     val headerBytes = header.toByteArray(Charsets.US_ASCII)
     val footerBytes = footer.toByteArray(Charsets.US_ASCII)
@@ -685,10 +687,7 @@ class Td404PrinterModule : Module() {
     System.arraycopy(footerBytes, 0, job, headerBytes.size + rawBmp.size, footerBytes.size)
     val tEncode = System.currentTimeMillis()
 
-    var totalSent = 0
-    for (i in 0 until copies) {
-      totalSent += writeBytesToSocketSync(job)
-    }
+    val totalSent = writeBytesToSocketSync(job)
     val tWrite = System.currentTimeMillis()
 
     android.util.Log.i(
