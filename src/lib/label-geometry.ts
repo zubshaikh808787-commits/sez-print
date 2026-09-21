@@ -249,8 +249,9 @@ export function fitEditorLabel(
   return fitLabelSize(widthMm, heightMm, maxWidthPx, maxHeightPx);
 }
 
-/** Minimal edge margin at bottom of pad (floating chip removed). */
-export const CANVAS_BOTTOM_CHIP_CLEARANCE_PX = 4;
+/** Balanced edge margin around the editor stage so canvas and rulers have breathing room. */
+export const STAGE_PADDING_PX = 14;
+export const CANVAS_BOTTOM_CHIP_CLEARANCE_PX = STAGE_PADDING_PX;
 export const EDITOR_PAD_ZOOM_CHROME_PX = CANVAS_BOTTOM_CHIP_CLEARANCE_PX;
 
 /**
@@ -275,9 +276,8 @@ export function fitEditorPadBoard(
   offsetXPx: number;
   offsetYPx: number;
 } {
-  const padInset = 4;
-  const maxBoardW = Math.max(64, padWidthPx - padInset);
-  const maxBoardH = Math.max(64, padHeightPx - CANVAS_BOTTOM_CHIP_CLEARANCE_PX);
+  const maxBoardW = Math.max(64, padWidthPx - STAGE_PADDING_PX * 2);
+  const maxBoardH = Math.max(64, padHeightPx - STAGE_PADDING_PX * 2);
   const innerWidthPx = Math.max(48, maxBoardW - rulerSizePx);
   const innerHeightPx = Math.max(48, maxBoardH - rulerSizePx);
   const fitted = containFitLabel(

@@ -113,3 +113,68 @@ test('Non-integer label dimension (e.g. 75mm width): preserves uniformity for fu
   const lastLabel = labels[labels.length - 1];
   assert.equal(contentPx - lastLabel.px, 20);
 });
+
+test('34.0mm circle label dimension: uniform tick cadence without forcing 34mm as major', () => {
+  const lengthMm = 34;
+  const contentPx = 272; // 8 px/mm
+  const ticks = rulerTicksFor(lengthMm, contentPx);
+
+  // Starts at 0, ends at 34
+  assert.equal(ticks[0].mm, 0);
+  assert.equal(ticks[ticks.length - 1].mm, 34);
+
+  // 34mm is NOT a multiple of 10 or 5, so it must be minor
+  assert.equal(ticks[ticks.length - 1].kind, 'minor');
+
+  // Major ticks must strictly be 0, 10, 20, 30
+  const majors = ticks.filter((t) => t.kind === 'major');
+  assert.deepEqual(
+    majors.map((m) => m.mm),
+    [0, 10, 20, 30]
+  );
+
+  // Spaced major labels must only be [0, 10, 20, 30]
+  const labels = spacedMajor(ticks, 22, lengthMm);
+  assert.deepEqual(
+    labels.map((l) => l.mm),
+    [0, 10, 20, 30]
+  );
+
+  // Tick step spacing is strictly uniform (0.5mm step = 4px between adjacent ticks)
+  for (let i = 1; i < ticks.length; i++) {
+    const mmStep = Math.round((ticks[i].mm - ticks[i - 1].mm) * 100) / 100;
+    assert.equal(mmStep, 0.5);
+    const pxGap = ticks[i].px - ticks[i - 1].px;
+    assert.ok(Math.abs(pxGap - 4) < 0.001);
+  }
+});
+
+test('34.2mm decimal dimension: ruler terminates with uniform step cadence without forced squashed tick', () => {
+  const lengthMm = 34.2;
+  const contentPx = 273.6; // 8 px/mm
+  const ticks = rulerTicksFor(lengthMm, contentPx);
+
+  // Last tick is at clean 34.0mm step, not an irregular fractional 34.2mm
+  const lastTick = ticks[ticks.length - 1];
+  assert.equal(lastTick.mm, 34.0);
+
+  // All tick steps are uniformly 0.5mm
+  for (let i = 1; i < ticks.length; i++) {
+    const mmStep = Math.round((ticks[i].mm - ticks[i - 1].mm) * 100) / 100;
+    assert.equal(mmStep, 0.5);
+    const pxGap = ticks[i].px - ticks[i - 1].px;
+    assert.ok(Math.abs(pxGap - 4) < 0.001);
+  }
+
+  // Major labels remain strictly 0, 10, 20, 30
+  const labels = spacedMajor(ticks, 22, lengthMm);
+  assert.deepEqual(
+    labels.map((l) => l.mm),
+    [0, 10, 20, 30]
+  );
+
+  // Small clean trailing gap to true artboard boundary is 0.2mm (1.6px)
+  const trailingGapPx = contentPx - lastTick.px;
+  assert.ok(Math.abs(trailingGapPx - 1.6) < 0.001);
+});
+

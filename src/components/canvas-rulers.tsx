@@ -151,7 +151,7 @@ export const HorizontalRuler = memo(function HorizontalRuler({
           const h = tickLen(tick.kind, 10, 7, 4);
           const isStart = tick.mm < 0.001;
           const isEnd = Math.abs(tick.mm - lengthMm) < 0.01;
-          const isMajor = tick.kind === 'major' || isStart || isEnd;
+          const isMajor = tick.kind === 'major';
           const stroke = isMajor
             ? TICK_MAJOR
             : tick.kind === 'mid'
@@ -308,7 +308,7 @@ export const VerticalRuler = memo(function VerticalRuler({
           const w = tickLen(tick.kind, 10, 7, 4);
           const isStart = tick.mm < 0.001;
           const isEnd = Math.abs(tick.mm - lengthMm) < 0.01;
-          const isMajor = tick.kind === 'major' || isStart || isEnd;
+          const isMajor = tick.kind === 'major';
           const stroke = isMajor
             ? TICK_MAJOR
             : tick.kind === 'mid'

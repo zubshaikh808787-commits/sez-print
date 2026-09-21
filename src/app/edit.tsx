@@ -157,7 +157,7 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
-import { CANVAS_BOTTOM_CHIP_CLEARANCE_PX, clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
+import { CANVAS_BOTTOM_CHIP_CLEARANCE_PX, STAGE_PADDING_PX, clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { computeTextElementHeightMm, textBlockHeightMm } from '@/lib/element-sizing';
@@ -713,8 +713,8 @@ export default function EditScreen() {
 
   const committedScale = useMemo(() => {
     if (pxPerMM <= 0) return 1;
-    const liveInnerH = Math.max(32, canvasSplitH - RULER_SIZE - CANVAS_BOTTOM_CHIP_CLEARANCE_PX);
-    const liveInnerW = Math.max(32, workspaceW - 4 - RULER_SIZE);
+    const liveInnerH = Math.max(32, canvasSplitH - RULER_SIZE - STAGE_PADDING_PX * 2);
+    const liveInnerW = Math.max(32, workspaceW - RULER_SIZE - STAGE_PADDING_PX * 2);
     const livePxPerMM = Math.min(
       liveInnerW / (doc.widthMm > 0 ? doc.widthMm : 1),
       liveInnerH / (doc.heightMm > 0 ? doc.heightMm : 1),
@@ -783,8 +783,8 @@ export default function EditScreen() {
 
   const canvasAssemblyAnimatedStyle = useAnimatedStyle(() => {
     const liveH = canvasHeightSv.value;
-    const liveInnerH = Math.max(32, liveH - RULER_SIZE - CANVAS_BOTTOM_CHIP_CLEARANCE_PX);
-    const liveInnerW = Math.max(32, workspaceWSv.value - 4 - RULER_SIZE);
+    const liveInnerH = Math.max(32, liveH - RULER_SIZE - STAGE_PADDING_PX * 2);
+    const liveInnerW = Math.max(32, workspaceWSv.value - RULER_SIZE - STAGE_PADDING_PX * 2);
     const wMm = docWidthMmSv.value > 0 ? docWidthMmSv.value : 1;
     const hMm = docHeightMmSv.value > 0 ? docHeightMmSv.value : 1;
     const livePxPerMM = Math.min(liveInnerW / wMm, liveInnerH / hMm);
