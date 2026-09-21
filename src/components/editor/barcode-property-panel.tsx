@@ -607,37 +607,6 @@ export function BarcodePropertyPanel({
               selected={`${normalizeRotation(state.rotation)}°`}
               onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
             />
-            <Divider />
-            <StepperRow
-              label="Left"
-              value={formatMm(state.left)}
-              onMinus={() => patch({ left: Math.max(0, state.left - 0.1) })}
-              onPlus={() => patch({ left: state.left + 0.1 })}
-            />
-            <Divider />
-            <StepperRow
-              label="Top"
-              value={formatMm(state.top)}
-              onMinus={() => patch({ top: Math.max(0, state.top - 0.1) })}
-              onPlus={() => patch({ top: state.top + 0.1 })}
-            />
-            <SectionGap />
-            <View style={styles.block}>
-              <Text style={styles.rowLabel}>Font Style</Text>
-              <StyleButtons state={state} patch={patch} />
-            </View>
-            <Divider />
-            <View style={styles.block}>
-              <Text style={styles.rowLabel}>Hor Alignment</Text>
-              <AlignButtons align={state.align} patch={patch} />
-            </View>
-            <Divider />
-            <SegmentRow
-              label={`Rotation Angle (${normalizeRotation(state.rotation)}°)`}
-              options={['0°', '90°', '180°', '270°'] as const}
-              selected={`${normalizeRotation(state.rotation)}°`}
-              onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
-            />
             <SectionGap />
             <ScannabilityInspectorCard report={scannabilityReport} onAutoOptimize={handleAutoOptimize} />
             <SectionGap />

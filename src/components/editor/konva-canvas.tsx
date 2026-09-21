@@ -19,6 +19,7 @@ import { sortLayers } from '@/lib/template-schema';
 import { idleElementRefsUnchanged } from '@/lib/editor/drag-layer';
 import { SNAP_GUIDE_COLOR, SNAP_GUIDE_STROKE_PX } from '@/lib/editor/canvas-chrome';
 import type { SnapGuide } from '@/lib/editor/engine';
+import { type ElementAnchorRect } from '@/lib/editor/quick-value';
 
 type KonvaCanvasProps = {
   document: LabelDocument;
@@ -38,6 +39,7 @@ type KonvaCanvasProps = {
   onDeselectAll: () => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
+  onQuickEdit?: (id: string, anchorRect?: ElementAnchorRect) => void;
   onTransformStart?: (id: string) => void;
   onTransformMove?: (payload: TransformMovePayload) => void;
   onTransformEnd: (payload: TransformCommitPayload) => void;
@@ -69,6 +71,7 @@ type ElementChrome = {
   onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
+  onQuickEdit?: (id: string, anchorRect?: ElementAnchorRect) => void;
   onTransformStart?: (id: string) => void;
   onTransformMove?: (payload: TransformMovePayload) => void;
   onTransformEnd: (payload: TransformCommitPayload) => void;
@@ -110,6 +113,7 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           onSelect={chrome.onSelect}
           onOpenPanel={chrome.onOpenPanel}
           onEditText={chrome.onEditText}
+          onQuickEdit={chrome.onQuickEdit}
           onTransformStart={chrome.onTransformStart}
           onTransformMove={chrome.onTransformMove}
           onTransformEnd={chrome.onTransformEnd}
@@ -140,6 +144,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     onDeselectAll,
     onOpenPanel,
     onEditText,
+    onQuickEdit,
     onTransformStart,
     onTransformMove,
     onTransformEnd,
@@ -355,6 +360,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       onSelect,
       onOpenPanel,
       onEditText,
+      onQuickEdit,
       onTransformStart,
       onTransformMove,
       onTransformEnd,
@@ -377,6 +383,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       onSelect,
       onOpenPanel,
       onEditText,
+      onQuickEdit,
       onTransformStart,
       onTransformMove,
       onTransformEnd,

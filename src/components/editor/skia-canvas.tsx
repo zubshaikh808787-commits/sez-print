@@ -64,6 +64,7 @@ export type SkiaCanvasProps = {
   onDeselectAll: () => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
+  onQuickEdit?: (id: string) => void;
   onTransformStart?: (id: string) => void;
   onTransformMove?: (payload: SkiaTransformMovePayload) => void;
   onTransformEnd: (payload: SkiaTransformCommitPayload) => void;
@@ -203,6 +204,7 @@ const ElementGestureNode = memo(function ElementGestureNode({
   liveBounds,
   onSelect,
   onEditText,
+  onQuickEdit,
   onTransformStart,
   onTransformMove,
   onTransformEnd,
@@ -217,6 +219,7 @@ const ElementGestureNode = memo(function ElementGestureNode({
   liveBounds?: LiveRulerBounds;
   onSelect: (id: string) => void;
   onEditText: (id: string) => void;
+  onQuickEdit?: (id: string) => void;
   onTransformStart?: (id: string) => void;
   onTransformMove?: (payload: SkiaTransformMovePayload) => void;
   onTransformEnd: (payload: SkiaTransformCommitPayload) => void;
@@ -487,20 +490,33 @@ const ElementGestureNode = memo(function ElementGestureNode({
       });
   }, [element.id, onSelect]);
 
-  // Double tap to edit text
+  // Double tap to edit
   const doubleTapGesture = useMemo(() => {
     return Gesture.Tap()
       .numberOfTaps(2)
-      .maxDuration(350)
+      .maxDuration(1000)
       .onEnd((_e, success) => {
-        if (success && element.type === 'text') {
-          runOnJS(onEditText)(element.id);
+        if (success) {
+          if (
+            element.type === 'text' ||
+            element.type === 'barcode' ||
+            element.type === 'qrcode' ||
+            element.type === 'arctext' ||
+            element.type === 'degrees'
+          ) {
+            if (onQuickEdit) {
+              runOnJS(onQuickEdit)(element.id);
+            } else if (element.type === 'text') {
+              runOnJS(onEditText)(element.id);
+            }
+          }
         }
       });
-  }, [element.id, element.type, onEditText]);
+  }, [element.id, element.type, onEditText, onQuickEdit]);
 
   const combinedElementGesture = useMemo(() => {
-    return Gesture.Race(dragGesture, doubleTapGesture, tapSelectGesture);
+    const tapGestures = Gesture.Exclusive(doubleTapGesture, tapSelectGesture);
+    return Gesture.Race(dragGesture, tapGestures);
   }, [doubleTapGesture, dragGesture, tapSelectGesture]);
 
   const boxStyle = useAnimatedStyle(() => ({
@@ -567,6 +583,7 @@ export const SkiaCanvas = forwardRef<ViewShot, SkiaCanvasProps>(function SkiaCan
     onDeselectAll,
     onOpenPanel,
     onEditText,
+    onQuickEdit,
     onTransformStart,
     onTransformMove,
     onTransformEnd,
@@ -702,6 +719,7 @@ export const SkiaCanvas = forwardRef<ViewShot, SkiaCanvasProps>(function SkiaCan
               liveBounds={liveBounds}
               onSelect={onSelect}
               onEditText={onEditText}
+              onQuickEdit={onQuickEdit}
               onTransformStart={onTransformStart}
               onTransformMove={onTransformMove}
               onTransformEnd={onTransformEnd}

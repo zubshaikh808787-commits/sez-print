@@ -119,6 +119,15 @@ import {
 import { TableSizePicker } from '@/components/editor/table-size-picker';
 import { TextPropertyPanel } from '@/components/editor/text-property-panel';
 import { TimePropertyPanel } from '@/components/editor/time-property-panel';
+import { QuickValueModal } from '@/components/editor/quick-value-modal';
+import {
+  getQuickEditPatch,
+  getQuickEditPlaceholder,
+  getQuickEditTitle,
+  getQuickEditValue,
+  isQuickEditableType,
+  type ElementAnchorRect,
+} from '@/lib/editor/quick-value';
 import {
   DEFAULT_ARCTEXT_STATE,
   DEFAULT_BARCODE_STATE,
@@ -631,6 +640,13 @@ export default function EditScreen() {
   const [textEditField, setTextEditField] = useState<'text' | 'content'>('text');
   const textEditInputRef = useRef<TextInput>(null);
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
+
+  const [quickEditTarget, setQuickEditTarget] = useState<{
+    id: string;
+    type: ElementType;
+    value: string;
+    anchorRect?: ElementAnchorRect;
+  } | null>(null);
 
   const initialSplitRestoredRef = useRef(false);
   const lastViewportHRef = useRef(0);
@@ -1271,6 +1287,43 @@ export default function EditScreen() {
     setPanelOpen(false);
   }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
+  const resetTabToRegularForElement = useCallback((type: ElementType) => {
+    switch (type) {
+      case 'barcode':
+        setBarcodeTab('Regular');
+        break;
+      case 'image':
+        setImageTab('Regular');
+        break;
+      case 'text':
+        setTextTab('Regular');
+        break;
+      case 'qrcode':
+        setQrcodeTab('Regular');
+        break;
+      case 'line':
+        setLineTab('Regular');
+        break;
+      case 'shape':
+        setShapeTab('Regular');
+        break;
+      case 'table':
+        setTableTab('Regular');
+        break;
+      case 'time':
+        setTimeTab('Regular');
+        break;
+      case 'arctext':
+        setArcTextTab('Regular');
+        break;
+      case 'degrees':
+        setDegreesTab('Regular');
+        break;
+      default:
+        break;
+    }
+  }, []);
+
   const handleSelect = useCallback(
     (id: string) => {
       const element = docRef.current.elements.find((el) => el.id === id);
@@ -1288,15 +1341,13 @@ export default function EditScreen() {
       if (!multipleMode) {
         if (element.type === 'signature') {
           setShowSignatureBoard(true);
-        } else if (element.type === 'image') {
-          setImageTab('Regular');
-          setPanelOpen(true);
         } else {
+          resetTabToRegularForElement(element.type);
           setPanelOpen(true);
         }
       }
     },
-    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv],
+    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement],
   );
 
   const openPanelFor = useCallback((id: string) => {
@@ -1317,13 +1368,9 @@ export default function EditScreen() {
       router.push({ pathname: '/clipart', params: { from: 'edit' } });
       return;
     }
-    if (element.type === 'image') {
-      setImageTab('Regular');
-      setPanelOpen(true);
-      return;
-    }
+    resetTabToRegularForElement(element.type);
     setPanelOpen(true);
-  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement]);
 
   const beginTextEdit = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
@@ -1350,6 +1397,35 @@ export default function EditScreen() {
     requestAnimationFrame(() => {
       textEditInputRef.current?.focus();
     });
+  }, []);
+
+  const handleQuickEdit = useCallback((id: string, anchorRect?: ElementAnchorRect) => {
+    const element = docRef.current.elements.find((el) => el.id === id);
+    if (!element || !isQuickEditableType(element.type)) return;
+    setSelectedIds([id]);
+    setQuickEditTarget({
+      id,
+      type: element.type,
+      value: getQuickEditValue(element),
+      anchorRect,
+    });
+  }, []);
+
+  const handleQuickEditConfirm = useCallback(
+    (newValue: string) => {
+      if (!quickEditTarget) return;
+      const element = docRef.current.elements.find((el) => el.id === quickEditTarget.id);
+      if (element) {
+        const patch = getQuickEditPatch(element, newValue);
+        patchElement(element.id, patch);
+      }
+      setQuickEditTarget(null);
+    },
+    [quickEditTarget, patchElement],
+  );
+
+  const handleQuickEditCancel = useCallback(() => {
+    setQuickEditTarget(null);
   }, []);
 
   const commitTextEdit = useCallback(() => {
@@ -2281,7 +2357,8 @@ export default function EditScreen() {
         onViewTransformChange={handleViewTransformChange}
         onViewportLayout={handlePadLayout}
         onWindowOriginChange={handlePadWindowOrigin}
-        oneFingerPanEnabled={selectedIds.length === 0}>
+        oneFingerPanEnabled={selectedIds.length === 0}
+        doubleTapEnabled={false}>
         <View style={[styles.workspace, { backgroundColor: stageBg }]} pointerEvents="box-none">
           <View
             style={[
@@ -2372,6 +2449,7 @@ export default function EditScreen() {
                     onDeselectAll={handleDeselectAll}
                     onOpenPanel={openPanelFor}
                     onEditText={beginTextEdit}
+                    onQuickEdit={handleQuickEdit}
                     onTransformStart={handleTransformStart}
                     onTransformMove={handleTransformMove}
                     onTransformEnd={handleTransformEnd}
@@ -2945,6 +3023,16 @@ export default function EditScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+
+      <QuickValueModal
+        visible={quickEditTarget !== null}
+        initialValue={quickEditTarget?.value ?? ''}
+        title={quickEditTarget ? getQuickEditTitle(quickEditTarget.type) : undefined}
+        placeholder={quickEditTarget ? getQuickEditPlaceholder(quickEditTarget.type) : undefined}
+        anchorRect={quickEditTarget?.anchorRect}
+        onCancel={handleQuickEditCancel}
+        onConfirm={handleQuickEditConfirm}
+      />
       <View
         ref={overlayViewRef}
         pointerEvents="none"

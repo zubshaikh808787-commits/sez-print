@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -58,7 +59,9 @@ export type TransformMovePayload = {
   topMm: number;
 };
 
-type KonvaTransformerProps = {
+import { type ElementAnchorRect } from '@/lib/editor/quick-value';
+
+export type KonvaTransformerProps = {
   element: LabelElement;
   pxPerMM: number;
   padZoom: number;
@@ -75,6 +78,7 @@ type KonvaTransformerProps = {
   onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
+  onQuickEdit?: (id: string, anchorRect?: ElementAnchorRect) => void;
   onTransformStart?: (id: string) => void;
   onTransformMove?: (payload: TransformMovePayload) => void;
   onTransformEnd: (payload: TransformCommitPayload) => void;
@@ -92,7 +96,7 @@ type KonvaTransformerProps = {
 };
 
 const HIT_TARGET_PX = 36;
-const DOUBLE_TAP_MS = 350;
+const DOUBLE_TAP_MS = 1000;
 const TOOLTIP_MS = 80;
 
 type HandlePosition = ResizeAnchor;
@@ -117,6 +121,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   onSelect,
   onOpenPanel,
   onEditText,
+  onQuickEdit,
   onTransformStart,
   onTransformMove,
   onTransformEnd,
@@ -168,6 +173,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const minResizeMmSv = useSharedValue(resizePolicy.minMm);
   const aspectSv = useSharedValue(aspectRatio);
   const lastTooltipTimeSv = useSharedValue(0);
+  const lastTapTimeSv = useSharedValue(0);
+  const lastTapXSv = useSharedValue(0);
+  const lastTapYSv = useSharedValue(0);
+  const tapHandledSv = useSharedValue(false);
 
   const isTextElement = element.type === 'text' || element.type === 'degrees';
   const isAutoHeight = isTextElement && element.autoTextHeight !== false && element.autoWrapping !== 'Close';
@@ -200,6 +209,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const beginTimeSv = useSharedValue(0);
   const tooltipRef = useRef<TooltipHandle | null>(null);
   const lastTooltipAt = useRef(0);
+  const containerRef = useRef<View>(null);
 
   useEffect(() => {
     selectedSv.value = selected;
@@ -306,6 +316,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     onSelect,
     onOpenPanel,
     onEditText,
+    onQuickEdit,
     onTransformStart,
     onTransformMove,
     onTransformEnd,
@@ -316,6 +327,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     onSelect,
     onOpenPanel,
     onEditText,
+    onQuickEdit,
     onTransformStart,
     onTransformMove,
     onTransformEnd,
@@ -550,27 +562,66 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     callbacksRef.current.onSelect(id);
   }, []);
 
-  const handleSingleTap = useCallback(() => {
+  const lastDoubleTapTimeRef = useRef(0);
+  const triggerDoubleTapJS = useCallback(() => {
     const now = Date.now();
-    const last = lastTapRef.current;
-    const isDouble = last.id === element.id && now - last.time < DOUBLE_TAP_MS;
-    lastTapRef.current = { id: element.id, time: now };
+    if (now - lastDoubleTapTimeRef.current < 600) {
+      return;
+    }
+    lastDoubleTapTimeRef.current = now;
+    lastTapRef.current = { id: '', time: 0 };
+    lastTapTimeSv.value = 0;
 
-    logPerf(`[BODY_DRAG] handleSingleTap el=${element.id}`);
+    logPerf(`[BODY_DRAG] triggerDoubleTapJS el=${element.id}`);
     callbacksRef.current.onSelect(element.id);
 
-    if (isDouble) {
-      if (element.type === 'text' || element.type === 'degrees') {
-        callbacksRef.current.onEditText(element.id);
+    const openWithAnchor = (anchor?: ElementAnchorRect) => {
+      if (
+        element.type === 'text' ||
+        element.type === 'barcode' ||
+        element.type === 'qrcode' ||
+        element.type === 'arctext' ||
+        element.type === 'degrees'
+      ) {
+        if (callbacksRef.current.onQuickEdit) {
+          callbacksRef.current.onQuickEdit(element.id, anchor);
+        } else if (element.type === 'text' || element.type === 'degrees') {
+          callbacksRef.current.onEditText(element.id);
+        } else {
+          callbacksRef.current.onOpenPanel(element.id);
+        }
       } else {
         callbacksRef.current.onOpenPanel(element.id);
       }
-    }
-  }, [element.id, element.type]);
+    };
 
-  const triggerTapJS = useCallback(() => {
-    handleSingleTap();
-  }, [handleSingleTap]);
+    if (containerRef.current && typeof (containerRef.current as any).measureInWindow === 'function') {
+      (containerRef.current as any).measureInWindow((x: number, y: number, width: number, height: number) => {
+        if (Number.isFinite(x) && Number.isFinite(y) && width > 0 && height > 0) {
+          openWithAnchor({ x, y, width, height });
+        } else {
+          openWithAnchor();
+        }
+      });
+    } else {
+      openWithAnchor();
+    }
+  }, [element.id, element.type, lastTapTimeSv]);
+
+  const triggerSingleTapJS = useCallback(() => {
+    const now = Date.now();
+    const last = lastTapRef.current;
+    const isDouble = last.id === element.id && now - last.time > 30 && now - last.time < 1200;
+    lastTapRef.current = { id: element.id, time: now };
+
+    logPerf(`[BODY_DRAG] triggerSingleTapJS el=${element.id}`);
+    callbacksRef.current.onSelect(element.id);
+
+    if (isDouble) {
+      lastTapRef.current = { id: '', time: 0 };
+      triggerDoubleTapJS();
+    }
+  }, [element.id, triggerDoubleTapJS]);
 
   const bodyDragGesture = useMemo(() => {
     const pan = Gesture.Pan()
@@ -590,6 +641,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         const tNow = Date.now();
         beginTimeSv.value = tNow;
         hasMovedSv.value = false;
+        tapHandledSv.value = false;
         // Immediately prime interaction and selection on UI thread
         // so positions and visual boundary are locked instantly with 0ms delay
         isInteracting.value = true;
@@ -617,8 +669,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         'worklet';
         const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
         if (!hasMovedSv.value) {
-          if (distSq < 6.25) {
-            // Less than 2.5px: stationary touch noise, ignore so taps are rock solid
+          if (distSq < 100) {
+            // Less than 10px: stationary touch noise, ignore so taps are rock solid
             return;
           }
           hasMovedSv.value = true;
@@ -660,12 +712,30 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       .onEnd((e) => {
         'worklet';
         liftSv.value = 1;
-        if (!hasMovedSv.value) {
-          // Finger lifted without significant translation -> tap event
+        const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
+        // Less than 20px translation (distSq < 400) or !hasMovedSv is treated as a tap
+        const isTap = !hasMovedSv.value || distSq < 400;
+
+        if (isTap) {
+          tapHandledSv.value = true;
           transX.value = 0;
           transY.value = 0;
           isInteracting.value = false;
-          runOnJS(triggerTapJS)();
+
+          const tNow = Date.now();
+          const deltaSinceLastTap = tNow - lastTapTimeSv.value;
+
+          if (deltaSinceLastTap > 30 && deltaSinceLastTap < 1200) {
+            // Confirmed double tap on UI thread
+            lastTapTimeSv.value = 0;
+            runOnJS(triggerDoubleTapJS)();
+          } else {
+            // First tap
+            lastTapTimeSv.value = tNow;
+            lastTapXSv.value = e.absoluteX;
+            lastTapYSv.value = e.absoluteY;
+            runOnJS(triggerSingleTapJS)();
+          }
         } else {
           originLeftSv.value = originLeftSv.value + transX.value;
           originTopSv.value = originTopSv.value + transY.value;
@@ -681,11 +751,27 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       })
       .onFinalize((_e, success) => {
         'worklet';
-        if (!success) {
-          isInteracting.value = false;
-          liftSv.value = 1;
-          transX.value = 0;
-          transY.value = 0;
+        isInteracting.value = false;
+        liftSv.value = 1;
+        transX.value = 0;
+        transY.value = 0;
+
+        // If onEnd did not run (e.g. pan failed because touch ended before drag threshold),
+        // but the finger did not drag, this was a stationary tap! Process it here!
+        if (!tapHandledSv.value && !hasMovedSv.value) {
+          tapHandledSv.value = true;
+          const tNow = Date.now();
+          const deltaSinceLastTap = tNow - lastTapTimeSv.value;
+
+          if (deltaSinceLastTap > 30 && deltaSinceLastTap < 1200) {
+            lastTapTimeSv.value = 0;
+            runOnJS(triggerDoubleTapJS)();
+          } else {
+            lastTapTimeSv.value = tNow;
+            lastTapXSv.value = _e?.absoluteX ?? 0;
+            lastTapYSv.value = _e?.absoluteY ?? 0;
+            runOnJS(triggerSingleTapJS)();
+          }
         }
       });
   }, [
@@ -713,10 +799,33 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     liveBounds,
     hasMovedSv,
     beginTimeSv,
+    lastTapTimeSv,
+    lastTapXSv,
+    lastTapYSv,
+    tapHandledSv,
     notifySelectJS,
     notifyTransformStartJS,
-    triggerTapJS,
+    triggerDoubleTapJS,
+    triggerSingleTapJS,
   ]);
+
+  const doubleTapGesture = useMemo(() => {
+    return Gesture.Tap()
+      .numberOfTaps(2)
+      .maxDuration(1200)
+      .maxDelay(600)
+      .hitSlop(bodyHitSlop)
+      .runOnJS(true)
+      .onEnd((_e, success) => {
+        if (success) {
+          triggerDoubleTapJS();
+        }
+      });
+  }, [bodyHitSlop, triggerDoubleTapJS]);
+
+  const composedElementGesture = useMemo(() => {
+    return Gesture.Simultaneous(bodyDragGesture, doubleTapGesture);
+  }, [bodyDragGesture, doubleTapGesture]);
 
   const createHandleGesture = useCallback(
     (handle: HandlePosition, behavior: ResizeBehavior) => {
@@ -1057,9 +1166,23 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   });
 
   return (
-    <Animated.View style={containerStyle} collapsable={false}>
-      <GestureDetector gesture={bodyDragGesture}>
-        <View collapsable={false} style={styles.fillContainer}>
+    <Animated.View ref={containerRef} style={containerStyle} collapsable={false}>
+      <GestureDetector gesture={composedElementGesture}>
+        <View
+          collapsable={false}
+          style={styles.fillContainer}
+          {...(Platform.OS === 'web'
+            ? {
+                onClick: (e: any) => {
+                  e?.stopPropagation?.();
+                  triggerSingleTapJS();
+                },
+                onDoubleClick: (e: any) => {
+                  e?.stopPropagation?.();
+                  triggerDoubleTapJS();
+                },
+              }
+            : {})}>
           <View pointerEvents="none" style={styles.fillContainer}>
             <ElementContentView
               element={element}

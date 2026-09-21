@@ -44,6 +44,7 @@ type ZoomableEditPadProps = {
   minZoom?: number;
   maxZoom?: number;
   oneFingerPanEnabled?: boolean;
+  doubleTapEnabled?: boolean;
 };
 
 function panLimit(viewSize: number, zoom: number) {
@@ -62,6 +63,7 @@ export function ZoomableEditPad({
   minZoom = VIEW_ZOOM_MIN,
   maxZoom = VIEW_ZOOM_MAX,
   oneFingerPanEnabled = false,
+  doubleTapEnabled = true,
 }: ZoomableEditPadProps) {
   const zoomSv = useSharedValue(zoom);
   const panX = useSharedValue(0);
@@ -277,13 +279,14 @@ export function ZoomableEditPad({
   const doubleTap = useMemo(
     () =>
       Gesture.Tap()
+        .enabled(doubleTapEnabled)
         .numberOfTaps(2)
         .maxDuration(250)
         .onEnd(() => {
           'worklet';
           runOnJS(zoomFit)();
         }),
-    [zoomFit],
+    [doubleTapEnabled, zoomFit],
   );
 
   const composed = useMemo(
