@@ -25,7 +25,6 @@ import { finiteMm, roundMm } from '@/lib/editor/engine';
 import { mmToPx, pxToMm } from '@/lib/label-coordinate-system';
 import { dropTopLeftMm, grabOffsetMm } from '@/lib/editor/view-transform';
 import { createFrameThrottled } from '@/lib/editor/drag-layer';
-import { logPerf } from '@/lib/perf-logger';
 import {
   aspectRatioOf,
   boundBoxMm,
@@ -423,7 +422,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const commitDragFromPointer = useCallback(
     (_windowX: number, _windowY: number, fallbackLeftPx: number, fallbackTopPx: number) => {
       dragMovePump.cancel();
-      logPerf(`[BODY_DRAG] commitDragFromPointer el=${element.id}`);
       const leftMm = pxToMm(fallbackLeftPx, pxPerMMSafe);
       const topMm = pxToMm(fallbackTopPx, pxPerMMSafe);
       callbacksRef.current.onSelect(element.id);
@@ -556,9 +554,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     callbacksRef.current.onTransformStart?.(id);
   }, []);
 
-  const notifySelectJS = useCallback((id: string, tBegin: number) => {
-    const transit = Date.now() - tBegin;
-    logPerf(`[JS_THREAD] onSelect arrived for el=${id} (bridge transit: ${transit}ms)`);
+  const notifySelectJS = useCallback((id: string, _tBegin: number) => {
     callbacksRef.current.onSelect(id);
   }, []);
 
@@ -572,7 +568,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     lastTapRef.current = { id: '', time: 0 };
     lastTapTimeSv.value = 0;
 
-    logPerf(`[BODY_DRAG] triggerDoubleTapJS el=${element.id}`);
     callbacksRef.current.onSelect(element.id);
 
     const openWithAnchor = (anchor?: ElementAnchorRect) => {
@@ -614,7 +609,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     const isDouble = last.id === element.id && now - last.time > 30 && now - last.time < 1200;
     lastTapRef.current = { id: element.id, time: now };
 
-    logPerf(`[BODY_DRAG] triggerSingleTapJS el=${element.id}`);
     callbacksRef.current.onSelect(element.id);
 
     if (isDouble) {
@@ -660,10 +654,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       })
       .onStart((_e) => {
         'worklet';
-        const delta = Date.now() - beginTimeSv.value;
         isInteracting.value = true;
         selectedSv.value = true;
-        runOnJS(logPerf)(`[BODY_DRAG] onStart el=${element.id} (begin->start: ${delta}ms)`);
       })
       .onUpdate((e) => {
         'worklet';
@@ -675,8 +667,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           }
           hasMovedSv.value = true;
           liftSv.value = DRAG_LIFT_OPACITY;
-          const updateDelta = Date.now() - beginTimeSv.value;
-          runOnJS(logPerf)(`[BODY_DRAG] first onUpdate el=${element.id} (begin->update: ${updateDelta}ms)`);
           runOnJS(notifyTransformStartJS)(element.id);
         }
 

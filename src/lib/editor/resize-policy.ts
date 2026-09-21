@@ -31,7 +31,7 @@ export type ResizePolicy = {
 export type MmBox = { left: number; top: number; width: number; height: number };
 
 export function aspectRatioOf(element: LabelElement): number {
-  if (element.type === 'qrcode') return 1;
+  if (element.type === 'qrcode' || element.type === 'arctext') return 1;
   if (element.type === 'image' && typeof element.originalAspect === 'number' && element.originalAspect > 0) {
     return element.originalAspect;
   }
@@ -57,12 +57,13 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
       };
     }
     case 'qrcode':
+    case 'arctext':
       return {
         anchors: ['e', 's'],
         behavior: { e: 'square', s: 'square' },
         rotateHandle: false,
         minMm: RESIZE_MIN_PROPORTIONAL_MM,
-        comment: 'QR must stay square (width = height), not merely a similar aspect.',
+        comment: 'QR and ArcText must stay square (width = height) to maintain circular/square geometry.',
       };
     case 'barcode':
       return {
@@ -111,14 +112,13 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
         comment: 'Line: length only. Stroke thickness is a property, not a drag axis.',
       };
     case 'shape':
-    case 'arctext':
     case 'table':
       return {
         anchors: ['e', 's'],
         behavior: { e: 'width', s: 'height' },
         rotateHandle: false,
         minMm: MIN_ELEMENT_MM,
-        comment: 'Shape/arc-text/table: independent width and height. Not photos, so aspect is not forced.',
+        comment: 'Shape/table: independent width and height. Not photos, so aspect is not forced.',
       };
     case 'border':
       return {

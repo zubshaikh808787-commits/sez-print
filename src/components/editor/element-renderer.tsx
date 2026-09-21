@@ -2,6 +2,7 @@ import { Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, {
+  Circle,
   Defs,
   Ellipse,
   Line,
@@ -10,6 +11,7 @@ import Svg, {
   Text as SvgText,
   TextPath,
 } from 'react-native-svg';
+import { computeArcTextLayout } from '@/lib/editor/arctext-layout';
 import QRCode from 'react-native-qrcode-svg';
 
 import { ClipartIcon } from '@/components/clipart-icon';
@@ -702,33 +704,72 @@ function ArcTextContent({
   scale: number;
 }) {
   const color = element.antiColor ? '#FFFFFF' : inkColor(element.drawingColorIndex);
-  const text =
+  const isPlaceholder = !element.text || element.text.trim().length === 0;
+  const displayText =
     element.contentType === 'Data Source' && element.columnNameContent
       ? element.columnNameContent
-      : element.text || 'ARC TEXT';
-  const size = fontSizePx(element.fontSize, scale);
-  const rx = widthPx / 2 - size / 2;
-  const ry = heightPx / 2 - size / 2;
-  const pathId = 'arc-path';
-  const d = `M ${widthPx / 2 - rx} ${heightPx / 2} A ${rx} ${ry} 0 0 1 ${widthPx / 2 + rx} ${
-    heightPx / 2
-  }`;
+      : isPlaceholder
+      ? 'Double-tap to enter text'
+      : element.text;
+
+  const nominalFontSize = fontSizePx(element.fontSize, scale);
+  const layout = useMemo(
+    () =>
+      computeArcTextLayout({
+        text: displayText,
+        widthPx,
+        heightPx,
+        nominalFontSizePx: nominalFontSize,
+        lineWidthMm: element.lineWidth,
+        scale,
+        bold: element.bold,
+      }),
+    [displayText, widthPx, heightPx, nominalFontSize, element.lineWidth, scale, element.bold],
+  );
+
+  const fontFamily = resolveFontFamily(element.fontFamily);
+  const textColor = isPlaceholder
+    ? element.antiColor
+      ? 'rgba(255, 255, 255, 0.65)'
+      : '#334155'
+    : color;
 
   return (
     <View style={[styles.fill, element.antiColor && styles.antiBg]}>
-      <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
-        <Defs>
-          <Path id={pathId} d={d} />
-        </Defs>
-        <SvgText
-          fill={color}
-          fontSize={size}
-          fontWeight={element.bold ? '700' : '400'}
-          fontStyle={element.italic ? 'italic' : 'normal'}>
-          <TextPath href={`#${pathId}`} startOffset="50%" textAnchor="middle">
-            {text}
-          </TextPath>
-        </SvgText>
+      <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`}>
+        {/* Circular guide line matching reference specification */}
+        <Circle
+          cx={layout.cx}
+          cy={layout.cy}
+          r={layout.radius}
+          stroke={color}
+          strokeWidth={layout.strokeWidth}
+          fill="none"
+        />
+
+        {/* Letters curved along the circular arc */}
+        {layout.characters.map((item, idx) => (
+          <SvgText
+            key={`${idx}-${item.char}`}
+            x={item.x}
+            y={item.y}
+            fill={textColor}
+            fontSize={layout.effectiveFontSizePx}
+            fontFamily={fontFamily}
+            fontWeight={element.bold ? '700' : '400'}
+            fontStyle={element.italic ? 'italic' : 'normal'}
+            textDecoration={
+              element.underline
+                ? 'underline'
+                : element.strikethrough
+                ? 'line-through'
+                : 'none'
+            }
+            textAnchor="middle"
+            transform={`rotate(${item.rotationDeg}, ${item.x}, ${item.y})`}>
+            {item.char}
+          </SvgText>
+        ))}
       </Svg>
     </View>
   );

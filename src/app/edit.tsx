@@ -90,7 +90,6 @@ import type { TransformCommitPayload, TransformMovePayload } from '@/components/
 import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
 import { StaticToolPalette } from '@/components/editor/static-tool-palette';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
-import { logPerf } from '@/lib/perf-logger';
 import {
   ArtboardFrame,
   CATALOG_STOCK_LINER,
@@ -355,10 +354,14 @@ function paletteDefaultSizeMm(
       const fit = fitLineDefaults(canvas.widthMm, canvas.heightMm, elements);
       return { widthMm: fit.width, heightMm: fit.height };
     }
-    case 'shape':
-    case 'arctext': {
+    case 'shape': {
       const fit = fitShapeDefaults(canvas.widthMm, canvas.heightMm, elements);
       return { widthMm: fit.width, heightMm: fit.height };
+    }
+    case 'arctext': {
+      const fit = fitShapeDefaults(canvas.widthMm, canvas.heightMm, elements);
+      const circleSize = Math.min(fit.width, fit.height);
+      return { widthMm: circleSize, heightMm: circleSize };
     }
     default: {
       const fit =
@@ -1148,14 +1151,15 @@ export default function EditScreen() {
         }
         case 'arctext': {
           const fit = fitShapeDefaults(maxW, maxH, elements);
+          const circleSize = Math.min(fit.width, fit.height);
           element = {
             ...DEFAULT_ARCTEXT_STATE,
             ...base,
             type: 'arctext',
             left: fit.left,
             top: fit.top,
-            width: fit.width,
-            height: fit.height,
+            width: circleSize,
+            height: circleSize,
             fontSize: fitTextDefaults(maxW, maxH, elements).fontSize,
             ...overrides,
           };
@@ -1280,7 +1284,6 @@ export default function EditScreen() {
   }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const handleDeselectAll = useCallback(() => {
-    logPerf('[JS_THREAD] handleDeselectAll');
     topBarSelectionVisibleSv.value = 0;
     bottomPanelVisibleSv.value = 0;
     setSelectedIds([]);
@@ -1328,7 +1331,6 @@ export default function EditScreen() {
     (id: string) => {
       const element = docRef.current.elements.find((el) => el.id === id);
       if (!element || element.needPrinting === false || element.type === 'border') return;
-      logPerf(`[JS_THREAD] handleSelect el=${id}`);
       topBarSelectionVisibleSv.value = 1;
       bottomPanelVisibleSv.value = 1;
       setSelectedIds((prev) => {
