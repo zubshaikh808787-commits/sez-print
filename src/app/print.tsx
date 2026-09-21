@@ -649,9 +649,11 @@ export default function PrintScreen() {
 
   const handlePrint = useCallback(async () => {
     if (printingLockRef.current) return;
+    printingLockRef.current = true;
     if (isPdfJob) {
       const manager = getPrinterManager();
       if (!manager.isConnected) {
+        printingLockRef.current = false;
         Alert.alert(
           'Printer Not Connected',
           'Connect your thermal printer (TD-404, Tez, Dev, Josh) before printing.',
@@ -664,12 +666,12 @@ export default function PrintScreen() {
       }
 
       if (pdfPages.length === 0) {
+        printingLockRef.current = false;
         Alert.alert('PDF Not Ready', 'Please wait for the PDF pages to finish rendering.');
         return;
       }
 
       setPrinting(true);
-      printingLockRef.current = true;
       try {
         const targetSelection = pageCount > 1 ? pageIndex : 'all';
         await printPdfToThermal(pdfPages, {
@@ -697,6 +699,7 @@ export default function PrintScreen() {
 
     const manager = getPrinterManager();
     if (!manager.isConnected) {
+      printingLockRef.current = false;
       Alert.alert(
         'Printer Not Connected',
         'Connect your TD-404 (Bluetooth or Wi‑Fi) before printing.',
@@ -718,13 +721,13 @@ export default function PrintScreen() {
       : orientedPrintSize(widthMm, heightMm, orientationDeg);
     const sizeError = printJobSizeError(paper.widthMm, paper.heightMm);
     if (sizeError) {
+      printingLockRef.current = false;
       Alert.alert('Unsupported Size', sizeError);
       return;
     }
 
     useSettingsStore.getState().patchDefaults({ paperType });
     setPrinting(true);
-    printingLockRef.current = true;
     const timer = new PrintTimingLogger();
 
     try {

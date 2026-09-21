@@ -53,6 +53,7 @@ class JoshPrinterManager(private val context: Context) {
         private const val CONNECT_RETRY_DELAY_MS = 1_500L
         private const val CONNECT_MAX_ATTEMPTS = 2
         private const val PRINT_TIMEOUT_MS = 4_000L
+        private const val PRINT_SUBMIT_FALLBACK_MS = 800L
         private const val MAX_RECONNECT_ATTEMPTS = 3
         private val RECONNECT_DELAYS_MS = longArrayOf(1000, 2000, 4000)
 
@@ -116,6 +117,8 @@ class JoshPrinterManager(private val context: Context) {
      *  false when DataEnded's 200ms no-ACK fallback completed the job instead. */
     private var lastPrintConfirmedByDevice = false
     private val jobIdCounter = AtomicInteger(0)
+    private var printSubmitFallback: Runnable? = null
+    private var printDataEndedFallback: Runnable? = null
 
     // ─── Configuration ─────────────────────────────────────────────────
 
@@ -185,12 +188,14 @@ class JoshPrinterManager(private val context: Context) {
             when (progress) {
                 PrintProgress.Success -> {
                     Log.i(TAG, "[JOSH-PRINT-P4:HARDWARE-ACK] Physical print confirmed by printer hardware!")
+                    cancelPrintFallbacks()
                     lastPrintSuccess = true
                     lastPrintConfirmedByDevice = true
                     printLatch?.countDown()
                     mainHandler.post { handlePrintSuccess() }
                 }
                 PrintProgress.Failed -> {
+                    cancelPrintFallbacks()
                     lastPrintSuccess = false
                     val reason = addiInfo?.toString() ?: "Print job failed"
                     Log.e(TAG, "[JOSH-PRINT-P4:HARDWARE-FAIL] Physical print failed at hardware level: $reason")
@@ -200,17 +205,17 @@ class JoshPrinterManager(private val context: Context) {
                 }
                 PrintProgress.DataEnded -> {
                     Log.i(TAG, "[JOSH-PRINT-P3:DATA-TRANSMITTED] Bluetooth byte transmission completed, waiting for hardware print confirmation...")
-                    // If hardware does not send Success packet within 200ms after all bytes are sent,
-                    // count down as success so print completes fast without hanging on models lacking hardware ACK.
-                    // Previously 1500ms — reduced to 200ms to eliminate artificial delay in the print pipeline.
-                    mainHandler.postDelayed({
+                    printDataEndedFallback?.let { mainHandler.removeCallbacks(it) }
+                    val dataEndedRunnable = Runnable {
                         if (printLatch != null && isPrinting.get() && !lastPrintSuccess) {
                             Log.i(TAG, "[JOSH-PRINT-P4:FALLBACK-SUCCESS] DataEnded confirmed and safety timer elapsed; completing print.")
                             lastPrintSuccess = true
                             printLatch?.countDown()
                             handlePrintSuccess()
                         }
-                    }, 200)
+                    }
+                    printDataEndedFallback = dataEndedRunnable
+                    mainHandler.postDelayed(dataEndedRunnable, 200)
                 }
                 else -> {
                     Log.d(TAG, "[JOSH-PRINT-P4:HARDWARE-PROGRESS] $progress (info=$addiInfo)")
@@ -977,6 +982,22 @@ class JoshPrinterManager(private val context: Context) {
             }
             val tSubmit = System.currentTimeMillis()
 
+            // printBitmap on some LPAPI firmware never emits PrintProgress — complete quickly after submit.
+            printSubmitFallback?.let { mainHandler.removeCallbacks(it) }
+            val submitFallback = Runnable {
+                if (printLatch != null && isPrinting.get() && !lastPrintSuccess) {
+                    Log.i(
+                        TAG,
+                        "[$jobId] [JOSH-PRINT-P4:SUBMIT-FALLBACK] printBitmap submitted without LPAPI progress; completing.",
+                    )
+                    lastPrintSuccess = true
+                    printLatch?.countDown()
+                    mainHandler.post { handlePrintSuccess() }
+                }
+            }
+            printSubmitFallback = submitFallback
+            mainHandler.postDelayed(submitFallback, PRINT_SUBMIT_FALLBACK_MS)
+
             Log.i(TAG, "[$jobId] [JOSH-PRINT-P4:WAIT-HARDWARE] PRINT_SUBMITTED waiting for physical completion (timeout=${PRINT_TIMEOUT_MS}ms)")
 
             // ── Wait for completion callback ───────────────────────────
@@ -1038,6 +1059,7 @@ class JoshPrinterManager(private val context: Context) {
             emitPrintProgress(jobId, "FAILED", mapOf("error" to (e.message ?: "Unknown")))
             return null
         } finally {
+            cancelPrintFallbacks()
             isPrinting.set(false)
             printLock.unlock()
             if (isConnected()) {
@@ -1301,8 +1323,10 @@ class JoshPrinterManager(private val context: Context) {
             ))
         }
 
-        // Release print latch if waiting (print will fail)
+        // Release print latch if waiting — but not during an active job (transient ACL drops).
         if (isPrinting.get()) {
+            Log.w(TAG, "[DISCONNECT-DURING-PRINT] Suppressing latch release — job will resolve via callback or timeout")
+        } else {
             lastPrintSuccess = false
             printLatch?.countDown()
         }
@@ -1366,6 +1390,7 @@ class JoshPrinterManager(private val context: Context) {
 
     private fun handlePrintSuccess() {
         Log.i(TAG, "[PRINT_SUCCESS]")
+        cancelPrintFallbacks()
         lastPrintSuccess = true
         setState(State.PRINT_SUCCESS)
         printLatch?.countDown()
@@ -1376,6 +1401,7 @@ class JoshPrinterManager(private val context: Context) {
 
     private fun handlePrintFailed(reason: String) {
         Log.e(TAG, "[PRINT_FAILED] $reason")
+        cancelPrintFallbacks()
         lastPrintSuccess = false
         lastError = "JOSH_PRINT_FAILED: $reason"
         setState(State.PRINT_FAILED)
@@ -1384,6 +1410,13 @@ class JoshPrinterManager(private val context: Context) {
         val jobId = "JOSH-PRINT-${String.format("%03d", jobIdCounter.get())}"
         emitPrintProgress(jobId, "FAILED", mapOf("reason" to reason))
         emitError("JOSH_PRINT_FAILED", reason)
+    }
+
+    private fun cancelPrintFallbacks() {
+        printSubmitFallback?.let { mainHandler.removeCallbacks(it) }
+        printSubmitFallback = null
+        printDataEndedFallback?.let { mainHandler.removeCallbacks(it) }
+        printDataEndedFallback = null
     }
 
     // ═══════════════════════════════════════════════════════════════════
