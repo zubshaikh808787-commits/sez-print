@@ -7,6 +7,7 @@ import {
   AppState,
   ActivityIndicator,
   Dimensions,
+  InteractionManager,
   KeyboardAvoidingView,
   LayoutAnimation,
   Modal,
@@ -1405,11 +1406,16 @@ export default function EditScreen() {
     const element = docRef.current.elements.find((el) => el.id === id);
     if (!element || !isQuickEditableType(element.type)) return;
     setSelectedIds([id]);
-    setQuickEditTarget({
-      id,
-      type: element.type,
-      value: getQuickEditValue(element),
-      anchorRect,
+    // Wait for the double-tap gesture to finish so it doesn't steal focus from the input.
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => {
+        setQuickEditTarget({
+          id,
+          type: element.type,
+          value: getQuickEditValue(element),
+          anchorRect,
+        });
+      }, 80);
     });
   }, []);
 
@@ -3026,15 +3032,6 @@ export default function EditScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <QuickValueModal
-        visible={quickEditTarget !== null}
-        initialValue={quickEditTarget?.value ?? ''}
-        title={quickEditTarget ? getQuickEditTitle(quickEditTarget.type) : undefined}
-        placeholder={quickEditTarget ? getQuickEditPlaceholder(quickEditTarget.type) : undefined}
-        anchorRect={quickEditTarget?.anchorRect}
-        onCancel={handleQuickEditCancel}
-        onConfirm={handleQuickEditConfirm}
-      />
       <View
         ref={overlayViewRef}
         pointerEvents="none"
@@ -3064,6 +3061,15 @@ export default function EditScreen() {
           </View>
         </View>
       ) : null}
+      <QuickValueModal
+        visible={quickEditTarget !== null}
+        initialValue={quickEditTarget?.value ?? ''}
+        title={quickEditTarget ? getQuickEditTitle(quickEditTarget.type) : undefined}
+        placeholder={quickEditTarget ? getQuickEditPlaceholder(quickEditTarget.type) : undefined}
+        anchorRect={quickEditTarget?.anchorRect}
+        onCancel={handleQuickEditCancel}
+        onConfirm={handleQuickEditConfirm}
+      />
     </View>
   );
 }

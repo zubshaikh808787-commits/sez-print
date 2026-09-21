@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Modal,
+  InteractionManager,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -14,6 +15,9 @@ import type { ElementAnchorRect } from '@/lib/editor/quick-value';
 const ACCENT = '#48C3C7';
 const DANGER = '#E53935';
 const MUTED = '#8A94A6';
+
+/** Ignore backdrop taps briefly so the leftover double-tap doesn't dismiss or blur the input. */
+const BACKDROP_ARM_MS = 400;
 
 export type QuickValueModalProps = {
   visible: boolean;
@@ -36,19 +40,61 @@ export function QuickValueModal({
 }: QuickValueModalProps) {
   const [draft, setDraft] = useState(initialValue);
   const [cardHeight, setCardHeight] = useState(200);
-  const inputRef = React.useRef<TextInput>(null);
-  const openTimeRef = React.useRef(0);
-  const { width: windowWidth } = useWindowDimensions();
+  const [backdropArmed, setBackdropArmed] = useState(false);
+  const inputRef = useRef<TextInput>(null);
+  const openTimeRef = useRef(0);
+  const focusCleanupRef = useRef<(() => void) | null>(null);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+
+  const clearFocusTimers = useCallback(() => {
+    focusCleanupRef.current?.();
+    focusCleanupRef.current = null;
+  }, []);
+
+  const focusInput = useCallback(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const scheduleFocus = useCallback(() => {
+    clearFocusTimers();
+
+    const runFocus = () => {
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+    };
+
+    const afterInteractions = InteractionManager.runAfterInteractions(runFocus);
+    const t1 = setTimeout(runFocus, 50);
+    const t2 = setTimeout(focusInput, Platform.OS === 'android' ? 200 : 120);
+    const tArm = setTimeout(() => setBackdropArmed(true), BACKDROP_ARM_MS);
+
+    focusCleanupRef.current = () => {
+      afterInteractions.cancel();
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(tArm);
+    };
+  }, [clearFocusTimers, focusInput]);
 
   useEffect(() => {
-    if (visible) {
-      openTimeRef.current = Date.now();
-      setDraft(initialValue);
+    if (!visible) {
+      clearFocusTimers();
+      setBackdropArmed(false);
+      return;
     }
-  }, [visible, initialValue]);
+
+    setDraft(initialValue);
+    openTimeRef.current = Date.now();
+    setBackdropArmed(false);
+    scheduleFocus();
+  }, [visible, initialValue, clearFocusTimers, scheduleFocus]);
+
+  useEffect(() => () => clearFocusTimers(), [clearFocusTimers]);
 
   const handleClear = () => {
     setDraft('');
+    focusInput();
   };
 
   const handleConfirm = () => {
@@ -56,16 +102,19 @@ export function QuickValueModal({
   };
 
   const handleBackdropPress = () => {
-    // Ignore any backdrop tap within 800ms of opening.
-    // This prevents continuous taps from immediately dismissing the modal!
-    if (Date.now() - openTimeRef.current < 800) {
+    if (!backdropArmed || Date.now() - openTimeRef.current < BACKDROP_ARM_MS) {
+      focusInput();
       return;
     }
     onCancel();
   };
 
+  if (!visible) {
+    return null;
+  }
+
   const cardWidth = Math.min(340, Math.max(280, windowWidth - 32));
-  const minTop = 64; // Below top status bar / header
+  const minTop = 64;
 
   let cardTop = minTop + 8;
   let cardLeft = (windowWidth - cardWidth) / 2;
@@ -74,111 +123,100 @@ export function QuickValueModal({
     const elementCenterX = anchorRect.x + anchorRect.width / 2;
     cardLeft = Math.max(16, Math.min(windowWidth - cardWidth - 16, elementCenterX - cardWidth / 2));
 
-    // Place directly ABOVE the element
     const aboveY = anchorRect.y - cardHeight - 12;
+    const maxTop = Math.max(minTop + 8, windowHeight - cardHeight - 320);
     if (aboveY >= minTop) {
-      cardTop = aboveY;
+      cardTop = Math.min(aboveY, maxTop);
     } else {
-      // Element is near the top of the canvas: place at top boundary above the element
-      cardTop = minTop;
+      cardTop = minTop + 8;
     }
   }
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onCancel}
-      onShow={() => {
-        setTimeout(() => {
-          inputRef.current?.focus();
-        }, 50);
-      }}>
-      <View style={styles.overlay}>
-        <Pressable
-          style={styles.backdrop}
-          onPress={handleBackdropPress}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-        />
-        <View
-          style={[
-            styles.card,
-            {
-              position: 'absolute',
-              top: cardTop,
-              left: cardLeft,
-              width: cardWidth,
-            },
-          ]}
-          onLayout={(e) => {
-            const h = e.nativeEvent.layout.height;
-            if (h > 0 && Math.abs(h - cardHeight) > 4) {
-              setCardHeight(h);
-            }
-          }}
-          onStartShouldSetResponder={() => true}
-          onTouchEnd={(e) => e.stopPropagation?.()}>
-          {!!title && <Text style={styles.cardTitle}>{title}</Text>}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.overlay}
+      pointerEvents="box-none"
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}>
+      <Pressable
+        style={styles.backdrop}
+        onPress={handleBackdropPress}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
+      <View
+        style={[
+          styles.card,
+          {
+            position: 'absolute',
+            top: cardTop,
+            left: cardLeft,
+            width: cardWidth,
+          },
+        ]}
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          if (h > 0 && Math.abs(h - cardHeight) > 4) {
+            setCardHeight(h);
+          }
+        }}>
+        {!!title && <Text style={styles.cardTitle}>{title}</Text>}
 
-          <View style={styles.inputContainer}>
-            <TextInput
-              ref={inputRef}
-              style={styles.input}
-              value={draft}
-              onChangeText={setDraft}
-              autoFocus
-              multiline
-              placeholder={placeholder || 'Enter value'}
-              placeholderTextColor="#94A3B8"
-              selectionColor={ACCENT}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
+        <View style={styles.inputContainer}>
+          <TextInput
+            ref={inputRef}
+            style={styles.input}
+            value={draft}
+            onChangeText={setDraft}
+            autoFocus
+            showSoftInputOnFocus
+            multiline
+            placeholder={placeholder || 'Enter value'}
+            placeholderTextColor="#94A3B8"
+            selectionColor={ACCENT}
+            autoCapitalize="none"
+            autoCorrect={false}
+            blurOnSubmit={false}
+            onLayout={scheduleFocus}
+          />
+        </View>
 
-          <View style={styles.buttonRow}>
-            <Pressable
-              onPress={onCancel}
-              hitSlop={12}
-              style={({ pressed }) => [styles.actionBtn, pressed && styles.btnPressed]}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </Pressable>
+        <View style={styles.buttonRow}>
+          <Pressable
+            onPress={onCancel}
+            hitSlop={12}
+            style={({ pressed }) => [styles.actionBtn, pressed && styles.btnPressed]}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </Pressable>
 
-            <Pressable
-              onPress={handleClear}
-              hitSlop={12}
-              style={({ pressed }) => [styles.actionBtn, pressed && styles.btnPressed]}>
-              <Text style={styles.clearText}>Clear</Text>
-            </Pressable>
+          <Pressable
+            onPress={handleClear}
+            hitSlop={12}
+            style={({ pressed }) => [styles.actionBtn, pressed && styles.btnPressed]}>
+            <Text style={styles.clearText}>Clear</Text>
+          </Pressable>
 
-            <Pressable
-              onPress={handleConfirm}
-              hitSlop={12}
-              style={({ pressed }) => [styles.actionBtn, pressed && styles.btnPressed]}>
-              <Text style={styles.confirmText}>Confirm</Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={handleConfirm}
+            hitSlop={12}
+            style={({ pressed }) => [styles.actionBtn, pressed && styles.btnPressed]}>
+            <Text style={styles.confirmText}>Confirm</Text>
+          </Pressable>
         </View>
       </View>
-    </Modal>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    flex: 1,
-    width: '100%',
-    height: '100%',
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-    zIndex: 9999,
+    zIndex: 10000,
+    elevation: 10000,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -190,7 +228,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.16,
     shadowRadius: 14,
-    elevation: 8,
+    elevation: 12,
     zIndex: 10,
   },
   cardTitle: {
