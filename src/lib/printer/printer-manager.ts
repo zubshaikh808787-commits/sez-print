@@ -26,9 +26,10 @@ import {
   isLikelyDevName,
   isLikelyLabelXName,
   shouldUseTsplCommandSet,
+  getAmbiguousModelCandidates,
 } from '@/lib/printer/printer-heuristics';
 import { encodeTscTextSample } from '@/lib/printer/tsc';
-import { usePrinterStore } from '@/stores/printer-store';
+import { usePrinterStore, normalizePrinterMac } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { type SeznikPrinterModelId, SEZNIK_PRINTER_MODELS } from '@/constants/printer-models';
 
@@ -196,6 +197,7 @@ export {
   isLikelyDevName,
   isLikelyLabelXName,
   shouldUseTsplCommandSet,
+  getAmbiguousModelCandidates,
 } from './printer-heuristics';
 
 function isExpoGoRuntime(): boolean {
@@ -244,6 +246,48 @@ class PrinterManager {
   private lastRetryCount: number = 0;
   /** Number of pending jobs in the serial print chain. */
   private printQueueDepth: number = 0;
+  private aclListener: { remove: () => void } | undefined;
+
+  /** OS-level ACL link events — catches drops the SDK read loop misses. */
+  setupAclListener(): void {
+    if (this.aclListener || Platform.OS !== 'android') return;
+    void import('dev-printer')
+      .then(({ addDevAclListener }) => {
+        if (this.aclListener) return;
+        this.aclListener = addDevAclListener((event) => {
+          if (event.connected) return;
+          const store = usePrinterStore.getState();
+          const connectedMac = store.deviceId ? normalizePrinterMac(store.deviceId) : null;
+          const droppedMac = event.mac ? normalizePrinterMac(event.mac) : null;
+          if (!connectedMac || !droppedMac || connectedMac !== droppedMac) return;
+          console.warn(`[printer] ACL_DISCONNECTED for active printer ${droppedMac}`);
+          this.activeTransport = null;
+          this.connectionState = 'disconnected';
+          this.connectedDevice = null;
+          this.writableTarget = null;
+          store.clearConnection();
+        });
+      })
+      .catch(() => {});
+  }
+
+  /**
+   * Total native teardown — every SDK singleton, not just activeTransport.
+   * Prevents stale LuckPrinter/LPAPI handles after brand switch.
+   */
+  private async disconnectAllBridges(): Promise<void> {
+    await this.getLabelX()?.disconnectLabelX().catch(() => {});
+    await this.getJosh()?.disconnectJosh().catch(() => {});
+    await this.getTez()?.disconnectTez().catch(() => {});
+    await this.getTd404()?.disconnectTd404().catch(() => {});
+    await this.getDev()?.disconnectDev().catch(() => {});
+    if (this.connectedDevice) {
+      await this.connectedDevice.cancelConnection().catch(() => {});
+      this.connectedDevice = null;
+      this.writableTarget = null;
+    }
+    await new Promise<void>((r) => setTimeout(r, 300));
+  }
 
   get transport(): ActiveTransport {
     return this.activeTransport;
@@ -1843,6 +1887,14 @@ class PrinterManager {
       `[CONN-ROUTE] connectInner called: id=${deviceId}, name=${deviceName ?? 'null'}, transport=${transport ?? 'undefined'}`,
     );
 
+    const macKey = normalizePrinterMac(deviceId);
+    const pinnedModel = usePrinterStore.getState().pinnedDriverByMac[macKey];
+    if (pinnedModel) {
+      console.info(`[CONN-ROUTE] MAC pin overrides heuristics: ${macKey} → ${pinnedModel}`);
+      await this.connectModel(pinnedModel, deviceId, deviceName);
+      return;
+    }
+
     const isTargetLabelX =
       isLikelyLabelXName(deviceName) ||
       (!isLikelyDevName(deviceName) &&
@@ -2464,21 +2516,7 @@ class PrinterManager {
       return;
     }
     console.info('[printer] disconnect requested, transport:', this.activeTransport);
-    if (this.activeTransport === 'labelx-spp') {
-      await this.getLabelX()?.disconnectLabelX().catch(() => {});
-    }
-    if (this.activeTransport === 'dev-spp') {
-      await this.getDev()?.disconnectDev().catch(() => {});
-    }
-    if (this.activeTransport === 'td404-spp') {
-      await this.getTd404()?.disconnectTd404();
-    }
-    if (this.activeTransport === 'tez-spp') {
-      await this.getTez()?.disconnectTez();
-    }
-    if (this.activeTransport === 'josh-lpapi') {
-      await this.getJosh()?.disconnectJosh();
-    }
+
     if (this.activeTransport === 'wifi' && this.backendPrinterId) {
       try {
         const { getBackendBaseUrl } = await import('@/lib/printer/backend-api');
@@ -2489,11 +2527,9 @@ class PrinterManager {
         // ignore
       }
     }
-    if (this.connectedDevice) {
-      await this.connectedDevice.cancelConnection().catch(() => {});
-      this.connectedDevice = null;
-      this.writableTarget = null;
-    }
+
+    await this.disconnectAllBridges();
+
     this.activeTransport = null;
     this.backendPrinterId = null;
     this.bleNegotiatedMtu = 0;
@@ -3549,6 +3585,7 @@ function setupAppStateListener() {
 export function getPrinterManager(): PrinterManager {
   if (!manager) {
     manager = new PrinterManager();
+    manager.setupAclListener();
     setupAppStateListener();
   }
   return manager;

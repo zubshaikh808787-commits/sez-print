@@ -32,6 +32,7 @@ import {
   isLikelyShaktiName,
   isLikelyDevName,
   isLikelyLabelXName,
+  getAmbiguousModelCandidates,
   type BluetoothCapabilities,
   type DiscoveredPrinter,
 } from '@/lib/printer/printer-manager';
@@ -40,7 +41,7 @@ import {
   SEZNIK_PRINTER_MODELS,
   type SeznikPrinterModelId,
 } from '@/constants/printer-models';
-import { usePrinterStore } from '@/stores/printer-store';
+import { normalizePrinterMac, usePrinterStore } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
 const ANDROID_BLUETOOTH_SETTINGS = 'android.settings.BLUETOOTH_SETTINGS';
@@ -289,6 +290,48 @@ export default function PrinterConnectScreen() {
     [devices],
   );
 
+  const resolveTargetModel = (
+    device: DiscoveredPrinter,
+    fallback: SeznikPrinterModelId,
+  ): SeznikPrinterModelId =>
+    fallback === 'josh' || device.sdkId === 'josh' || device.likelyJosh
+      ? 'josh'
+      : fallback === 'labelx' || device.sdkId === 'labelx' || (device as any).likelyLabelX
+        ? 'labelx'
+        : fallback === 'td404' || device.sdkId === 'td404' || device.likelyTd404
+          ? 'td404'
+          : fallback === 'tez' || device.sdkId === 'tez' || (device as any).likelyTez || (device as any).likelyShakti
+            ? 'tez'
+            : fallback === 'dev' || device.sdkId === 'dev' || (device as any).likelyDev
+              ? 'dev'
+              : fallback;
+
+  const connectWithModel = async (
+    targetModel: SeznikPrinterModelId,
+    device: DiscoveredPrinter,
+  ) => {
+    console.info(
+      `[PRINTER-CONNECT] Connecting model ${targetModel} to ${device.id} (${device.name ?? 'unknown'})`,
+    );
+    await getPrinterManager().connectModel(targetModel, device.id, device.name);
+    if (mountedRef.current) {
+      Alert.alert(
+        'Connected!',
+        `${device.name ?? SEZNIK_PRINTER_MODELS[targetModel].shortName} connected successfully. Would you like to print a test label?`,
+        [
+          {
+            text: 'Print Test Label',
+            onPress: () => void handleTestPrint(),
+          },
+          {
+            text: 'Done',
+            style: 'cancel',
+          },
+        ],
+      );
+    }
+  };
+
   const handleConnect = async (device: DiscoveredPrinter) => {
     if (!getPrinterManager().isBluetoothEnabled()) {
       setBluetoothOn(false);
@@ -296,45 +339,59 @@ export default function PrinterConnectScreen() {
       Alert.alert('Bluetooth is off', BLUETOOTH_OFF_MESSAGE);
       return;
     }
+
+    const macKey = normalizePrinterMac(device.id);
+    const pinned = usePrinterStore.getState().pinnedDriverByMac[macKey];
+    if (pinned) {
+      setConnectingId(device.id);
+      try {
+        await connectWithModel(pinned, device);
+      } catch (error) {
+        if (mountedRef.current) {
+          Alert.alert(
+            'Connection Failed',
+            error instanceof Error ? error.message : `Could not connect to ${activeModelMeta.shortName} printer.`,
+          );
+        }
+      } finally {
+        if (mountedRef.current) setConnectingId(null);
+      }
+      return;
+    }
+
+    const candidates = getAmbiguousModelCandidates(device.name, device.transport);
+    if (candidates.length > 1) {
+      Alert.alert(
+        'Which printer is this?',
+        `${device.name ?? device.id} matched more than one driver. Pick the correct model once — we will remember it for this MAC.`,
+        [
+          ...candidates.map((modelId) => ({
+            text: SEZNIK_PRINTER_MODELS[modelId].shortName,
+            onPress: () => {
+              usePrinterStore.getState().pinDriverForMac(device.id, modelId, true);
+              setConnectingId(device.id);
+              void connectWithModel(modelId, device)
+                .catch((error) => {
+                  Alert.alert(
+                    'Connection Failed',
+                    error instanceof Error ? error.message : 'Could not connect.',
+                  );
+                })
+                .finally(() => {
+                  if (mountedRef.current) setConnectingId(null);
+                });
+            },
+          })),
+          { text: 'Cancel', style: 'cancel' as const },
+        ],
+      );
+      return;
+    }
+
     setConnectingId(device.id);
     try {
-      const targetModel: SeznikPrinterModelId =
-        selectedModel === 'josh' || device.sdkId === 'josh' || device.likelyJosh
-          ? 'josh'
-          : selectedModel === 'labelx' || device.sdkId === 'labelx' || (device as any).likelyLabelX
-            ? 'labelx'
-            : selectedModel === 'td404' || device.sdkId === 'td404' || device.likelyTd404
-              ? 'td404'
-              : selectedModel === 'tez' || device.sdkId === 'tez' || (device as any).likelyTez || (device as any).likelyShakti
-                ? 'tez'
-                : selectedModel === 'dev' || device.sdkId === 'dev' || (device as any).likelyDev
-                  ? 'dev'
-                  : selectedModel;
-
-      console.info(
-        `[PRINTER-CONNECT] Connecting model ${targetModel} to ${device.id} (${device.name ?? 'unknown'})`,
-      );
-      await getPrinterManager().connectModel(
-        targetModel,
-        device.id,
-        device.name,
-      );
-      if (mountedRef.current) {
-        Alert.alert(
-          'Connected!',
-          `${device.name ?? activeModelMeta.shortName} connected successfully. Would you like to print a test label?`,
-          [
-            {
-              text: 'Print Test Label',
-              onPress: () => void handleTestPrint(),
-            },
-            {
-              text: 'Done',
-              style: 'cancel',
-            },
-          ],
-        );
-      }
+      const targetModel = resolveTargetModel(device, selectedModel);
+      await connectWithModel(targetModel, device);
     } catch (error) {
       if (mountedRef.current) {
         Alert.alert(

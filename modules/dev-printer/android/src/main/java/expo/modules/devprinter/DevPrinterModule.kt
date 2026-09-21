@@ -51,6 +51,34 @@ class DevPrinterModule : Module() {
   private var connectedMac: String? = null
   private var connectedName: String? = null
   private var receiverRegistered = false
+  private var aclReceiverRegistered = false
+
+  private val aclReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      when (intent?.action) {
+        BluetoothDevice.ACTION_ACL_CONNECTED,
+        BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+          val device: BluetoothDevice? =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+              intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            } else {
+              @Suppress("DEPRECATION")
+              intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+            }
+          val mac = device?.address ?: return
+          val connected = intent.action == BluetoothDevice.ACTION_ACL_CONNECTED
+          Log.i(TAG, "ACL link ${if (connected) "CONNECTED" else "DISCONNECTED"}: $mac")
+          sendEvent(
+            "onAclLinkChanged",
+            mapOf(
+              "mac" to mac,
+              "connected" to connected,
+            ),
+          )
+        }
+      }
+    }
+  }
 
   // 16x16 Bayer / Floyd ordered dithering matrix matching inventort-seznik PrintPicture.Floyd16x16
   private val Floyd16x16 = arrayOf(
@@ -97,14 +125,16 @@ class DevPrinterModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("DevPrinter")
 
-    Events("onDeviceFound", "onScanFinished", "onConnectionChanged")
+    Events("onDeviceFound", "onScanFinished", "onConnectionChanged", "onAclLinkChanged")
 
     OnCreate {
       ensureReceiver()
+      ensureAclReceiver()
     }
 
     OnDestroy {
       unregisterReceiverSafe()
+      unregisterAclReceiverSafe()
       closeHandle()
     }
 
@@ -947,6 +977,30 @@ class DevPrinterModule : Module() {
     printerHandle = null
     connectedMac = null
     connectedName = null
+  }
+
+  private fun ensureAclReceiver() {
+    if (aclReceiverRegistered) return
+    val context = appContext.reactContext ?: return
+    val filter = IntentFilter().apply {
+      addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+      addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      context.registerReceiver(aclReceiver, filter, Context.RECEIVER_EXPORTED)
+    } else {
+      context.registerReceiver(aclReceiver, filter)
+    }
+    aclReceiverRegistered = true
+  }
+
+  private fun unregisterAclReceiverSafe() {
+    if (!aclReceiverRegistered) return
+    try {
+      appContext.reactContext?.unregisterReceiver(aclReceiver)
+    } catch (_: Exception) {
+    }
+    aclReceiverRegistered = false
   }
 
   private fun ensureReceiver() {

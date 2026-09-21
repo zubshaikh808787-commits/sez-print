@@ -469,10 +469,8 @@ class Td404PrinterModule : Module() {
     }
 
     // Paced path for large payloads (4x6 labels, 100KB–300KB):
-    // Write in 4096-byte chunks with a micro-pause (3ms).
-    // This allows the printer's 115200-baud UART buffer to drain smoothly without
-    // overflowing its hardware FIFO, preventing the printer Bluetooth chip from crashing or resetting.
-    val chunkSize = 4096
+    // Write in 1024-byte chunks with a micro-pause (3ms) — Ninestar vendor reference.
+    val chunkSize = 1024
     var offset = 0
     while (offset < bytes.size) {
       val count = minOf(chunkSize, bytes.size - offset)
@@ -489,7 +487,7 @@ class Td404PrinterModule : Module() {
       }
     }
     val totalMs = System.currentTimeMillis() - startMs
-    android.util.Log.i("Td404Printer", "SPP paced write ${bytes.size} bytes in ${totalMs}ms (stable)")
+    android.util.Log.i("Td404Printer", "SPP paced write ${bytes.size} bytes in ${totalMs}ms chunk=${1024}")
     return bytes.size
   }
 

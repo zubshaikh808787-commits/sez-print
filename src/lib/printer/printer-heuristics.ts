@@ -1,3 +1,5 @@
+import type { SeznikPrinterModelId } from '@/constants/printer-models';
+
 /** `tej` as its own token — not `tejas` (TD-404). Matches Seznik_Tej_DAA91. */
 function hasTejToken(n: string): boolean {
   return /(^|[^a-z])tej([^a-z]|$)/.test(n);
@@ -256,4 +258,24 @@ export function shouldUseTsplCommandSet(opts: {
     return isLikelyTd404Name(opts.deviceName);
   }
   return false;
+}
+
+/** Which model heuristics claim this device name — used for conflict picker UI. */
+export function getAmbiguousModelCandidates(
+  name: string | null | undefined,
+  transport?: string,
+): SeznikPrinterModelId[] {
+  const out: SeznikPrinterModelId[] = [];
+  if (isLikelyLabelXName(name) || transport === 'labelx-spp') out.push('labelx');
+  if (isLikelyJoshName(name) || transport === 'josh-lpapi') out.push('josh');
+  if (isLikelyTezName(name) || isLikelyShaktiName(name) || transport === 'tez-spp') out.push('tez');
+  if (isLikelyDevName(name) || transport === 'dev-spp') out.push('dev');
+  if (
+    isLikelyTd404Name(name) ||
+    transport === 'bluetooth-spp' ||
+    transport === 'wifi'
+  ) {
+    out.push('td404');
+  }
+  return [...new Set(out)];
 }
