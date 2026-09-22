@@ -12,19 +12,24 @@ export type TapSelectInput = {
   current: EditorSelection;
 };
 
-/** Tap-to-select: single replaces; multiple adds or promotes primary without deselecting. */
+/** Tap-to-select: single replaces; multiple toggles membership (add or remove). */
 export function reduceTapSelect(input: TapSelectInput): EditorSelection {
   const { id, multipleMode, current } = input;
 
   if (!multipleMode) {
-    if (current.ids.length === 1 && current.ids[0] === id) {
-      return { ids: [id], primaryId: id };
-    }
     return { ids: [id], primaryId: id };
   }
 
   if (current.ids.includes(id)) {
-    return { ids: current.ids, primaryId: id };
+    const ids = current.ids.filter((memberId) => memberId !== id);
+    if (ids.length === 0) {
+      return clearSelection();
+    }
+    const primaryId =
+      current.primaryId && current.primaryId !== id && ids.includes(current.primaryId)
+        ? current.primaryId
+        : ids[ids.length - 1];
+    return { ids, primaryId };
   }
 
   return { ids: [...current.ids, id], primaryId: id };
@@ -32,6 +37,15 @@ export function reduceTapSelect(input: TapSelectInput): EditorSelection {
 
 export function clearSelection(): EditorSelection {
   return { ids: [], primaryId: null };
+}
+
+/** Multiple ON keeps the current selection (carry-forward). OFF clears immediately. */
+export function reduceMultipleModeToggle(
+  turningOn: boolean,
+  current: EditorSelection,
+): EditorSelection {
+  if (turningOn) return current;
+  return clearSelection();
 }
 
 export function selectionFromIds(ids: string[], primaryId?: string | null): EditorSelection {

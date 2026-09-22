@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -46,13 +46,13 @@ import {
 } from '@/lib/element-sizing';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
 import {
-  applyGroupResize,
-  buildGroupResizeSnapshots,
-  getGroupResizeScaleLimits,
-  groupResizeFrameFromSnapshots,
-  selectionHasBlockedRotation,
-} from '@/lib/editor/group-resize';
-import type { MmBox } from '@/lib/editor/resize-policy';
+  aspectRatioOf,
+  resizeMemberByScale,
+  resizePolicyFor,
+  sharedScaleLimits,
+  type MmBox,
+  type ScaleCapMember,
+} from '@/lib/editor/resize-policy';
 import {
   DEFAULT_CANVAS_SPLIT_RATIO,
   DIVIDER_HIT_SIZE_PX,
@@ -142,6 +142,7 @@ import {
 } from '@/lib/editor/quick-value';
 import {
   alignGroupBounds,
+  reduceMultipleModeToggle,
   reduceTapSelect,
   selectionFromIds,
   supportsMultiSelectPanel,
@@ -249,6 +250,75 @@ const TOOL_ROWS: { icon: IconName; label: string }[][] = [
 const TOOLS = TOOL_ROWS.flat();
 
 const MAX_HISTORY = 60;
+
+function logMultiTransformBox(
+  phase: string,
+  id: string,
+  box: { left: number; top: number; width: number; height: number },
+) {
+  console.log(
+    `[multi-transform] ${phase} ${id} l=${box.left.toFixed(2)} t=${box.top.toFixed(2)} w=${box.width.toFixed(2)} h=${box.height.toFixed(2)}`,
+  );
+}
+
+function boxOfElement(el: LabelElement): MmBox {
+  const size = elementSizeMm(el);
+  return { left: el.left, top: el.top, width: size.width, height: size.height };
+}
+
+function naturalHeightForWidth(el: LabelElement, widthMm: number, fontSize?: number): number | undefined {
+  if (el.type === 'text' || el.type === 'degrees') {
+    const rawText =
+      el.contentType === 'Data Source' && el.columnNameContent
+        ? `{${el.columnNameContent}}`
+        : 'text' in el
+          ? el.text
+          : el.content;
+    const fs = fontSize ?? ('fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : 12);
+    return computeTextElementHeightMm({
+      text: rawText,
+      fontSize: fs,
+      widthMm,
+      autoWrapping: el.autoWrapping ?? 'Word',
+      lineSpacing: el.lineSpacing ?? '1.0',
+      charSpacing: el.charSpacing ?? 0,
+      bold: el.bold ?? false,
+      verticalDisplay: el.verticalDisplay ?? false,
+    });
+  }
+  if (el.type === 'time') {
+    const fs = fontSize ?? ('fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : 12);
+    return textBlockHeightMm(fs, 1);
+  }
+  return undefined;
+}
+
+function resizeElementByScale(
+  el: LabelElement,
+  start: MmBox,
+  handle: 'e' | 's',
+  scaleX: number,
+  scaleY: number,
+  canvas: { widthMm: number; heightMm: number },
+  fontSize?: number,
+): MmBox {
+  const policy = resizePolicyFor(el);
+  const behavior = policy.behavior[handle];
+  if (!behavior) {
+    return { left: start.left, top: start.top, width: start.width, height: start.height };
+  }
+  return resizeMemberByScale({
+    start,
+    handle,
+    behavior,
+    scaleX,
+    scaleY,
+    aspect: aspectRatioOf(el),
+    minMm: policy.minMm,
+    canvas,
+    naturalHeightMm: naturalHeightForWidth(el, start.width * scaleX, fontSize),
+  });
+}
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -521,41 +591,16 @@ export default function EditScreen() {
   primaryIdRef.current = primaryId;
   const dragStartPositionsRef = useRef<Map<string, { left: number; top: number }> | null>(null);
   const transformKindRef = useRef<TransformStartKind | null>(null);
-  const groupDragDeltaLeftSv = useSharedValue(0);
-  const groupDragDeltaTopSv = useSharedValue(0);
-  const groupDragAnchorIdSv = useSharedValue('');
-  const groupDragEligibleSv = useSharedValue(0);
-  const transformSettlePulseSv = useSharedValue(0);
-  const groupDragSettleAnchorIdSv = useSharedValue('');
-  const groupDragSettleDeltaLeftSv = useSharedValue(0);
-  const groupDragSettleDeltaTopSv = useSharedValue(0);
-  const groupDragCommitPendingRef = useRef<{
-    ids: string[];
-    expected: Map<string, { left: number; top: number }>;
-  } | null>(null);
+  const groupDeltaLeftSv = useSharedValue(0);
+  const groupDeltaTopSv = useSharedValue(0);
+  const groupAnchorIdSv = useSharedValue('');
+  const groupEligibleSv = useSharedValue(0);
   const resizeStartSnapshotsRef = useRef<Map<string, MmBox> | null>(null);
-  const groupResizeCommitPendingRef = useRef<{
-    ids: string[];
-    expected: Map<string, { left: number; top: number; width: number; height: number }>;
-  } | null>(null);
-  const groupResizeEligibleSv = useSharedValue(0);
-  const groupResizeReadySv = useSharedValue(0);
-  const groupResizeAnchorIdSv = useSharedValue('');
-  const groupResizeScaleXSv = useSharedValue(1);
-  const groupResizeScaleYSv = useSharedValue(1);
-  const groupResizeHandleSv = useSharedValue(0);
-  const groupResizeFixedOriginLeftSv = useSharedValue(0);
-  const groupResizeFixedOriginTopSv = useSharedValue(0);
-  const groupResizeMinScaleXSv = useSharedValue(0.001);
-  const groupResizeMaxScaleXSv = useSharedValue(1000);
-  const groupResizeMinScaleYSv = useSharedValue(0.001);
-  const groupResizeMaxScaleYSv = useSharedValue(1000);
-  const groupResizeSettleAnchorIdSv = useSharedValue('');
-  const groupResizeSettleScaleXSv = useSharedValue(1);
-  const groupResizeSettleScaleYSv = useSharedValue(1);
-  const groupResizeSettleHandleSv = useSharedValue(0);
-  const groupResizeSettleFixedOriginLeftSv = useSharedValue(0);
-  const groupResizeSettleFixedOriginTopSv = useSharedValue(0);
+  const groupScaleXSv = useSharedValue(1);
+  const groupScaleYSv = useSharedValue(1);
+  const groupHandleSv = useSharedValue(0);
+  const groupScaleMinSv = useSharedValue(0.001);
+  const groupScaleMaxSv = useSharedValue(1000);
   const activeSelectedIdSv = useSharedValue(primaryId ?? (params.selectedElementId ?? ''));
   const [panelOpen, setPanelOpen] = useState(() =>
     Boolean(params.autoOpenPanel === 'true' && params.selectedElementId)
@@ -644,9 +689,8 @@ export default function EditScreen() {
   }, [primaryId, selectedIds, activeSelectedIdSv]);
 
   useEffect(() => {
-    groupDragEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
-    groupResizeEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
-  }, [selectedIds.length, groupDragEligibleSv, groupResizeEligibleSv]);
+    groupEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
+  }, [selectedIds.length, groupEligibleSv]);
 
   const defaultToolbarAnimatedStyle = useAnimatedStyle(() => ({
     opacity: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
@@ -1411,11 +1455,20 @@ export default function EditScreen() {
   }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const toggleMultipleMode = useCallback(() => {
-    // Leaving Multiple mode drops the whole multi-selection rather than
-    // carrying it into single-select.
-    if (multipleMode) handleDeselectAll();
-    setMultipleMode((prev) => !prev);
-  }, [multipleMode, handleDeselectAll]);
+    const turningOn = !multipleMode;
+    const next = reduceMultipleModeToggle(turningOn, {
+      ids: selectedIdsRef.current,
+      primaryId: primaryIdRef.current,
+    });
+    if (!turningOn) {
+      topBarSelectionVisibleSv.value = 0;
+      bottomPanelVisibleSv.value = 0;
+      setPanelOpen(false);
+    }
+    setSelectedIds(next.ids);
+    setPrimaryId(next.primaryId);
+    setMultipleMode(turningOn);
+  }, [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const resetTabToRegularForElement = useCallback((type: ElementType) => {
     switch (type) {
@@ -1639,98 +1692,13 @@ export default function EditScreen() {
     rulerVisible,
   ]);
 
-  const clearGroupDragPreview = useCallback(() => {
-    groupDragAnchorIdSv.value = '';
-    groupDragDeltaLeftSv.value = 0;
-    groupDragDeltaTopSv.value = 0;
-  }, [groupDragAnchorIdSv, groupDragDeltaLeftSv, groupDragDeltaTopSv]);
-
-  const clearGroupResizePreview = useCallback(() => {
-    groupResizeAnchorIdSv.value = '';
-    groupResizeScaleXSv.value = 1;
-    groupResizeScaleYSv.value = 1;
-    groupResizeReadySv.value = 0;
-    resizeStartSnapshotsRef.current = null;
-  }, [
-    groupResizeAnchorIdSv,
-    groupResizeScaleXSv,
-    groupResizeScaleYSv,
-    groupResizeReadySv,
-  ]);
-
-  const trySettleTransformCommit = useCallback(() => {
-    const elements = docRef.current.elements;
-    const dragPending = groupDragCommitPendingRef.current;
-    const resizePending = groupResizeCommitPendingRef.current;
-
-    if (dragPending) {
-      const allMatch = dragPending.ids.every((id) => {
-        const el = elements.find((e) => e.id === id);
-        const exp = dragPending.expected.get(id);
-        if (!el || !exp) return false;
-        return Math.abs(el.left - exp.left) < 0.005 && Math.abs(el.top - exp.top) < 0.005;
-      });
-      if (!allMatch) {
-        return;
-      }
-      groupDragCommitPendingRef.current = null;
-      groupDragSettleAnchorIdSv.value = groupDragAnchorIdSv.value;
-      groupDragSettleDeltaLeftSv.value = groupDragDeltaLeftSv.value;
-      groupDragSettleDeltaTopSv.value = groupDragDeltaTopSv.value;
-      transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
-      return;
-    }
-
-    if (resizePending) {
-      const allMatch = resizePending.ids.every((id) => {
-        const el = elements.find((e) => e.id === id);
-        const exp = resizePending.expected.get(id);
-        if (!el || !exp) return false;
-        const size = elementSizeMm(el);
-        return (
-          Math.abs(el.left - exp.left) < 0.005 &&
-          Math.abs(el.top - exp.top) < 0.005 &&
-          Math.abs(size.width - exp.width) < 0.005 &&
-          Math.abs(size.height - exp.height) < 0.005
-        );
-      });
-      if (!allMatch) {
-        return;
-      }
-      groupResizeCommitPendingRef.current = null;
-      groupResizeSettleAnchorIdSv.value = groupResizeAnchorIdSv.value;
-      groupResizeSettleScaleXSv.value = groupResizeScaleXSv.value;
-      groupResizeSettleScaleYSv.value = groupResizeScaleYSv.value;
-      groupResizeSettleHandleSv.value = groupResizeHandleSv.value;
-      groupResizeSettleFixedOriginLeftSv.value = groupResizeFixedOriginLeftSv.value;
-      groupResizeSettleFixedOriginTopSv.value = groupResizeFixedOriginTopSv.value;
-      transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
-    }
-  }, [
-    groupDragAnchorIdSv,
-    groupDragDeltaLeftSv,
-    groupDragDeltaTopSv,
-    groupDragSettleAnchorIdSv,
-    groupDragSettleDeltaLeftSv,
-    groupDragSettleDeltaTopSv,
-    groupResizeAnchorIdSv,
-    groupResizeScaleXSv,
-    groupResizeScaleYSv,
-    groupResizeHandleSv,
-    groupResizeFixedOriginLeftSv,
-    groupResizeFixedOriginTopSv,
-    groupResizeSettleAnchorIdSv,
-    groupResizeSettleScaleXSv,
-    groupResizeSettleScaleYSv,
-    groupResizeSettleHandleSv,
-    groupResizeSettleFixedOriginLeftSv,
-    groupResizeSettleFixedOriginTopSv,
-    transformSettlePulseSv,
-  ]);
-
-  useLayoutEffect(() => {
-    trySettleTransformCommit();
-  }, [doc.elements, trySettleTransformCommit]);
+  const clearGroupPreview = useCallback(() => {
+    groupAnchorIdSv.value = '';
+    groupDeltaLeftSv.value = 0;
+    groupDeltaTopSv.value = 0;
+    groupScaleXSv.value = 1;
+    groupScaleYSv.value = 1;
+  }, [groupAnchorIdSv, groupDeltaLeftSv, groupDeltaTopSv, groupScaleXSv, groupScaleYSv]);
 
   const handleTransformStart = useCallback(
     (id: string, kind: TransformStartKind) => {
@@ -1744,82 +1712,69 @@ export default function EditScreen() {
       }
 
       const ids = selectedIdsRef.current.includes(id) ? selectedIdsRef.current : [id];
-      if (kind === 'move' && ids.length > 1 && ids.includes(id)) {
-        const map = new Map<string, { left: number; top: number }>();
-        for (const el of docRef.current.elements) {
-          if (ids.includes(el.id)) {
-            map.set(el.id, { left: el.left, top: el.top });
-          }
+      const map = new Map<string, MmBox>();
+      for (const el of docRef.current.elements) {
+        if (ids.includes(el.id)) {
+          const box = boxOfElement(el);
+          map.set(el.id, box);
+          logMultiTransformBox('start', el.id, box);
         }
-        dragStartPositionsRef.current = map;
+      }
+
+      if (kind === 'move' && ids.length > 1 && ids.includes(id)) {
+        const positions = new Map<string, { left: number; top: number }>();
+        for (const [memberId, box] of map) {
+          positions.set(memberId, { left: box.left, top: box.top });
+        }
+        dragStartPositionsRef.current = positions;
         resizeStartSnapshotsRef.current = null;
-        groupResizeReadySv.value = 0;
       } else if (kind === 'resize' && ids.length > 1 && ids.includes(id)) {
         dragStartPositionsRef.current = null;
-        const docSnapshot = docRef.current;
-        if (selectionHasBlockedRotation(docSnapshot.elements, ids)) {
-          resizeStartSnapshotsRef.current = null;
-          groupResizeReadySv.value = 0;
-        } else {
-          const snapshots = buildGroupResizeSnapshots(docSnapshot.elements, ids);
-          if (snapshots.size > 1) {
-            resizeStartSnapshotsRef.current = snapshots;
-            const { fixedOrigin } = groupResizeFrameFromSnapshots(docSnapshot.elements, snapshots);
-            groupResizeFixedOriginLeftSv.value = fixedOrigin.left;
-            groupResizeFixedOriginTopSv.value = fixedOrigin.top;
-            groupResizeReadySv.value = 1;
-          } else {
-            resizeStartSnapshotsRef.current = null;
-            groupResizeReadySv.value = 0;
-          }
-        }
+        resizeStartSnapshotsRef.current = map.size > 1 ? map : null;
       } else {
         dragStartPositionsRef.current = null;
         resizeStartSnapshotsRef.current = null;
-        groupResizeReadySv.value = 0;
       }
     },
-    [
-      publishSnapGuides,
-      handleSelect,
-      groupResizeReadySv,
-      groupResizeFixedOriginLeftSv,
-      groupResizeFixedOriginTopSv,
-    ],
+    [publishSnapGuides, handleSelect],
   );
 
   const prepareGroupResizeHandle = useCallback(
     (handle: 'e' | 's') => {
       const snapshots = resizeStartSnapshotsRef.current;
       const ids = selectedIdsRef.current;
-      if (!snapshots || ids.length < 2) return;
+      if (ids.length < 2) return;
       const docSnapshot = docRef.current;
-      const { fixedOrigin } = groupResizeFrameFromSnapshots(docSnapshot.elements, snapshots);
-      groupResizeFixedOriginLeftSv.value = fixedOrigin.left;
-      groupResizeFixedOriginTopSv.value = fixedOrigin.top;
-      groupResizeHandleSv.value = handle === 'e' ? 0 : 1;
-      const limits = getGroupResizeScaleLimits({
-        elements: docSnapshot.elements,
-        snapshots,
-        selectedIds: ids,
-        handle,
-        fixedOrigin,
-        canvas: { widthMm: docSnapshot.widthMm, heightMm: docSnapshot.heightMm },
-      });
-      groupResizeMinScaleXSv.value = limits.minScaleX;
-      groupResizeMaxScaleXSv.value = limits.maxScaleX;
-      groupResizeMinScaleYSv.value = limits.minScaleY;
-      groupResizeMaxScaleYSv.value = limits.maxScaleY;
+      const canvas = { widthMm: docSnapshot.widthMm, heightMm: docSnapshot.heightMm };
+      const resolved = snapshots ?? new Map<string, MmBox>();
+      if (!snapshots) {
+        for (const el of docSnapshot.elements) {
+          if (ids.includes(el.id)) resolved.set(el.id, boxOfElement(el));
+        }
+        resizeStartSnapshotsRef.current = resolved;
+      }
+      const members: ScaleCapMember[] = [];
+      for (const memberId of ids) {
+        const el = docSnapshot.elements.find((item) => item.id === memberId);
+        const start = resolved.get(memberId);
+        if (!el || !start) continue;
+        const policy = resizePolicyFor(el);
+        const behavior = policy.behavior[handle];
+        if (!behavior) continue;
+        members.push({
+          start,
+          minMm: policy.minMm,
+          behavior,
+          aspect: aspectRatioOf(el),
+        });
+      }
+      if (members.length === 0) return;
+      const limits = sharedScaleLimits({ members, handle, canvas });
+      groupHandleSv.value = handle === 's' ? 1 : 0;
+      groupScaleMinSv.value = limits.minScale;
+      groupScaleMaxSv.value = limits.maxScale;
     },
-    [
-      groupResizeFixedOriginLeftSv,
-      groupResizeFixedOriginTopSv,
-      groupResizeHandleSv,
-      groupResizeMinScaleXSv,
-      groupResizeMaxScaleXSv,
-      groupResizeMinScaleYSv,
-      groupResizeMaxScaleYSv,
-    ],
+    [groupHandleSv, groupScaleMinSv, groupScaleMaxSv],
   );
 
   const snapMoveMm = useCallback(
@@ -1847,255 +1802,155 @@ export default function EditScreen() {
       const startPositions = dragStartPositionsRef.current;
       dragStartPositionsRef.current = null;
       const resizeSnapshots = resizeStartSnapshotsRef.current;
+      resizeStartSnapshotsRef.current = null;
       const kind = transformKindRef.current;
       transformKindRef.current = null;
       const ids = selectedIdsRef.current;
-      const dragged = docRef.current.elements.find((el) => el.id === payload.id);
-      const isGroupResizeCandidate =
+      const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
+
+      const patchBox = (
+        el: LabelElement,
+        box: MmBox,
+        rotation: number,
+        fontSize?: number,
+      ): LabelElement => {
+        const next: LabelElement = {
+          ...el,
+          left: box.left,
+          top: box.top,
+          width: box.width,
+          rotation,
+        };
+        if (fontSize !== undefined && 'fontSize' in next) {
+          (next as { fontSize: number }).fontSize = fontSize;
+        }
+        if (
+          el.type === 'text' ||
+          el.type === 'degrees' ||
+          el.type === 'time' ||
+          typeof (el as { height?: number }).height === 'number'
+        ) {
+          (next as { height: number }).height = box.height;
+        }
+        return next;
+      };
+
+      const isGroupResize =
         kind === 'resize' &&
         ids.length > 1 &&
         ids.includes(payload.id) &&
         resizeSnapshots &&
-        resizeSnapshots.size > 1 &&
-        dragged;
+        resizeSnapshots.size > 1;
 
-      if (isGroupResizeCandidate) {
-        const handle: 'e' | 's' = groupResizeHandleSv.value === 1 ? 's' : 'e';
-        const fixedOrigin = {
-          left: groupResizeFixedOriginLeftSv.value,
-          top: groupResizeFixedOriginTopSv.value,
-        };
-        const scaleX = groupResizeScaleXSv.value;
-        const scaleY = groupResizeScaleYSv.value;
-        const docSnapshot = docRef.current;
-        const result = applyGroupResize({
-          elements: docSnapshot.elements,
-          selectedIds: ids,
-          snapshots: resizeSnapshots,
-          handle,
-          fixedOrigin,
-          scaleX,
-          scaleY,
-          canvas: { widthMm: docSnapshot.widthMm, heightMm: docSnapshot.heightMm },
-        });
-        resizeStartSnapshotsRef.current = null;
-        if (result.ok) {
-          const expected = new Map<string, { left: number; top: number; width: number; height: number }>();
-          const committedIds: string[] = [];
-          setElements(
-            (elements) =>
-              elements.map((el) => {
-                if (!ids.includes(el.id)) return el;
-
-                const isAnchor = el.id === payload.id;
-                const patch = isAnchor
-                  ? {
-                      left: clean.leftMm,
-                      top: clean.topMm,
-                      width: clean.widthMm,
-                      height: clean.heightMm,
-                    }
-                  : result.patches.get(el.id);
-                if (!patch) return el;
-
-                let targetHeight = patch.height;
-                const fs =
-                  clean.fontSize ??
-                  ('fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : undefined);
-                if (el.type === 'text' || el.type === 'degrees') {
-                  const rawText =
-                    el.contentType === 'Data Source' && el.columnNameContent
-                      ? `{${el.columnNameContent}}`
-                      : 'text' in el
-                        ? el.text
-                        : el.content;
-                  targetHeight = computeTextElementHeightMm({
-                    text: rawText,
-                    fontSize: fs ?? 12,
-                    widthMm: patch.width,
-                    autoWrapping: el.autoWrapping ?? 'Word',
-                    lineSpacing: el.lineSpacing ?? '1.0',
-                    charSpacing: el.charSpacing ?? 0,
-                    bold: el.bold ?? false,
-                    verticalDisplay: el.verticalDisplay ?? false,
-                  });
-                } else if (el.type === 'time') {
-                  targetHeight = textBlockHeightMm(fs ?? 12, 1);
-                }
-
-                const next: LabelElement = {
-                  ...el,
-                  left: patch.left,
-                  top: patch.top,
-                  width: patch.width,
-                  rotation: clean.rotation,
-                };
-                if (fs !== undefined && 'fontSize' in next) {
-                  (next as { fontSize: number }).fontSize = fs;
-                }
-                if (
-                  el.type === 'text' ||
-                  el.type === 'degrees' ||
-                  el.type === 'time' ||
-                  typeof (el as { height?: number }).height === 'number'
-                ) {
-                  (next as { height: number }).height = targetHeight;
-                }
-                const committed = clampElementToLabel(next, docSnapshot);
-                expected.set(el.id, {
-                  left: committed.left,
-                  top: committed.top,
-                  width: committed.width,
-                  height: elementSizeMm(committed).height,
-                });
-                committedIds.push(el.id);
-                return committed;
-              }),
-            recordHistory,
-          );
-          groupResizeCommitPendingRef.current = { ids: committedIds, expected };
-          return;
-        }
+      if (isGroupResize) {
+        const handle: 'e' | 's' = groupHandleSv.value === 1 ? 's' : 'e';
+        const scaleX = groupScaleXSv.value;
+        const scaleY = groupScaleYSv.value;
+        setElements(
+          (elements) =>
+            elements.map((el) => {
+              if (!ids.includes(el.id)) return el;
+              const start = resizeSnapshots.get(el.id);
+              if (!start) return el;
+              const live = resizeElementByScale(el, start, handle, scaleX, scaleY, canvas, clean.fontSize);
+              logMultiTransformBox('live', el.id, live);
+              logMultiTransformBox('commit', el.id, live);
+              return patchBox(el, live, clean.rotation, clean.fontSize);
+            }),
+          recordHistory,
+        );
+        clearGroupPreview();
+        return;
       }
 
-      const isGroupMoveCandidate =
+      const isGroupMove =
         kind === 'move' &&
         ids.length > 1 &&
         ids.includes(payload.id) &&
-        startPositions &&
-        dragged;
+        startPositions;
 
-      if (isGroupMoveCandidate) {
-        const start = startPositions.get(payload.id);
-        if (start) {
-          const prevSize = elementSizeMm(dragged);
-          const resized =
-            Math.abs(prevSize.width - clean.widthMm) > 0.04 ||
-            Math.abs(prevSize.height - clean.heightMm) > 0.04;
-          const deltaLeft = groupDragDeltaLeftSv.value;
-          const deltaTop = groupDragDeltaTopSv.value;
-          if (
-            !resized &&
-            (Math.abs(deltaLeft) > 0.005 || Math.abs(deltaTop) > 0.005)
-          ) {
-            const expected = new Map<string, { left: number; top: number }>();
-            const committedIds: string[] = [];
-            const docSnapshot = docRef.current;
-            setElements(
-              (elements) =>
-                elements.map((el) => {
-                  if (!ids.includes(el.id) || el.lockMovement || el.type === 'border') {
-                    return el;
-                  }
-                  const orig = startPositions.get(el.id);
-                  if (!orig) return el;
-                  const left = orig.left + deltaLeft;
-                  const top = orig.top + deltaTop;
-                  const clamped = clampElementToLabel({ ...el, left, top }, docSnapshot);
-                  expected.set(el.id, { left: clamped.left, top: clamped.top });
-                  committedIds.push(el.id);
-                  return clamped;
-                }),
-              recordHistory,
-            );
-            groupDragCommitPendingRef.current = { ids: committedIds, expected };
-            return;
-          }
-        }
+      if (isGroupMove) {
+        const deltaLeft = groupDeltaLeftSv.value;
+        const deltaTop = groupDeltaTopSv.value;
+        setElements(
+          (elements) =>
+            elements.map((el) => {
+              if (!ids.includes(el.id) || el.lockMovement || el.type === 'border') {
+                return el;
+              }
+              const orig = startPositions.get(el.id);
+              if (!orig) return el;
+              const size = elementSizeMm(el);
+              const live = {
+                left: orig.left + deltaLeft,
+                top: orig.top + deltaTop,
+                width: size.width,
+                height: size.height,
+              };
+              logMultiTransformBox('live', el.id, live);
+              logMultiTransformBox('commit', el.id, live);
+              return { ...el, left: live.left, top: live.top };
+            }),
+          recordHistory,
+        );
+        clearGroupPreview();
+        return;
       }
 
-      let moveCommitExpected: { left: number; top: number } | null = null;
       setElements(
         (elements) =>
           elements.map((el) => {
             if (el.id !== payload.id) return el;
-            const prevSize = elementSizeMm(el);
-            const resized =
-              Math.abs(prevSize.width - clean.widthMm) > 0.04 ||
-              Math.abs(prevSize.height - clean.heightMm) > 0.04;
-            let targetHeight = clean.heightMm;
             const fs = clean.fontSize ?? ('fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : undefined);
-
-            if (el.type === 'text' || el.type === 'degrees') {
-              const rawText =
-                el.contentType === 'Data Source' && el.columnNameContent
-                  ? `{${el.columnNameContent}}`
-                  : 'text' in el
-                    ? el.text
-                    : el.content;
-              const effectiveFs = fs ?? 12;
-              targetHeight = computeTextElementHeightMm({
-                text: rawText,
-                fontSize: effectiveFs,
-                widthMm: clean.widthMm,
-                autoWrapping: el.autoWrapping ?? 'Word',
-                lineSpacing: el.lineSpacing ?? '1.0',
-                charSpacing: el.charSpacing ?? 0,
-                bold: el.bold ?? false,
-                verticalDisplay: el.verticalDisplay ?? false,
-              });
-            } else if (el.type === 'time') {
-              const effectiveFs = fs ?? 12;
-              targetHeight = textBlockHeightMm(effectiveFs, 1);
+            let targetHeight = clean.heightMm;
+            const naturalH = naturalHeightForWidth(el, clean.widthMm, fs);
+            if (naturalH !== undefined) {
+              targetHeight = naturalH;
             }
-
+            if (kind === 'resize') {
+              return patchBox(
+                el,
+                {
+                  left: clean.leftMm,
+                  top: clean.topMm,
+                  width: clean.widthMm,
+                  height: targetHeight,
+                },
+                clean.rotation,
+                fs,
+              );
+            }
             const clamped = clampToLabelBounds(
               { left: clean.leftMm, top: clean.topMm, width: clean.widthMm, height: targetHeight },
-              { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm },
+              canvas,
               { anchor: 'body', naturalHeight: targetHeight },
             );
-
-            const next: LabelElement = {
-              ...el,
-              left: clamped.left,
-              top: clamped.top,
-              width: clamped.width,
-              rotation: clean.rotation,
-            };
-            if (fs !== undefined && 'fontSize' in next) {
-              (next as { fontSize: number }).fontSize = fs;
-            }
-            if (
-              el.type === 'text' ||
-              el.type === 'degrees' ||
-              el.type === 'time' ||
-              resized ||
-              typeof (el as { height?: number }).height === 'number'
-            ) {
-              (next as { height: number }).height = clamped.height;
-            }
-            const committed = clampElementToLabel(next, docRef.current);
-            if (kind === 'move') {
-              moveCommitExpected = { left: committed.left, top: committed.top };
-            }
-            return committed;
+            return patchBox(
+              el,
+              {
+                left: clamped.left,
+                top: clamped.top,
+                width: clamped.width,
+                height: clamped.height,
+              },
+              clean.rotation,
+              fs,
+            );
           }),
         recordHistory,
       );
-      if (kind === 'move' && moveCommitExpected) {
-        groupDragCommitPendingRef.current = {
-          ids: [payload.id],
-          expected: new Map([[payload.id, moveCommitExpected]]),
-        };
-      } else if (kind === 'resize') {
-        clearGroupResizePreview();
-      } else {
-        clearGroupDragPreview();
-      }
+      clearGroupPreview();
     },
     [
       setElements,
       bumpHistory,
       publishSnapGuides,
-      clearGroupDragPreview,
-      clearGroupResizePreview,
-      groupDragDeltaLeftSv,
-      groupDragDeltaTopSv,
-      groupResizeHandleSv,
-      groupResizeFixedOriginLeftSv,
-      groupResizeFixedOriginTopSv,
-      groupResizeScaleXSv,
-      groupResizeScaleYSv,
+      clearGroupPreview,
+      groupDeltaLeftSv,
+      groupDeltaTopSv,
+      groupHandleSv,
+      groupScaleXSv,
+      groupScaleYSv,
     ],
   );
 
@@ -2987,32 +2842,16 @@ export default function EditScreen() {
                     activeSelectedIdSv={activeSelectedIdSv}
                     topBarSelectionVisibleSv={topBarSelectionVisibleSv}
                     bottomPanelVisibleSv={bottomPanelVisibleSv}
-                    groupDragDeltaLeftMm={groupDragDeltaLeftSv}
-                    groupDragDeltaTopMm={groupDragDeltaTopSv}
-                    groupDragAnchorIdSv={groupDragAnchorIdSv}
-                    groupDragEligibleSv={groupDragEligibleSv}
-                    transformSettlePulseSv={transformSettlePulseSv}
-                    groupDragSettleAnchorIdSv={groupDragSettleAnchorIdSv}
-                    groupDragSettleDeltaLeftSv={groupDragSettleDeltaLeftSv}
-                    groupDragSettleDeltaTopSv={groupDragSettleDeltaTopSv}
-                    groupResizeEligibleSv={groupResizeEligibleSv}
-                    groupResizeReadySv={groupResizeReadySv}
-                    groupResizeAnchorIdSv={groupResizeAnchorIdSv}
-                    groupResizeScaleXSv={groupResizeScaleXSv}
-                    groupResizeScaleYSv={groupResizeScaleYSv}
-                    groupResizeHandleSv={groupResizeHandleSv}
-                    groupResizeFixedOriginLeftMm={groupResizeFixedOriginLeftSv}
-                    groupResizeFixedOriginTopMm={groupResizeFixedOriginTopSv}
-                    groupResizeMinScaleXSv={groupResizeMinScaleXSv}
-                    groupResizeMaxScaleXSv={groupResizeMaxScaleXSv}
-                    groupResizeMinScaleYSv={groupResizeMinScaleYSv}
-                    groupResizeMaxScaleYSv={groupResizeMaxScaleYSv}
-                    groupResizeSettleAnchorIdSv={groupResizeSettleAnchorIdSv}
-                    groupResizeSettleScaleXSv={groupResizeSettleScaleXSv}
-                    groupResizeSettleScaleYSv={groupResizeSettleScaleYSv}
-                    groupResizeSettleHandleSv={groupResizeSettleHandleSv}
-                    groupResizeSettleFixedOriginLeftMm={groupResizeSettleFixedOriginLeftSv}
-                    groupResizeSettleFixedOriginTopMm={groupResizeSettleFixedOriginTopSv}
+                    multipleMode={multipleMode}
+                    groupEligibleSv={groupEligibleSv}
+                    groupAnchorIdSv={groupAnchorIdSv}
+                    groupDeltaLeftMm={groupDeltaLeftSv}
+                    groupDeltaTopMm={groupDeltaTopSv}
+                    groupScaleXSv={groupScaleXSv}
+                    groupScaleYSv={groupScaleYSv}
+                    groupHandleSv={groupHandleSv}
+                    groupScaleMinSv={groupScaleMinSv}
+                    groupScaleMaxSv={groupScaleMaxSv}
                     onGroupResizeHandleBegin={prepareGroupResizeHandle}
                     onSelect={handleSelect}
                     onDeselectAll={handleDeselectAll}
