@@ -34,6 +34,7 @@ const ION: Record<string, IoniconsName> = {
   'barcode.viewfinder': 'barcode-outline',
   character: 'text-outline',
   checkmark: 'checkmark',
+  'checkmark.shield.fill': 'shield-checkmark',
   'checkmark.square': 'checkbox-outline',
   'chevron.left': 'chevron-back',
   'chevron.right': 'chevron-forward',

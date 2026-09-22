@@ -12,6 +12,7 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   type SharedValue,
 } from 'react-native-reanimated';
 import Svg, { Path as SvgPath, Line as SvgLine } from 'react-native-svg';
@@ -23,6 +24,7 @@ import { computeTextElementHeightMm } from '@/lib/text-metrics';
 import { clampToLabelBounds, fitFontSizeToLabel } from '@/lib/editor/label-bounds';
 import { DIVIDER_HIT_SIZE_PX } from '@/lib/editor/canvas-split';
 import { finiteMm, roundMm } from '@/lib/editor/engine';
+import { fullyInsideLabelMm } from '@/lib/editor/safe-mode';
 import { mmToPx, pxToMm } from '@/lib/label-coordinate-system';
 import { grabOffsetMm } from '@/lib/editor/view-transform';
 import { createFrameThrottled } from '@/lib/editor/drag-layer';
@@ -112,6 +114,8 @@ export type KonvaTransformerProps = {
   groupResizeSettleFixedOriginLeftMm?: SharedValue<number>;
   groupResizeSettleFixedOriginTopMm?: SharedValue<number>;
   onGroupResizeHandleBegin?: (handle: 'e' | 's') => void;
+  /** 1 when Safe Mode is on — drags may leave the label, then spring back on release. */
+  safeModeSv?: SharedValue<number>;
   onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
@@ -137,6 +141,9 @@ const TOOLTIP_MS = 80;
 
 /** Standard double-tap window. Wider gaps are two unrelated taps, not a double tap. */
 const DOUBLE_TAP_MAX_GAP_MS = 300;
+/** Soft overshoot so a Safe Mode release outside the label settles back inside. */
+const SAFE_MODE_SPRING = { damping: 12, stiffness: 180, mass: 0.6 };
+
 /** Below this the two reports are one physical tap double-counted. */
 const DOUBLE_TAP_MIN_GAP_MS = 30;
 /** Both taps must land on roughly the same spot, not opposite ends of a wide element. */
@@ -200,6 +207,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   onQuickRotate,
   pointerToMm,
   snapMoveMm,
+  safeModeSv,
 }: KonvaTransformerProps) {
   const pxPerMMSafe = pxPerMM > 0 && Number.isFinite(pxPerMM) ? pxPerMM : 1;
   const sx = pxPerMMSafe;
@@ -1167,23 +1175,26 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         const curWMm = animW.value / sxSv.value;
         const curHMm = animH.value / sySv.value;
 
-        const clamped = clampToLabelBounds(
-          { left: curLeftMm, top: curTopMm, width: curWMm, height: curHMm },
-          { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
-          { anchor: 'body' },
-        );
+        const placed =
+          safeModeSv && safeModeSv.value > 0.5
+            ? { left: curLeftMm, top: curTopMm, width: curWMm, height: curHMm }
+            : clampToLabelBounds(
+                { left: curLeftMm, top: curTopMm, width: curWMm, height: curHMm },
+                { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
+                { anchor: 'body' },
+              );
 
-        const targetLeftPx = clamped.left * sxSv.value;
-        const targetTopPx = clamped.top * sySv.value;
+        const targetLeftPx = placed.left * sxSv.value;
+        const targetTopPx = placed.top * sySv.value;
 
         transX.value = targetLeftPx - originLeftSv.value;
         transY.value = targetTopPx - originTopSv.value;
 
         if (liveBounds) {
-          liveBounds.leftMm.value = clamped.left;
-          liveBounds.topMm.value = clamped.top;
-          liveBounds.widthMm.value = clamped.width;
-          liveBounds.heightMm.value = clamped.height;
+          liveBounds.leftMm.value = placed.left;
+          liveBounds.topMm.value = placed.top;
+          liveBounds.widthMm.value = placed.width;
+          liveBounds.heightMm.value = placed.height;
           liveBounds.visible.value = true;
         }
 
@@ -1193,8 +1204,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           groupDragDeltaLeftMm &&
           groupDragDeltaTopMm
         ) {
-          groupDragDeltaLeftMm.value = clamped.left - anchorStartLeftMmSv.value;
-          groupDragDeltaTopMm.value = clamped.top - anchorStartTopMmSv.value;
+          groupDragDeltaLeftMm.value = placed.left - anchorStartLeftMmSv.value;
+          groupDragDeltaTopMm.value = placed.top - anchorStartTopMmSv.value;
         }
       })
       .onEnd((e) => {
@@ -1251,11 +1262,54 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           originTopSv.value = originTopSv.value + transY.value;
           transX.value = 0;
           transY.value = 0;
+
+          let commitLeftPx = originLeftSv.value;
+          let commitTopPx = originTopSv.value;
+          if (safeModeSv && safeModeSv.value > 0.5) {
+            const leftMm = originLeftSv.value / sxSv.value;
+            const topMm = originTopSv.value / sySv.value;
+            const inside = fullyInsideLabelMm(
+              leftMm,
+              topMm,
+              animW.value / sxSv.value,
+              animH.value / sySv.value,
+              canvasWMmSv.value,
+              canvasHMmSv.value,
+            );
+            commitLeftPx = inside.left * sxSv.value;
+            commitTopPx = inside.top * sySv.value;
+            const bounce =
+              Math.abs(commitLeftPx - originLeftSv.value) > 0.5 ||
+              Math.abs(commitTopPx - originTopSv.value) > 0.5;
+            if (
+              groupDragAnchorIdSv &&
+              groupDragAnchorIdSv.value === element.id &&
+              groupDragDeltaLeftMm &&
+              groupDragDeltaTopMm
+            ) {
+              groupDragDeltaLeftMm.value = inside.left - anchorStartLeftMmSv.value;
+              groupDragDeltaTopMm.value = inside.top - anchorStartTopMmSv.value;
+            }
+            if (liveBounds && bounce) {
+              liveBounds.leftMm.value = withSpring(inside.left, SAFE_MODE_SPRING);
+              liveBounds.topMm.value = withSpring(inside.top, SAFE_MODE_SPRING);
+            }
+            if (bounce) {
+              originLeftSv.value = withSpring(commitLeftPx, SAFE_MODE_SPRING);
+              originTopSv.value = withSpring(commitTopPx, SAFE_MODE_SPRING, (finished) => {
+                if (finished) {
+                  runOnJS(commitDragFromPointer)(0, 0, commitLeftPx, commitTopPx);
+                }
+              });
+              return;
+            }
+          }
+
           runOnJS(commitDragFromPointer)(
             e.absoluteX,
             e.absoluteY,
-            originLeftSv.value,
-            originTopSv.value,
+            commitLeftPx,
+            commitTopPx,
           );
         }
       })
@@ -1352,6 +1406,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     anchorStartTopMmSv,
     triggerDoubleTapJS,
     triggerSingleTapJS,
+    safeModeSv,
   ]);
 
   const doubleTapGesture = useMemo(() => {

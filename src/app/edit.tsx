@@ -40,10 +40,13 @@ import {
   fitShapeDefaults,
   fitTableDefaults,
   fitTextDefaults,
+  fitNewTextDefaults,
   fitTimeDefaults,
+  NEW_TEXT_PLACEHOLDER,
   normalizeDocumentElements,
   scaleDocumentToSize,
 } from '@/lib/element-sizing';
+import { labelElementsOverlap } from '@/lib/editor/safe-mode';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
 import { GridSpacingPopover } from '@/components/editor/grid-spacing-popover';
 import { requestEditorGridToggle } from '@/lib/editor/editor-grid-toggle';
@@ -388,7 +391,9 @@ function paletteDefaultSizeMm(
       const fit =
         type === 'time'
           ? fitTimeDefaults(canvas.widthMm, canvas.heightMm, elements)
-          : fitTextDefaults(canvas.widthMm, canvas.heightMm, elements);
+          : type === 'text'
+            ? fitNewTextDefaults(canvas.widthMm, canvas.heightMm, elements)
+            : fitTextDefaults(canvas.widthMm, canvas.heightMm, elements);
       return { widthMm: fit.width, heightMm: textBlockHeightMm(fit.fontSize, 1) };
     }
   }
@@ -528,6 +533,7 @@ export default function EditScreen() {
   const groupDragAnchorIdSv = useSharedValue('');
   const groupDragEligibleSv = useSharedValue(0);
   const transformSettlePulseSv = useSharedValue(0);
+  const safeModeSv = useSharedValue(editorSettings.safeMode ? 1 : 0);
   const groupDragSettleAnchorIdSv = useSharedValue('');
   const groupDragSettleDeltaLeftSv = useSharedValue(0);
   const groupDragSettleDeltaTopSv = useSharedValue(0);
@@ -635,6 +641,10 @@ export default function EditScreen() {
   useEffect(() => {
     topBarSelectionVisibleSv.value = selectedIds.length > 0 ? 1 : 0;
   }, [selectedIds.length, topBarSelectionVisibleSv]);
+
+  useEffect(() => {
+    safeModeSv.value = editorSettings.safeMode ? 1 : 0;
+  }, [editorSettings.safeMode, safeModeSv]);
 
   useEffect(() => {
     bottomPanelVisibleSv.value = panelOpen && selectedIds.length > 0 ? 1 : 0;
@@ -996,6 +1006,10 @@ export default function EditScreen() {
     () => doc.elements.filter((el) => selectedIds.includes(el.id)),
     [doc.elements, selectedIds],
   );
+  const elementsOverlap = useMemo(
+    () => Boolean(editorSettings.safeMode) && labelElementsOverlap(doc.elements),
+    [editorSettings.safeMode, doc.elements],
+  );
   const isMultiSelect = selectedIds.length > 1;
 
   const docRef = useRef(doc);
@@ -1143,12 +1157,12 @@ export default function EditScreen() {
       let element: LabelElement;
       switch (type) {
         case 'text': {
-          const fit = fitTextDefaults(maxW, maxH, elements);
+          const fit = fitNewTextDefaults(maxW, maxH, elements);
           element = {
             ...DEFAULT_ELEMENT_STATE,
             ...base,
             type: 'text',
-            text: 'Text',
+            text: NEW_TEXT_PLACEHOLDER,
             left: fit.left,
             top: fit.top,
             width: fit.width,
@@ -3026,6 +3040,7 @@ export default function EditScreen() {
                     groupResizeSettleAnchorIdSv={groupResizeSettleAnchorIdSv}
                     groupResizeSettleScaleXSv={groupResizeSettleScaleXSv}
                     groupResizeSettleScaleYSv={groupResizeSettleScaleYSv}
+                    safeModeSv={safeModeSv}
                     groupResizeSettleHandleSv={groupResizeSettleHandleSv}
                     groupResizeSettleFixedOriginLeftMm={groupResizeSettleFixedOriginLeftSv}
                     groupResizeSettleFixedOriginTopMm={groupResizeSettleFixedOriginTopSv}
@@ -3045,6 +3060,16 @@ export default function EditScreen() {
                   />
                 </View>
               </View>
+              {elementsOverlap ? (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.overlapBanner,
+                    { top: RULER_SIZE + 6, left: RULER_SIZE + 8 },
+                  ]}>
+                  <Text style={styles.overlapBannerText}>Elements overlap</Text>
+                </View>
+              ) : null}
             </Animated.View>
           </View>
         </View>
@@ -3286,6 +3311,23 @@ export default function EditScreen() {
                 </Text>
               </Pressable>
             ) : null}
+
+            <Pressable
+              onPress={() => patchEditor({ safeMode: !editorSettings.safeMode })}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={editorSettings.safeMode ? 'Safe mode' : 'Free mode'}
+              style={({ pressed }) => [
+                styles.splitMaxBtn,
+                editorSettings.safeMode && styles.canvasChromeBtnActive,
+                pressed && styles.pressed,
+              ]}>
+              <AppIcon
+                name={editorSettings.safeMode ? 'checkmark.shield.fill' : 'lock.open'}
+                tintColor={editorSettings.safeMode ? Palette.accent : Palette.muted}
+                size={18}
+              />
+            </Pressable>
 
             <Pressable
               onPress={toggleEditorGrid}
@@ -3741,6 +3783,21 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     width: '100%',
+  },
+  overlapBanner: {
+    position: 'absolute',
+    right: 8,
+    zIndex: 40,
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  overlapBannerText: {
+    color: '#92400E',
+    fontSize: 12,
+    fontWeight: '600',
   },
   header: {
     width: '100%',

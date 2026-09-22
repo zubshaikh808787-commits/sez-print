@@ -98,6 +98,8 @@ function placeInLabel(
   };
 }
 
+export const NEW_TEXT_PLACEHOLDER = 'Double tap to add text';
+
 export function fitTextDefaults(widthMm: number, heightMm: number, existing: LabelElement[] = []) {
   const fonts = existingTextFonts(existing);
   const minPt = Math.min(widthMm, heightMm) < 18 ? 4 : 6;
@@ -109,6 +111,16 @@ export function fitTextDefaults(widthMm: number, heightMm: number, existing: Lab
   const boxW = Math.max(4, Math.min(fitTextWidth(widthMm), widthMm * 0.88));
   const placed = placeInLabel(widthMm, heightMm, boxW, boxH, existing);
   return { left: placed.left, top: placed.top, width: placed.width, fontSize };
+}
+
+/** New text box hugs the placeholder line instead of spanning most of the label. */
+export function fitNewTextDefaults(widthMm: number, heightMm: number, existing: LabelElement[] = []) {
+  const base = fitTextDefaults(widthMm, heightMm, existing);
+  const measured = measureTextWidthMm(NEW_TEXT_PLACEHOLDER, base.fontSize) + 1.5;
+  const boxW = Math.min(base.width, Math.max(4, measured));
+  const boxH = textBlockHeightMm(base.fontSize, 1);
+  const placed = placeInLabel(widthMm, heightMm, boxW, boxH, existing);
+  return { left: placed.left, top: placed.top, width: placed.width, fontSize: base.fontSize };
 }
 
 export function fitBarcodeDefaults(widthMm: number, heightMm: number, existing: LabelElement[] = []) {

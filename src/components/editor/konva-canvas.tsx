@@ -86,6 +86,7 @@ type KonvaCanvasProps = {
     heightMm: number;
   }) => { leftMm: number; topMm: number };
   snapGuides?: SnapGuide[];
+  safeModeSv?: SharedValue<number>;
 };
 
 type ElementChrome = {
@@ -143,6 +144,8 @@ type ElementChrome = {
     widthMm: number;
     heightMm: number;
   }) => { leftMm: number; topMm: number };
+  /** 1 when Safe Mode is on. */
+  safeModeSv?: SharedValue<number>;
 };
 
 const CanvasElementNodes = memo(function CanvasElementNodes({
@@ -206,6 +209,7 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           onQuickRotate={chrome.onQuickRotate}
           pointerToMm={chrome.pointerToMm}
           snapMoveMm={chrome.snapMoveMm}
+          safeModeSv={chrome.safeModeSv}
         />
       ))}
     </>
@@ -292,6 +296,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     pointerToMm,
     snapMoveMm,
     snapGuides = [],
+    safeModeSv,
   },
   ref,
 ) {
@@ -498,6 +503,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       onQuickRotate,
       pointerToMm,
       snapMoveMm,
+      safeModeSv,
     }),
     [
       pxPerMM,
@@ -548,6 +554,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       onQuickRotate,
       pointerToMm,
       snapMoveMm,
+      safeModeSv,
     ],
   );
 

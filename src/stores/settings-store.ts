@@ -12,6 +12,8 @@ export type EditorSettings = {
   showColumnName: boolean;
   highlightColumnName: boolean;
   pictureAdsorption: boolean;
+  /** When true, elements released outside the label spring back in and overlaps warn. */
+  safeMode: boolean;
   editorGrid: boolean;
   /** Design grid cell size in mm (editor-only overlay). */
   editorGridSpacingMm: number;
@@ -71,6 +73,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   showColumnName: false,
   highlightColumnName: false,
   pictureAdsorption: true,
+  safeMode: false,
   editorGrid: false,
   editorGridSpacingMm: 5,
   editorGridColor: '#000000',
