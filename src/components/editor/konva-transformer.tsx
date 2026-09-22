@@ -79,6 +79,7 @@ export type KonvaTransformerProps = {
   mediaShape?: MediaShape;
   liveBounds?: LiveRulerBounds;
   deselectGesture?: GestureType;
+  activeSelectedIdSv?: SharedValue<string>;
   topBarSelectionVisibleSv?: SharedValue<number>;
   bottomPanelVisibleSv?: SharedValue<number>;
   /** Multi-select body-drag preview delta (mm). Followers apply; anchor drives via gesture. */
@@ -135,6 +136,15 @@ export type KonvaTransformerProps = {
 const HIT_TARGET_PX = 36;
 const TOOLTIP_MS = 80;
 
+/**
+ * Drag activation / tap tolerance — restored to the 6b97449 "deliberate drag" feel.
+ * A finger must travel >10px before the element starts following (kills sudden-drag
+ * on what was meant to be a tap), and a gesture that ends under 20px of travel snaps
+ * back and is treated as a tap/select rather than a committed move.
+ */
+const DRAG_ACTIVATE_DIST_SQ_PX = 100; // (10px)^2
+const TAP_MAX_DIST_SQ_PX = 400; // (20px)^2
+
 /** Standard double-tap window. Wider gaps are two unrelated taps, not a double tap. */
 const DOUBLE_TAP_MAX_GAP_MS = 300;
 /** Below this the two reports are one physical tap double-counted. */
@@ -161,6 +171,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   mediaShape,
   liveBounds,
   deselectGesture,
+  activeSelectedIdSv,
   topBarSelectionVisibleSv,
   bottomPanelVisibleSv,
   groupDragDeltaLeftMm,
@@ -288,8 +299,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const followerResizeStartHeightMmSv = useSharedValue(0);
   const resizeBehaviorECodeSv = useSharedValue(resizeBehaviorToCode(resizePolicy.behavior.e));
   const resizeBehaviorSCodeSv = useSharedValue(resizeBehaviorToCode(resizePolicy.behavior.s));
-  const followerLiveLeftPxSv = useSharedValue(0);
-  const followerLiveTopPxSv = useSharedValue(0);
   const beginTimeSv = useSharedValue(0);
   const tooltipRef = useRef<TooltipHandle | null>(null);
   const lastTooltipAt = useRef(0);
@@ -354,27 +363,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     verticalDisplaySv,
   ]);
 
-  const tracePropsSync = useCallback(
-    (info: {
-      phase: 'skip' | 'apply';
-      reason: string;
-      tPropsSync: number;
-      elementLeftMm: number;
-      elementTopMm: number;
-      originLeftPx: number;
-      originTopPx: number;
-      baseLeftPx: number;
-      baseTopPx: number;
-      followerFolded: number;
-      groupDragActive: boolean;
-      isInteracting: boolean;
-    }) => {
-      if (!__DEV__) return;
-      console.log('[group-drag-props-sync]', element.id, info);
-    },
-    [element.id],
-  );
-
   useEffect(() => {
     // Don't clobber an in-progress gesture. A gesture folds its own final
     // position/size into these shared values synchronously as soon as it ends
@@ -390,28 +378,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         groupResizeAnchorIdSv.value !== '' &&
         selectedSv.value,
     );
-    const tPropsSync = Date.now();
     if (isInteracting.value || groupDragActive || groupResizeActive) {
-      if (__DEV__) {
-        tracePropsSync({
-          phase: 'skip',
-          reason: isInteracting.value
-            ? 'isInteracting'
-            : groupDragActive
-              ? 'groupDragActive'
-              : 'groupResizeActive',
-          tPropsSync,
-          elementLeftMm: finiteMm(element.left),
-          elementTopMm: finiteMm(element.top),
-          originLeftPx: originLeftSv.value,
-          originTopPx: originTopSv.value,
-          baseLeftPx,
-          baseTopPx,
-          followerFolded: followerFoldedSv.value,
-          groupDragActive,
-          isInteracting: isInteracting.value,
-        });
-      }
       return;
     }
 
@@ -423,22 +390,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         Math.abs(finiteMm(element.left) - foldedLeftMm) > 0.005 ||
         Math.abs(finiteMm(element.top) - foldedTopMm) > 0.005
       ) {
-        if (__DEV__) {
-          tracePropsSync({
-            phase: 'skip',
-            reason: 'followerFolded_propsMismatch',
-            tPropsSync,
-            elementLeftMm: finiteMm(element.left),
-            elementTopMm: finiteMm(element.top),
-            originLeftPx: originLeftSv.value,
-            originTopPx: originTopSv.value,
-            baseLeftPx,
-            baseTopPx,
-            followerFolded: followerFoldedSv.value,
-            groupDragActive,
-            isInteracting: isInteracting.value,
-          });
-        }
         return;
       }
       followerFoldedSv.value = 0;
@@ -458,23 +409,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         return;
       }
       followerResizeFoldedSv.value = 0;
-    }
-
-    if (__DEV__) {
-      tracePropsSync({
-        phase: 'apply',
-        reason: 'sync',
-        tPropsSync,
-        elementLeftMm: finiteMm(element.left),
-        elementTopMm: finiteMm(element.top),
-        originLeftPx: originLeftSv.value,
-        originTopPx: originTopSv.value,
-        baseLeftPx,
-        baseTopPx,
-        followerFolded: followerFoldedSv.value,
-        groupDragActive,
-        isInteracting: isInteracting.value,
-      });
     }
 
     transX.value = 0;
@@ -513,46 +447,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     selectedSv,
     followerFoldedSv,
     followerResizeFoldedSv,
-    tracePropsSync,
     pxPerMMSafe,
     startW,
     startH,
     liftSv,
   ]);
-
-  const traceSettleFold = useCallback(
-    (info: {
-      role: 'follower' | 'anchor' | 'other';
-      settleAnchorId: string;
-      settleDeltaLeft: number;
-      settleDeltaTop: number;
-      tSettle: number;
-      liveLastLeftPx: number;
-      liveLastTopPx: number;
-      originBeforeFoldLeftPx: number;
-      originBeforeFoldTopPx: number;
-      settleResultLeftPx: number;
-      settleResultTopPx: number;
-      jumpPxLeft: number;
-      jumpPxTop: number;
-    }) => {
-      if (!__DEV__) return;
-      console.log('[group-drag-settle]', element.id, {
-        role: info.role,
-        settleAnchorId: info.settleAnchorId,
-        settleDeltaMm: { left: info.settleDeltaLeft, top: info.settleDeltaTop },
-        tSettle: info.tSettle,
-        LIVE_LAST_FRAME: { leftPx: info.liveLastLeftPx, topPx: info.liveLastTopPx },
-        SETTLE_RESULT: { leftPx: info.settleResultLeftPx, topPx: info.settleResultTopPx },
-        JUMP_PX: { left: info.jumpPxLeft, top: info.jumpPxTop },
-        originBeforeFoldPx: {
-          left: info.originBeforeFoldLeftPx,
-          top: info.originBeforeFoldTopPx,
-        },
-      });
-    },
-    [element.id],
-  );
 
   const lastTapRef = useRef({ id: '', time: 0 });
   const callbacksRef = useRef({
@@ -679,36 +578,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   );
 
   useAnimatedReaction(
-    () => ({
-      anchorId: groupDragAnchorIdSv?.value ?? '',
-      deltaLeft: groupDragDeltaLeftMm?.value ?? 0,
-      deltaTop: groupDragDeltaTopMm?.value ?? 0,
-      originLeft: originLeftSv.value,
-      originTop: originTopSv.value,
-      offsetX: transX.value,
-      offsetY: transY.value,
-      sx: sxSv.value,
-      sy: sySv.value,
-      selected: selectedSv.value,
-      folded: followerFoldedSv.value,
-    }),
-    (cur) => {
-      if (
-        cur.folded === 0 &&
-        cur.anchorId &&
-        cur.anchorId !== element.id &&
-        cur.selected &&
-        (Math.abs(cur.deltaLeft) > 0.0005 || Math.abs(cur.deltaTop) > 0.0005)
-      ) {
-        followerLiveLeftPxSv.value =
-          cur.originLeft + cur.offsetX + cur.deltaLeft * cur.sx;
-        followerLiveTopPxSv.value =
-          cur.originTop + cur.offsetY + cur.deltaTop * cur.sy;
-      }
-    },
-  );
-
-  useAnimatedReaction(
     () => transformSettlePulseSv?.value ?? -1,
     (current, previous) => {
       if (previous === null || current === previous) return;
@@ -717,11 +586,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       const settleDeltaLeft = groupDragSettleDeltaLeftSv?.value ?? 0;
       const settleDeltaTop = groupDragSettleDeltaTopSv?.value ?? 0;
       const settleResizeAnchor = groupResizeSettleAnchorIdSv?.value ?? '';
-      const tSettle = Date.now();
-      const liveLastLeftPx = followerLiveLeftPxSv.value;
-      const liveLastTopPx = followerLiveTopPxSv.value;
-      const originBeforeFoldLeftPx = originLeftSv.value;
-      const originBeforeFoldTopPx = originTopSv.value;
 
       const isFollowerFold =
         Boolean(
@@ -788,31 +652,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         animH.value = box.height * sySv.value;
         followerResizeFoldedSv.value = 1;
       }
-
-      const settleResultLeftPx = originLeftSv.value;
-      const settleResultTopPx = originTopSv.value;
-
-      runOnJS(traceSettleFold)({
-        role: isFollowerFold || isResizeFollowerFold
-          ? 'follower'
-          : settleAnchorId && settleAnchorId === element.id
-            ? 'anchor'
-            : settleResizeAnchor && settleResizeAnchor === element.id
-              ? 'anchor'
-              : 'other',
-        settleAnchorId: settleAnchorId || settleResizeAnchor,
-        settleDeltaLeft,
-        settleDeltaTop,
-        tSettle,
-        liveLastLeftPx,
-        liveLastTopPx,
-        originBeforeFoldLeftPx,
-        originBeforeFoldTopPx,
-        settleResultLeftPx,
-        settleResultTopPx,
-        jumpPxLeft: settleResultLeftPx - liveLastLeftPx,
-        jumpPxTop: settleResultTopPx - liveLastTopPx,
-      });
 
       if (groupDragAnchorIdSv) {
         groupDragAnchorIdSv.value = '';
@@ -1109,6 +948,19 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         beginTimeSv.value = tNow;
         hasMovedSv.value = false;
         tapHandledSv.value = false;
+        isInteracting.value = true;
+        selectedSv.value = true;
+        if (activeSelectedIdSv) {
+          activeSelectedIdSv.value = element.id;
+        }
+        if (topBarSelectionVisibleSv) {
+          topBarSelectionVisibleSv.value = 1;
+        }
+        if (bottomPanelVisibleSv) {
+          bottomPanelVisibleSv.value = 1;
+        }
+        originLeftSv.value = originLeftSv.value + transX.value;
+        originTopSv.value = originTopSv.value + transY.value;
         transX.value = 0;
         transY.value = 0;
 
@@ -1126,11 +978,12 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           groupDragDeltaTopMm.value = 0;
         }
 
-        // Prime JS selection immediately on touch-down
         runOnJS(notifySelectJS)(element.id);
       })
       .onStart((_e) => {
         'worklet';
+        isInteracting.value = true;
+        selectedSv.value = true;
       })
       .onUpdate((e) => {
         'worklet';
@@ -1139,8 +992,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           if (element.lockMovement) {
             return;
           }
-          if (distSq < 100) {
-            // Less than 10px: stationary touch noise, ignore so taps are rock solid
+          if (distSq < DRAG_ACTIVATE_DIST_SQ_PX) {
+            // Under 10px: stationary touch noise / tap intent — don't start dragging.
             return;
           }
           hasMovedSv.value = true;
@@ -1196,8 +1049,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         'worklet';
         liftSv.value = 1;
         const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
-        // Less than 20px translation (distSq < 400) or !hasMovedSv or locked element is treated as a tap
-        const isTap = !hasMovedSv.value || distSq < 400 || element.lockMovement;
+        // Under 20px translation, or never crossed the drag threshold, or locked: treat as a tap.
+        const isTap = !hasMovedSv.value || distSq < TAP_MAX_DIST_SQ_PX || element.lockMovement;
 
         if (isTap) {
           tapHandledSv.value = true;
@@ -1348,24 +1201,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     triggerDoubleTapJS,
     triggerSingleTapJS,
   ]);
-
-  const doubleTapGesture = useMemo(() => {
-    return Gesture.Tap()
-      .numberOfTaps(2)
-      .maxDuration(500)
-      .maxDelay(DOUBLE_TAP_MAX_GAP_MS)
-      .hitSlop(bodyHitSlop)
-      .runOnJS(true)
-      .onEnd((_e, success) => {
-        if (success) {
-          triggerDoubleTapJS();
-        }
-      });
-  }, [bodyHitSlop, triggerDoubleTapJS]);
-
-  const composedElementGesture = useMemo(() => {
-    return Gesture.Simultaneous(bodyDragGesture, doubleTapGesture);
-  }, [bodyDragGesture, doubleTapGesture]);
 
   const createHandleGesture = useCallback(
     (handle: HandlePosition, behavior: ResizeBehavior) => {
@@ -1737,6 +1572,11 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       liveH = box.height * sySv.value;
     }
 
+    const isUiSelected =
+      activeSelectedIdSv && activeSelectedIdSv.value !== ''
+        ? activeSelectedIdSv.value === element.id
+        : selected;
+
     return {
       position: 'absolute',
       left: liveLeft,
@@ -1745,7 +1585,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       height: liveH,
       transform: [{ rotate: `${liveRot}deg` }],
       opacity: (element.opacity ?? 1) * liftSv.value,
-      zIndex: selected ? 100 + (element.zIndex ?? 1) : (element.zIndex ?? 1),
+      zIndex: isUiSelected ? 100 + (element.zIndex ?? 1) : (element.zIndex ?? 1),
     };
   });
 
@@ -1834,10 +1674,15 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const borderStrokeColor = isOverflowed ? '#EF4444' : selectionColor || CHROME_SELECTION_STROKE;
 
   const selectionOverlayStyle = useAnimatedStyle(() => {
+    const isUiSelected =
+      activeSelectedIdSv && activeSelectedIdSv.value !== ''
+        ? activeSelectedIdSv.value === element.id
+        : selected;
     return {
-      opacity: selected ? 1 : 0,
+      opacity: isUiSelected ? 1 : 0,
+      pointerEvents: (isUiSelected ? 'box-none' : 'none') as any,
     };
-  }, [selected]);
+  }, [selected, activeSelectedIdSv, element.id]);
 
   const overflowBadgeStyle = useAnimatedStyle(() => {
     return {
@@ -1847,7 +1692,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
   return (
     <Animated.View ref={containerRef} style={containerStyle} collapsable={false}>
-      <GestureDetector gesture={composedElementGesture}>
+      <GestureDetector gesture={bodyDragGesture}>
         <View
           collapsable={false}
           style={styles.fillContainer}
@@ -1876,7 +1721,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       </GestureDetector>
 
       <Animated.View
-        pointerEvents={selected ? 'box-none' : 'none'}
         style={[StyleSheet.absoluteFill, selectionOverlayStyle]}>
         <View
           pointerEvents="none"
@@ -1933,6 +1777,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     prev.mediaShape === next.mediaShape &&
     prev.liveBounds === next.liveBounds &&
     prev.deselectGesture === next.deselectGesture &&
+    prev.activeSelectedIdSv === next.activeSelectedIdSv &&
     prev.topBarSelectionVisibleSv === next.topBarSelectionVisibleSv &&
     prev.bottomPanelVisibleSv === next.bottomPanelVisibleSv &&
     prev.groupDragDeltaLeftMm === next.groupDragDeltaLeftMm &&

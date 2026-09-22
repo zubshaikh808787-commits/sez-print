@@ -34,6 +34,7 @@ type KonvaCanvasProps = {
   surfaceColor?: string;
   showGrid?: boolean;
   liveBounds?: LiveRulerBounds;
+  activeSelectedIdSv?: SharedValue<string>;
   topBarSelectionVisibleSv?: SharedValue<number>;
   bottomPanelVisibleSv?: SharedValue<number>;
   groupDragDeltaLeftMm?: SharedValue<number>;
@@ -94,6 +95,7 @@ type ElementChrome = {
   mediaShape?: MediaShape;
   liveBounds?: LiveRulerBounds;
   deselectGesture?: GestureType;
+  activeSelectedIdSv?: SharedValue<string>;
   topBarSelectionVisibleSv?: SharedValue<number>;
   bottomPanelVisibleSv?: SharedValue<number>;
   groupDragDeltaLeftMm?: SharedValue<number>;
@@ -163,6 +165,7 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           mediaShape={chrome.mediaShape}
           liveBounds={chrome.liveBounds}
           deselectGesture={chrome.deselectGesture}
+          activeSelectedIdSv={chrome.activeSelectedIdSv}
           topBarSelectionVisibleSv={chrome.topBarSelectionVisibleSv}
           bottomPanelVisibleSv={chrome.bottomPanelVisibleSv}
           groupDragDeltaLeftMm={chrome.groupDragDeltaLeftMm}
@@ -220,6 +223,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     surfaceColor,
     showGrid = false,
     liveBounds,
+    activeSelectedIdSv,
     topBarSelectionVisibleSv,
     bottomPanelVisibleSv,
     groupDragDeltaLeftMm,
@@ -432,6 +436,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         .onEnd((_e, success) => {
           'worklet';
           if (success) {
+            if (activeSelectedIdSv) {
+              activeSelectedIdSv.value = '';
+            }
             if (topBarSelectionVisibleSv) {
               topBarSelectionVisibleSv.value = 0;
             }
@@ -441,7 +448,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             runOnJS(onDeselectAll)();
           }
         }),
-    [onDeselectAll, topBarSelectionVisibleSv, bottomPanelVisibleSv],
+    [onDeselectAll, activeSelectedIdSv, topBarSelectionVisibleSv, bottomPanelVisibleSv],
   );
 
   const canvasWidthMm = isRatTailGeometry(doc.mediaGeometry)
@@ -464,6 +471,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       mediaShape: doc.mediaShape,
       liveBounds,
       deselectGesture,
+      activeSelectedIdSv,
       topBarSelectionVisibleSv,
       bottomPanelVisibleSv,
       groupDragDeltaLeftMm,
@@ -514,6 +522,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       doc.mediaShape,
       liveBounds,
       deselectGesture,
+      activeSelectedIdSv,
       topBarSelectionVisibleSv,
       bottomPanelVisibleSv,
       groupDragDeltaLeftMm,

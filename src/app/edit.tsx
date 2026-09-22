@@ -556,6 +556,7 @@ export default function EditScreen() {
   const groupResizeSettleHandleSv = useSharedValue(0);
   const groupResizeSettleFixedOriginLeftSv = useSharedValue(0);
   const groupResizeSettleFixedOriginTopSv = useSharedValue(0);
+  const activeSelectedIdSv = useSharedValue(primaryId ?? (params.selectedElementId ?? ''));
   const [panelOpen, setPanelOpen] = useState(() =>
     Boolean(params.autoOpenPanel === 'true' && params.selectedElementId)
   );
@@ -630,21 +631,17 @@ export default function EditScreen() {
   const topBarSelectionVisibleSv = useSharedValue(selectedIds.length > 0 ? 1 : 0);
   const bottomPanelVisibleSv = useSharedValue(panelOpen && selectedIds.length > 0 ? 1 : 0);
 
-  const smoothEasing = useMemo(() => Easing.bezier(0.25, 0.1, 0.25, 1), []);
+  useEffect(() => {
+    topBarSelectionVisibleSv.value = selectedIds.length > 0 ? 1 : 0;
+  }, [selectedIds.length, topBarSelectionVisibleSv]);
 
   useEffect(() => {
-    topBarSelectionVisibleSv.value = withTiming(selectedIds.length > 0 ? 1 : 0, {
-      duration: 160,
-      easing: smoothEasing,
-    });
-  }, [selectedIds.length, topBarSelectionVisibleSv, smoothEasing]);
+    bottomPanelVisibleSv.value = panelOpen && selectedIds.length > 0 ? 1 : 0;
+  }, [panelOpen, selectedIds.length, bottomPanelVisibleSv]);
 
   useEffect(() => {
-    bottomPanelVisibleSv.value = withTiming(panelOpen && selectedIds.length > 0 ? 1 : 0, {
-      duration: 160,
-      easing: smoothEasing,
-    });
-  }, [panelOpen, selectedIds.length, bottomPanelVisibleSv, smoothEasing]);
+    activeSelectedIdSv.value = primaryId ?? (selectedIds.length === 1 ? selectedIds[0] : '');
+  }, [primaryId, selectedIds, activeSelectedIdSv]);
 
   useEffect(() => {
     groupDragEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
@@ -652,36 +649,31 @@ export default function EditScreen() {
   }, [selectedIds.length, groupDragEligibleSv, groupResizeEligibleSv]);
 
   const defaultToolbarAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: 1 - topBarSelectionVisibleSv.value,
-    transform: [{ translateY: topBarSelectionVisibleSv.value * -6 }],
+    opacity: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
     zIndex: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
     pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'none' : 'auto',
   }));
 
   const contextualToolbarAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: topBarSelectionVisibleSv.value,
-    transform: [{ translateY: (1 - topBarSelectionVisibleSv.value) * 6 }],
+    opacity: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
     zIndex: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
     pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'auto' : 'none',
   }));
 
   const staticPaletteAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: 1 - bottomPanelVisibleSv.value,
-    transform: [{ translateY: bottomPanelVisibleSv.value * 6 }],
+    opacity: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
     zIndex: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
     pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'none' : 'auto',
   }));
 
   const propertyPanelAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: bottomPanelVisibleSv.value,
-    transform: [{ translateY: (1 - bottomPanelVisibleSv.value) * 6 }],
+    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
     zIndex: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
     pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
   }));
 
   const panelCloseBtnAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: bottomPanelVisibleSv.value,
-    transform: [{ scale: 0.8 + 0.2 * bottomPanelVisibleSv.value }],
+    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
     pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
   }));
 
@@ -1389,34 +1381,34 @@ export default function EditScreen() {
 
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
-    topBarSelectionVisibleSv.value = withTiming(0, { duration: 160, easing: smoothEasing });
-    bottomPanelVisibleSv.value = withTiming(0, { duration: 160, easing: smoothEasing });
+    topBarSelectionVisibleSv.value = 0;
+    bottomPanelVisibleSv.value = 0;
     setElements((elements) => elements.filter((el) => !selectedIds.includes(el.id)), true);
     setSelectedIds([]);
     setPrimaryId(null);
     setPanelOpen(false);
-  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv, smoothEasing]);
+  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const duplicateSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     const bounds = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
     const result = duplicateElements(docRef.current.elements, selectedIds, bounds);
     if (result.newIds.length === 0) return;
-    topBarSelectionVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
-    bottomPanelVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
+    topBarSelectionVisibleSv.value = 1;
+    bottomPanelVisibleSv.value = 1;
     setElements(() => result.elements, true);
     const next = selectionFromIds(result.newIds);
     setSelectedIds(next.ids);
     setPrimaryId(next.primaryId);
-  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv, smoothEasing]);
+  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const handleDeselectAll = useCallback(() => {
-    topBarSelectionVisibleSv.value = withTiming(0, { duration: 160, easing: smoothEasing });
-    bottomPanelVisibleSv.value = withTiming(0, { duration: 160, easing: smoothEasing });
+    topBarSelectionVisibleSv.value = 0;
+    bottomPanelVisibleSv.value = 0;
     setSelectedIds([]);
     setPrimaryId(null);
     setPanelOpen(false);
-  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, smoothEasing]);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const toggleMultipleMode = useCallback(() => {
     // Leaving Multiple mode drops the whole multi-selection rather than
@@ -1467,8 +1459,8 @@ export default function EditScreen() {
       const element = docRef.current.elements.find((el) => el.id === id);
       if (!element || element.needPrinting === false || element.type === 'border') return;
       lastSelectedElementRef.current = element;
-      topBarSelectionVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
-      bottomPanelVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
+      topBarSelectionVisibleSv.value = 1;
+      bottomPanelVisibleSv.value = 1;
       const next = reduceTapSelect({
         id,
         multipleMode,
@@ -1501,14 +1493,14 @@ export default function EditScreen() {
         setPanelOpen(true);
       }
     },
-    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement, smoothEasing, panelOpen],
+    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement, panelOpen],
   );
 
   const openPanelFor = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
     if (!element) return;
-    topBarSelectionVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
-    bottomPanelVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
+    topBarSelectionVisibleSv.value = 1;
+    bottomPanelVisibleSv.value = 1;
     setSelectedIds([id]);
     setPrimaryId(id);
     if (element.type === 'signature') {
@@ -1525,7 +1517,7 @@ export default function EditScreen() {
     }
     resetTabToRegularForElement(element.type);
     setPanelOpen(true);
-  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement, smoothEasing]);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement]);
 
   const beginTextEdit = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
@@ -1679,31 +1671,12 @@ export default function EditScreen() {
         return Math.abs(el.left - exp.left) < 0.005 && Math.abs(el.top - exp.top) < 0.005;
       });
       if (!allMatch) {
-        if (__DEV__) {
-          console.log('[group-drag-settle-pulse]', {
-            phase: 'blocked',
-            tPulse: Date.now(),
-            pendingIds: dragPending.ids,
-          });
-        }
         return;
       }
       groupDragCommitPendingRef.current = null;
       groupDragSettleAnchorIdSv.value = groupDragAnchorIdSv.value;
       groupDragSettleDeltaLeftSv.value = groupDragDeltaLeftSv.value;
       groupDragSettleDeltaTopSv.value = groupDragDeltaTopSv.value;
-      if (__DEV__) {
-        console.log('[group-drag-settle-pulse]', {
-          phase: 'fire',
-          tPulse: Date.now(),
-          anchorId: groupDragSettleAnchorIdSv.value,
-          settleDeltaMm: {
-            left: groupDragSettleDeltaLeftSv.value,
-            top: groupDragSettleDeltaTopSv.value,
-          },
-          pendingIds: dragPending.ids,
-        });
-      }
       transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
       return;
     }
@@ -1722,13 +1695,6 @@ export default function EditScreen() {
         );
       });
       if (!allMatch) {
-        if (__DEV__) {
-          console.log('[group-resize-settle-pulse]', {
-            phase: 'blocked',
-            tPulse: Date.now(),
-            pendingIds: resizePending.ids,
-          });
-        }
         return;
       }
       groupResizeCommitPendingRef.current = null;
@@ -1738,18 +1704,6 @@ export default function EditScreen() {
       groupResizeSettleHandleSv.value = groupResizeHandleSv.value;
       groupResizeSettleFixedOriginLeftSv.value = groupResizeFixedOriginLeftSv.value;
       groupResizeSettleFixedOriginTopSv.value = groupResizeFixedOriginTopSv.value;
-      if (__DEV__) {
-        console.log('[group-resize-settle-pulse]', {
-          phase: 'fire',
-          tPulse: Date.now(),
-          anchorId: groupResizeSettleAnchorIdSv.value,
-          scale: {
-            x: groupResizeSettleScaleXSv.value,
-            y: groupResizeSettleScaleYSv.value,
-          },
-          pendingIds: resizePending.ids,
-        });
-      }
       transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
     }
   }, [
@@ -1785,7 +1739,11 @@ export default function EditScreen() {
       publishSnapGuides([]);
       transformKindRef.current = kind;
 
-      const ids = selectedIdsRef.current;
+      if (!selectedIdsRef.current.includes(id)) {
+        handleSelect(id);
+      }
+
+      const ids = selectedIdsRef.current.includes(id) ? selectedIdsRef.current : [id];
       if (kind === 'move' && ids.length > 1 && ids.includes(id)) {
         const map = new Map<string, { left: number; top: number }>();
         for (const el of docRef.current.elements) {
@@ -1823,6 +1781,7 @@ export default function EditScreen() {
     },
     [
       publishSnapGuides,
+      handleSelect,
       groupResizeReadySv,
       groupResizeFixedOriginLeftSv,
       groupResizeFixedOriginTopSv,
@@ -3025,6 +2984,7 @@ export default function EditScreen() {
                     surfaceColor={artboardFill}
                     showGrid={Boolean(editorSettings.editorGrid)}
                     liveBounds={liveRulerBounds}
+                    activeSelectedIdSv={activeSelectedIdSv}
                     topBarSelectionVisibleSv={topBarSelectionVisibleSv}
                     bottomPanelVisibleSv={bottomPanelVisibleSv}
                     groupDragDeltaLeftMm={groupDragDeltaLeftSv}
