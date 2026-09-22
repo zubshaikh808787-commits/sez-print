@@ -4,10 +4,12 @@ import { StyleSheet, Text, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import Svg, { Ellipse, Line, Rect } from 'react-native-svg';
 import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
-import { runOnJS, type SharedValue } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 import type { TransformStartKind } from './konva-transformer';
 
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
+import { CanvasGridOverlay } from '@/components/editor/canvas-grid-overlay';
+import { DEFAULT_GRID_SPACING_MM } from '@/lib/editor/canvas-grid';
 import { type LiveRulerBounds } from '@/components/canvas-rulers';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
@@ -32,7 +34,9 @@ type KonvaCanvasProps = {
   selectionColor: string;
   /** Editor nested artboard fill. Print capture keeps document white. */
   surfaceColor?: string;
+  /** Editor-only design grid (not included in print capture via LabelPreview). */
   showGrid?: boolean;
+  gridSpacingMm?: number;
   liveBounds?: LiveRulerBounds;
   topBarSelectionVisibleSv?: SharedValue<number>;
   bottomPanelVisibleSv?: SharedValue<number>;
@@ -208,6 +212,32 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
   );
 }, (prev, next) => prev.chrome === next.chrome && idleElementRefsUnchanged(prev.elements, next.elements));
 
+/** Follows the active move/resize on the UI thread so the grid does not rebuild every frame. */
+const GridLivePlate = memo(function GridLivePlate({
+  liveBounds,
+  pxPerMM,
+  color,
+  rotationDeg,
+}: {
+  liveBounds: LiveRulerBounds;
+  pxPerMM: number;
+  color: string;
+  rotationDeg: number;
+}) {
+  const style = useAnimatedStyle(() => ({
+    position: 'absolute',
+    opacity: liveBounds.visible.value ? 1 : 0,
+    left: liveBounds.leftMm.value * pxPerMM,
+    top: liveBounds.topMm.value * pxPerMM,
+    width: Math.max(1, liveBounds.widthMm.value * pxPerMM),
+    height: Math.max(1, liveBounds.heightMm.value * pxPerMM),
+    backgroundColor: color,
+    transform: [{ rotate: `${rotationDeg}deg` }],
+  }));
+
+  return <Animated.View pointerEvents="none" style={style} />;
+});
+
 export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function KonvaCanvas(
   {
     document: doc,
@@ -219,6 +249,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     selectionColor,
     surfaceColor,
     showGrid = false,
+    gridSpacingMm = DEFAULT_GRID_SPACING_MM,
     liveBounds,
     topBarSelectionVisibleSv,
     bottomPanelVisibleSv,
@@ -266,6 +297,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 ) {
   const w = Math.max(1, canvasWidthPx);
   const h = Math.max(1, canvasHeightPx);
+  const resolvedGridSpacingMm = gridSpacingMm ?? DEFAULT_GRID_SPACING_MM;
 
   const isCircle = doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse';
   const cableFlag = isCableFlagDieCutDocument(doc);
@@ -283,50 +315,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     : doc.background?.type === 'color'
       ? doc.background.color
       : '#FFFFFF';
-
-  // Grid lines — engraved 1 / 5 / 10 mm like a machinist scale
-  const gridLines = useMemo(() => {
-    if (!showGrid || pxPerMM <= 0) return null;
-    const vertical: { x: number; kind: 'minor' | 'mid' | 'major' }[] = [];
-    const horizontal: { y: number; kind: 'minor' | 'mid' | 'major' }[] = [];
-    const stepMm = pxPerMM >= 3 ? 1 : 5;
-    for (let mm = stepMm; mm * pxPerMM < w - 0.5; mm += stepMm) {
-      const kind = mm % 10 === 0 ? 'major' : mm % 5 === 0 ? 'mid' : 'minor';
-      vertical.push({ x: mm * pxPerMM, kind });
-    }
-    for (let mm = stepMm; mm * pxPerMM < h - 0.5; mm += stepMm) {
-      const kind = mm % 10 === 0 ? 'major' : mm % 5 === 0 ? 'mid' : 'minor';
-      horizontal.push({ y: mm * pxPerMM, kind });
-    }
-    const stroke = (kind: 'minor' | 'mid' | 'major') =>
-      kind === 'major' ? '#94A3B8' : kind === 'mid' ? '#CBD5E1' : '#E8EEF4';
-    return (
-      <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
-        {vertical.map((tick) => (
-          <Line
-            key={`v${tick.x}`}
-            x1={tick.x}
-            y1={0}
-            x2={tick.x}
-            y2={h}
-            stroke={stroke(tick.kind)}
-            strokeWidth={tick.kind === 'major' ? 1 : StyleSheet.hairlineWidth}
-          />
-        ))}
-        {horizontal.map((tick) => (
-          <Line
-            key={`h${tick.y}`}
-            x1={0}
-            y1={tick.y}
-            x2={w}
-            y2={tick.y}
-            stroke={stroke(tick.kind)}
-            strokeWidth={tick.kind === 'major' ? 1 : StyleSheet.hairlineWidth}
-          />
-        ))}
-      </Svg>
-    );
-  }, [showGrid, pxPerMM, w, h]);
 
   // Jewelry rat-tail guides (if applicable)
   const jewelryGuides = useMemo(() => {
@@ -453,6 +441,13 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 
   const sortedElements = useMemo(() => sortLayers(doc.elements), [doc.elements]);
 
+  const gridLiveElementId = selectedIds.length === 1 ? selectedIds[0] : null;
+  const gridLiveRotation = useMemo(() => {
+    if (!gridLiveElementId) return 0;
+    const anchor = sortedElements.find((el) => el.id === gridLiveElementId);
+    return anchor && 'rotation' in anchor ? (anchor.rotation ?? 0) : 0;
+  }, [gridLiveElementId, sortedElements]);
+
   const chrome = useMemo<ElementChrome>(
     () => ({
       pxPerMM,
@@ -566,9 +561,8 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         overflow: 'hidden',
       }}>
       {stockOutline}
-      <ViewShot ref={ref} options={{ format: 'png', quality: 1 }} style={{ width: w, height: h, overflow: 'hidden' }}>
+      <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.artboardLayer]}>
         <View
-          pointerEvents="none"
           collapsable={false}
           style={[
             styles.canvasPad,
@@ -578,7 +572,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
               backgroundColor,
             },
           ]}>
-          {/* pageLayer: static artboard / page boundary. listening: false */}
           {doc.background?.type === 'image' ? (
             <View style={StyleSheet.absoluteFillObject}>
               <Image
@@ -604,7 +597,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
           ) : null}
 
           {jewelryGuides}
-          {gridLines}
 
           {doc.elements.length === 0 && !stockCut ? (
             <View style={styles.emptyHintWrap}>
@@ -612,17 +604,55 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             </View>
           ) : null}
 
-          {cableFlag || stockCut || isCircle ? null : (
-            <View style={styles.artboardBorder} />
-          )}
-        </View>
+          {cableFlag || stockCut || isCircle ? null : <View style={styles.artboardBorder} />}
 
+          <CanvasGridOverlay
+            widthPx={w}
+            heightPx={h}
+            pxPerMM={pxPerMM}
+            spacingMm={resolvedGridSpacingMm}
+            visible={showGrid}
+          />
+          {showGrid
+            ? sortedElements.map((el) => {
+                if (el.visible === false || el.id === gridLiveElementId) return null;
+                const rotation = 'rotation' in el ? (el.rotation ?? 0) : 0;
+                return (
+                  <View
+                    key={el.id}
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      left: el.left * pxPerMM,
+                      top: el.top * pxPerMM,
+                      width: Math.max(1, el.width * pxPerMM),
+                      height: Math.max(1, el.height * pxPerMM),
+                      backgroundColor: stickerFillColor,
+                      transform: [{ rotate: `${rotation}deg` }],
+                    }}
+                  />
+                );
+              })
+            : null}
+          {showGrid && gridLiveElementId && liveBounds ? (
+            <GridLivePlate
+              liveBounds={liveBounds}
+              pxPerMM={pxPerMM}
+              color={stickerFillColor}
+              rotationDeg={gridLiveRotation}
+            />
+          ) : null}
+        </View>
+      </View>
+      <ViewShot
+        ref={ref}
+        options={{ format: 'png', quality: 1 }}
+        style={[StyleSheet.absoluteFillObject, styles.elementLayer]}>
         <GestureDetector gesture={deselectGesture}>
           <View style={StyleSheet.absoluteFillObject} collapsable={false} />
         </GestureDetector>
 
         <View pointerEvents="box-none" collapsable={false} style={[StyleSheet.absoluteFillObject, { overflow: 'hidden' }]}>
-          {/* Stable single-layer element rendering: preserves component instances across drag without flicker */}
           <CanvasElementNodes elements={sortedElements} chrome={chrome} />
         </View>
       </ViewShot>
@@ -660,6 +690,14 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 });
 
 const styles = StyleSheet.create({
+  artboardLayer: {
+    zIndex: 0,
+  },
+  elementLayer: {
+    zIndex: 1,
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
+  },
   canvasPad: {
     overflow: 'hidden',
     position: 'absolute',

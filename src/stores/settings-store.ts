@@ -13,6 +13,12 @@ export type EditorSettings = {
   highlightColumnName: boolean;
   pictureAdsorption: boolean;
   editorGrid: boolean;
+  /** Design grid cell size in mm (editor-only overlay). */
+  editorGridSpacingMm: number;
+  /** Design grid line color (hex). */
+  editorGridColor: string;
+  /** One-time alert shown when the user first enables the design grid. */
+  editorGridDisclaimerSeen: boolean;
   /** Extra D-pad under the canvas. Off by default — use Editor Settings to show it. */
   showNudgePad: boolean;
   /** Canvas share of the editor split column (0.35–0.89). */
@@ -66,6 +72,9 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   highlightColumnName: false,
   pictureAdsorption: true,
   editorGrid: false,
+  editorGridSpacingMm: 5,
+  editorGridColor: '#000000',
+  editorGridDisclaimerSeen: false,
   showNudgePad: false,
   canvasSplitRatio: DEFAULT_CANVAS_SPLIT_RATIO,
   canvasSplitFullscreen: false,

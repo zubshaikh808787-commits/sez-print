@@ -45,6 +45,8 @@ import {
   scaleDocumentToSize,
 } from '@/lib/element-sizing';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
+import { GridSpacingPopover } from '@/components/editor/grid-spacing-popover';
+import { requestEditorGridToggle } from '@/lib/editor/editor-grid-toggle';
 import {
   applyGroupResize,
   buildGroupResizeSnapshots,
@@ -197,7 +199,7 @@ import { isRatTail143Document, refitRatTail143Document } from '@/constants/rat-t
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
 import { isRatTailGeometry, ratTailBodyRectMm } from '@/lib/media-geometry';
 import { useLabelStore } from '@/stores/label-store';
-import { useSettingsStore } from '@/stores/settings-store';
+import { DEFAULT_EDITOR_SETTINGS, useSettingsStore } from '@/stores/settings-store';
 import {
   EditorHistory,
   alignBox,
@@ -673,6 +675,7 @@ export default function EditScreen() {
   }));
 
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
+  const [gridSpacingPopoverVisible, setGridSpacingPopoverVisible] = useState(false);
   const [padZoom, setPadZoom] = useState(1);
   const padPanRef = useRef({ x: 0, y: 0 });
   const editorViewRef = useRef<EditorViewTransform | null>(null);
@@ -1412,6 +1415,13 @@ export default function EditScreen() {
     setMultipleMode((prev) => !prev);
   }, [multipleMode, handleDeselectAll]);
 
+  const toggleEditorGrid = useCallback(() => {
+    requestEditorGridToggle(!editorSettings.editorGrid, patchEditor);
+  }, [editorSettings.editorGrid, patchEditor]);
+
+  const gridSpacingMm =
+    editorSettings.editorGridSpacingMm ?? DEFAULT_EDITOR_SETTINGS.editorGridSpacingMm;
+
   const resetTabToRegularForElement = useCallback((type: ElementType) => {
     switch (type) {
       case 'barcode':
@@ -1604,6 +1614,7 @@ export default function EditScreen() {
   );
 
   useEffect(() => {
+    if (transformingRef.current) return;
     if (selectedElement) {
       rulerLeftMm.value = selectedElement.left;
       rulerTopMm.value = selectedElement.top;
@@ -3000,6 +3011,7 @@ export default function EditScreen() {
                     selectionColor={selectionColor}
                     surfaceColor={artboardFill}
                     showGrid={Boolean(editorSettings.editorGrid)}
+                    gridSpacingMm={gridSpacingMm}
                     liveBounds={liveRulerBounds}
                     topBarSelectionVisibleSv={topBarSelectionVisibleSv}
                     bottomPanelVisibleSv={bottomPanelVisibleSv}
@@ -3255,8 +3267,7 @@ export default function EditScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.body, { maxWidth: MaxContentWidth }]}>
         <View style={styles.subToolbarSlot}>
-          <Animated.View
-            style={[styles.subToolbarRow, defaultToolbarAnimatedStyle]}>
+          <Animated.View style={[styles.subToolbarRow, defaultToolbarAnimatedStyle]}>
             <Pressable
               onPress={() => {
                 if (isRatTail143Document(doc)) return;
@@ -3289,6 +3300,30 @@ export default function EditScreen() {
             ) : null}
 
             <Pressable
+              onPress={toggleEditorGrid}
+              onLongPress={() => setGridSpacingPopoverVisible(true)}
+              delayLongPress={280}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={
+                editorSettings.editorGrid
+                  ? 'Hide design grid'
+                  : 'Show design grid'
+              }
+              accessibilityHint="Long press to change grid spacing."
+              style={({ pressed }) => [
+                styles.splitMaxBtn,
+                editorSettings.editorGrid && styles.canvasChromeBtnActive,
+                pressed && styles.pressed,
+              ]}>
+              <AppIcon
+                name={editorSettings.editorGrid ? 'square.grid.2x2.fill' : 'square.grid.2x2'}
+                tintColor={editorSettings.editorGrid ? Palette.accent : Palette.muted}
+                size={18}
+              />
+            </Pressable>
+
+            <Pressable
               onPress={toggleCanvasFullscreen}
               hitSlop={10}
               accessibilityRole="button"
@@ -3306,8 +3341,7 @@ export default function EditScreen() {
             </Pressable>
           </Animated.View>
 
-          <Animated.View
-            style={[StyleSheet.absoluteFillObject, contextualToolbarAnimatedStyle]}>
+          <Animated.View style={[StyleSheet.absoluteFillObject, contextualToolbarAnimatedStyle]}>
             {renderContextualToolbar()}
           </Animated.View>
         </View>
@@ -3549,6 +3583,13 @@ export default function EditScreen() {
           autoFocus
         />
       </IosAlertModal>
+
+      <GridSpacingPopover
+        visible={gridSpacingPopoverVisible}
+        spacingMm={gridSpacingMm}
+        onClose={() => setGridSpacingPopoverVisible(false)}
+        onSpacingChange={(mm) => patchEditor({ editorGridSpacingMm: mm })}
+      />
 
       <Modal
         visible={showOpenModal}
@@ -3811,6 +3852,9 @@ const styles = StyleSheet.create({
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  canvasChromeBtnActive: {
+    backgroundColor: 'rgba(23, 166, 184, 0.15)',
   },
   dimText: {
     color: Palette.muted,
