@@ -1016,6 +1016,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     callbacksRef.current.onTransformStart?.(id, kind);
   }, []);
 
+  const notifySelectJS = useCallback((id: string) => {
+    callbacksRef.current.onSelect(id);
+  }, []);
+
   const notifyGroupResizeHandleBeginJS = useCallback(
     (handle: 'e' | 's') => {
       onGroupResizeHandleBegin?.(handle);
@@ -1132,6 +1136,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           groupDragDeltaLeftMm.value = 0;
           groupDragDeltaTopMm.value = 0;
         }
+
+        // Prime JS selection + panel content immediately on touch-down, not after drag threshold.
+        runOnJS(notifySelectJS)(element.id);
       })
       .onStart((_e) => {
         'worklet';
@@ -1336,6 +1343,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     lastTapYSv,
     tapHandledSv,
     notifyTransformStartJS,
+    notifySelectJS,
     groupDragEligibleSv,
     groupDragAnchorIdSv,
     groupDragDeltaLeftMm,

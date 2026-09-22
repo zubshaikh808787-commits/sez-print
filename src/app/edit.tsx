@@ -996,7 +996,11 @@ export default function EditScreen() {
   }, [doc.elements, primaryId, selectedIds]);
 
   const selectedElement = selectedIds.length === 1 ? primaryElement : null;
-  const displayElement = primaryElement;
+  const lastSelectedElementRef = useRef<LabelElement | null>(null);
+  if (primaryElement) {
+    lastSelectedElementRef.current = primaryElement;
+  }
+  const displayElement = primaryElement ?? lastSelectedElementRef.current;
   const selectedElements = useMemo(
     () => doc.elements.filter((el) => selectedIds.includes(el.id)),
     [doc.elements, selectedIds],
@@ -1449,6 +1453,7 @@ export default function EditScreen() {
     (id: string) => {
       const element = docRef.current.elements.find((el) => el.id === id);
       if (!element || element.needPrinting === false || element.type === 'border') return;
+      lastSelectedElementRef.current = element;
       topBarSelectionVisibleSv.value = 1;
       bottomPanelVisibleSv.value = 1;
       const next = reduceTapSelect({
