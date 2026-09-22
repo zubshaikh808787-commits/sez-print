@@ -1,10 +1,13 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { clampGridSpacingMm } from '@/lib/editor/canvas-grid';
+import { clampGridSpacingMm, GRID_SPACING_MAX_MM, GRID_SPACING_MIN_MM } from '@/lib/editor/canvas-grid';
 import {
+  GRID_CUSTOM_LABEL,
   GRID_PRINT_DISCLAIMER,
-  GRID_SPACING_LABELS,
-  spacingLabelForMm,
+  GRID_SPACING_OPTIONS,
+  isPresetGridSpacing,
+  spacingOptionForMm,
 } from '@/lib/editor/grid-settings-ui';
 import { Spacing } from '@/constants/theme';
 import { Palette, Type, androidRipple } from '@/constants/ui';
@@ -16,13 +19,34 @@ type GridSpacingPopoverProps = {
   onSpacingChange: (spacingMm: number) => void;
 };
 
+function parseSpacingDraft(draft: string): number | null {
+  const mm = Number.parseFloat(draft.replace(',', '.'));
+  return Number.isFinite(mm) ? clampGridSpacingMm(mm) : null;
+}
+
 export function GridSpacingPopover({
   visible,
   spacingMm,
   onClose,
   onSpacingChange,
 }: GridSpacingPopoverProps) {
-  const selectedSpacing = spacingLabelForMm(spacingMm);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  useEffect(() => {
+    if (!visible) return;
+    setCustomOpen(!isPresetGridSpacing(spacingMm));
+    setDraft(String(clampGridSpacingMm(spacingMm)));
+  }, [visible, spacingMm]);
+
+  const selected = customOpen ? GRID_CUSTOM_LABEL : spacingOptionForMm(spacingMm);
+
+  const commitDraft = () => {
+    const mm = parseSpacingDraft(draft);
+    if (mm == null) return;
+    onSpacingChange(mm);
+    setDraft(String(mm));
+  };
 
   return (
     <Modal
@@ -36,16 +60,21 @@ export function GridSpacingPopover({
           <Text style={styles.disclaimer}>{GRID_PRINT_DISCLAIMER}</Text>
 
           <View style={styles.chipRow}>
-            {GRID_SPACING_LABELS.map((label) => {
-              const active = label === selectedSpacing;
+            {GRID_SPACING_OPTIONS.map((label) => {
+              const active = label === selected;
               return (
                 <Pressable
                   key={label}
                   onPress={() => {
-                    const mm = Number.parseFloat(label);
-                    if (Number.isFinite(mm)) {
-                      onSpacingChange(clampGridSpacingMm(mm));
+                    if (label === GRID_CUSTOM_LABEL) {
+                      setCustomOpen(true);
+                      setDraft(String(clampGridSpacingMm(spacingMm)));
+                      return;
                     }
+                    const mm = Number.parseFloat(label);
+                    if (!Number.isFinite(mm)) return;
+                    setCustomOpen(false);
+                    onSpacingChange(clampGridSpacingMm(mm));
                   }}
                   android_ripple={androidRipple}
                   style={({ pressed }) => [
@@ -59,8 +88,31 @@ export function GridSpacingPopover({
             })}
           </View>
 
+          {customOpen ? (
+            <View style={styles.customBlock}>
+              <Text style={styles.customLabel}>Custom size (mm)</Text>
+              <TextInput
+                value={draft}
+                onChangeText={setDraft}
+                onEndEditing={commitDraft}
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+                onSubmitEditing={commitDraft}
+                selectTextOnFocus
+                style={styles.customInput}
+                accessibilityLabel="Custom grid spacing in millimetres"
+              />
+              <Text style={styles.customHint}>
+                {GRID_SPACING_MIN_MM}–{GRID_SPACING_MAX_MM} mm
+              </Text>
+            </View>
+          ) : null}
+
           <Pressable
-            onPress={onClose}
+            onPress={() => {
+              if (customOpen) commitDraft();
+              onClose();
+            }}
             android_ripple={androidRipple}
             style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}>
             <Text style={styles.doneText}>Done</Text>
@@ -82,7 +134,7 @@ const styles = StyleSheet.create({
     paddingLeft: Spacing.three,
   },
   panel: {
-    width: 240,
+    width: 260,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     paddingHorizontal: Spacing.three,
@@ -128,6 +180,28 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: Palette.accent,
+  },
+  customBlock: {
+    gap: 4,
+  },
+  customLabel: {
+    ...Type.caption,
+    color: Palette.ink,
+    fontWeight: '600',
+  },
+  customInput: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 16,
+    color: Palette.ink,
+    backgroundColor: '#F8FAFC',
+  },
+  customHint: {
+    ...Type.caption,
+    color: Palette.muted,
   },
   doneBtn: {
     alignSelf: 'flex-end',

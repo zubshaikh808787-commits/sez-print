@@ -1,4 +1,5 @@
-import { Alert } from 'react-native';
+import { useState } from 'react';
+import { Alert, StyleSheet, TextInput } from 'react-native';
 
 import {
   SettingsActionCard,
@@ -9,12 +10,14 @@ import {
   SettingsToggleGroup,
   SettingsToggleRow,
 } from '@/components/settings-ui';
-import { clampGridSpacingMm } from '@/lib/editor/canvas-grid';
+import { clampGridSpacingMm, GRID_SPACING_MAX_MM, GRID_SPACING_MIN_MM } from '@/lib/editor/canvas-grid';
 import { requestEditorGridToggle } from '@/lib/editor/editor-grid-toggle';
 import {
+  GRID_CUSTOM_LABEL,
   GRID_PRINT_DISCLAIMER,
-  GRID_SPACING_LABELS,
-  spacingLabelForMm,
+  GRID_SPACING_OPTIONS,
+  isPresetGridSpacing,
+  spacingOptionForMm,
 } from '@/lib/editor/grid-settings-ui';
 import {
   DEFAULT_EDITOR_SETTINGS,
@@ -37,6 +40,8 @@ export default function EditorSettingsScreen() {
 
   const gridSpacingMm =
     editorGridSpacingMm ?? DEFAULT_EDITOR_SETTINGS.editorGridSpacingMm ?? 5;
+  const [customOpen, setCustomOpen] = useState(() => !isPresetGridSpacing(gridSpacingMm));
+  const [customDraft, setCustomDraft] = useState(() => String(clampGridSpacingMm(gridSpacingMm)));
 
   const setShowColumnName = (v: boolean) => patchEditor({ showColumnName: v });
   const setHighlightColumnName = (v: boolean) => patchEditor({ highlightColumnName: v });
@@ -85,15 +90,42 @@ export default function EditorSettingsScreen() {
         <SettingsCard>
           <SettingsSegmentRow
             label="Grid spacing"
-            options={GRID_SPACING_LABELS}
-            selected={spacingLabelForMm(gridSpacingMm)}
+            options={GRID_SPACING_OPTIONS}
+            selected={customOpen ? GRID_CUSTOM_LABEL : spacingOptionForMm(gridSpacingMm)}
             onSelect={(label) => {
-              const mm = Number.parseFloat(label);
-              if (Number.isFinite(mm)) {
-                patchEditor({ editorGridSpacingMm: clampGridSpacingMm(mm) });
+              if (label === GRID_CUSTOM_LABEL) {
+                setCustomOpen(true);
+                setCustomDraft(String(clampGridSpacingMm(gridSpacingMm)));
+                return;
               }
+              const mm = Number.parseFloat(label);
+              if (!Number.isFinite(mm)) return;
+              setCustomOpen(false);
+              patchEditor({ editorGridSpacingMm: clampGridSpacingMm(mm) });
             }}
+            showDivider={customOpen}
           />
+          {customOpen ? (
+            <>
+              <TextInput
+                value={customDraft}
+                onChangeText={setCustomDraft}
+                onEndEditing={() => {
+                  const mm = Number.parseFloat(customDraft.replace(',', '.'));
+                  if (!Number.isFinite(mm)) return;
+                  const clamped = clampGridSpacingMm(mm);
+                  setCustomDraft(String(clamped));
+                  patchEditor({ editorGridSpacingMm: clamped });
+                }}
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+                selectTextOnFocus
+                placeholder={`${GRID_SPACING_MIN_MM}–${GRID_SPACING_MAX_MM} mm`}
+                style={styles.customInput}
+                accessibilityLabel="Custom grid spacing in millimetres"
+              />
+            </>
+          ) : null}
         </SettingsCard>
       ) : null}
 
@@ -125,3 +157,18 @@ export default function EditorSettingsScreen() {
     </SettingsScreenShell>
   );
 }
+
+const styles = StyleSheet.create({
+  customInput: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 16,
+    color: '#0F172A',
+    backgroundColor: '#F8FAFC',
+  },
+});

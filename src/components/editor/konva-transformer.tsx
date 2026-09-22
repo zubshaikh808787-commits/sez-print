@@ -1200,9 +1200,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       .onEnd((e) => {
         'worklet';
         liftSv.value = 1;
-        const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
-        // Less than 20px translation (distSq < 400) or !hasMovedSv is treated as a tap
-        const isTap = !hasMovedSv.value || distSq < 400;
+        // A real move (past the 10px noise gate) keeps its position.
+        // Treating short drags as taps snapped elements back when seating them on a corner.
+        const isTap = !hasMovedSv.value;
 
         if (isTap) {
           tapHandledSv.value = true;

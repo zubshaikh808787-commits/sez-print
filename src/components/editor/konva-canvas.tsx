@@ -561,7 +561,10 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         overflow: 'hidden',
       }}>
       {stockOutline}
-      <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.artboardLayer]}>
+      <View
+        pointerEvents="none"
+        collapsable={false}
+        style={[styles.artboardLayer, { width: w, height: h }]}>
         <View
           collapsable={false}
           style={[
@@ -646,8 +649,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       </View>
       <ViewShot
         ref={ref}
+        collapsable={false}
         options={{ format: 'png', quality: 1 }}
-        style={[StyleSheet.absoluteFillObject, styles.elementLayer]}>
+        style={[styles.elementLayer, { width: w, height: h }]}>
         <GestureDetector gesture={deselectGesture}>
           <View style={StyleSheet.absoluteFillObject} collapsable={false} />
         </GestureDetector>
@@ -691,6 +695,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 
 const styles = StyleSheet.create({
   artboardLayer: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
     zIndex: 0,
   },
   elementLayer: {

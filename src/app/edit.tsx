@@ -645,18 +645,6 @@ export default function EditScreen() {
     groupResizeEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
   }, [selectedIds.length, groupDragEligibleSv, groupResizeEligibleSv]);
 
-  const defaultToolbarAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
-    zIndex: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
-    pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'none' : 'auto',
-  }));
-
-  const contextualToolbarAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
-    zIndex: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
-    pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'auto' : 'none',
-  }));
-
   const staticPaletteAnimatedStyle = useAnimatedStyle(() => ({
     opacity: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
     zIndex: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
@@ -3267,7 +3255,7 @@ export default function EditScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.body, { maxWidth: MaxContentWidth }]}>
         <View style={styles.subToolbarSlot}>
-          <Animated.View style={[styles.subToolbarRow, defaultToolbarAnimatedStyle]}>
+          <View style={styles.subToolbarRow}>
             <Pressable
               onPress={() => {
                 if (isRatTail143Document(doc)) return;
@@ -3339,11 +3327,16 @@ export default function EditScreen() {
                 size={18}
               />
             </Pressable>
-          </Animated.View>
+          </View>
 
-          <Animated.View style={[StyleSheet.absoluteFillObject, contextualToolbarAnimatedStyle]}>
+          <View
+            pointerEvents={selectedIds.length > 0 ? 'auto' : 'none'}
+            style={[
+              styles.contextualToolbarHost,
+              selectedIds.length === 0 && styles.contextualToolbarHidden,
+            ]}>
             {renderContextualToolbar()}
-          </Animated.View>
+          </View>
         </View>
 
         {doc.ups && doc.ups.columns > 1 ? (
@@ -3814,11 +3807,20 @@ const styles = StyleSheet.create({
   },
   subToolbarSlot: {
     width: '100%',
-    height: 44,
-    justifyContent: 'center',
+    height: 88,
+    flexShrink: 0,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E2E8F0',
+  },
+  contextualToolbarHost: {
+    width: '100%',
+    height: 44,
+    overflow: 'hidden',
+    zIndex: 2,
+  },
+  contextualToolbarHidden: {
+    opacity: 0,
   },
   subToolbarRow: {
     width: '100%',
