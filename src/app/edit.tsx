@@ -101,7 +101,7 @@ import type {
 } from '@/components/editor/konva-transformer';
 import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
 import { StaticToolPalette } from '@/components/editor/static-tool-palette';
-import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import {
   ArtboardFrame,
   CATALOG_STOCK_LINER,
@@ -630,13 +630,21 @@ export default function EditScreen() {
   const topBarSelectionVisibleSv = useSharedValue(selectedIds.length > 0 ? 1 : 0);
   const bottomPanelVisibleSv = useSharedValue(panelOpen && selectedIds.length > 0 ? 1 : 0);
 
-  useEffect(() => {
-    topBarSelectionVisibleSv.value = selectedIds.length > 0 ? 1 : 0;
-  }, [selectedIds.length, topBarSelectionVisibleSv]);
+  const smoothEasing = useMemo(() => Easing.bezier(0.25, 0.1, 0.25, 1), []);
 
   useEffect(() => {
-    bottomPanelVisibleSv.value = panelOpen && selectedIds.length > 0 ? 1 : 0;
-  }, [panelOpen, selectedIds.length, bottomPanelVisibleSv]);
+    topBarSelectionVisibleSv.value = withTiming(selectedIds.length > 0 ? 1 : 0, {
+      duration: 160,
+      easing: smoothEasing,
+    });
+  }, [selectedIds.length, topBarSelectionVisibleSv, smoothEasing]);
+
+  useEffect(() => {
+    bottomPanelVisibleSv.value = withTiming(panelOpen && selectedIds.length > 0 ? 1 : 0, {
+      duration: 160,
+      easing: smoothEasing,
+    });
+  }, [panelOpen, selectedIds.length, bottomPanelVisibleSv, smoothEasing]);
 
   useEffect(() => {
     groupDragEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
@@ -644,31 +652,36 @@ export default function EditScreen() {
   }, [selectedIds.length, groupDragEligibleSv, groupResizeEligibleSv]);
 
   const defaultToolbarAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
+    opacity: 1 - topBarSelectionVisibleSv.value,
+    transform: [{ translateY: topBarSelectionVisibleSv.value * -6 }],
     zIndex: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
     pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'none' : 'auto',
   }));
 
   const contextualToolbarAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
+    opacity: topBarSelectionVisibleSv.value,
+    transform: [{ translateY: (1 - topBarSelectionVisibleSv.value) * 6 }],
     zIndex: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
     pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'auto' : 'none',
   }));
 
   const staticPaletteAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
+    opacity: 1 - bottomPanelVisibleSv.value,
+    transform: [{ translateY: bottomPanelVisibleSv.value * 6 }],
     zIndex: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
     pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'none' : 'auto',
   }));
 
   const propertyPanelAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
+    opacity: bottomPanelVisibleSv.value,
+    transform: [{ translateY: (1 - bottomPanelVisibleSv.value) * 6 }],
     zIndex: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
     pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
   }));
 
   const panelCloseBtnAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
+    opacity: bottomPanelVisibleSv.value,
+    transform: [{ scale: 0.8 + 0.2 * bottomPanelVisibleSv.value }],
     pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
   }));
 
@@ -1376,34 +1389,34 @@ export default function EditScreen() {
 
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
-    topBarSelectionVisibleSv.value = 0;
-    bottomPanelVisibleSv.value = 0;
+    topBarSelectionVisibleSv.value = withTiming(0, { duration: 160, easing: smoothEasing });
+    bottomPanelVisibleSv.value = withTiming(0, { duration: 160, easing: smoothEasing });
     setElements((elements) => elements.filter((el) => !selectedIds.includes(el.id)), true);
     setSelectedIds([]);
     setPrimaryId(null);
     setPanelOpen(false);
-  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
+  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv, smoothEasing]);
 
   const duplicateSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     const bounds = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
     const result = duplicateElements(docRef.current.elements, selectedIds, bounds);
     if (result.newIds.length === 0) return;
-    topBarSelectionVisibleSv.value = 1;
-    bottomPanelVisibleSv.value = 1;
+    topBarSelectionVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
+    bottomPanelVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
     setElements(() => result.elements, true);
     const next = selectionFromIds(result.newIds);
     setSelectedIds(next.ids);
     setPrimaryId(next.primaryId);
-  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
+  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv, smoothEasing]);
 
   const handleDeselectAll = useCallback(() => {
-    topBarSelectionVisibleSv.value = 0;
-    bottomPanelVisibleSv.value = 0;
+    topBarSelectionVisibleSv.value = withTiming(0, { duration: 160, easing: smoothEasing });
+    bottomPanelVisibleSv.value = withTiming(0, { duration: 160, easing: smoothEasing });
     setSelectedIds([]);
     setPrimaryId(null);
     setPanelOpen(false);
-  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, smoothEasing]);
 
   const toggleMultipleMode = useCallback(() => {
     // Leaving Multiple mode drops the whole multi-selection rather than
@@ -1454,21 +1467,32 @@ export default function EditScreen() {
       const element = docRef.current.elements.find((el) => el.id === id);
       if (!element || element.needPrinting === false || element.type === 'border') return;
       lastSelectedElementRef.current = element;
-      topBarSelectionVisibleSv.value = 1;
-      bottomPanelVisibleSv.value = 1;
+      topBarSelectionVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
+      bottomPanelVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
       const next = reduceTapSelect({
         id,
         multipleMode,
         current: { ids: selectedIdsRef.current, primaryId: primaryIdRef.current },
       });
-      setSelectedIds(next.ids);
-      setPrimaryId(next.primaryId);
+      const idsSame =
+        next.ids.length === selectedIdsRef.current.length &&
+        next.ids.every((val, idx) => val === selectedIdsRef.current[idx]);
+      const primarySame = next.primaryId === primaryIdRef.current;
+
+      if (!idsSame) {
+        setSelectedIds(next.ids);
+      }
+      if (!primarySame) {
+        setPrimaryId(next.primaryId);
+      }
       if (!multipleMode) {
         if (element.type === 'signature') {
           setShowSignatureBoard(true);
         } else {
-          resetTabToRegularForElement(element.type);
-          setPanelOpen(true);
+          if (!idsSame || !primarySame || !panelOpen) {
+            resetTabToRegularForElement(element.type);
+            setPanelOpen(true);
+          }
         }
       } else if (next.ids.length >= 2) {
         setPanelOpen(true);
@@ -1477,14 +1501,14 @@ export default function EditScreen() {
         setPanelOpen(true);
       }
     },
-    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement],
+    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement, smoothEasing, panelOpen],
   );
 
   const openPanelFor = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
     if (!element) return;
-    topBarSelectionVisibleSv.value = 1;
-    bottomPanelVisibleSv.value = 1;
+    topBarSelectionVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
+    bottomPanelVisibleSv.value = withTiming(1, { duration: 160, easing: smoothEasing });
     setSelectedIds([id]);
     setPrimaryId(id);
     if (element.type === 'signature') {
@@ -1501,7 +1525,7 @@ export default function EditScreen() {
     }
     resetTabToRegularForElement(element.type);
     setPanelOpen(true);
-  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement]);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement, smoothEasing]);
 
   const beginTextEdit = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
@@ -2787,7 +2811,7 @@ export default function EditScreen() {
 
   const closePanel = () => {
     commitTextEdit();
-    bottomPanelVisibleSv.value = 0;
+    bottomPanelVisibleSv.value = withTiming(0, { duration: 160, easing: smoothEasing });
     setPanelOpen(false);
   };
 

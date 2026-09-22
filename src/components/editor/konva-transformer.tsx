@@ -1003,12 +1003,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   );
 
   const bodyHitSlop = useMemo(() => {
-    const target = 42;
+    const target = 48;
+    const minSlop = 16;
     return {
-      top: Math.max(12, (target - Math.max(1, baseHeightPx)) / 2),
-      bottom: Math.max(12, (target - Math.max(1, baseHeightPx)) / 2),
-      left: Math.max(12, (target - Math.max(1, baseWidthPx)) / 2),
-      right: Math.max(12, (target - Math.max(1, baseWidthPx)) / 2),
+      top: Math.max(minSlop, (target - Math.max(1, baseHeightPx)) / 2),
+      bottom: Math.max(minSlop, (target - Math.max(1, baseHeightPx)) / 2),
+      left: Math.max(minSlop, (target - Math.max(1, baseWidthPx)) / 2),
+      right: Math.max(minSlop, (target - Math.max(1, baseWidthPx)) / 2),
     };
   }, [baseHeightPx, baseWidthPx]);
 
@@ -1081,17 +1082,17 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       now - last.time < DOUBLE_TAP_MAX_GAP_MS;
     lastTapRef.current = { id: element.id, time: now };
 
-    callbacksRef.current.onSelect(element.id);
-
     if (isDouble) {
       lastTapRef.current = { id: '', time: 0 };
       triggerDoubleTapJS();
+    } else {
+      callbacksRef.current.onSelect(element.id);
     }
   }, [element.id, triggerDoubleTapJS]);
 
   const bodyDragGesture = useMemo(() => {
     const pan = Gesture.Pan()
-      .enabled(!element.lockMovement)
+      .enabled(true)
       .minDistance(0)
       .maxPointers(1)
       .shouldCancelWhenOutside(false)
@@ -1108,18 +1109,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         beginTimeSv.value = tNow;
         hasMovedSv.value = false;
         tapHandledSv.value = false;
-        // Immediately prime interaction and selection on UI thread
-        // so positions and visual boundary are locked instantly with 0ms delay
-        isInteracting.value = true;
-        selectedSv.value = true;
-        if (topBarSelectionVisibleSv) {
-          topBarSelectionVisibleSv.value = 1;
-        }
-        if (bottomPanelVisibleSv) {
-          bottomPanelVisibleSv.value = 1;
-        }
-        originLeftSv.value = originLeftSv.value + transX.value;
-        originTopSv.value = originTopSv.value + transY.value;
         transX.value = 0;
         transY.value = 0;
 
@@ -1137,25 +1126,31 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           groupDragDeltaTopMm.value = 0;
         }
 
-        // Prime JS selection + panel content immediately on touch-down, not after drag threshold.
+        // Prime JS selection immediately on touch-down
         runOnJS(notifySelectJS)(element.id);
       })
       .onStart((_e) => {
         'worklet';
-        isInteracting.value = true;
-        selectedSv.value = true;
       })
       .onUpdate((e) => {
         'worklet';
         const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
         if (!hasMovedSv.value) {
+          if (element.lockMovement) {
+            return;
+          }
           if (distSq < 100) {
             // Less than 10px: stationary touch noise, ignore so taps are rock solid
             return;
           }
           hasMovedSv.value = true;
+          isInteracting.value = true;
           liftSv.value = DRAG_LIFT_OPACITY;
           runOnJS(notifyTransformStartJS)(element.id, 'move');
+        }
+
+        if (element.lockMovement) {
+          return;
         }
 
         const z = padZoomSv.value > 0 ? padZoomSv.value : 1;
@@ -1201,8 +1196,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         'worklet';
         liftSv.value = 1;
         const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
-        // Less than 20px translation (distSq < 400) or !hasMovedSv is treated as a tap
-        const isTap = !hasMovedSv.value || distSq < 400;
+        // Less than 20px translation (distSq < 400) or !hasMovedSv or locked element is treated as a tap
+        const isTap = !hasMovedSv.value || distSq < 400 || element.lockMovement;
 
         if (isTap) {
           tapHandledSv.value = true;
@@ -1750,7 +1745,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       height: liveH,
       transform: [{ rotate: `${liveRot}deg` }],
       opacity: (element.opacity ?? 1) * liftSv.value,
-      zIndex: selectedSv.value ? 100 + (element.zIndex ?? 1) : (element.zIndex ?? 1),
+      zIndex: selected ? 100 + (element.zIndex ?? 1) : (element.zIndex ?? 1),
     };
   });
 
@@ -1840,9 +1835,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
   const selectionOverlayStyle = useAnimatedStyle(() => {
     return {
-      opacity: selectedSv.value ? 1 : 0,
+      opacity: selected ? 1 : 0,
     };
-  });
+  }, [selected]);
 
   const overflowBadgeStyle = useAnimatedStyle(() => {
     return {
@@ -1925,6 +1920,47 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         ) : null}
       </Animated.View>
     </Animated.View>
+  );
+}, (prev, next) => {
+  return (
+    prev.element === next.element &&
+    prev.selected === next.selected &&
+    prev.pxPerMM === next.pxPerMM &&
+    prev.padZoom === next.padZoom &&
+    prev.selectionColor === next.selectionColor &&
+    prev.canvasWidthMm === next.canvasWidthMm &&
+    prev.canvasHeightMm === next.canvasHeightMm &&
+    prev.mediaShape === next.mediaShape &&
+    prev.liveBounds === next.liveBounds &&
+    prev.deselectGesture === next.deselectGesture &&
+    prev.topBarSelectionVisibleSv === next.topBarSelectionVisibleSv &&
+    prev.bottomPanelVisibleSv === next.bottomPanelVisibleSv &&
+    prev.groupDragDeltaLeftMm === next.groupDragDeltaLeftMm &&
+    prev.groupDragDeltaTopMm === next.groupDragDeltaTopMm &&
+    prev.groupDragAnchorIdSv === next.groupDragAnchorIdSv &&
+    prev.groupDragEligibleSv === next.groupDragEligibleSv &&
+    prev.transformSettlePulseSv === next.transformSettlePulseSv &&
+    prev.groupDragSettleAnchorIdSv === next.groupDragSettleAnchorIdSv &&
+    prev.groupDragSettleDeltaLeftSv === next.groupDragSettleDeltaLeftSv &&
+    prev.groupDragSettleDeltaTopSv === next.groupDragSettleDeltaTopSv &&
+    prev.groupResizeEligibleSv === next.groupResizeEligibleSv &&
+    prev.groupResizeReadySv === next.groupResizeReadySv &&
+    prev.groupResizeAnchorIdSv === next.groupResizeAnchorIdSv &&
+    prev.groupResizeScaleXSv === next.groupResizeScaleXSv &&
+    prev.groupResizeScaleYSv === next.groupResizeScaleYSv &&
+    prev.groupResizeHandleSv === next.groupResizeHandleSv &&
+    prev.groupResizeFixedOriginLeftMm === next.groupResizeFixedOriginLeftMm &&
+    prev.groupResizeFixedOriginTopMm === next.groupResizeFixedOriginTopMm &&
+    prev.groupResizeMinScaleXSv === next.groupResizeMinScaleXSv &&
+    prev.groupResizeMaxScaleXSv === next.groupResizeMaxScaleXSv &&
+    prev.groupResizeMinScaleYSv === next.groupResizeMinScaleYSv &&
+    prev.groupResizeMaxScaleYSv === next.groupResizeMaxScaleYSv &&
+    prev.groupResizeSettleAnchorIdSv === next.groupResizeSettleAnchorIdSv &&
+    prev.groupResizeSettleScaleXSv === next.groupResizeSettleScaleXSv &&
+    prev.groupResizeSettleScaleYSv === next.groupResizeSettleScaleYSv &&
+    prev.groupResizeSettleHandleSv === next.groupResizeSettleHandleSv &&
+    prev.groupResizeSettleFixedOriginLeftMm === next.groupResizeSettleFixedOriginLeftMm &&
+    prev.groupResizeSettleFixedOriginTopMm === next.groupResizeSettleFixedOriginTopMm
   );
 });
 
