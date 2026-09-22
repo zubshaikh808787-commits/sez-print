@@ -1,12 +1,13 @@
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
   ActivityIndicator,
   Dimensions,
+  InteractionManager,
   KeyboardAvoidingView,
   LayoutAnimation,
   Modal,
@@ -20,6 +21,8 @@ import {
   Vibration,
   useWindowDimensions,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import { useFocusEffect } from '@react-navigation/native';
@@ -43,16 +46,25 @@ import {
 } from '@/lib/element-sizing';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
 import {
+  applyGroupResize,
+  buildGroupResizeSnapshots,
+  getGroupResizeScaleLimits,
+  groupResizeFrameFromSnapshots,
+  selectionHasBlockedRotation,
+} from '@/lib/editor/group-resize';
+import type { MmBox } from '@/lib/editor/resize-policy';
+import {
   DEFAULT_CANVAS_SPLIT_RATIO,
+  DIVIDER_HIT_SIZE_PX,
   NUDGE_PAD_SPLIT_EXTRA_PX,
+  PANEL_DEFAULT_HEIGHT_PX,
   PANEL_MIN_HEIGHT_PX,
-  RULER_DEBOUNCE_MS,
   SPLIT_ANIMATION_MS,
   clampCanvasSplitHeight,
   clampStoredSplitRatio,
   persistableSplitRatio,
   restoreCanvasSplitHeight,
-  workspaceHeightFromSplit,
+  usableSplitViewportPx,
   type SplitReleaseResult,
 } from '@/lib/editor/canvas-split';
 import {
@@ -63,7 +75,6 @@ import {
   windowPointToMm,
   type EditorViewTransform,
 } from '@/lib/editor/view-transform';
-import { applyLiveDragPosition } from '@/lib/editor/drag-layer';
 import { collectImageFileUris, placeImportedImageMm } from '@/lib/editor/image-ingest';
 import { ingestEditorImage, sweepEditorImageFiles } from '@/lib/editor/image-ingest-native';
 import {
@@ -74,6 +85,7 @@ import {
 import { chromeStrokeForFill, paletteGhostSizePx } from '@/lib/editor/canvas-chrome';
 import { PaletteDragGhost } from '@/components/editor/palette-drag-ghost';
 import { PaletteToolItem } from '@/components/editor/palette-tool-item';
+import { ToolMenuIcon, TopToolbarIcon } from '@/components/editor/editor-menu-icons';
 import { DegreesPropertyPanel } from '@/components/editor/degrees-property-panel';
 import { ArcTextPropertyPanel } from '@/components/editor/arctext-property-panel';
 import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel';
@@ -82,8 +94,14 @@ import { ElementContentView } from '@/components/editor/element-renderer';
 import { ZoomableEditPad } from '@/components/editor/zoomable-edit-pad';
 import { EditingPad } from '@/components/editor/editing-pad';
 import { KonvaCanvas } from '@/components/editor/konva-canvas';
-import type { TransformCommitPayload, TransformMovePayload } from '@/components/editor/konva-transformer';
+import type {
+  TransformCommitPayload,
+  TransformMovePayload,
+  TransformStartKind,
+} from '@/components/editor/konva-transformer';
 import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
+import { StaticToolPalette } from '@/components/editor/static-tool-palette';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import {
   ArtboardFrame,
   CATALOG_STOCK_LINER,
@@ -92,7 +110,13 @@ import {
   fitLabelCanvas,
   LABEL_PAD_STAGE_MIN_HEIGHT,
 } from '@/components/label-preview';
-import { HorizontalRuler, RULER_SIZE, RulerCorner, VerticalRuler } from '@/components/canvas-rulers';
+import {
+  HorizontalRuler,
+  RULER_SIZE,
+  RulerCorner,
+  VerticalRuler,
+  type LiveRulerBounds,
+} from '@/components/canvas-rulers';
 import { LabelSizeEditor } from '@/components/label-size-editor';
 import { LabelSettingsMenu } from '@/components/editor/more-menu';
 import { LinePropertyPanel } from '@/components/editor/line-property-panel';
@@ -106,6 +130,22 @@ import {
 import { TableSizePicker } from '@/components/editor/table-size-picker';
 import { TextPropertyPanel } from '@/components/editor/text-property-panel';
 import { TimePropertyPanel } from '@/components/editor/time-property-panel';
+import { QuickValueModal } from '@/components/editor/quick-value-modal';
+import { MultiSelectPropertyPanel } from '@/components/editor/multi-select-property-panel';
+import {
+  getQuickEditPatch,
+  getQuickEditPlaceholder,
+  getQuickEditTitle,
+  getQuickEditValue,
+  isQuickEditableType,
+  type ElementAnchorRect,
+} from '@/lib/editor/quick-value';
+import {
+  alignGroupBounds,
+  reduceTapSelect,
+  selectionFromIds,
+  supportsMultiSelectPanel,
+} from '@/lib/editor/selection';
 import {
   DEFAULT_ARCTEXT_STATE,
   DEFAULT_BARCODE_STATE,
@@ -144,7 +184,7 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
-import { clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
+import { CANVAS_BOTTOM_CHIP_CLEARANCE_PX, STAGE_PADDING_PX, clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import { computeTextElementHeightMm, textBlockHeightMm } from '@/lib/element-sizing';
@@ -177,26 +217,36 @@ import {
 
 type IconName = AppIconName;
 
-const TOOLS: { icon: IconName; label: string }[] = [
-  { icon: 'textformat', label: 'Text' },
-  { icon: 'barcode', label: 'Barcode' },
-  { icon: 'qrcode', label: 'QRCode' },
-  { icon: 'photo', label: 'Image' },
-  { icon: 'photo.artframe', label: 'Clipart' },
-  { icon: 'line.diagonal', label: 'Line' },
-  { icon: 'square.on.circle', label: 'Shapes' },
-  { icon: 'tablecells', label: 'Table' },
-  { icon: 'clock', label: 'Time' },
-  { icon: 'character', label: 'ArcText' },
-  { icon: 'list.number', label: 'Degrees' },
-  { icon: 'tablecells.badge.ellipsis', label: 'Excel' },
-  { icon: 'viewfinder', label: 'Scan' },
-  { icon: 'eye', label: 'OCR' },
-  { icon: 'mic', label: 'ASR' },
-  { icon: 'square.on.square', label: '2ups Label' },
-  { icon: 'square.dashed', label: 'Border' },
-  { icon: 'signature', label: 'Signature' },
+const TOOL_ROWS: { icon: IconName; label: string }[][] = [
+  [
+    { icon: 'textformat', label: 'Text' },
+    { icon: 'barcode', label: 'Barcode' },
+    { icon: 'qrcode', label: 'QRCode' },
+    { icon: 'photo', label: 'Image' },
+    { icon: 'photo.artframe', label: 'Clipart' },
+  ],
+  [
+    { icon: 'line.diagonal', label: 'Line' },
+    { icon: 'square.on.circle', label: 'Shapes' },
+    { icon: 'tablecells', label: 'Table' },
+    { icon: 'clock', label: 'Time' },
+    { icon: 'character', label: 'ArcText' },
+  ],
+  [
+    { icon: 'list.number', label: 'Counter' },
+    { icon: 'tablecells.badge.ellipsis', label: 'Excel' },
+    { icon: 'viewfinder', label: 'Scan' },
+    { icon: 'eye', label: 'OCR' },
+    { icon: 'mic', label: 'ASR' },
+  ],
+  [
+    { icon: 'square.on.square', label: 'Label Clone' },
+    { icon: 'square.dashed', label: 'Border' },
+    { icon: 'signature', label: 'Signature' },
+  ],
 ];
+
+const TOOLS = TOOL_ROWS.flat();
 
 const MAX_HISTORY = 60;
 
@@ -235,21 +285,19 @@ function HeaderAction({
 }
 
 function ToolbarItem({
-  icon,
+  name,
   label,
   active,
   disabled,
-  withDivider,
   onPress,
 }: {
-  icon: IconName;
+  name: string;
   label: string;
   active?: boolean;
   disabled?: boolean;
-  withDivider?: boolean;
   onPress?: () => void;
 }) {
-  const color = disabled ? Palette.disabled : active ? Palette.accent : Palette.ink;
+  const color = disabled ? '#CBD5E1' : active ? '#06B6D4' : '#64748B';
   return (
     <Pressable
       disabled={disabled}
@@ -258,11 +306,10 @@ function ToolbarItem({
       android_ripple={androidRipple}
       style={({ pressed }) => [
         styles.toolbarItem,
-        withDivider && styles.toolbarDivider,
         pressed && !disabled && styles.pressed,
       ]}>
-      <AppIcon name={icon} tintColor={active ? Palette.accent : color} size={22} />
-      <Text numberOfLines={1} style={[styles.toolbarLabel, { color: active ? Palette.accent : color }]}>
+      <TopToolbarIcon name={name} size={22} color={color} active={active} />
+      <Text numberOfLines={1} style={[styles.toolbarLabel, { color }]}>
         {label}
       </Text>
     </Pressable>
@@ -270,21 +317,23 @@ function ToolbarItem({
 }
 
 function ToolItem({
-  icon,
+  icon: _icon,
   label,
   onPress,
+  style,
 }: {
-  icon: IconName;
+  icon?: IconName;
   label: string;
   onPress?: () => void;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
     <Pressable
       onPress={onPress}
       hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
       android_ripple={androidRipple}
-      style={({ pressed }) => [styles.toolItem, pressed && styles.pressed]}>
-      <AppIcon name={icon} tintColor={Palette.accent} size={26} />
+      style={({ pressed }) => [styles.toolItem, style, pressed && styles.pressed]}>
+      <ToolMenuIcon name={label} size={32} />
       <Text numberOfLines={1} style={styles.toolLabel}>
         {label}
       </Text>
@@ -324,10 +373,14 @@ function paletteDefaultSizeMm(
       const fit = fitLineDefaults(canvas.widthMm, canvas.heightMm, elements);
       return { widthMm: fit.width, heightMm: fit.height };
     }
-    case 'shape':
-    case 'arctext': {
+    case 'shape': {
       const fit = fitShapeDefaults(canvas.widthMm, canvas.heightMm, elements);
       return { widthMm: fit.width, heightMm: fit.height };
+    }
+    case 'arctext': {
+      const fit = fitShapeDefaults(canvas.widthMm, canvas.heightMm, elements);
+      const circleSize = Math.min(fit.width, fit.height);
+      return { widthMm: circleSize, heightMm: circleSize };
     }
     default: {
       const fit =
@@ -458,7 +511,51 @@ export default function EditScreen() {
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
     params.selectedElementId ? [params.selectedElementId] : []
   );
+  const [primaryId, setPrimaryId] = useState<string | null>(() =>
+    params.selectedElementId ? params.selectedElementId : null,
+  );
   const [multipleMode, setMultipleMode] = useState(false);
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const primaryIdRef = useRef(primaryId);
+  primaryIdRef.current = primaryId;
+  const dragStartPositionsRef = useRef<Map<string, { left: number; top: number }> | null>(null);
+  const transformKindRef = useRef<TransformStartKind | null>(null);
+  const groupDragDeltaLeftSv = useSharedValue(0);
+  const groupDragDeltaTopSv = useSharedValue(0);
+  const groupDragAnchorIdSv = useSharedValue('');
+  const groupDragEligibleSv = useSharedValue(0);
+  const transformSettlePulseSv = useSharedValue(0);
+  const groupDragSettleAnchorIdSv = useSharedValue('');
+  const groupDragSettleDeltaLeftSv = useSharedValue(0);
+  const groupDragSettleDeltaTopSv = useSharedValue(0);
+  const groupDragCommitPendingRef = useRef<{
+    ids: string[];
+    expected: Map<string, { left: number; top: number }>;
+  } | null>(null);
+  const resizeStartSnapshotsRef = useRef<Map<string, MmBox> | null>(null);
+  const groupResizeCommitPendingRef = useRef<{
+    ids: string[];
+    expected: Map<string, { left: number; top: number; width: number; height: number }>;
+  } | null>(null);
+  const groupResizeEligibleSv = useSharedValue(0);
+  const groupResizeReadySv = useSharedValue(0);
+  const groupResizeAnchorIdSv = useSharedValue('');
+  const groupResizeScaleXSv = useSharedValue(1);
+  const groupResizeScaleYSv = useSharedValue(1);
+  const groupResizeHandleSv = useSharedValue(0);
+  const groupResizeFixedOriginLeftSv = useSharedValue(0);
+  const groupResizeFixedOriginTopSv = useSharedValue(0);
+  const groupResizeMinScaleXSv = useSharedValue(0.001);
+  const groupResizeMaxScaleXSv = useSharedValue(1000);
+  const groupResizeMinScaleYSv = useSharedValue(0.001);
+  const groupResizeMaxScaleYSv = useSharedValue(1000);
+  const groupResizeSettleAnchorIdSv = useSharedValue('');
+  const groupResizeSettleScaleXSv = useSharedValue(1);
+  const groupResizeSettleScaleYSv = useSharedValue(1);
+  const groupResizeSettleHandleSv = useSharedValue(0);
+  const groupResizeSettleFixedOriginLeftSv = useSharedValue(0);
+  const groupResizeSettleFixedOriginTopSv = useSharedValue(0);
   const [panelOpen, setPanelOpen] = useState(() =>
     Boolean(params.autoOpenPanel === 'true' && params.selectedElementId)
   );
@@ -492,27 +589,89 @@ export default function EditScreen() {
   const [padInner, setPadInner] = useState({ width: 0, height: 0 });
   const [splitViewportH, setSplitViewportH] = useState(0);
   const [splitDragging, setSplitDragging] = useState(false);
+  const splitDraggingRef = useRef(false);
+  splitDraggingRef.current = splitDragging;
   const [canvasFullscreen, setCanvasFullscreen] = useState(() =>
     Boolean(editorSettings.canvasSplitFullscreen),
   );
+  const effectiveSplitRatio =
+    editorSettings.canvasSplitRatio == null ||
+    editorSettings.canvasSplitRatio === 0.55 ||
+    editorSettings.canvasSplitRatio === 0.42
+      ? null
+      : editorSettings.canvasSplitRatio;
+
   const [canvasSplitH, setCanvasSplitH] = useState(() =>
     restoreCanvasSplitHeight({
-      ratio: clampStoredSplitRatio(editorSettings.canvasSplitRatio ?? DEFAULT_CANVAS_SPLIT_RATIO),
+      ratio: effectiveSplitRatio,
       fullscreen: Boolean(editorSettings.canvasSplitFullscreen),
       viewportPx: Math.max(Dimensions.get('window').height, 560) * 0.62,
       panelMinPx: PANEL_MIN_HEIGHT_PX,
+      panelDefaultPx: PANEL_DEFAULT_HEIGHT_PX,
     }),
   );
-  const [rulerView, setRulerView] = useState({
-    innerWidthPx: 1,
-    innerHeightPx: 1,
-    boardOffsetXPx: 0,
-    boardOffsetYPx: 0,
-    canvasWidthPx: 1,
-    canvasHeightPx: 1,
-  });
+
+  const canvasHeightSv = useSharedValue(canvasSplitH);
+  const isDividerDraggingSv = useSharedValue(false);
+  const splitViewportHSv = useSharedValue(
+    splitViewportH > 0 ? splitViewportH : Math.max(Dimensions.get('window').height, 560) * 0.62,
+  );
+  const workspaceWSv = useSharedValue(120);
+  const docWidthMmSv = useSharedValue(doc.widthMm);
+  const docHeightMmSv = useSharedValue(doc.heightMm);
+  const basePxPerMMSv = useSharedValue(1);
+  const liveScaleSv = useSharedValue(1);
+  const panelDefaultForSplit =
+    PANEL_DEFAULT_HEIGHT_PX + (editorSettings.showNudgePad ? NUDGE_PAD_SPLIT_EXTRA_PX : 0);
   const panelMinForSplit =
     PANEL_MIN_HEIGHT_PX + (editorSettings.showNudgePad ? NUDGE_PAD_SPLIT_EXTRA_PX : 0);
+  const panelMinForSplitSv = useSharedValue(panelMinForSplit);
+
+  const topBarSelectionVisibleSv = useSharedValue(selectedIds.length > 0 ? 1 : 0);
+  const bottomPanelVisibleSv = useSharedValue(panelOpen && selectedIds.length > 0 ? 1 : 0);
+
+  useEffect(() => {
+    topBarSelectionVisibleSv.value = selectedIds.length > 0 ? 1 : 0;
+  }, [selectedIds.length, topBarSelectionVisibleSv]);
+
+  useEffect(() => {
+    bottomPanelVisibleSv.value = panelOpen && selectedIds.length > 0 ? 1 : 0;
+  }, [panelOpen, selectedIds.length, bottomPanelVisibleSv]);
+
+  useEffect(() => {
+    groupDragEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
+    groupResizeEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
+  }, [selectedIds.length, groupDragEligibleSv, groupResizeEligibleSv]);
+
+  const defaultToolbarAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
+    zIndex: topBarSelectionVisibleSv.value > 0.5 ? 0 : 1,
+    pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'none' : 'auto',
+  }));
+
+  const contextualToolbarAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
+    zIndex: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
+    pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'auto' : 'none',
+  }));
+
+  const staticPaletteAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
+    zIndex: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
+    pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'none' : 'auto',
+  }));
+
+  const propertyPanelAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
+    zIndex: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
+    pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
+  }));
+
+  const panelCloseBtnAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
+    pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
+  }));
+
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
   const [padZoom, setPadZoom] = useState(1);
   const padPanRef = useRef({ x: 0, y: 0 });
@@ -553,31 +712,81 @@ export default function EditScreen() {
   const textEditInputRef = useRef<TextInput>(null);
   const [contentFocusRequest, setContentFocusRequest] = useState(0);
 
+  const [quickEditTarget, setQuickEditTarget] = useState<{
+    id: string;
+    type: ElementType;
+    value: string;
+    anchorRect?: ElementAnchorRect;
+  } | null>(null);
+
+  const initialSplitRestoredRef = useRef(false);
+  const lastViewportHRef = useRef(0);
+  const lastPanelMinRef = useRef(panelMinForSplit);
+
   useEffect(() => {
-    if (splitViewportH <= 0 || splitDragging) return;
-    setCanvasSplitH(
-      restoreCanvasSplitHeight({
-        ratio: clampStoredSplitRatio(editorSettings.canvasSplitRatio ?? DEFAULT_CANVAS_SPLIT_RATIO),
-        fullscreen: canvasFullscreen,
-        viewportPx: splitViewportH,
-        panelMinPx: panelMinForSplit,
-      }),
-    );
-  }, [
-    splitViewportH,
-    panelMinForSplit,
-    editorSettings.canvasSplitRatio,
-    canvasFullscreen,
-    splitDragging,
-  ]);
+    if (splitViewportH <= 0) return;
+
+    if (!initialSplitRestoredRef.current) {
+      initialSplitRestoredRef.current = true;
+      lastViewportHRef.current = splitViewportH;
+      lastPanelMinRef.current = panelMinForSplit;
+      setCanvasSplitH(
+        restoreCanvasSplitHeight({
+          ratio: effectiveSplitRatio,
+          fullscreen: canvasFullscreen,
+          viewportPx: splitViewportH,
+          panelMinPx: panelMinForSplit,
+          panelDefaultPx: panelDefaultForSplit,
+        }),
+      );
+      return;
+    }
+
+    const prevVp = lastViewportHRef.current;
+    const vpChanged = Math.abs(splitViewportH - prevVp) > 2;
+    const panelMinChanged = panelMinForSplit !== lastPanelMinRef.current;
+
+    if (vpChanged || panelMinChanged) {
+      lastViewportHRef.current = splitViewportH;
+      lastPanelMinRef.current = panelMinForSplit;
+      setCanvasSplitH((prevH) => {
+        if (canvasFullscreen) {
+          return clampCanvasSplitHeight({
+            viewportPx: splitViewportH,
+            requestedCanvasPx: splitViewportH,
+            panelMinPx: panelMinForSplit,
+          });
+        }
+        if (vpChanged && prevVp > 0) {
+          const prevUsable = usableSplitViewportPx(prevVp);
+          const ratio = prevUsable > 0 ? prevH / prevUsable : DEFAULT_CANVAS_SPLIT_RATIO;
+          const newUsable = usableSplitViewportPx(splitViewportH);
+          return clampCanvasSplitHeight({
+            viewportPx: splitViewportH,
+            requestedCanvasPx: Math.round(newUsable * ratio),
+            panelMinPx: panelMinForSplit,
+          });
+        }
+        return clampCanvasSplitHeight({
+          viewportPx: splitViewportH,
+          requestedCanvasPx: prevH,
+          panelMinPx: panelMinForSplit,
+        });
+      });
+    }
+  }, [splitViewportH, panelMinForSplit, canvasFullscreen, effectiveSplitRatio]);
 
   const layoutWidth = stageWidth > 0 ? stageWidth : initialStageWidth;
   // Phone workspace is constant. Label millimetres only change the inner artboard.
-  const workspaceW = padInner.width > 1 ? padInner.width : Math.max(120, layoutWidth - 16);
-  const workspaceH = workspaceHeightFromSplit(canvasSplitH);
+  const workspaceW = padInner.width > 1 ? padInner.width : Math.max(120, layoutWidth);
+  // Canonical base workspace: uses maximum viewport height so canvas elements are rendered
+  // at high resolution once. Sheet divider movement purely applies GPU transform (scale: s)
+  // without re-running fitEditorPadBoard or causing React reconciliation flicker.
+  const baseWorkspaceH =
+    splitViewportH > 0 ? splitViewportH : Math.max(Dimensions.get('window').height, 560) * 0.62;
   const { canvasWidthPx, canvasHeightPx, pxPerMM, boardOffsetXPx, boardOffsetYPx, innerWidthPx, innerHeightPx } =
     useMemo(() => {
-      const fitted = fitEditorPadBoard(doc.widthMm, doc.heightMm, workspaceW, workspaceH, RULER_SIZE);
+      const fitted = fitEditorPadBoard(doc.widthMm, doc.heightMm, workspaceW, baseWorkspaceH, RULER_SIZE);
       return {
         canvasWidthPx: Math.max(1, fitted.widthPx),
         canvasHeightPx: Math.max(1, fitted.heightPx),
@@ -587,17 +796,29 @@ export default function EditScreen() {
         innerWidthPx: Math.max(1, fitted.innerWidthPx),
         innerHeightPx: Math.max(1, fitted.innerHeightPx),
       };
-    }, [workspaceW, workspaceH, doc.widthMm, doc.heightMm]);
+    }, [workspaceW, baseWorkspaceH, doc.widthMm, doc.heightMm]);
+
+  const committedScale = useMemo(() => {
+    if (pxPerMM <= 0) return 1;
+    const liveInnerH = Math.max(32, canvasSplitH - RULER_SIZE - STAGE_PADDING_PX * 2);
+    const liveInnerW = Math.max(32, workspaceW - RULER_SIZE - STAGE_PADDING_PX * 2);
+    const livePxPerMM = Math.min(
+      liveInnerW / (doc.widthMm > 0 ? doc.widthMm : 1),
+      liveInnerH / (doc.heightMm > 0 ? doc.heightMm : 1),
+    );
+    return livePxPerMM / pxPerMM;
+  }, [canvasSplitH, workspaceW, doc.widthMm, doc.heightMm, pxPerMM]);
 
   const writeEditorView = useCallback(
     (zoom: number, panX: number, panY: number) => {
+      const effectiveZoom = zoom * committedScale;
       editorViewRef.current = editorViewTransform({
         pxPerMM,
-        viewZoom: zoom,
+        viewZoom: effectiveZoom,
         panX,
         panY,
         viewWidthPx: workspaceW,
-        viewHeightPx: workspaceH,
+        viewHeightPx: canvasSplitH,
         innerWidthPx,
         innerHeightPx,
         rulerSizePx: RULER_SIZE,
@@ -606,8 +827,61 @@ export default function EditScreen() {
         workspacePaddingBottomPx: EDITOR_WORKSPACE_PAD_BOTTOM_PX,
       });
     },
-    [pxPerMM, workspaceW, workspaceH, innerWidthPx, innerHeightPx, boardOffsetXPx, boardOffsetYPx],
+    [pxPerMM, committedScale, workspaceW, canvasSplitH, innerWidthPx, innerHeightPx, boardOffsetXPx, boardOffsetYPx],
   );
+
+  useEffect(() => {
+    if (!splitDragging) {
+      canvasHeightSv.value = canvasSplitH;
+    }
+  }, [canvasSplitH, splitDragging, canvasHeightSv]);
+
+  useEffect(() => {
+    splitViewportHSv.value = splitViewportH;
+  }, [splitViewportH, splitViewportHSv]);
+
+  useEffect(() => {
+    workspaceWSv.value = workspaceW;
+  }, [workspaceW, workspaceWSv]);
+
+  useEffect(() => {
+    docWidthMmSv.value = doc.widthMm;
+    docHeightMmSv.value = doc.heightMm;
+    basePxPerMMSv.value = pxPerMM;
+  }, [doc.widthMm, doc.heightMm, pxPerMM, docWidthMmSv, docHeightMmSv, basePxPerMMSv]);
+
+  useEffect(() => {
+    panelMinForSplitSv.value = panelMinForSplit;
+  }, [panelMinForSplit, panelMinForSplitSv]);
+
+  const stageAnimatedStyle = useAnimatedStyle(() => ({
+    height: canvasHeightSv.value,
+  }));
+
+  const toolGridAnimatedStyle = useAnimatedStyle(() => {
+    const vpH = splitViewportHSv.value > 0 ? splitViewportHSv.value : 600;
+    const belowDividerH = Math.max(0, vpH - canvasHeightSv.value - DIVIDER_HIT_SIZE_PX);
+    const nudgeH = panelMinForSplitSv.value - PANEL_MIN_HEIGHT_PX;
+    const gridH = Math.max(0, belowDividerH - nudgeH - PANEL_MIN_HEIGHT_PX);
+    return {
+      height: gridH,
+    };
+  });
+
+  const canvasAssemblyAnimatedStyle = useAnimatedStyle(() => {
+    const liveH = canvasHeightSv.value;
+    const liveInnerH = Math.max(32, liveH - RULER_SIZE - STAGE_PADDING_PX * 2);
+    const liveInnerW = Math.max(32, workspaceWSv.value - RULER_SIZE - STAGE_PADDING_PX * 2);
+    const wMm = docWidthMmSv.value > 0 ? docWidthMmSv.value : 1;
+    const hMm = docHeightMmSv.value > 0 ? docHeightMmSv.value : 1;
+    const livePxPerMM = Math.min(liveInnerW / wMm, liveInnerH / hMm);
+    const base = basePxPerMMSv.value > 0 ? basePxPerMMSv.value : 1;
+    const s = livePxPerMM / base;
+    liveScaleSv.value = s;
+    return {
+      transform: [{ scale: s }],
+    };
+  });
 
   useEffect(() => {
     writeEditorView(padZoom, padPanRef.current.x, padPanRef.current.y);
@@ -635,30 +909,6 @@ export default function EditScreen() {
     setSnapGuides((prev) => (guidesEqual(prev, next) ? prev : next));
   }, []);
 
-  useEffect(() => {
-    const next = {
-      innerWidthPx,
-      innerHeightPx,
-      boardOffsetXPx,
-      boardOffsetYPx,
-      canvasWidthPx,
-      canvasHeightPx,
-    };
-    if (!splitDragging) {
-      setRulerView(next);
-      return;
-    }
-    const timer = setTimeout(() => setRulerView(next), RULER_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [
-    splitDragging,
-    innerWidthPx,
-    innerHeightPx,
-    boardOffsetXPx,
-    boardOffsetYPx,
-    canvasWidthPx,
-    canvasHeightPx,
-  ]);
 
   const persistSplit = useCallback(
     (canvasPx: number, fullscreen: boolean) => {
@@ -668,11 +918,11 @@ export default function EditScreen() {
           canvasPx,
           viewportPx: splitViewportH,
           fullscreen,
-          lastRatio: editorSettings.canvasSplitRatio,
+          lastRatio: effectiveSplitRatio ?? undefined,
         }),
       });
     },
-    [patchEditor, splitViewportH, editorSettings.canvasSplitRatio],
+    [patchEditor, splitViewportH, effectiveSplitRatio],
   );
 
   const toggleCanvasFullscreen = useCallback(() => {
@@ -680,10 +930,11 @@ export default function EditScreen() {
     const next = !canvasFullscreen;
     const viewport = splitViewportH > 0 ? splitViewportH : canvasSplitH + panelMinForSplit;
     const height = restoreCanvasSplitHeight({
-      ratio: clampStoredSplitRatio(editorSettings.canvasSplitRatio ?? DEFAULT_CANVAS_SPLIT_RATIO),
+      ratio: effectiveSplitRatio,
       fullscreen: next,
       viewportPx: viewport,
       panelMinPx: panelMinForSplit,
+      panelDefaultPx: panelDefaultForSplit,
     });
     setCanvasFullscreen(next);
     setCanvasSplitH(height);
@@ -691,27 +942,22 @@ export default function EditScreen() {
   }, [
     canvasFullscreen,
     canvasSplitH,
-    editorSettings.canvasSplitRatio,
+    effectiveSplitRatio,
     panelMinForSplit,
     persistSplit,
     splitViewportH,
   ]);
 
   const handleSplitDragStart = useCallback(() => {
+    splitDraggingRef.current = true;
     setSplitDragging(true);
     if (!canvasFullscreen) return;
     setCanvasFullscreen(false);
-    setCanvasSplitH((height) =>
-      clampCanvasSplitHeight({
-        viewportPx: splitViewportH,
-        requestedCanvasPx: height,
-        panelMinPx: panelMinForSplit,
-      }),
-    );
-  }, [canvasFullscreen, panelMinForSplit, splitViewportH]);
+  }, [canvasFullscreen]);
 
   const handleSplitDragEnd = useCallback(
     (result: SplitReleaseResult) => {
+      splitDraggingRef.current = false;
       setSplitDragging(false);
       if (result.snapped) {
         try {
@@ -739,10 +985,27 @@ export default function EditScreen() {
   }, [doc.widthMm, doc.heightMm, doc.templatePreviewType]);
   const selectionColor = chromeStrokeForFill(artboardFill);
 
-  const selectedElement =
-    selectedIds.length === 1
-      ? doc.elements.find((el) => el.id === selectedIds[0]) ?? null
-      : null;
+  const primaryElement = useMemo(() => {
+    if (primaryId) {
+      return doc.elements.find((el) => el.id === primaryId) ?? null;
+    }
+    if (selectedIds.length === 1) {
+      return doc.elements.find((el) => el.id === selectedIds[0]) ?? null;
+    }
+    return null;
+  }, [doc.elements, primaryId, selectedIds]);
+
+  const selectedElement = selectedIds.length === 1 ? primaryElement : null;
+  const lastSelectedElementRef = useRef<LabelElement | null>(null);
+  if (primaryElement) {
+    lastSelectedElementRef.current = primaryElement;
+  }
+  const displayElement = primaryElement ?? lastSelectedElementRef.current;
+  const selectedElements = useMemo(
+    () => doc.elements.filter((el) => selectedIds.includes(el.id)),
+    [doc.elements, selectedIds],
+  );
+  const isMultiSelect = selectedIds.length > 1;
 
   const docRef = useRef(doc);
   docRef.current = doc;
@@ -796,12 +1059,23 @@ export default function EditScreen() {
       return switchUpsPanel(prev, nextIndex);
     });
     setSelectedIds([]);
+    setPrimaryId(null);
     setPanelOpen(false);
     historyRef.current.clear();
     bumpHistory();
     setTextEditId(null);
     setDirty(true);
   }, [bumpHistory]);
+
+  const syncSelectionAfterSnapshot = useCallback((snapshot: LabelElement[]) => {
+    setSelectedIds((ids) => {
+      const filtered = ids.filter((id) => snapshot.some((el) => el.id === id));
+      setPrimaryId((pid) =>
+        pid && filtered.includes(pid) ? pid : filtered[filtered.length - 1] ?? null,
+      );
+      return filtered;
+    });
+  }, []);
 
   const undo = useCallback(() => {
     const snapshot = historyRef.current.undo(docRef.current.elements);
@@ -813,8 +1087,8 @@ export default function EditScreen() {
     });
     setDirty(true);
     bumpHistory();
-    setSelectedIds((ids) => ids.filter((id) => snapshot.some((el) => el.id === id)));
-  }, [bumpHistory]);
+    syncSelectionAfterSnapshot(snapshot);
+  }, [bumpHistory, syncSelectionAfterSnapshot]);
 
   const redo = useCallback(() => {
     const snapshot = historyRef.current.redo(docRef.current.elements);
@@ -826,8 +1100,8 @@ export default function EditScreen() {
     });
     setDirty(true);
     bumpHistory();
-    setSelectedIds((ids) => ids.filter((id) => snapshot.some((el) => el.id === id)));
-  }, [bumpHistory]);
+    syncSelectionAfterSnapshot(snapshot);
+  }, [bumpHistory, syncSelectionAfterSnapshot]);
 
   const patchElement = useCallback(
     (id: string, updates: Record<string, unknown>) => {
@@ -846,6 +1120,29 @@ export default function EditScreen() {
       patchElement(selectedIds[0], updates);
     },
     [selectedIds, patchElement],
+  );
+
+  const patchPrimary = useCallback(
+    (updates: Record<string, unknown>) => {
+      const id = primaryId ?? (selectedIds.length === 1 ? selectedIds[0] : null);
+      if (!id) return;
+      patchElement(id, updates);
+    },
+    [primaryId, selectedIds, patchElement],
+  );
+
+  const patchAllSelected = useCallback(
+    (updates: Record<string, unknown>) => {
+      if (selectedIds.length === 0) return;
+      historyRef.current.begin(docRef.current.elements);
+      setElements((elements) =>
+        elements.map((el) =>
+          selectedIds.includes(el.id) ? ({ ...el, ...updates } as LabelElement) : el,
+        ),
+      );
+      scheduleHistoryCommit();
+    },
+    [selectedIds, setElements, scheduleHistoryCommit],
   );
 
   const addElement = useCallback(
@@ -877,6 +1174,7 @@ export default function EditScreen() {
             ...DEFAULT_BARCODE_STATE,
             ...base,
             type: 'barcode',
+            content: '1234567890',
             encodeMode: defaults.barcodeEncodeMode,
             left: fit.left,
             top: fit.top,
@@ -963,14 +1261,15 @@ export default function EditScreen() {
         }
         case 'arctext': {
           const fit = fitShapeDefaults(maxW, maxH, elements);
+          const circleSize = Math.min(fit.width, fit.height);
           element = {
             ...DEFAULT_ARCTEXT_STATE,
             ...base,
             type: 'arctext',
             left: fit.left,
             top: fit.top,
-            width: fit.width,
-            height: fit.height,
+            width: circleSize,
+            height: circleSize,
             fontSize: fitTextDefaults(maxW, maxH, elements).fontSize,
             ...overrides,
           };
@@ -1065,8 +1364,11 @@ export default function EditScreen() {
           return null;
       }
       element = clampElementToLabel(element, docRef.current);
+      const maxZ = docRef.current.elements.reduce((max, el) => Math.max(max, el.zIndex ?? 0), 0);
+      element.zIndex = maxZ + 1;
       setElements((items) => [...items, element], true);
       setSelectedIds([element.id]);
+      setPrimaryId(element.id);
       return element;
     },
     [defaults, pickerRows, pickerColumns, setElements],
@@ -1074,53 +1376,117 @@ export default function EditScreen() {
 
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
+    topBarSelectionVisibleSv.value = 0;
+    bottomPanelVisibleSv.value = 0;
     setElements((elements) => elements.filter((el) => !selectedIds.includes(el.id)), true);
     setSelectedIds([]);
+    setPrimaryId(null);
     setPanelOpen(false);
-  }, [selectedIds, setElements]);
+  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const duplicateSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     const bounds = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
     const result = duplicateElements(docRef.current.elements, selectedIds, bounds);
     if (result.newIds.length === 0) return;
+    topBarSelectionVisibleSv.value = 1;
+    bottomPanelVisibleSv.value = 1;
     setElements(() => result.elements, true);
-    setSelectedIds(result.newIds);
-  }, [selectedIds, setElements]);
+    const next = selectionFromIds(result.newIds);
+    setSelectedIds(next.ids);
+    setPrimaryId(next.primaryId);
+  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const handleDeselectAll = useCallback(() => {
+    topBarSelectionVisibleSv.value = 0;
+    bottomPanelVisibleSv.value = 0;
     setSelectedIds([]);
+    setPrimaryId(null);
     setPanelOpen(false);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
+
+  const toggleMultipleMode = useCallback(() => {
+    // Leaving Multiple mode drops the whole multi-selection rather than
+    // carrying it into single-select.
+    if (multipleMode) handleDeselectAll();
+    setMultipleMode((prev) => !prev);
+  }, [multipleMode, handleDeselectAll]);
+
+  const resetTabToRegularForElement = useCallback((type: ElementType) => {
+    switch (type) {
+      case 'barcode':
+        setBarcodeTab('Regular');
+        break;
+      case 'image':
+        setImageTab('Regular');
+        break;
+      case 'text':
+        setTextTab('Regular');
+        break;
+      case 'qrcode':
+        setQrcodeTab('Regular');
+        break;
+      case 'line':
+        setLineTab('Regular');
+        break;
+      case 'shape':
+        setShapeTab('Regular');
+        break;
+      case 'table':
+        setTableTab('Regular');
+        break;
+      case 'time':
+        setTimeTab('Regular');
+        break;
+      case 'arctext':
+        setArcTextTab('Regular');
+        break;
+      case 'degrees':
+        setDegreesTab('Regular');
+        break;
+      default:
+        break;
+    }
   }, []);
 
   const handleSelect = useCallback(
     (id: string) => {
       const element = docRef.current.elements.find((el) => el.id === id);
       if (!element || element.needPrinting === false || element.type === 'border') return;
-      setSelectedIds((prev) => {
-        if (multipleMode) {
-          return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-        }
-        return [id];
+      lastSelectedElementRef.current = element;
+      topBarSelectionVisibleSv.value = 1;
+      bottomPanelVisibleSv.value = 1;
+      const next = reduceTapSelect({
+        id,
+        multipleMode,
+        current: { ids: selectedIdsRef.current, primaryId: primaryIdRef.current },
       });
+      setSelectedIds(next.ids);
+      setPrimaryId(next.primaryId);
       if (!multipleMode) {
         if (element.type === 'signature') {
           setShowSignatureBoard(true);
-        } else if (element.type === 'image') {
-          setImageTab('Regular');
-          setPanelOpen(true);
         } else {
+          resetTabToRegularForElement(element.type);
           setPanelOpen(true);
         }
+      } else if (next.ids.length >= 2) {
+        setPanelOpen(true);
+      } else if (next.ids.length === 1) {
+        resetTabToRegularForElement(element.type);
+        setPanelOpen(true);
       }
     },
-    [multipleMode],
+    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement],
   );
 
   const openPanelFor = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
     if (!element) return;
+    topBarSelectionVisibleSv.value = 1;
+    bottomPanelVisibleSv.value = 1;
     setSelectedIds([id]);
+    setPrimaryId(id);
     if (element.type === 'signature') {
       setShowSignatureBoard(true);
       return;
@@ -1133,18 +1499,15 @@ export default function EditScreen() {
       router.push({ pathname: '/clipart', params: { from: 'edit' } });
       return;
     }
-    if (element.type === 'image') {
-      setImageTab('Regular');
-      setPanelOpen(true);
-      return;
-    }
+    resetTabToRegularForElement(element.type);
     setPanelOpen(true);
-  }, []);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement]);
 
   const beginTextEdit = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
     if (!element) return;
     setSelectedIds([id]);
+    setPrimaryId(id);
     setPanelOpen(true);
 
     if (element.type === 'text') {
@@ -1168,6 +1531,41 @@ export default function EditScreen() {
     });
   }, []);
 
+  const handleQuickEdit = useCallback((id: string, anchorRect?: ElementAnchorRect) => {
+    const element = docRef.current.elements.find((el) => el.id === id);
+    if (!element || !isQuickEditableType(element.type)) return;
+    setSelectedIds([id]);
+    setPrimaryId(id);
+    // Wait for the double-tap gesture to finish so it doesn't steal focus from the input.
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => {
+        setQuickEditTarget({
+          id,
+          type: element.type,
+          value: getQuickEditValue(element),
+          anchorRect,
+        });
+      }, 80);
+    });
+  }, []);
+
+  const handleQuickEditConfirm = useCallback(
+    (newValue: string) => {
+      if (!quickEditTarget) return;
+      const element = docRef.current.elements.find((el) => el.id === quickEditTarget.id);
+      if (element) {
+        const patch = getQuickEditPatch(element, newValue);
+        patchElement(element.id, patch);
+      }
+      setQuickEditTarget(null);
+    },
+    [quickEditTarget, patchElement],
+  );
+
+  const handleQuickEditCancel = useCallback(() => {
+    setQuickEditTarget(null);
+  }, []);
+
   const commitTextEdit = useCallback(() => {
     setTextEditId(null);
     textEditInputRef.current?.blur();
@@ -1182,17 +1580,264 @@ export default function EditScreen() {
     [patchElement, textEditField, textEditId],
   );
 
-  const selectedElementHeightMm = selectedElement ? elementSizeMm(selectedElement).height : 0;
+  const selectedElementHeightMm = primaryElement ? elementSizeMm(primaryElement).height : 0;
   const labelBounds = useMemo(
     () => ({ widthMm: doc.widthMm, heightMm: doc.heightMm }),
     [doc.widthMm, doc.heightMm],
   );
 
-  const handleTransformStart = useCallback((_id: string) => {
-    transformingRef.current = true;
-    historyRef.current.begin(docRef.current.elements);
-    publishSnapGuides([]);
-  }, [publishSnapGuides]);
+  const rulerLeftMm = useSharedValue(0);
+  const rulerTopMm = useSharedValue(0);
+  const rulerWidthMm = useSharedValue(0);
+  const rulerHeightMm = useSharedValue(0);
+  const rulerVisible = useSharedValue(false);
+
+  const liveRulerBounds = useMemo<LiveRulerBounds>(
+    () => ({
+      leftMm: rulerLeftMm,
+      topMm: rulerTopMm,
+      widthMm: rulerWidthMm,
+      heightMm: rulerHeightMm,
+      visible: rulerVisible,
+    }),
+    [rulerLeftMm, rulerTopMm, rulerWidthMm, rulerHeightMm, rulerVisible],
+  );
+
+  useEffect(() => {
+    if (selectedElement) {
+      rulerLeftMm.value = selectedElement.left;
+      rulerTopMm.value = selectedElement.top;
+      rulerWidthMm.value = selectedElement.width;
+      rulerHeightMm.value = selectedElementHeightMm;
+      rulerVisible.value = true;
+    } else {
+      rulerVisible.value = false;
+    }
+  }, [
+    selectedElement,
+    selectedElementHeightMm,
+    rulerLeftMm,
+    rulerTopMm,
+    rulerWidthMm,
+    rulerHeightMm,
+    rulerVisible,
+  ]);
+
+  const clearGroupDragPreview = useCallback(() => {
+    groupDragAnchorIdSv.value = '';
+    groupDragDeltaLeftSv.value = 0;
+    groupDragDeltaTopSv.value = 0;
+  }, [groupDragAnchorIdSv, groupDragDeltaLeftSv, groupDragDeltaTopSv]);
+
+  const clearGroupResizePreview = useCallback(() => {
+    groupResizeAnchorIdSv.value = '';
+    groupResizeScaleXSv.value = 1;
+    groupResizeScaleYSv.value = 1;
+    groupResizeReadySv.value = 0;
+    resizeStartSnapshotsRef.current = null;
+  }, [
+    groupResizeAnchorIdSv,
+    groupResizeScaleXSv,
+    groupResizeScaleYSv,
+    groupResizeReadySv,
+  ]);
+
+  const trySettleTransformCommit = useCallback(() => {
+    const elements = docRef.current.elements;
+    const dragPending = groupDragCommitPendingRef.current;
+    const resizePending = groupResizeCommitPendingRef.current;
+
+    if (dragPending) {
+      const allMatch = dragPending.ids.every((id) => {
+        const el = elements.find((e) => e.id === id);
+        const exp = dragPending.expected.get(id);
+        if (!el || !exp) return false;
+        return Math.abs(el.left - exp.left) < 0.005 && Math.abs(el.top - exp.top) < 0.005;
+      });
+      if (!allMatch) {
+        if (__DEV__) {
+          console.log('[group-drag-settle-pulse]', {
+            phase: 'blocked',
+            tPulse: Date.now(),
+            pendingIds: dragPending.ids,
+          });
+        }
+        return;
+      }
+      groupDragCommitPendingRef.current = null;
+      groupDragSettleAnchorIdSv.value = groupDragAnchorIdSv.value;
+      groupDragSettleDeltaLeftSv.value = groupDragDeltaLeftSv.value;
+      groupDragSettleDeltaTopSv.value = groupDragDeltaTopSv.value;
+      if (__DEV__) {
+        console.log('[group-drag-settle-pulse]', {
+          phase: 'fire',
+          tPulse: Date.now(),
+          anchorId: groupDragSettleAnchorIdSv.value,
+          settleDeltaMm: {
+            left: groupDragSettleDeltaLeftSv.value,
+            top: groupDragSettleDeltaTopSv.value,
+          },
+          pendingIds: dragPending.ids,
+        });
+      }
+      transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
+      return;
+    }
+
+    if (resizePending) {
+      const allMatch = resizePending.ids.every((id) => {
+        const el = elements.find((e) => e.id === id);
+        const exp = resizePending.expected.get(id);
+        if (!el || !exp) return false;
+        const size = elementSizeMm(el);
+        return (
+          Math.abs(el.left - exp.left) < 0.005 &&
+          Math.abs(el.top - exp.top) < 0.005 &&
+          Math.abs(size.width - exp.width) < 0.005 &&
+          Math.abs(size.height - exp.height) < 0.005
+        );
+      });
+      if (!allMatch) {
+        if (__DEV__) {
+          console.log('[group-resize-settle-pulse]', {
+            phase: 'blocked',
+            tPulse: Date.now(),
+            pendingIds: resizePending.ids,
+          });
+        }
+        return;
+      }
+      groupResizeCommitPendingRef.current = null;
+      groupResizeSettleAnchorIdSv.value = groupResizeAnchorIdSv.value;
+      groupResizeSettleScaleXSv.value = groupResizeScaleXSv.value;
+      groupResizeSettleScaleYSv.value = groupResizeScaleYSv.value;
+      groupResizeSettleHandleSv.value = groupResizeHandleSv.value;
+      groupResizeSettleFixedOriginLeftSv.value = groupResizeFixedOriginLeftSv.value;
+      groupResizeSettleFixedOriginTopSv.value = groupResizeFixedOriginTopSv.value;
+      if (__DEV__) {
+        console.log('[group-resize-settle-pulse]', {
+          phase: 'fire',
+          tPulse: Date.now(),
+          anchorId: groupResizeSettleAnchorIdSv.value,
+          scale: {
+            x: groupResizeSettleScaleXSv.value,
+            y: groupResizeSettleScaleYSv.value,
+          },
+          pendingIds: resizePending.ids,
+        });
+      }
+      transformSettlePulseSv.value = transformSettlePulseSv.value + 1;
+    }
+  }, [
+    groupDragAnchorIdSv,
+    groupDragDeltaLeftSv,
+    groupDragDeltaTopSv,
+    groupDragSettleAnchorIdSv,
+    groupDragSettleDeltaLeftSv,
+    groupDragSettleDeltaTopSv,
+    groupResizeAnchorIdSv,
+    groupResizeScaleXSv,
+    groupResizeScaleYSv,
+    groupResizeHandleSv,
+    groupResizeFixedOriginLeftSv,
+    groupResizeFixedOriginTopSv,
+    groupResizeSettleAnchorIdSv,
+    groupResizeSettleScaleXSv,
+    groupResizeSettleScaleYSv,
+    groupResizeSettleHandleSv,
+    groupResizeSettleFixedOriginLeftSv,
+    groupResizeSettleFixedOriginTopSv,
+    transformSettlePulseSv,
+  ]);
+
+  useLayoutEffect(() => {
+    trySettleTransformCommit();
+  }, [doc.elements, trySettleTransformCommit]);
+
+  const handleTransformStart = useCallback(
+    (id: string, kind: TransformStartKind) => {
+      transformingRef.current = true;
+      historyRef.current.begin(docRef.current.elements);
+      publishSnapGuides([]);
+      transformKindRef.current = kind;
+
+      const ids = selectedIdsRef.current;
+      if (kind === 'move' && ids.length > 1 && ids.includes(id)) {
+        const map = new Map<string, { left: number; top: number }>();
+        for (const el of docRef.current.elements) {
+          if (ids.includes(el.id)) {
+            map.set(el.id, { left: el.left, top: el.top });
+          }
+        }
+        dragStartPositionsRef.current = map;
+        resizeStartSnapshotsRef.current = null;
+        groupResizeReadySv.value = 0;
+      } else if (kind === 'resize' && ids.length > 1 && ids.includes(id)) {
+        dragStartPositionsRef.current = null;
+        const docSnapshot = docRef.current;
+        if (selectionHasBlockedRotation(docSnapshot.elements, ids)) {
+          resizeStartSnapshotsRef.current = null;
+          groupResizeReadySv.value = 0;
+        } else {
+          const snapshots = buildGroupResizeSnapshots(docSnapshot.elements, ids);
+          if (snapshots.size > 1) {
+            resizeStartSnapshotsRef.current = snapshots;
+            const { fixedOrigin } = groupResizeFrameFromSnapshots(docSnapshot.elements, snapshots);
+            groupResizeFixedOriginLeftSv.value = fixedOrigin.left;
+            groupResizeFixedOriginTopSv.value = fixedOrigin.top;
+            groupResizeReadySv.value = 1;
+          } else {
+            resizeStartSnapshotsRef.current = null;
+            groupResizeReadySv.value = 0;
+          }
+        }
+      } else {
+        dragStartPositionsRef.current = null;
+        resizeStartSnapshotsRef.current = null;
+        groupResizeReadySv.value = 0;
+      }
+    },
+    [
+      publishSnapGuides,
+      groupResizeReadySv,
+      groupResizeFixedOriginLeftSv,
+      groupResizeFixedOriginTopSv,
+    ],
+  );
+
+  const prepareGroupResizeHandle = useCallback(
+    (handle: 'e' | 's') => {
+      const snapshots = resizeStartSnapshotsRef.current;
+      const ids = selectedIdsRef.current;
+      if (!snapshots || ids.length < 2) return;
+      const docSnapshot = docRef.current;
+      const { fixedOrigin } = groupResizeFrameFromSnapshots(docSnapshot.elements, snapshots);
+      groupResizeFixedOriginLeftSv.value = fixedOrigin.left;
+      groupResizeFixedOriginTopSv.value = fixedOrigin.top;
+      groupResizeHandleSv.value = handle === 'e' ? 0 : 1;
+      const limits = getGroupResizeScaleLimits({
+        elements: docSnapshot.elements,
+        snapshots,
+        selectedIds: ids,
+        handle,
+        fixedOrigin,
+        canvas: { widthMm: docSnapshot.widthMm, heightMm: docSnapshot.heightMm },
+      });
+      groupResizeMinScaleXSv.value = limits.minScaleX;
+      groupResizeMaxScaleXSv.value = limits.maxScaleX;
+      groupResizeMinScaleYSv.value = limits.minScaleY;
+      groupResizeMaxScaleYSv.value = limits.maxScaleY;
+    },
+    [
+      groupResizeFixedOriginLeftSv,
+      groupResizeFixedOriginTopSv,
+      groupResizeHandleSv,
+      groupResizeMinScaleXSv,
+      groupResizeMaxScaleXSv,
+      groupResizeMinScaleYSv,
+      groupResizeMaxScaleYSv,
+    ],
+  );
 
   const snapMoveMm = useCallback(
     (input: { id: string; leftMm: number; topMm: number; widthMm: number; heightMm: number }) => {
@@ -1201,12 +1846,9 @@ export default function EditScreen() {
     [],
   );
 
-  const handleTransformMove = useCallback(
-    (_payload: TransformMovePayload) => {
-      // Free-motion 1:1 gesture without intermediate React re-renders
-    },
-    [],
-  );
+  const handleTransformMove = useCallback((_payload: TransformMovePayload) => {
+    // Group-drag live preview is driven on the UI thread in konva-transformer worklets.
+  }, []);
 
   const handleTransformEnd = useCallback(
     (payload: TransformCommitPayload) => {
@@ -1218,6 +1860,168 @@ export default function EditScreen() {
         transformingRef.current = false;
         bumpHistory();
       }
+
+      const startPositions = dragStartPositionsRef.current;
+      dragStartPositionsRef.current = null;
+      const resizeSnapshots = resizeStartSnapshotsRef.current;
+      const kind = transformKindRef.current;
+      transformKindRef.current = null;
+      const ids = selectedIdsRef.current;
+      const dragged = docRef.current.elements.find((el) => el.id === payload.id);
+      const isGroupResizeCandidate =
+        kind === 'resize' &&
+        ids.length > 1 &&
+        ids.includes(payload.id) &&
+        resizeSnapshots &&
+        resizeSnapshots.size > 1 &&
+        dragged;
+
+      if (isGroupResizeCandidate) {
+        const handle: 'e' | 's' = groupResizeHandleSv.value === 1 ? 's' : 'e';
+        const fixedOrigin = {
+          left: groupResizeFixedOriginLeftSv.value,
+          top: groupResizeFixedOriginTopSv.value,
+        };
+        const scaleX = groupResizeScaleXSv.value;
+        const scaleY = groupResizeScaleYSv.value;
+        const docSnapshot = docRef.current;
+        const result = applyGroupResize({
+          elements: docSnapshot.elements,
+          selectedIds: ids,
+          snapshots: resizeSnapshots,
+          handle,
+          fixedOrigin,
+          scaleX,
+          scaleY,
+          canvas: { widthMm: docSnapshot.widthMm, heightMm: docSnapshot.heightMm },
+        });
+        resizeStartSnapshotsRef.current = null;
+        if (result.ok) {
+          const expected = new Map<string, { left: number; top: number; width: number; height: number }>();
+          const committedIds: string[] = [];
+          setElements(
+            (elements) =>
+              elements.map((el) => {
+                if (!ids.includes(el.id)) return el;
+
+                const isAnchor = el.id === payload.id;
+                const patch = isAnchor
+                  ? {
+                      left: clean.leftMm,
+                      top: clean.topMm,
+                      width: clean.widthMm,
+                      height: clean.heightMm,
+                    }
+                  : result.patches.get(el.id);
+                if (!patch) return el;
+
+                let targetHeight = patch.height;
+                const fs =
+                  clean.fontSize ??
+                  ('fontSize' in el && typeof el.fontSize === 'number' ? el.fontSize : undefined);
+                if (el.type === 'text' || el.type === 'degrees') {
+                  const rawText =
+                    el.contentType === 'Data Source' && el.columnNameContent
+                      ? `{${el.columnNameContent}}`
+                      : 'text' in el
+                        ? el.text
+                        : el.content;
+                  targetHeight = computeTextElementHeightMm({
+                    text: rawText,
+                    fontSize: fs ?? 12,
+                    widthMm: patch.width,
+                    autoWrapping: el.autoWrapping ?? 'Word',
+                    lineSpacing: el.lineSpacing ?? '1.0',
+                    charSpacing: el.charSpacing ?? 0,
+                    bold: el.bold ?? false,
+                    verticalDisplay: el.verticalDisplay ?? false,
+                  });
+                } else if (el.type === 'time') {
+                  targetHeight = textBlockHeightMm(fs ?? 12, 1);
+                }
+
+                const next: LabelElement = {
+                  ...el,
+                  left: patch.left,
+                  top: patch.top,
+                  width: patch.width,
+                  rotation: clean.rotation,
+                };
+                if (fs !== undefined && 'fontSize' in next) {
+                  (next as { fontSize: number }).fontSize = fs;
+                }
+                if (
+                  el.type === 'text' ||
+                  el.type === 'degrees' ||
+                  el.type === 'time' ||
+                  typeof (el as { height?: number }).height === 'number'
+                ) {
+                  (next as { height: number }).height = targetHeight;
+                }
+                const committed = clampElementToLabel(next, docSnapshot);
+                expected.set(el.id, {
+                  left: committed.left,
+                  top: committed.top,
+                  width: committed.width,
+                  height: elementSizeMm(committed).height,
+                });
+                committedIds.push(el.id);
+                return committed;
+              }),
+            recordHistory,
+          );
+          groupResizeCommitPendingRef.current = { ids: committedIds, expected };
+          return;
+        }
+      }
+
+      const isGroupMoveCandidate =
+        kind === 'move' &&
+        ids.length > 1 &&
+        ids.includes(payload.id) &&
+        startPositions &&
+        dragged;
+
+      if (isGroupMoveCandidate) {
+        const start = startPositions.get(payload.id);
+        if (start) {
+          const prevSize = elementSizeMm(dragged);
+          const resized =
+            Math.abs(prevSize.width - clean.widthMm) > 0.04 ||
+            Math.abs(prevSize.height - clean.heightMm) > 0.04;
+          const deltaLeft = groupDragDeltaLeftSv.value;
+          const deltaTop = groupDragDeltaTopSv.value;
+          if (
+            !resized &&
+            (Math.abs(deltaLeft) > 0.005 || Math.abs(deltaTop) > 0.005)
+          ) {
+            const expected = new Map<string, { left: number; top: number }>();
+            const committedIds: string[] = [];
+            const docSnapshot = docRef.current;
+            setElements(
+              (elements) =>
+                elements.map((el) => {
+                  if (!ids.includes(el.id) || el.lockMovement || el.type === 'border') {
+                    return el;
+                  }
+                  const orig = startPositions.get(el.id);
+                  if (!orig) return el;
+                  const left = orig.left + deltaLeft;
+                  const top = orig.top + deltaTop;
+                  const clamped = clampElementToLabel({ ...el, left, top }, docSnapshot);
+                  expected.set(el.id, { left: clamped.left, top: clamped.top });
+                  committedIds.push(el.id);
+                  return clamped;
+                }),
+              recordHistory,
+            );
+            groupDragCommitPendingRef.current = { ids: committedIds, expected };
+            return;
+          }
+        }
+      }
+
+      let moveCommitExpected: { left: number; top: number } | null = null;
       setElements(
         (elements) =>
           elements.map((el) => {
@@ -1277,12 +2081,39 @@ export default function EditScreen() {
             ) {
               (next as { height: number }).height = clamped.height;
             }
-            return next;
+            const committed = clampElementToLabel(next, docRef.current);
+            if (kind === 'move') {
+              moveCommitExpected = { left: committed.left, top: committed.top };
+            }
+            return committed;
           }),
         recordHistory,
       );
+      if (kind === 'move' && moveCommitExpected) {
+        groupDragCommitPendingRef.current = {
+          ids: [payload.id],
+          expected: new Map([[payload.id, moveCommitExpected]]),
+        };
+      } else if (kind === 'resize') {
+        clearGroupResizePreview();
+      } else {
+        clearGroupDragPreview();
+      }
     },
-    [setElements, bumpHistory, publishSnapGuides],
+    [
+      setElements,
+      bumpHistory,
+      publishSnapGuides,
+      clearGroupDragPreview,
+      clearGroupResizePreview,
+      groupDragDeltaLeftSv,
+      groupDragDeltaTopSv,
+      groupResizeHandleSv,
+      groupResizeFixedOriginLeftSv,
+      groupResizeFixedOriginTopSv,
+      groupResizeScaleXSv,
+      groupResizeScaleYSv,
+    ],
   );
 
 
@@ -1341,6 +2172,22 @@ export default function EditScreen() {
   const alignSelected = useCallback(
     (kind: 'left' | 'right' | 'top' | 'bottom' | 'center') => {
       if (selectedIds.length === 0) return;
+      if (selectedIds.length > 1) {
+        setElements(
+          (elements) => {
+            const patches = alignGroupBounds(elements, selectedIds, canvasMm, kind);
+            return elements.map((el) => {
+              if (!selectedIds.includes(el.id) || el.lockMovement || el.type === 'border') {
+                return el;
+              }
+              const patch = patches.get(el.id);
+              return patch ? { ...el, ...patch } : el;
+            });
+          },
+          true,
+        );
+        return;
+      }
       setElements(
         (elements) =>
           elements.map((el) => {
@@ -1364,7 +2211,9 @@ export default function EditScreen() {
     const result = pasteElementsFromClipboard(docRef.current.elements, canvasMm);
     if (result.newIds.length === 0) return;
     setElements(() => result.elements, true);
-    setSelectedIds(result.newIds);
+    const next = selectionFromIds(result.newIds);
+    setSelectedIds(next.ids);
+    setPrimaryId(next.primaryId);
   }, [canvasMm, setElements]);
 
   const reorderSelected = useCallback(
@@ -1460,6 +2309,7 @@ export default function EditScreen() {
     setSavedToStore(true);
     setDirty(false);
     setSelectedIds([]);
+    setPrimaryId(null);
     setPanelOpen(false);
     historyRef.current.clear();
     bumpHistory();
@@ -1481,11 +2331,11 @@ export default function EditScreen() {
   );
 
   const handlePadLayout = useCallback((size: { width: number; height: number }) => {
+    if (splitDraggingRef.current) return;
     setPadInner((prev) => {
       const width = Math.round(size.width);
-      const height = Math.round(size.height);
-      if (Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1) return prev;
-      return { width, height };
+      if (Math.abs(prev.width - width) < 1) return prev;
+      return { width, height: 0 };
     });
   }, []);
 
@@ -1861,9 +2711,10 @@ export default function EditScreen() {
         addElement('arctext');
         openAddedElementPanel(label);
         break;
+      case 'Counter':
       case 'Degrees':
         addElement('degrees');
-        openAddedElementPanel(label);
+        openAddedElementPanel('Degrees');
         break;
       case 'Image':
         void handlePickImage();
@@ -1887,6 +2738,7 @@ export default function EditScreen() {
       case 'ASR':
         router.push({ pathname: '/asr', params: { from: 'edit' } });
         break;
+      case 'Label Clone':
       case '2ups Label':
         saveDocument(false);
         router.push({
@@ -1935,6 +2787,7 @@ export default function EditScreen() {
 
   const closePanel = () => {
     commitTextEdit();
+    bottomPanelVisibleSv.value = 0;
     setPanelOpen(false);
   };
 
@@ -1944,78 +2797,111 @@ export default function EditScreen() {
   const renderToolbar = () => (
     <View ref={toolbarRef} collapsable={false} style={styles.toolbarRow}>
       <ToolbarItem
-        icon="gearshape"
+        name="Label"
         label="Label"
         active={showLabelMenu}
         onPress={openLabelMenu}
       />
       <ToolbarItem
-        icon="checkmark.square"
+        name="Multiple"
         label="Multiple"
         active={multipleMode}
-        onPress={() => {
-          setMultipleMode((m) => !m);
-          setSelectedIds([]);
-        }}
+        onPress={toggleMultipleMode}
       />
       <ToolbarItem
-        icon="arrow.uturn.backward"
+        name="Undo"
         label="Undo"
         disabled={!canUndo}
         onPress={undo}
       />
       <ToolbarItem
-        icon="arrow.uturn.forward"
+        name="Redo"
         label="Redo"
         disabled={!canRedo}
         onPress={redo}
       />
       <ToolbarItem
-        icon="lock"
+        name="Lock"
         label="Lock"
         disabled={selectedIds.length === 0}
         onPress={() => setLockOnSelection(true)}
       />
       <ToolbarItem
-        icon="lock.open"
-        label="Unlock"
+        name="UnLock"
+        label="UnLock"
         disabled={selectedIds.length === 0}
         onPress={() => setLockOnSelection(false)}
       />
-      <ToolbarItem
-        icon="arrow.clockwise"
-        label="Rotate"
-        disabled={selectedIds.length === 0}
-        onPress={() => rotateSelectedBy(90)}
-      />
-      <ToolbarItem
-        icon="square.on.square"
-        label="Duplicate"
-        disabled={selectedIds.length === 0}
-        onPress={duplicateSelected}
-      />
-      <ToolbarItem
-        icon="trash"
-        label="Delete"
-        withDivider
-        disabled={selectedIds.length === 0}
-        onPress={deleteSelected}
-      />
-      {selectedElement?.type === 'image' ? (
-        <ToolbarItem
-          icon="photo"
-          label="Edit Image"
-          active={panelOpen}
-          onPress={() => {
-            setImageTab('Regular');
-            setPanelOpen((o) => !o);
-          }}
-        />
-      ) : null}
     </View>
-  );  const renderCanvas = () => (
-    <View
-      style={[styles.stage, { height: canvasSplitH, minHeight: 0, backgroundColor: stageBg }]}
+  );
+
+  const renderContextualToolbar = () => (
+    <View style={styles.contextualTopBar}>
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={deleteSelected}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Delete selected element">
+        <AppIcon name="trash" tintColor="#FFFFFF" size={18} />
+      </Pressable>
+      <View style={styles.contextualBarDivider} />
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={() => rotateSelectedBy(90)}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Rotate selected element 90 degrees">
+        <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={18} />
+      </Pressable>
+      <View style={styles.contextualBarDivider} />
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={duplicateSelected}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Duplicate selected element">
+        <AppIcon name="square.on.square" tintColor="#FFFFFF" size={18} />
+      </Pressable>
+      <View style={styles.contextualBarDivider} />
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={() =>
+          setLockOnSelection(!selectedElements.every((el) => el.lockMovement))
+        }
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={
+          selectedElements.every((el) => el.lockMovement) ? 'Unlock element' : 'Lock element'
+        }>
+        <AppIcon
+          name={selectedElements.every((el) => el.lockMovement) ? 'lock.open' : 'lock'}
+          tintColor="#FFFFFF"
+          size={18}
+        />
+      </Pressable>
+      <View style={styles.contextualBarDivider} />
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={() => {
+          if (selectedIds.length > 1) {
+            setPanelOpen(true);
+          } else if (primaryElement) {
+            openPanelFor(primaryElement.id);
+          }
+        }}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Element properties">
+        <AppIcon name="slider.horizontal.3" tintColor="#FFFFFF" size={18} />
+      </Pressable>
+    </View>
+  );
+
+  const renderCanvas = () => (
+    <Animated.View
+      pointerEvents={splitDragging ? 'none' : 'auto'}
+      style={[styles.stage, stageAnimatedStyle, { minHeight: 0, backgroundColor: stageBg }]}
       onLayout={(event) => {
         const next = Math.round(event.nativeEvent.layout.width);
         if (next > 0 && Math.abs(next - stageWidth) > 1) {
@@ -2029,7 +2915,8 @@ export default function EditScreen() {
         onViewTransformChange={handleViewTransformChange}
         onViewportLayout={handlePadLayout}
         onWindowOriginChange={handlePadWindowOrigin}
-        oneFingerPanEnabled={selectedIds.length === 0}>
+        oneFingerPanEnabled={selectedIds.length === 0}
+        doubleTapEnabled={false}>
         <View style={[styles.workspace, { backgroundColor: stageBg }]} pointerEvents="box-none">
           <View
             style={[
@@ -2039,14 +2926,20 @@ export default function EditScreen() {
                 height: RULER_SIZE + innerHeightPx,
               },
             ]}>
-            <View
+            <Animated.View
               style={[
                 styles.flushCanvasAssembly,
+                canvasAssemblyAnimatedStyle,
                 {
                   left: boardOffsetXPx,
                   top: boardOffsetYPx,
                   width: RULER_SIZE + (canvasWidthPx || 1),
                   height: RULER_SIZE + (canvasHeightPx || 1),
+                },
+                (doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse') && {
+                  backgroundColor: 'transparent',
+                  shadowOpacity: 0,
+                  elevation: 0,
                 },
               ]}>
               <View style={styles.rulerTopRow}>
@@ -2064,6 +2957,7 @@ export default function EditScreen() {
                         }
                       : null
                   }
+                  liveBounds={liveRulerBounds}
                 />
               </View>
               <View style={styles.rulerBodyRow}>
@@ -2080,6 +2974,7 @@ export default function EditScreen() {
                         }
                       : null
                   }
+                  liveBounds={liveRulerBounds}
                 />
                 <View
                   style={[
@@ -2088,6 +2983,11 @@ export default function EditScreen() {
                       width: canvasWidthPx || 1,
                       height: canvasHeightPx || 1,
                     },
+                    (doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse') && {
+                      backgroundColor: 'transparent',
+                      borderRightWidth: 0,
+                      borderBottomWidth: 0,
+                    },
                   ]}>
                   <KonvaCanvas
                     ref={canvasShotRef}
@@ -2095,15 +2995,46 @@ export default function EditScreen() {
                     canvasWidthPx={canvasWidthPx}
                     canvasHeightPx={canvasHeightPx}
                     pxPerMM={pxPerMM}
-                    padZoom={padZoom}
+                    padZoom={padZoom * committedScale}
                     selectedIds={selectedIds}
                     selectionColor={selectionColor}
                     surfaceColor={artboardFill}
                     showGrid={Boolean(editorSettings.editorGrid)}
+                    liveBounds={liveRulerBounds}
+                    topBarSelectionVisibleSv={topBarSelectionVisibleSv}
+                    bottomPanelVisibleSv={bottomPanelVisibleSv}
+                    groupDragDeltaLeftMm={groupDragDeltaLeftSv}
+                    groupDragDeltaTopMm={groupDragDeltaTopSv}
+                    groupDragAnchorIdSv={groupDragAnchorIdSv}
+                    groupDragEligibleSv={groupDragEligibleSv}
+                    transformSettlePulseSv={transformSettlePulseSv}
+                    groupDragSettleAnchorIdSv={groupDragSettleAnchorIdSv}
+                    groupDragSettleDeltaLeftSv={groupDragSettleDeltaLeftSv}
+                    groupDragSettleDeltaTopSv={groupDragSettleDeltaTopSv}
+                    groupResizeEligibleSv={groupResizeEligibleSv}
+                    groupResizeReadySv={groupResizeReadySv}
+                    groupResizeAnchorIdSv={groupResizeAnchorIdSv}
+                    groupResizeScaleXSv={groupResizeScaleXSv}
+                    groupResizeScaleYSv={groupResizeScaleYSv}
+                    groupResizeHandleSv={groupResizeHandleSv}
+                    groupResizeFixedOriginLeftMm={groupResizeFixedOriginLeftSv}
+                    groupResizeFixedOriginTopMm={groupResizeFixedOriginTopSv}
+                    groupResizeMinScaleXSv={groupResizeMinScaleXSv}
+                    groupResizeMaxScaleXSv={groupResizeMaxScaleXSv}
+                    groupResizeMinScaleYSv={groupResizeMinScaleYSv}
+                    groupResizeMaxScaleYSv={groupResizeMaxScaleYSv}
+                    groupResizeSettleAnchorIdSv={groupResizeSettleAnchorIdSv}
+                    groupResizeSettleScaleXSv={groupResizeSettleScaleXSv}
+                    groupResizeSettleScaleYSv={groupResizeSettleScaleYSv}
+                    groupResizeSettleHandleSv={groupResizeSettleHandleSv}
+                    groupResizeSettleFixedOriginLeftMm={groupResizeSettleFixedOriginLeftSv}
+                    groupResizeSettleFixedOriginTopMm={groupResizeSettleFixedOriginTopSv}
+                    onGroupResizeHandleBegin={prepareGroupResizeHandle}
                     onSelect={handleSelect}
                     onDeselectAll={handleDeselectAll}
                     onOpenPanel={openPanelFor}
                     onEditText={beginTextEdit}
+                    onQuickEdit={handleQuickEdit}
                     onTransformStart={handleTransformStart}
                     onTransformMove={handleTransformMove}
                     onTransformEnd={handleTransformEnd}
@@ -2114,22 +3045,41 @@ export default function EditScreen() {
                   />
                 </View>
               </View>
-            </View>
+            </Animated.View>
           </View>
         </View>
       </ZoomableEditPad>
-    </View>
+    </Animated.View>
   );
 
-  const renderPanel = () => {
-    if (!selectedElement) return null;
-    switch (selectedElement.type) {
+  const canShowMultiSelectPanel =
+    isMultiSelect &&
+    primaryElement !== null &&
+    selectedElements.every(supportsMultiSelectPanel);
+
+  const renderMultiSelectPanel = () => {
+    if (!canShowMultiSelectPanel || !primaryElement) return null;
+    return (
+      <MultiSelectPropertyPanel
+        primary={primaryElement}
+        selectedElements={selectedElements}
+        labelWidthMm={labelBounds.widthMm}
+        labelHeightMm={labelBounds.heightMm}
+        onPatchPrimary={patchPrimary}
+        onPatchAllSelected={patchAllSelected}
+      />
+    );
+  };
+
+  const renderPanel = (targetEl: LabelElement | null = displayElement) => {
+    if (!targetEl) return null;
+    switch (targetEl.type) {
       case 'text':
         return (
           <TextPropertyPanel
             activeTab={textTab}
             onTabChange={setTextTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2142,7 +3092,7 @@ export default function EditScreen() {
           <BarcodePropertyPanel
             activeTab={barcodeTab}
             onTabChange={setBarcodeTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
@@ -2155,7 +3105,7 @@ export default function EditScreen() {
           <QrcodePropertyPanel
             activeTab={qrcodeTab}
             onTabChange={setQrcodeTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
@@ -2168,7 +3118,7 @@ export default function EditScreen() {
           <LinePropertyPanel
             activeTab={lineTab}
             onTabChange={setLineTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2180,7 +3130,7 @@ export default function EditScreen() {
           <ShapePropertyPanel
             activeTab={shapeTab}
             onTabChange={setShapeTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2192,7 +3142,7 @@ export default function EditScreen() {
           <TablePropertyPanel
             activeTab={tableTab}
             onTabChange={setTableTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2204,7 +3154,7 @@ export default function EditScreen() {
           <TimePropertyPanel
             activeTab={timeTab}
             onTabChange={setTimeTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2216,7 +3166,7 @@ export default function EditScreen() {
           <ArcTextPropertyPanel
             activeTab={arcTextTab}
             onTabChange={setArcTextTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
@@ -2229,7 +3179,7 @@ export default function EditScreen() {
           <DegreesPropertyPanel
             activeTab={degreesTab}
             onTabChange={setDegreesTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
@@ -2243,7 +3193,7 @@ export default function EditScreen() {
           <ImagePropertyPanel
             activeTab={imageTab}
             onTabChange={setImageTab}
-            state={selectedElement}
+            state={targetEl}
             patch={patchSelected}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
@@ -2256,7 +3206,10 @@ export default function EditScreen() {
     }
   };
 
-  const propertyMode = panelOpen && selectedElement !== null && renderPanel() !== null;
+  const activePanelContent = isMultiSelect
+    ? renderMultiSelectPanel()
+    : renderPanel(displayElement);
+  const propertyMode = panelOpen && selectedIds.length > 0 && activePanelContent !== null;
 
   return (
     <View style={styles.root}>
@@ -2301,40 +3254,62 @@ export default function EditScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.body, { maxWidth: MaxContentWidth }]}>
-        <View style={styles.subToolbarRow}>
-        <Pressable
-          onPress={() => {
-            if (isRatTail143Document(doc)) return;
-            setSizeModalVisible(true);
-          }}
-          style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
-          <Text style={styles.dimText}>
-            {doc.widthMm.toFixed(1)} × {doc.heightMm.toFixed(1)} mm · {doc.paperType}
-            {doc.orientation ? ` · ${doc.orientation}°` : ''}
-            {doc.ups ? ` · ${doc.ups.columns}ups` : ''}
-          </Text>
-          <Text style={styles.sizeHint}>
-            {isRatTail143Document(doc)
-              ? 'Prints 14.3 × 101.6 mm wrap stock · content locked on the paddle'
-              : 'Tap to customize size'}
-          </Text>
-        </Pressable>
-          <Pressable
-            onPress={toggleCanvasFullscreen}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel={canvasFullscreen ? 'Restore editing panel' : 'Maximize canvas'}
-            style={({ pressed }) => [styles.splitMaxBtn, pressed && styles.pressed]}>
-            <AppIcon
-              name={
-                canvasFullscreen
-                  ? 'arrow.down.right.and.arrow.up.left'
-                  : 'arrow.up.left.and.arrow.down.right'
-              }
-              tintColor={Palette.accent}
-              size={18}
-            />
-          </Pressable>
+        <View style={styles.subToolbarSlot}>
+          <Animated.View
+            style={[styles.subToolbarRow, defaultToolbarAnimatedStyle]}>
+            <Pressable
+              onPress={() => {
+                if (isRatTail143Document(doc)) return;
+                setSizeModalVisible(true);
+              }}
+              style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
+              <Text style={styles.dimText}>
+                {doc.widthMm.toFixed(1)} × {doc.heightMm.toFixed(1)} mm · {doc.paperType}
+                {doc.orientation ? ` · ${doc.orientation}°` : ''}
+                {doc.ups ? ` · ${doc.ups.columns}ups` : ''}
+              </Text>
+              <Text style={styles.sizeHint}>
+                {isRatTail143Document(doc)
+                  ? 'Prints 14.3 × 101.6 mm wrap stock · content locked on the paddle'
+                  : 'Tap to customize size'}
+              </Text>
+            </Pressable>
+
+            {Math.abs(padZoom - 1) > 0.02 ? (
+              <Pressable
+                onPress={() => setPadZoom(1)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.fitZoomBtn, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Reset zoom to fit">
+                <Text style={styles.fitZoomBtnText}>
+                  Fit ({Math.round(padZoom * 100)}%)
+                </Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              onPress={toggleCanvasFullscreen}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={canvasFullscreen ? 'Restore editing panel' : 'Maximize canvas'}
+              style={({ pressed }) => [styles.splitMaxBtn, pressed && styles.pressed]}>
+              <AppIcon
+                name={
+                  canvasFullscreen
+                    ? 'arrow.down.right.and.arrow.up.left'
+                    : 'arrow.up.left.and.arrow.down.right'
+                }
+                tintColor={Palette.accent}
+                size={18}
+              />
+            </Pressable>
+          </Animated.View>
+
+          <Animated.View
+            style={[StyleSheet.absoluteFillObject, contextualToolbarAnimatedStyle]}>
+            {renderContextualToolbar()}
+          </Animated.View>
         </View>
 
         {doc.ups && doc.ups.columns > 1 ? (
@@ -2396,7 +3371,7 @@ export default function EditScreen() {
                 <Text
                   style={[
                     styles.upsPagerChevron,
-                    doc.ups.activeIndex >= doc.ups.columns - 1 && styles.upsPagerChevronDisabled,
+                    doc.ups!.activeIndex >= doc.ups!.columns - 1 && styles.upsPagerChevronDisabled,
                   ]}>
                   ›
                 </Text>
@@ -2416,9 +3391,10 @@ export default function EditScreen() {
 
           <CanvasPanelDivider
             canvasHeightPx={canvasSplitH}
+            canvasHeightSv={canvasHeightSv}
+            isDraggingSv={isDividerDraggingSv}
             viewportPx={splitViewportH > 0 ? splitViewportH : canvasSplitH + panelMinForSplit}
             panelMinPx={panelMinForSplit}
-            onCanvasHeightChange={setCanvasSplitH}
             onDragStart={handleSplitDragStart}
             onDragEnd={handleSplitDragEnd}
           />
@@ -2449,50 +3425,44 @@ export default function EditScreen() {
             />
           ) : null}
 
-          <View style={[styles.sheet, canvasFullscreen && styles.sheetCollapsed]} pointerEvents={canvasFullscreen ? 'none' : 'auto'}>
-          {propertyMode ? (
-            <View style={styles.panelHeader}>
-              {renderToolbar()}
-              <Pressable
-                onPress={closePanel}
-                hitSlop={10}
-                style={({ pressed }) => [styles.panelCloseBtn, pressed && styles.pressed]}>
-                <AppIcon name="xmark" tintColor={Palette.muted} size={16} />
-              </Pressable>
-            </View>
-          ) : (
-            renderToolbar()
-          )}
-          <ScrollView
-            style={styles.sheetScroll}
-            contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.three }}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            scrollEnabled={paletteGhost == null}>
-            {propertyMode ? renderPanel() : (
-              <View style={styles.toolsGrid}>
-                {TOOLS.map((t) => {
-                  const dropType = paletteDropTypeForLabel(t.label);
-                  if (dropType) {
-                    return (
-                      <PaletteToolItem
-                        key={t.label}
-                        icon={t.icon}
-                        label={t.label}
-                        style={styles.toolItem}
-                        onPress={() => handleToolPress(t.label)}
-                        onDragStart={(x, y) => beginPaletteDrag(dropType, t.label, t.icon, x, y)}
-                        onDragMove={movePaletteDrag}
-                        onDragEnd={endPaletteDrag}
-                      />
-                    );
-                  }
-                  return <ToolItem key={t.label} {...t} onPress={() => handleToolPress(t.label)} />;
-                })}
+          <View style={styles.sheet} pointerEvents="auto">
+            {/* Pinned Toolbar Row - ALWAYS VISIBLE AT ALL SHEET HEIGHTS */}
+            <View style={styles.pinnedToolbar}>
+              <View style={styles.panelHeader}>
+                {renderToolbar()}
+                <Animated.View style={panelCloseBtnAnimatedStyle}>
+                  <Pressable
+                    onPress={closePanel}
+                    hitSlop={10}
+                    style={({ pressed }) => [styles.panelCloseBtn, pressed && styles.pressed]}>
+                    <AppIcon name="xmark" tintColor={Palette.muted} size={16} />
+                  </Pressable>
+                </Animated.View>
               </View>
-            )}
-          </ScrollView>
-        </View>
+            </View>
+
+            {/* Collapsible Reveal Window for Tool Grid / Property Panel */}
+            <Animated.View style={[styles.toolGridRevealWindow, toolGridAnimatedStyle]}>
+              <Animated.View style={[styles.staticPaletteContainer, staticPaletteAnimatedStyle]}>
+                <StaticToolPalette
+                  onToolPress={handleToolPress}
+                  onBeginDrag={beginPaletteDrag}
+                  onMoveDrag={movePaletteDrag}
+                  onEndDrag={endPaletteDrag}
+                />
+              </Animated.View>
+
+              <Animated.View style={[StyleSheet.absoluteFillObject, propertyPanelAnimatedStyle]}>
+                <ScrollView
+                  style={styles.sheetScroll}
+                  contentContainerStyle={{ paddingBottom: Math.max(Spacing.two, insets.bottom) }}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled">
+                  {activePanelContent}
+                </ScrollView>
+              </Animated.View>
+            </Animated.View>
+          </View>
         </View>
 
         {textEditId ? (
@@ -2660,6 +3630,7 @@ export default function EditScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+
       <View
         ref={overlayViewRef}
         pointerEvents="none"
@@ -2689,6 +3660,15 @@ export default function EditScreen() {
           </View>
         </View>
       ) : null}
+      <QuickValueModal
+        visible={quickEditTarget !== null}
+        initialValue={quickEditTarget?.value ?? ''}
+        title={quickEditTarget ? getQuickEditTitle(quickEditTarget.type) : undefined}
+        placeholder={quickEditTarget ? getQuickEditPlaceholder(quickEditTarget.type) : undefined}
+        anchorRect={quickEditTarget?.anchorRect}
+        onCancel={handleQuickEditCancel}
+        onConfirm={handleQuickEditConfirm}
+      />
     </View>
   );
 }
@@ -2791,7 +3771,17 @@ const styles = StyleSheet.create({
   propertyModeShell: {
     flex: 1,
   },
+  subToolbarSlot: {
+    width: '100%',
+    height: 44,
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E2E8F0',
+  },
   subToolbarRow: {
+    width: '100%',
+    height: 44,
     flexDirection: 'row',
     alignItems: 'center',
     paddingRight: Spacing.two,
@@ -2801,8 +3791,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    paddingVertical: 2,
     gap: 2,
+  },
+  fitZoomBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(23, 166, 184, 0.15)',
+    marginRight: 6,
+  },
+  fitZoomBtnText: {
+    color: '#06B6D4',
+    fontSize: 12,
+    fontWeight: '700',
   },
   splitMaxBtn: {
     width: 44,
@@ -2887,8 +3889,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: EDITOR_WORKSPACE_COLOR,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
     minHeight: LABEL_PAD_STAGE_MIN_HEIGHT,
     overflow: 'hidden',
   },
@@ -2903,7 +3905,7 @@ const styles = StyleSheet.create({
     backgroundColor: EDITOR_WORKSPACE_COLOR,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingBottom: EDITOR_WORKSPACE_PAD_BOTTOM_PX,
+    paddingBottom: 0,
   },
   rulerFrame: {
     position: 'relative',
@@ -2995,21 +3997,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sheet: {
-    flex: 1,
-    backgroundColor: Palette.card,
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: Spacing.four,
     borderTopRightRadius: Spacing.four,
-    paddingTop: Spacing.three,
-    minHeight: 0,
+    overflow: 'hidden',
     ...cardShadow,
   },
-  sheetCollapsed: {
-    flex: 0,
-    height: 0,
-    minHeight: 0,
-    paddingTop: 0,
+  pinnedToolbar: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+  },
+  toolGridRevealWindow: {
+    width: '100%',
     overflow: 'hidden',
-    opacity: 0,
+    backgroundColor: '#FFFFFF',
+  },
+  staticPaletteContainer: {
+    width: '100%',
+    height: 270,
+    backgroundColor: '#FFFFFF',
   },
   sheetScroll: {
     flex: 1,
@@ -3020,7 +4026,7 @@ const styles = StyleSheet.create({
   panelCloseBtn: {
     position: 'absolute',
     right: Spacing.two,
-    top: -Spacing.one,
+    top: 11,
     width: 26,
     height: 26,
     borderRadius: 13,
@@ -3030,41 +4036,64 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   toolbarRow: {
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.two,
-    paddingBottom: Spacing.three,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.hairline,
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingTop: 4,
+    paddingBottom: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
   },
   toolbarItem: {
     flex: 1,
     alignItems: 'center',
-    gap: Spacing.one,
+    justifyContent: 'center',
+    gap: 3,
     minWidth: 0,
+    paddingVertical: 2,
   },
   toolbarDivider: {
     borderLeftWidth: 1,
     borderLeftColor: Palette.hairline,
   },
   toolbarLabel: {
-    ...Type.caption,
     fontSize: 11,
+    fontWeight: '400',
+    color: '#64748B',
+    textAlign: 'center',
   },
-  toolsGrid: {
+  toolsContainer: {
+    width: '100%',
+    paddingVertical: 4,
+    backgroundColor: '#FFFFFF',
+  },
+  toolRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingVertical: Spacing.three,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  toolCell: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 0,
   },
   toolItem: {
-    width: '20%',
+    width: '100%',
     alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: Spacing.three,
+    justifyContent: 'center',
+    gap: 4,
   },
   toolLabel: {
-    ...Type.action,
-    color: Palette.ink,
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#475569',
+    textAlign: 'center',
   },
   pressed: {
     opacity: 0.6,
@@ -3217,5 +4246,26 @@ const styles = StyleSheet.create({
   openCloseBtn: {
     flex: 0,
     marginTop: 4,
+  },
+  contextualTopBar: {
+    width: '100%',
+    height: 44,
+    backgroundColor: '#374151',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+  },
+  contextualBarBtn: {
+    flex: 1,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contextualBarDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
 });

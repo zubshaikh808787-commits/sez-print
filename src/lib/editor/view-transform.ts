@@ -23,8 +23,8 @@ export {
   type ViewPoint,
 } from '@/lib/label-coordinate-system';
 
-/** Matches `styles.workspace.paddingBottom` on the editor pad. */
-export const EDITOR_WORKSPACE_PAD_BOTTOM_PX = 40;
+/** Matches `styles.workspace.paddingBottom` on the editor pad (zeroed to allow full centering). */
+export const EDITOR_WORKSPACE_PAD_BOTTOM_PX = 0;
 
 export const VIEW_ZOOM_MIN = 0.25;
 export const VIEW_ZOOM_MAX = 8;

@@ -255,21 +255,24 @@ function encodeUpcA(input: string): number[] | null {
 
 export const BARCODE_MODES = ['CODE-128', 'CODE-39', 'ITF', 'EAN-13', 'EAN-8', 'UPC-A'] as const;
 
-/** Encode barcode content for the selected mode into normalized bar rectangles. */
-export function barcodeBarsForMode(mode: string, input: string): BarcodeBar[] | null {
+/** Encode barcode content for the selected mode into alternating [bar, space, ...] module counts. */
+export function barcodeModulesForMode(mode: string, input: string): number[] | null {
   const content = input || '0123456789';
   if (mode === 'CODE-39') {
-    const modules = encodeCode39(content);
-    return modules ? modulesToBars(modules) : null;
+    return encodeCode39(content);
   }
   if (mode === 'UPC-A') {
-    const modules = encodeUpcA(content);
-    return modules ? modulesToBars(modules) : null;
+    return encodeUpcA(content);
   }
   if (mode === 'ITF' || mode === 'EAN-13' || mode === 'EAN-8') {
-    const modules = encodeItf(content);
-    return modules ? modulesToBars(modules) : null;
+    return encodeItf(content);
   }
-  return code128Bars(content);
+  return encodeCode128(content);
+}
+
+/** Encode barcode content for the selected mode into normalized bar rectangles. */
+export function barcodeBarsForMode(mode: string, input: string): BarcodeBar[] | null {
+  const modules = barcodeModulesForMode(mode, input);
+  return modules ? modulesToBars(modules) : null;
 }
 

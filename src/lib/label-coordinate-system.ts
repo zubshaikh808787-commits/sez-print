@@ -114,16 +114,19 @@ export function containFitImageOnLabel(
 }
 
 export function mmToPx(mm: number, pxPerMM: number): number {
+  'worklet';
   if (!Number.isFinite(mm) || !Number.isFinite(pxPerMM) || pxPerMM <= 0) return 0;
   return mm * pxPerMM;
 }
 
 export function pxToMm(px: number, pxPerMM: number): number {
+  'worklet';
   if (!Number.isFinite(px) || !Number.isFinite(pxPerMM) || pxPerMM <= 0) return 0;
   return px / pxPerMM;
 }
 
 export function rectMmToPx(rect: MmRect, pxPerMM: number): MmRect {
+  'worklet';
   return {
     left: mmToPx(rect.left, pxPerMM),
     top: mmToPx(rect.top, pxPerMM),
@@ -133,6 +136,7 @@ export function rectMmToPx(rect: MmRect, pxPerMM: number): MmRect {
 }
 
 export function rectPxToMm(rect: MmRect, pxPerMM: number): MmRect {
+  'worklet';
   return {
     left: pxToMm(rect.left, pxPerMM),
     top: pxToMm(rect.top, pxPerMM),

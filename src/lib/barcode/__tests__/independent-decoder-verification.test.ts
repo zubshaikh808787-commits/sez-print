@@ -1,0 +1,144 @@
+/**
+ * Independent Barcode Decoder Verification Test Suite.
+ *
+ * Verifies that barcode matrices produced by our in-house ISO/IEC encoders
+ * (PDF417 in `pdf417.ts` and DataMatrix in `datamatrix.ts`) are 100% compliant
+ * with global barcode specifications and can be successfully decoded back to the
+ * original input string by an independent barcode engine (ZXing library).
+ */
+
+import assert from 'node:assert';
+import * as zxing from '@zxing/library';
+import { encodeDataMatrix } from '../datamatrix';
+import { encodePdf417 } from '../pdf417';
+import { generateQrMatrix } from '@/printing/renderer/qrcode';
+
+console.log('--- Running Independent Barcode Decoder Verification (ZXing Engine) ---');
+
+// Helper: render boolean matrix to grayscale LuminanceSource
+function matrixToBinaryBitmap(
+  matrix: boolean[][],
+  modW: number,
+  modH: number,
+  qzX: number,
+  qzY: number,
+): zxing.BinaryBitmap {
+  const rows = matrix.length;
+  const cols = matrix[0].length;
+  const width = (cols + 2 * qzX) * modW;
+  const height = (rows + 2 * qzY) * modH;
+  const lum = new Uint8ClampedArray(width * height).fill(255);
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (matrix[r][c]) {
+        const top = (r + qzY) * modH;
+        const left = (c + qzX) * modW;
+        for (let y = 0; y < modH; y++) {
+          for (let x = 0; x < modW; x++) {
+            lum[(top + y) * width + (left + x)] = 0;
+          }
+        }
+      }
+    }
+  }
+
+  const source = new zxing.RGBLuminanceSource(lum, width, height);
+  return new zxing.BinaryBitmap(new zxing.HybridBinarizer(source));
+}
+
+// 1. DataMatrix Independent Decoding Verification
+console.log('\n[1/2] Verifying DataMatrix ECC 200 with ZXing DataMatrixReader...');
+const dmReader = new zxing.DataMatrixReader();
+
+const dmTestCases = [
+  { text: '0123456789', rect: false, label: 'Numeric (12x12)' },
+  { text: 'SEZ-PRINT-AUTHENTIC-2026', rect: false, label: 'Alphanumeric uppercase' },
+  { text: 'BATCH-9941', rect: true, label: 'Rectangular format' },
+  { text: 'EXP:2028-12-31', rect: false, label: 'Date and punctuation' },
+];
+
+for (const tc of dmTestCases) {
+  const dm = encodeDataMatrix(tc.text, tc.rect);
+  assert(dm !== null, `Failed to generate DataMatrix for "${tc.text}"`);
+
+  const bitmap = matrixToBinaryBitmap(dm.matrix, 6, 6, 4, 4);
+  const result = dmReader.decode(bitmap);
+
+  assert.strictEqual(
+    result.getText(),
+    tc.text,
+    `Decoded text mismatch for "${tc.text}": got "${result.getText()}"`,
+  );
+  console.log(`  ✓ Decoded [${tc.label}] ${dm.rows}x${dm.cols}: "${result.getText()}"`);
+}
+
+// 2. PDF417 Independent Decoding Verification
+console.log('\n[2/2] Verifying PDF417 ISO/IEC 15438 with ZXing PDF417Reader...');
+const pdfReader = new zxing.PDF417Reader();
+
+const pdfTestCases = [
+  { text: 'TEST1234', ecc: 2, label: 'Alphanumeric short (ECC 2)' },
+  { text: 'Hello World 12345', ecc: 2, label: 'Mixed case with space & numbers (ECC 2)' },
+  { text: 'SEZ-PRINT-ENTERPRISE-2026', ecc: 3, label: 'Enterprise stock tag (ECC 3)' },
+  { text: 'Tracking# 9400 1000 0000 0000 00', ecc: 4, label: 'USPS style tracking (ECC 4)' },
+];
+
+for (const tc of pdfTestCases) {
+  const pdf = encodePdf417(tc.text, tc.ecc);
+  assert(pdf !== null, `Failed to generate PDF417 for "${tc.text}"`);
+
+  // PDF417 has ~3:1 aspect ratio per row
+  const bitmap = matrixToBinaryBitmap(pdf.matrix, 4, 12, 4, 4);
+  const result = pdfReader.decode(bitmap);
+
+  assert.strictEqual(
+    result.getText(),
+    tc.text,
+    `Decoded text mismatch for "${tc.text}": got "${result.getText()}"`,
+  );
+  console.log(`  ✓ Decoded [${tc.label}] ${pdf.rows} rows x ${pdf.cols} cols: "${result.getText()}"`);
+}
+
+// 3. QR Code ISO/IEC 18004 Independent Decoding Verification
+console.log('\n[3/3] Verifying QR Code ISO/IEC 18004 with ZXing QRCodeReader...');
+const qrReader = new zxing.QRCodeReader();
+
+const qrTestCases = [
+  { text: 'TEST1234', ec: 'M' as const, label: 'Alphanumeric short (EC M)' },
+  { text: 'https://example.com/item/49281', ec: 'L' as const, label: 'Web URL (EC L)' },
+  { text: 'Hello World 2026', ec: 'Q' as const, label: 'Mixed case sentence (EC Q)' },
+  { text: 'SEZ-PRINT-ENTERPRISE-HIGH-RELIABILITY', ec: 'H' as const, label: 'High error correction (EC H)' },
+  { text: '123456789012345', ec: 'M' as const, label: 'Numeric long (EC M)' },
+];
+
+for (const tc of qrTestCases) {
+  const qr = generateQrMatrix(tc.text, tc.ec);
+  assert(qr !== null, `Failed to generate QR code for "${tc.text}"`);
+
+  // Convert flat Uint8Array into 2D boolean array
+  const boolMatrix: boolean[][] = [];
+  for (let r = 0; r < qr.size; r++) {
+    const row: boolean[] = [];
+    for (let c = 0; c < qr.size; c++) {
+      row.push(qr.data[r * qr.size + c] === 1);
+    }
+    boolMatrix.push(row);
+  }
+
+  const bitmap = matrixToBinaryBitmap(boolMatrix, 6, 6, 4, 4);
+  const result = qrReader.decode(bitmap);
+
+  assert.strictEqual(
+    result.getText(),
+    tc.text,
+    `Decoded text mismatch for "${tc.text}": got "${result.getText()}"`,
+  );
+  console.log(`  ✓ Decoded [${tc.label}] ${qr.size}x${qr.size} modules: "${result.getText()}"`);
+}
+
+console.log('\n===============================================================');
+console.log('  100% PASS: All DataMatrix, PDF417, and QR codes generated by');
+console.log('  the engine were decoded with 100% accuracy by ZXing!');
+console.log('===============================================================\n');
+

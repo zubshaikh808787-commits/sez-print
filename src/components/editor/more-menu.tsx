@@ -34,6 +34,11 @@ export function LabelSettingsMenu({
       onPress: () => router.push('/default-property-settings'),
     },
     {
+      label: 'Skia Canvas Test (Dev)',
+      icon: 'sparkles',
+      onPress: () => router.push('/dev-skia-test' as any),
+    },
+    {
       label: 'Editing Settings',
       icon: 'square.and.pencil',
       onPress: () => router.push('/editing-settings'),

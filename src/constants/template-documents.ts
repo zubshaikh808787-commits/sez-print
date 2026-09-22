@@ -141,8 +141,8 @@ function circleShape(widthMm: number, heightMm: number): LabelElement {
     width: d,
     height: d,
     lineWidth: 0.45,
-    fill: true,
-    fillColor: '#FFFFFF',
+    fill: false,
+    fillColor: undefined,
     drawingColorIndex: 1,
   };
 }
@@ -238,7 +238,6 @@ export function buildTemplateElements(
 
     case 'circle':
       return [
-        circleShape(w, h),
         text({ left: w * 0.15, top: h * 0.38, width: w * 0.7 }, 'QC PASS', bodyPt, {
           align: 'center',
           bold: true,

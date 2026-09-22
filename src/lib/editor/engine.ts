@@ -15,6 +15,7 @@ export const MIN_ELEMENT_MM = 0.5;
 export const MAX_ELEMENT_MM = 310;
 
 export function finiteMm(value: unknown, fallback = 0): number {
+  'worklet';
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
   if (n === Number.POSITIVE_INFINITY || n === Number.NEGATIVE_INFINITY) return fallback;
@@ -23,6 +24,7 @@ export function finiteMm(value: unknown, fallback = 0): number {
 }
 
 export function roundMm(value: number, digits = 2): number {
+  'worklet';
   const n = finiteMm(value, 0);
   const f = 10 ** digits;
   return Math.round(n * f) / f;
@@ -59,9 +61,19 @@ export class EditorHistory {
     this.future = [];
   }
 
-  /** Start a drag / slider / typing burst. Only the first call in a burst is kept. */
+  /**
+   * Start a drag / slider / typing burst. Only the first call in a burst is kept.
+   *
+   * Shallow on purpose: this runs on the first frame of every drag, and a
+   * JSON round-trip of the whole document there is a real stall once a label
+   * carries an embedded image. Elements in the store are only ever replaced,
+   * never mutated in place — `setElements` maps to fresh objects and
+   * `clampElementToLabel` returns a spread copy — so holding the existing
+   * references is enough to restore this baseline later. The discrete-edit
+   * paths (`pushUndo`, `undo`, `redo`) still deep-clone.
+   */
   begin(current: LabelElement[]): void {
-    if (!this.baseline) this.baseline = cloneElements(current);
+    if (!this.baseline) this.baseline = current.slice();
   }
 
   /** Finish a burst: one undo step for the whole gesture. */

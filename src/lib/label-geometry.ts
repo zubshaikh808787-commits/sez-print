@@ -249,8 +249,10 @@ export function fitEditorLabel(
   return fitLabelSize(widthMm, heightMm, maxWidthPx, maxHeightPx);
 }
 
-/** Space reserved at the bottom of the pad for the Fit / + / − chip. */
-export const EDITOR_PAD_ZOOM_CHROME_PX = 48;
+/** Balanced edge margin around the editor stage so canvas and rulers have breathing room. */
+export const STAGE_PADDING_PX = 14;
+export const CANVAS_BOTTOM_CHIP_CLEARANCE_PX = STAGE_PADDING_PX;
+export const EDITOR_PAD_ZOOM_CHROME_PX = CANVAS_BOTTOM_CHIP_CLEARANCE_PX;
 
 /**
  * Single source for editor fit `pxPerMM` (`scale`). Letterboxes the label into
@@ -274,9 +276,8 @@ export function fitEditorPadBoard(
   offsetXPx: number;
   offsetYPx: number;
 } {
-  const padInset = 6;
-  const maxBoardW = Math.max(64, padWidthPx - padInset);
-  const maxBoardH = Math.max(64, padHeightPx - padInset - EDITOR_PAD_ZOOM_CHROME_PX);
+  const maxBoardW = Math.max(64, padWidthPx - STAGE_PADDING_PX * 2);
+  const maxBoardH = Math.max(64, padHeightPx - STAGE_PADDING_PX * 2);
   const innerWidthPx = Math.max(48, maxBoardW - rulerSizePx);
   const innerHeightPx = Math.max(48, maxBoardH - rulerSizePx);
   const fitted = containFitLabel(

@@ -31,7 +31,7 @@ export type ResizePolicy = {
 export type MmBox = { left: number; top: number; width: number; height: number };
 
 export function aspectRatioOf(element: LabelElement): number {
-  if (element.type === 'qrcode') return 1;
+  if (element.type === 'qrcode' || element.type === 'arctext') return 1;
   if (element.type === 'image' && typeof element.originalAspect === 'number' && element.originalAspect > 0) {
     return element.originalAspect;
   }
@@ -57,12 +57,13 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
       };
     }
     case 'qrcode':
+    case 'arctext':
       return {
         anchors: ['e', 's'],
         behavior: { e: 'square', s: 'square' },
         rotateHandle: false,
         minMm: RESIZE_MIN_PROPORTIONAL_MM,
-        comment: 'QR must stay square (width = height), not merely a similar aspect.',
+        comment: 'QR and ArcText must stay square (width = height) to maintain circular/square geometry.',
       };
     case 'barcode':
       return {
@@ -111,14 +112,13 @@ export function resizePolicyFor(element: LabelElement): ResizePolicy {
         comment: 'Line: length only. Stroke thickness is a property, not a drag axis.',
       };
     case 'shape':
-    case 'arctext':
     case 'table':
       return {
         anchors: ['e', 's'],
         behavior: { e: 'width', s: 'height' },
         rotateHandle: false,
         minMm: MIN_ELEMENT_MM,
-        comment: 'Shape/arc-text/table: independent width and height. Not photos, so aspect is not forced.',
+        comment: 'Shape/table: independent width and height. Not photos, so aspect is not forced.',
       };
     case 'border':
       return {
@@ -202,55 +202,24 @@ export function boundBoxMm(opts: {
 
   if (opts.behavior === 'square') {
     const driving = opts.anchor === 'e' ? proposedW : proposedH;
-    const maxSide = opts.anchor === 'e'
-      ? Math.min(maxW - start.left, maxH, MAX_ELEMENT_MM)
-      : Math.min(maxW, maxH - start.top, MAX_ELEMENT_MM);
+    const maxSide = Math.min(maxW - start.left, maxH - start.top, MAX_ELEMENT_MM);
     const side = clamp(driving, minMm, Math.max(minMm, maxSide));
     width = side;
     height = side;
   } else if (opts.behavior === 'aspect') {
     if (opts.anchor === 'e') {
-      const maxAvailW = Math.max(minMm, maxW - start.left);
+      const maxAvailW = Math.max(minMm, Math.min(maxW - start.left, (maxH - start.top) * aspect));
       width = clamp(proposedW, minMm, Math.min(maxAvailW, MAX_ELEMENT_MM));
       height = width / aspect;
-      if (height > maxH) {
-        height = maxH;
-        width = height * aspect;
-      }
     } else {
-      const maxAvailH = Math.max(minMm, maxH - start.top);
+      const maxAvailH = Math.max(minMm, Math.min(maxH - start.top, (maxW - start.left) / aspect));
       height = clamp(proposedH, minMm, Math.min(maxAvailH, MAX_ELEMENT_MM));
       width = height * aspect;
-      if (width > maxW) {
-        width = maxW;
-        height = width / aspect;
-      }
     }
   }
 
-  if (opts.behavior === 'aspect' || opts.behavior === 'square') {
-    const grow = Math.max(minMm / Math.max(width, 1e-9), minMm / Math.max(height, 1e-9));
-    if (grow > 1) {
-      width *= grow;
-      height *= grow;
-    }
-    const shrink = Math.min(maxW / Math.max(width, 1e-9), maxH / Math.max(height, 1e-9));
-    if (shrink < 1) {
-      width *= shrink;
-      height *= shrink;
-    }
-  }
-
-  if (opts.anchor === 'e') {
-    left = start.left;
-    top = Math.max(0, Math.min(maxH - height, start.top + (start.height - height) / 2));
-  } else {
-    top = start.top;
-    left = Math.max(0, Math.min(maxW - width, start.left + (start.width - width) / 2));
-  }
-
-  left = clamp(left, 0, Math.max(0, maxW - width));
-  top = clamp(top, 0, Math.max(0, maxH - height));
+  left = start.left;
+  top = start.top;
 
   return {
     left: roundMm(left),

@@ -1,11 +1,20 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect } from 'react-native-svg';
+import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 
 import { rulerTicksFor, type RulerTick } from '@/lib/editor/ruler-ticks';
 import { Palette } from '@/constants/ui';
 
 export const RULER_SIZE = 28;
+
+export type LiveRulerBounds = {
+  leftMm: SharedValue<number>;
+  topMm: SharedValue<number>;
+  widthMm: SharedValue<number>;
+  heightMm: SharedValue<number>;
+  visible: SharedValue<boolean>;
+};
 
 const RULER_BG = '#F0F4F9';
 const BRAND_BLUE = Palette.header; // #214668
@@ -21,21 +30,19 @@ function formatTick(mm: number) {
   return Number.isInteger(mm) ? String(mm) : mm.toFixed(1);
 }
 
-function spacedMajor(ticks: Tick[], minGapPx: number) {
+function spacedMajor(ticks: Tick[], minGapPx: number, lengthMm?: number) {
   const majors = ticks.filter((t) => t.kind === 'major');
   const kept: Tick[] = [];
   for (const tick of majors) {
+    // If this is the exact end-boundary tick of the ruler (e.g. 80mm on an 80mm label),
+    // omit its label so it doesn't compress or crowd the final segment.
+    // The ruler boundary is clearly demarcated by the end tick mark line and artboard edge.
+    if (lengthMm !== undefined && Math.abs(tick.mm - lengthMm) < 0.01) {
+      continue;
+    }
     const prev = kept[kept.length - 1];
     if (prev && Math.abs(tick.px - prev.px) < minGapPx) continue;
     kept.push(tick);
-  }
-  const last = majors[majors.length - 1];
-  if (last && kept[kept.length - 1] !== last) {
-    if (kept.length && Math.abs(last.px - kept[kept.length - 1].px) < minGapPx) {
-      kept[kept.length - 1] = last;
-    } else {
-      kept.push(last);
-    }
   }
   return kept;
 }
@@ -46,35 +53,60 @@ function tickLen(kind: Tick['kind'], major: number, mid: number, minor: number) 
   return minor;
 }
 
-/** Stable millimetre scale along the main canvas. Ticks align flush to the nested artboard. */
-export function HorizontalRuler({
+/**
+ * Stable millimetre scale along the main canvas. Ticks align flush to the nested artboard.
+ *
+ * Memoised on purpose: a ruler is ~100 native SVG nodes, and it used to be
+ * rebuilt on every editor render — including every selection change — for a
+ * selection band that `liveBounds` already draws on the UI thread.
+ */
+export const HorizontalRuler = memo(function HorizontalRuler({
   trackWidthPx,
   originPx,
   contentWidthPx,
   lengthMm,
   selectedRangeMm,
+  liveBounds,
 }: {
   trackWidthPx: number;
   originPx: number;
   contentWidthPx: number;
   lengthMm: number;
   selectedRangeMm?: { start: number; end: number } | null;
+  liveBounds?: LiveRulerBounds;
 }) {
   const track = Math.max(1, trackWidthPx);
   const content = Math.max(1, contentWidthPx);
   const origin = Math.max(0, originPx);
   const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
-  const labels = useMemo(() => spacedMajor(ticks, 22), [ticks]);
+  const labels = useMemo(() => spacedMajor(ticks, 22, lengthMm), [ticks, lengthMm]);
 
-  // Selected element projection on horizontal ruler
+  // Selected element projection on horizontal ruler (fallback for static prop)
   const selectionProjection = useMemo(() => {
-    if (!selectedRangeMm || lengthMm <= 0) return null;
+    if (liveBounds || !selectedRangeMm || lengthMm <= 0) return null;
     const x1 = Math.max(0, Math.min(track, origin + (selectedRangeMm.start / lengthMm) * content));
     const x2 = Math.max(0, Math.min(track, origin + (selectedRangeMm.end / lengthMm) * content));
     const left = Math.min(x1, x2);
     const width = Math.max(1, Math.abs(x2 - x1));
     return { x1, x2, left, width };
-  }, [selectedRangeMm, lengthMm, content, origin, track]);
+  }, [liveBounds, selectedRangeMm, lengthMm, content, origin, track]);
+
+  const animatedOverlayStyle = useAnimatedStyle(() => {
+    if (!liveBounds || !liveBounds.visible.value || lengthMm <= 0) {
+      return { opacity: 0 };
+    }
+    const leftVal = liveBounds.leftMm.value;
+    const widthVal = liveBounds.widthMm.value;
+    const x1 = Math.max(0, Math.min(track, origin + (leftVal / lengthMm) * content));
+    const x2 = Math.max(0, Math.min(track, origin + ((leftVal + widthVal) / lengthMm) * content));
+    const left = Math.min(x1, x2);
+    const width = Math.max(1, Math.abs(x2 - x1));
+    return {
+      opacity: 1,
+      left,
+      width,
+    };
+  }, [liveBounds, lengthMm, content, origin, track]);
 
   return (
     <View style={[styles.hTrack, { width: track }]}>
@@ -82,7 +114,7 @@ export function HorizontalRuler({
         {/* Light blue-grey background */}
         <Rect x={0} y={0} width={track} height={RULER_SIZE} fill={RULER_BG} />
 
-        {/* Selected element projection band & edge indicators */}
+        {/* Selected element projection band & edge indicators (static fallback) */}
         {selectionProjection && (
           <>
             <Rect
@@ -116,15 +148,24 @@ export function HorizontalRuler({
 
         {/* Ticks: touching the bottom divider line at y = RULER_SIZE - 1 */}
         {ticks.map((tick) => {
-          const x = origin + tick.px;
           const h = tickLen(tick.kind, 10, 7, 4);
-          const end = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
-          const isMajor = tick.kind === 'major' || end;
+          const isStart = tick.mm < 0.001;
+          const isEnd = Math.abs(tick.mm - lengthMm) < 0.01;
+          const isMajor = tick.kind === 'major';
           const stroke = isMajor
             ? TICK_MAJOR
             : tick.kind === 'mid'
               ? TICK_MID
               : TICK_MINOR;
+          const strokeWidth = isMajor ? 1.25 : 1;
+          const halfStroke = strokeWidth / 2;
+          // Inset stroke at bounds so boundary ticks are crisp and not clipped by overflow: 'hidden'
+          let x = origin + tick.px;
+          if (isStart) {
+            x = origin + halfStroke;
+          } else if (isEnd) {
+            x = origin + track - halfStroke;
+          }
           return (
             <Line
               key={`h-${tick.mm}`}
@@ -133,7 +174,7 @@ export function HorizontalRuler({
               x2={x}
               y2={RULER_SIZE - 1}
               stroke={stroke}
-              strokeWidth={isMajor ? 1.25 : 1}
+              strokeWidth={strokeWidth}
               strokeLinecap="square"
             />
           );
@@ -150,15 +191,23 @@ export function HorizontalRuler({
         />
       </Svg>
 
+      {/* Real-time Reanimated selection projection overlay */}
+      {liveBounds && (
+        <Animated.View
+          style={[styles.hSelectionOverlay, animatedOverlayStyle]}
+          pointerEvents="none"
+        />
+      )}
+
       {labels.map((tick) => {
-        const isEnd = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
+        const isStart = tick.mm < 0.001;
         return (
           <Text
             key={`hl-${tick.mm}`}
             style={[
               styles.hLabel,
-              isEnd ? styles.endLabel : null,
-              { left: Math.min(origin + tick.px + 2, Math.max(0, track - 22)) },
+              isStart ? styles.endLabel : null,
+              { left: origin + tick.px + 2 },
             ]}>
             {formatTick(tick.mm)}
           </Text>
@@ -166,36 +215,55 @@ export function HorizontalRuler({
       })}
     </View>
   );
-}
+});
 
-export function VerticalRuler({
+export const VerticalRuler = memo(function VerticalRuler({
   trackHeightPx,
   originPx,
   contentHeightPx,
   lengthMm,
   selectedRangeMm,
+  liveBounds,
 }: {
   trackHeightPx: number;
   originPx: number;
   contentHeightPx: number;
   lengthMm: number;
   selectedRangeMm?: { start: number; end: number } | null;
+  liveBounds?: LiveRulerBounds;
 }) {
   const track = Math.max(1, trackHeightPx);
   const content = Math.max(1, contentHeightPx);
   const origin = Math.max(0, originPx);
   const ticks = useMemo(() => rulerTicksFor(lengthMm, content), [lengthMm, content]);
-  const labels = useMemo(() => spacedMajor(ticks, 16), [ticks]);
+  const labels = useMemo(() => spacedMajor(ticks, 16, lengthMm), [ticks, lengthMm]);
 
-  // Selected element projection on vertical ruler
+  // Selected element projection on vertical ruler (fallback for static prop)
   const selectionProjection = useMemo(() => {
-    if (!selectedRangeMm || lengthMm <= 0) return null;
+    if (liveBounds || !selectedRangeMm || lengthMm <= 0) return null;
     const y1 = Math.max(0, Math.min(track, origin + (selectedRangeMm.start / lengthMm) * content));
     const y2 = Math.max(0, Math.min(track, origin + (selectedRangeMm.end / lengthMm) * content));
     const top = Math.min(y1, y2);
     const height = Math.max(1, Math.abs(y2 - y1));
     return { y1, y2, top, height };
-  }, [selectedRangeMm, lengthMm, content, origin, track]);
+  }, [liveBounds, selectedRangeMm, lengthMm, content, origin, track]);
+
+  const animatedOverlayStyle = useAnimatedStyle(() => {
+    if (!liveBounds || !liveBounds.visible.value || lengthMm <= 0) {
+      return { opacity: 0 };
+    }
+    const topVal = liveBounds.topMm.value;
+    const heightVal = liveBounds.heightMm.value;
+    const y1 = Math.max(0, Math.min(track, origin + (topVal / lengthMm) * content));
+    const y2 = Math.max(0, Math.min(track, origin + ((topVal + heightVal) / lengthMm) * content));
+    const top = Math.min(y1, y2);
+    const height = Math.max(1, Math.abs(y2 - y1));
+    return {
+      opacity: 1,
+      top,
+      height,
+    };
+  }, [liveBounds, lengthMm, content, origin, track]);
 
   return (
     <View style={[styles.vTrack, { height: track }]}>
@@ -203,7 +271,7 @@ export function VerticalRuler({
         {/* Light blue-grey background */}
         <Rect x={0} y={0} width={RULER_SIZE} height={track} fill={RULER_BG} />
 
-        {/* Selected element projection band & edge indicators */}
+        {/* Selected element projection band & edge indicators (static fallback) */}
         {selectionProjection && (
           <>
             <Rect
@@ -237,15 +305,23 @@ export function VerticalRuler({
 
         {/* Ticks: touching the right divider line at x = RULER_SIZE - 1 */}
         {ticks.map((tick) => {
-          const y = origin + tick.px;
           const w = tickLen(tick.kind, 10, 7, 4);
-          const end = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
-          const isMajor = tick.kind === 'major' || end;
+          const isStart = tick.mm < 0.001;
+          const isEnd = Math.abs(tick.mm - lengthMm) < 0.01;
+          const isMajor = tick.kind === 'major';
           const stroke = isMajor
             ? TICK_MAJOR
             : tick.kind === 'mid'
               ? TICK_MID
               : TICK_MINOR;
+          const strokeWidth = isMajor ? 1.25 : 1;
+          const halfStroke = strokeWidth / 2;
+          let y = origin + tick.px;
+          if (isStart) {
+            y = origin + halfStroke;
+          } else if (isEnd) {
+            y = origin + track - halfStroke;
+          }
           return (
             <Line
               key={`v-${tick.mm}`}
@@ -254,7 +330,7 @@ export function VerticalRuler({
               x2={RULER_SIZE - 1}
               y2={y}
               stroke={stroke}
-              strokeWidth={isMajor ? 1.25 : 1}
+              strokeWidth={strokeWidth}
               strokeLinecap="square"
             />
           );
@@ -271,15 +347,23 @@ export function VerticalRuler({
         />
       </Svg>
 
+      {/* Real-time Reanimated selection projection overlay */}
+      {liveBounds && (
+        <Animated.View
+          style={[styles.vSelectionOverlay, animatedOverlayStyle]}
+          pointerEvents="none"
+        />
+      )}
+
       {labels.map((tick) => {
-        const isEnd = tick.mm < 0.001 || Math.abs(tick.mm - lengthMm) < 0.01;
+        const isStart = tick.mm < 0.001;
         return (
           <Text
             key={`vl-${tick.mm}`}
             style={[
               styles.vLabel,
-              isEnd ? styles.endLabel : null,
-              { top: Math.min(origin + tick.px + 2, Math.max(0, track - 12)) },
+              isStart ? styles.endLabel : null,
+              { top: origin + tick.px + 2 },
             ]}>
             {formatTick(tick.mm)}
           </Text>
@@ -287,15 +371,15 @@ export function VerticalRuler({
       })}
     </View>
   );
-}
+});
 
-export function RulerCorner() {
+export const RulerCorner = memo(function RulerCorner() {
   return (
     <View style={styles.corner}>
       <Text style={styles.cornerText}>mm</Text>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   hTrack: {
@@ -307,6 +391,26 @@ const styles = StyleSheet.create({
     width: RULER_SIZE,
     backgroundColor: RULER_BG,
     overflow: 'hidden',
+  },
+  hSelectionOverlay: {
+    position: 'absolute',
+    top: 0,
+    height: RULER_SIZE - 1,
+    backgroundColor: 'rgba(33, 70, 104, 0.12)',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderLeftColor: BRAND_BLUE,
+    borderRightColor: BRAND_BLUE,
+  },
+  vSelectionOverlay: {
+    position: 'absolute',
+    left: 0,
+    width: RULER_SIZE - 1,
+    backgroundColor: 'rgba(33, 70, 104, 0.12)',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderTopColor: BRAND_BLUE,
+    borderBottomColor: BRAND_BLUE,
   },
   hLabel: {
     position: 'absolute',

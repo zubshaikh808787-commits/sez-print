@@ -2,6 +2,7 @@ import { Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, {
+  Circle,
   Defs,
   Ellipse,
   Line,
@@ -10,6 +11,7 @@ import Svg, {
   Text as SvgText,
   TextPath,
 } from 'react-native-svg';
+import { computeArcTextLayout } from '@/lib/editor/arctext-layout';
 import QRCode from 'react-native-qrcode-svg';
 
 import { ClipartIcon } from '@/components/clipart-icon';
@@ -32,7 +34,11 @@ import {
   type TimeElementState,
 } from '@/components/editor/types';
 import { FONT_LIBRARY } from '@/constants/font-library';
-import { barcodeBarsForMode } from '@/lib/barcode-code128';
+import { barcodeBarsForMode, barcodeModulesForMode } from '@/lib/barcode-code128';
+import { snap1DBarcodeModules } from '@/lib/barcode/barcode-snapping';
+import { encodeDataMatrix } from '@/lib/barcode/datamatrix';
+import { encodePdf417 } from '@/lib/barcode/pdf417';
+import { generateQrMatrix } from '@/printing/renderer/qrcode';
 import { applySerialOffset, lineSpacingMultiplier } from '@/lib/serial-content';
 import { useSettingsStore } from '@/stores/settings-store';
 import { ptToMm, type LabelElement } from '@/lib/label-document';
@@ -261,8 +267,8 @@ function BarcodeContent({
     element.contentType === 'Data Source' && element.columnNameContent
       ? `{${element.columnNameContent}}`
       : element.content || '0123456789';
-  const bars = useMemo(
-    () => barcodeBarsForMode(element.encodeMode, content),
+  const rawModules = useMemo(
+    () => barcodeModulesForMode(element.encodeMode, content),
     [content, element.encodeMode],
   );
   const color = element.antiColor ? '#FFFFFF' : inkColor(element.drawingColorIndex);
@@ -270,44 +276,62 @@ function BarcodeContent({
   const labelSize = fontSizePx(element.fontSize, scale);
   const showLabel = element.textFlag !== 'Hide';
   const hri = formatBarcodeHri(element.encodeMode, content);
-  const barsHeight = showLabel ? Math.max(2, heightPx - labelSize * 1.3) : heightPx;
+  const labelHeight = showLabel ? Math.max(8, Math.round(labelSize * 1.2)) : 0;
+  const widthMm = element.width > 0 ? element.width : widthPx / (scale || 1);
+
+  // Quantize barcode modules to integer hardware dots without internal quiet zone padding,
+  // matching WePrint's tight fit where the selection box hugs the outermost bars and text exactly.
+  const snapped = useMemo(() => {
+    if (!rawModules) return null;
+    return snap1DBarcodeModules(rawModules, widthMm, 203, false);
+  }, [rawModules, widthMm]);
+
   const label = showLabel ? (
-    <Text
-      numberOfLines={1}
-      allowFontScaling={false}
-      style={{
-        fontSize: labelSize,
-        lineHeight: labelSize * 1.2,
-        color,
-        textAlign: 'center',
-        fontFamily: resolveFontFamily(element.fontFamily),
-        fontWeight: element.bold ? '600' : '400',
-        includeFontPadding: false,
-      }}>
-      {hri}
-    </Text>
+    <View style={{ width: '100%', height: labelHeight, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }}>
+      <Text
+        numberOfLines={1}
+        allowFontScaling={false}
+        style={{
+          width: '100%',
+          fontSize: labelSize,
+          lineHeight: labelHeight,
+          color,
+          textAlign: 'center',
+          fontFamily: resolveFontFamily(element.fontFamily),
+          fontWeight: element.bold ? '600' : '400',
+          includeFontPadding: false,
+        }}>
+        {hri}
+      </Text>
+    </View>
   ) : null;
 
   return (
-    <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
+    <View style={[styles.fill, { backgroundColor: bgColor, justifyContent: 'flex-start', alignItems: 'stretch' }]}>
       {element.textFlag === 'Top' ? label : null}
-      {bars ? (
-        <Svg
-          width="100%"
-          height={Math.max(2, barsHeight)}
-          viewBox={`0 0 ${widthPx} ${Math.max(2, barsHeight)}`}
-          preserveAspectRatio="none">
-          {bars.map((bar, i) => (
-            <Rect
-              key={i}
-              x={bar.x * widthPx}
-              y={0}
-              width={Math.max(bar.width * widthPx, widthPx > 80 ? 0.85 : 0.55)}
-              height={Math.max(2, barsHeight)}
+      {rawModules && snapped ? (
+        <View
+          style={{
+            flex: 1,
+            width: '100%',
+          }}>
+          <Svg
+            width="100%"
+            height="100%"
+            viewBox={`0 0 ${widthPx} 100`}
+            preserveAspectRatio="none">
+            <Path
+              d={snapped.bars
+                .map((bar) => {
+                  const barX = bar.x * widthPx;
+                  const barW = Math.max(bar.width * widthPx, 0.55);
+                  return `M${barX},0h${barW}v100h-${barW}Z`;
+                })
+                .join(' ')}
               fill={color}
             />
-          ))}
-        </Svg>
+          </Svg>
+        </View>
       ) : (
         <View style={styles.invalidBox}>
           <Text style={styles.invalidText}>Invalid barcode content</Text>
@@ -316,19 +340,6 @@ function BarcodeContent({
       {element.textFlag === 'Bottom' ? label : null}
     </View>
   );
-}
-
-/** Deterministic pseudo-random matrix used to approximate PDF417 / DataMatrix. */
-function pseudoMatrix(content: string, cols: number, rows: number) {
-  let seed = 0;
-  for (const ch of content) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
-  const cells: boolean[] = [];
-  let value = seed || 1;
-  for (let i = 0; i < cols * rows; i += 1) {
-    value = (value * 1103515245 + 12345) >>> 0;
-    cells.push((value & 0x40000000) !== 0);
-  }
-  return cells;
 }
 
 function QrcodeContent({
@@ -348,45 +359,135 @@ function QrcodeContent({
       : element.content || 'https://example.com';
   const color = element.antiColor ? '#FFFFFF' : inkColor(element.drawingColorIndex);
   const bgColor = element.antiColor ? inkColor(element.drawingColorIndex) : '#FFFFFF00';
-  const quietZone = parseInt(element.zoneSize, 10) * 2;
-  const cols = element.encodeMode === 'PDF417' ? 24 : 16;
-  const rows = element.encodeMode === 'PDF417' ? 10 : 16;
-  const cells = useMemo(() => pseudoMatrix(content, cols, rows), [content, cols, rows]);
 
-  if (element.encodeMode === 'QRCode') {
-    const size = Math.min(widthPx, heightPx) - quietZone * 2;
+  // 1. QR Code
+  const qrMatrix = useMemo(() => {
+    if (element.encodeMode === 'QRCode') {
+      return generateQrMatrix(content, (element.errorLevel as 'L' | 'M' | 'Q' | 'H') || 'M');
+    }
+    return null;
+  }, [element.encodeMode, content, element.errorLevel]);
+
+  const qrPath = useMemo(() => {
+    if (element.encodeMode !== 'QRCode' || !qrMatrix) return '';
+    const qz = Math.max(0, parseInt(element.zoneSize, 10));
+    let d = '';
+    for (let r = 0; r < qrMatrix.size; r++) {
+      for (let c = 0; c < qrMatrix.size; c++) {
+        if (qrMatrix.data[r * qrMatrix.size + c]) {
+          const x = c + qz;
+          const y = r + qz;
+          d += `M${x},${y}h1v1h-1Z `;
+        }
+      }
+    }
+    return d;
+  }, [element.encodeMode, qrMatrix, element.zoneSize]);
+
+  // 2. DataMatrix (ISO/IEC 16022 authentic ECC 200)
+  const isRectangular = widthPx > heightPx * 1.5;
+  const dmMatrix = useMemo(() => {
+    if (element.encodeMode === 'DataMatrix') {
+      return encodeDataMatrix(content, isRectangular);
+    }
+    return null;
+  }, [element.encodeMode, content, isRectangular]);
+
+  const dmPath = useMemo(() => {
+    if (element.encodeMode !== 'DataMatrix' || !dmMatrix) return '';
+    const qz = Math.max(1, parseInt(element.zoneSize, 10) || 1);
+    let d = '';
+    for (let r = 0; r < dmMatrix.rows; r++) {
+      for (let c = 0; c < dmMatrix.cols; c++) {
+        if (dmMatrix.matrix[r][c]) {
+          d += `M${c + qz},${r + qz}h1v1h-1Z `;
+        }
+      }
+    }
+    return d;
+  }, [element.encodeMode, dmMatrix, element.zoneSize]);
+
+  // 3. PDF417 (ISO/IEC 15438 authentic multi-row)
+  const pdfMatrix = useMemo(() => {
+    if (element.encodeMode === 'PDF417') {
+      return encodePdf417(content, 2);
+    }
+    return null;
+  }, [element.encodeMode, content]);
+
+  const pdfPath = useMemo(() => {
+    if (element.encodeMode !== 'PDF417' || !pdfMatrix) return '';
+    const qzX = Math.max(2, parseInt(element.zoneSize, 10) || 2);
+    const qzY = Math.max(2, parseInt(element.zoneSize, 10) || 2);
+    let d = '';
+    for (let r = 0; r < pdfMatrix.rows; r++) {
+      for (let c = 0; c < pdfMatrix.cols; c++) {
+        if (pdfMatrix.matrix[r][c]) {
+          d += `M${c + qzX},${(r + qzY) * 3}h1v3h-1Z `;
+        }
+      }
+    }
+    return d;
+  }, [element.encodeMode, pdfMatrix, element.zoneSize]);
+
+  if (element.encodeMode === 'QRCode' && qrMatrix) {
+    const qz = Math.max(0, parseInt(element.zoneSize, 10));
+    const totalSize = qrMatrix.size + qz * 2;
+
     return (
       <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
-        <QRCode
-          value={content}
-          size={Math.max(1, size)}
-          color={color}
-          backgroundColor="transparent"
-          ecl={element.errorLevel}
-        />
+        <Svg
+          width="100%"
+          height="100%"
+          viewBox={`0 0 ${totalSize} ${totalSize}`}
+          preserveAspectRatio="xMidYMid meet">
+          <Path d={qrPath} fill={color} />
+        </Svg>
       </View>
     );
   }
 
-  const cellW = widthPx / cols;
-  const cellH = heightPx / rows;
+  if (element.encodeMode === 'DataMatrix' && dmMatrix) {
+    const qz = Math.max(1, parseInt(element.zoneSize, 10) || 1);
+    const totalW = dmMatrix.cols + qz * 2;
+    const totalH = dmMatrix.rows + qz * 2;
+
+    return (
+      <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
+        <Svg
+          width="100%"
+          height="100%"
+          viewBox={`0 0 ${totalW} ${totalH}`}
+          preserveAspectRatio="xMidYMid meet">
+          <Path d={dmPath} fill={color} />
+        </Svg>
+      </View>
+    );
+  }
+
+  if (element.encodeMode === 'PDF417' && pdfMatrix) {
+    const qzX = Math.max(2, parseInt(element.zoneSize, 10) || 2);
+    const qzY = Math.max(2, parseInt(element.zoneSize, 10) || 2);
+    const totalW = pdfMatrix.cols + qzX * 2;
+    const totalH = (pdfMatrix.rows + qzY * 2) * 3;
+
+    return (
+      <View style={[styles.fill, styles.center, { backgroundColor: bgColor }]}>
+        <Svg
+          width="100%"
+          height="100%"
+          viewBox={`0 0 ${totalW} ${totalH}`}
+          preserveAspectRatio="xMidYMid meet">
+          <Path d={pdfPath} fill={color} />
+        </Svg>
+      </View>
+    );
+  }
+
   return (
-    <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
-      {cells.map((on, i) =>
-        on ? (
-          <Rect
-            key={i}
-            x={(i % cols) * cellW}
-            y={Math.floor(i / cols) * cellH}
-            width={cellW}
-            height={cellH}
-            fill={color}
-          />
-        ) : null,
-      )}
-      <Rect x={0} y={0} width={cellW} height={heightPx} fill={color} />
-      <Rect x={widthPx - cellW} y={0} width={cellW} height={heightPx} fill={color} />
-    </Svg>
+    <View style={styles.invalidBox}>
+      <Text style={styles.invalidText}>Invalid 2D barcode content</Text>
+    </View>
   );
 }
 
@@ -603,33 +704,72 @@ function ArcTextContent({
   scale: number;
 }) {
   const color = element.antiColor ? '#FFFFFF' : inkColor(element.drawingColorIndex);
-  const text =
+  const isPlaceholder = !element.text || element.text.trim().length === 0;
+  const displayText =
     element.contentType === 'Data Source' && element.columnNameContent
       ? element.columnNameContent
-      : element.text || 'ARC TEXT';
-  const size = fontSizePx(element.fontSize, scale);
-  const rx = widthPx / 2 - size / 2;
-  const ry = heightPx / 2 - size / 2;
-  const pathId = 'arc-path';
-  const d = `M ${widthPx / 2 - rx} ${heightPx / 2} A ${rx} ${ry} 0 0 1 ${widthPx / 2 + rx} ${
-    heightPx / 2
-  }`;
+      : isPlaceholder
+      ? 'Double-tap to enter text'
+      : element.text;
+
+  const nominalFontSize = fontSizePx(element.fontSize, scale);
+  const layout = useMemo(
+    () =>
+      computeArcTextLayout({
+        text: displayText,
+        widthPx,
+        heightPx,
+        nominalFontSizePx: nominalFontSize,
+        lineWidthMm: element.lineWidth,
+        scale,
+        bold: element.bold,
+      }),
+    [displayText, widthPx, heightPx, nominalFontSize, element.lineWidth, scale, element.bold],
+  );
+
+  const fontFamily = resolveFontFamily(element.fontFamily);
+  const textColor = isPlaceholder
+    ? element.antiColor
+      ? 'rgba(255, 255, 255, 0.65)'
+      : '#334155'
+    : color;
 
   return (
     <View style={[styles.fill, element.antiColor && styles.antiBg]}>
-      <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
-        <Defs>
-          <Path id={pathId} d={d} />
-        </Defs>
-        <SvgText
-          fill={color}
-          fontSize={size}
-          fontWeight={element.bold ? '700' : '400'}
-          fontStyle={element.italic ? 'italic' : 'normal'}>
-          <TextPath href={`#${pathId}`} startOffset="50%" textAnchor="middle">
-            {text}
-          </TextPath>
-        </SvgText>
+      <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`}>
+        {/* Circular guide line matching reference specification */}
+        <Circle
+          cx={layout.cx}
+          cy={layout.cy}
+          r={layout.radius}
+          stroke={color}
+          strokeWidth={layout.strokeWidth}
+          fill="none"
+        />
+
+        {/* Letters curved along the circular arc */}
+        {layout.characters.map((item, idx) => (
+          <SvgText
+            key={`${idx}-${item.char}`}
+            x={item.x}
+            y={item.y}
+            fill={textColor}
+            fontSize={layout.effectiveFontSizePx}
+            fontFamily={fontFamily}
+            fontWeight={element.bold ? '700' : '400'}
+            fontStyle={element.italic ? 'italic' : 'normal'}
+            textDecoration={
+              element.underline
+                ? 'underline'
+                : element.strikethrough
+                ? 'line-through'
+                : 'none'
+            }
+            textAnchor="middle"
+            transform={`rotate(${item.rotationDeg}, ${item.x}, ${item.y})`}>
+            {item.char}
+          </SvgText>
+        ))}
       </Svg>
     </View>
   );
