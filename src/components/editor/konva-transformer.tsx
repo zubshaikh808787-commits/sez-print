@@ -63,6 +63,9 @@ export type TransformMovePayload = {
 
 export type TransformStartKind = 'move' | 'resize';
 
+/** 'touch' = touch-down (add-only in Multiple mode); 'toggle' = tap that may remove. */
+export type SelectSource = 'touch' | 'toggle';
+
 import { type ElementAnchorRect } from '@/lib/editor/quick-value';
 
 export type KonvaTransformerProps = {
@@ -95,7 +98,7 @@ export type KonvaTransformerProps = {
   onGroupResizeHandleBegin?: (handle: 'e' | 's') => void;
   /** 1 when Safe Mode is on — drags may leave the label, then spring back on release. */
   safeModeSv?: SharedValue<number>;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, source?: SelectSource) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
   onQuickEdit?: (id: string, anchorRect?: ElementAnchorRect) => void;
@@ -278,6 +281,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const isInteracting = useSharedValue(false);
   const liftSv = useSharedValue(1);
   const selectedSv = useSharedValue(selected);
+  const multipleModeSv = useSharedValue(multipleMode);
   const anchorStartLeftMmSv = useSharedValue(finiteMm(element.left));
   const anchorStartTopMmSv = useSharedValue(finiteMm(element.top));
   const hasMovedSv = useSharedValue(false);
@@ -295,6 +299,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   useEffect(() => {
     selectedSv.value = selected;
   }, [selected, selectedSv]);
+
+  useEffect(() => {
+    multipleModeSv.value = multipleMode;
+  }, [multipleMode, multipleModeSv]);
 
   useEffect(() => {
     padZoomSv.value = padZoom > 0 ? padZoom : 1;
@@ -730,9 +738,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     callbacksRef.current.onTransformStart?.(id, kind);
   }, []);
 
-  /** Touch-down selection so drag on another element switches panel before the move threshold. */
+  /**
+   * Touch-down selection so drag on another element switches panel before the move threshold.
+   * Add-only: in Multiple mode touch-down never removes, so a group drag keeps every member.
+   */
+  const wasSelectedAtTouchRef = useRef(false);
   const notifySelectJS = useCallback((id: string) => {
-    callbacksRef.current.onSelect(id);
+    wasSelectedAtTouchRef.current = callbacksRef.current.selected;
+    callbacksRef.current.onSelect(id, 'touch');
   }, []);
 
   const notifyGroupResizeHandleBeginJS = useCallback(
@@ -772,10 +785,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     lastTapRef.current = { id: '', time: 0 };
     lastTapTimeSv.value = 0;
 
-    if (!callbacksRef.current.selected) {
-      callbacksRef.current.onSelect(element.id);
-    }
-
+    // Touch-down already selected this element.
     const openWithAnchor = (anchor?: ElementAnchorRect) => {
       if (
         element.type === 'text' ||
@@ -824,19 +834,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       return;
     }
 
-    // Add-to-selection is immediate. Remove is deferred so a second tap
-    // within the double-tap window can open quick-edit instead of toggling off.
-    if (callbacksRef.current.multipleMode && callbacksRef.current.selected) {
+    // Touch-down already added the element. Only a tap on an element that was selected
+    // *before* this touch toggles it off, deferred so a double tap can open quick-edit instead.
+    if (callbacksRef.current.multipleMode && wasSelectedAtTouchRef.current) {
       cancelPendingRemoveJS();
       pendingRemoveTimerRef.current = setTimeout(() => {
         pendingRemoveTimerRef.current = null;
-        callbacksRef.current.onSelect(element.id);
+        callbacksRef.current.onSelect(element.id, 'toggle');
       }, DOUBLE_TAP_MAX_GAP_MS);
-      return;
-    }
-
-    if (!callbacksRef.current.selected) {
-      callbacksRef.current.onSelect(element.id);
     }
   }, [element.id, triggerDoubleTapJS, cancelPendingRemoveJS]);
 
@@ -1506,7 +1511,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const borderStrokeColor = isOverflowed ? '#EF4444' : selectionColor || CHROME_SELECTION_STROKE;
 
   const selectionOverlayStyle = useAnimatedStyle(() => {
-    const multiGroup = groupEligibleSv?.value === 1;
+    // In Multiple mode every selected member keeps its frame; keying on the touched id
+    // hid the others until React caught up with the new group size (blink on add).
+    const multiGroup = multipleModeSv.value || groupEligibleSv?.value === 1;
     const touchId = activeSelectedIdSv?.value ?? '';
     const showChrome = multiGroup
       ? selectedSv.value

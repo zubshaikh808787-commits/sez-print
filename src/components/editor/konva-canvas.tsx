@@ -5,7 +5,7 @@ import ViewShot from 'react-native-view-shot';
 import Svg, { Ellipse, Line, Rect } from 'react-native-svg';
 import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, type SharedValue } from 'react-native-reanimated';
-import type { TransformStartKind } from './konva-transformer';
+import type { SelectSource, TransformStartKind } from './konva-transformer';
 
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
 import { CanvasGridOverlay } from '@/components/editor/canvas-grid-overlay';
@@ -52,7 +52,7 @@ type KonvaCanvasProps = {
   groupScaleMinSv?: SharedValue<number>;
   groupScaleMaxSv?: SharedValue<number>;
   onGroupResizeHandleBegin?: (handle: 'e' | 's') => void;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, source?: SelectSource) => void;
   onDeselectAll: () => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
@@ -98,7 +98,7 @@ type ElementChrome = {
   groupScaleMinSv?: SharedValue<number>;
   groupScaleMaxSv?: SharedValue<number>;
   onGroupResizeHandleBegin?: (handle: 'e' | 's') => void;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, source?: SelectSource) => void;
   onOpenPanel: (id: string) => void;
   onEditText: (id: string) => void;
   onQuickEdit?: (id: string, anchorRect?: ElementAnchorRect) => void;

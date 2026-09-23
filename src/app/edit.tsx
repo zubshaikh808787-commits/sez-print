@@ -102,6 +102,7 @@ import { KonvaCanvas } from '@/components/editor/konva-canvas';
 import type {
   TransformCommitPayload,
   TransformMovePayload,
+  SelectSource,
   TransformStartKind,
 } from '@/components/editor/konva-transformer';
 import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
@@ -1615,36 +1616,55 @@ export default function EditScreen() {
   }, []);
 
   const handleSelect = useCallback(
-    (id: string) => {
+    (id: string, source: SelectSource = 'touch') => {
       const element = docRef.current.elements.find((el) => el.id === id);
       if (!element || element.needPrinting === false || element.type === 'border') return;
-      topBarSelectionVisibleSv.value = 1;
-      bottomPanelVisibleSv.value = 1;
-      activeSelectedIdSv.value = id;
-      lastSelectedElementRef.current = element;
-
-      const next = reduceTapSelect({
-        id,
-        multipleMode,
-        current: { ids: selectedIdsRef.current, primaryId: primaryIdRef.current },
-      });
-
       if (!mountedRef.current) return;
+
+      const current = { ids: selectedIdsRef.current, primaryId: primaryIdRef.current };
+      const alreadySelected = current.ids.includes(id);
+
+      // Touch-down is add-only: in Multiple mode it must never drop a member, or a group
+      // drag loses elements and the tap-end toggle flips it back (flicker).
+      if (multipleMode && source === 'touch' && alreadySelected) {
+        activeSelectedIdSv.value = id;
+        return;
+      }
+      // A deferred toggle whose element was already removed elsewhere is stale.
+      if (multipleMode && source === 'toggle' && !alreadySelected) return;
 
       // e41f3aa: skip React work when the same element is already selected with panel open.
       if (
         !multipleMode &&
-        next.ids.length === 1 &&
-        next.ids[0] === id &&
-        selectedIdsRef.current.length === 1 &&
-        selectedIdsRef.current[0] === id &&
+        current.ids.length === 1 &&
+        current.ids[0] === id &&
         panelOpen
       ) {
+        activeSelectedIdSv.value = id;
         return;
       }
 
+      const next = reduceTapSelect({ id, multipleMode, current });
+
+      // Refs update synchronously so a rapid next touch never reads the pre-render selection.
+      selectedIdsRef.current = next.ids;
+      primaryIdRef.current = next.primaryId;
       setSelectedIds(next.ids);
       setPrimaryId(next.primaryId);
+
+      if (next.ids.length === 0) {
+        activeSelectedIdSv.value = '';
+        topBarSelectionVisibleSv.value = 0;
+        bottomPanelVisibleSv.value = 0;
+        setPanelOpen(false);
+        return;
+      }
+
+      topBarSelectionVisibleSv.value = 1;
+      bottomPanelVisibleSv.value = 1;
+      activeSelectedIdSv.value = next.primaryId ?? id;
+      lastSelectedElementRef.current =
+        docRef.current.elements.find((el) => el.id === next.primaryId) ?? element;
 
       // e41f3aa: lightweight panel open — no tab resets or deferred transitions on touch-down.
       if (!multipleMode) {
