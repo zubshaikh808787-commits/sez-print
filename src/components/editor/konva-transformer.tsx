@@ -731,6 +731,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     callbacksRef.current.onTransformStart?.(id, kind);
   }, []);
 
+  /** Kept in the gesture closure so Reanimated worklets never capture a missing identifier. */
+  const notifySelectJS = useCallback((_id: string) => {
+  }, []);
+
   const notifyGroupResizeHandleBeginJS = useCallback(
     (handle: 'e' | 's') => {
       onGroupResizeHandleBegin?.(handle);
@@ -853,7 +857,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         beginTimeSv.value = tNow;
         hasMovedSv.value = false;
         tapHandledSv.value = false;
-        // Instant selection ring on the UI thread — no JS bridge hop on touch-down.
+        // Prime selection chrome and chrome bars on the UI thread before JS catches up.
+        isInteracting.value = true;
+        selectedSv.value = true;
         if (activeSelectedIdSv) {
           activeSelectedIdSv.value = element.id;
         }
@@ -883,8 +889,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             return;
           }
           hasMovedSv.value = true;
-          isInteracting.value = true;
-          selectedSv.value = true;
           liftSv.value = DRAG_LIFT_OPACITY;
           runOnJS(cancelPendingRemoveJS)();
 
@@ -1144,6 +1148,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     lastTapYSv,
     tapHandledSv,
     notifyTransformStartJS,
+    notifySelectJS,
     activeSelectedIdSv,
     groupEligibleSv,
     groupAnchorIdSv,
@@ -1491,7 +1496,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const borderStrokeColor = isOverflowed ? '#EF4444' : selectionColor || CHROME_SELECTION_STROKE;
 
   const selectionOverlayStyle = useAnimatedStyle(() => {
-    const showChrome = selectedSv.value;
+    const multiGroup = groupEligibleSv?.value === 1;
+    const touchId = activeSelectedIdSv?.value ?? '';
+    const showChrome = multiGroup
+      ? selectedSv.value
+      : touchId.length > 0
+        ? touchId === element.id
+        : selectedSv.value;
     return {
       opacity: showChrome ? 1 : 0,
       pointerEvents: (showChrome ? 'box-none' : 'none') as 'box-none' | 'none',

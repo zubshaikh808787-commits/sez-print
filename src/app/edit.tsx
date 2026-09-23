@@ -619,6 +619,7 @@ export default function EditScreen() {
   const historyRef = useRef(new EditorHistory(MAX_HISTORY));
   const [historyRev, setHistoryRev] = useState(0);
   const transformingRef = useRef(false);
+  const pendingSelectionCommitRef = useRef<(() => void) | null>(null);
   const mountedRef = useRef(true);
   const dirtyRef = useRef(false);
   const patchBurstTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -705,6 +706,12 @@ export default function EditScreen() {
   useEffect(() => {
     groupEligibleSv.value = selectedIds.length > 1 ? 1 : 0;
   }, [selectedIds.length, groupEligibleSv]);
+
+  const contextualToolbarAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
+    zIndex: topBarSelectionVisibleSv.value > 0.5 ? 1 : 0,
+    pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'auto' : 'none',
+  }));
 
   const staticPaletteAnimatedStyle = useAnimatedStyle(() => ({
     opacity: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
@@ -1469,6 +1476,7 @@ export default function EditScreen() {
     setSelectedIds([]);
     setPrimaryId(null);
     setPanelOpen(false);
+    pendingSelectionCommitRef.current = null;
   }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const toggleMultipleMode = useCallback(() => {
@@ -1535,9 +1543,9 @@ export default function EditScreen() {
     (id: string) => {
       const element = docRef.current.elements.find((el) => el.id === id);
       if (!element || element.needPrinting === false || element.type === 'border') return;
-      lastSelectedElementRef.current = element;
       topBarSelectionVisibleSv.value = 1;
       bottomPanelVisibleSv.value = 1;
+      const prevPrimaryId = primaryIdRef.current;
       const next = reduceTapSelect({
         id,
         multipleMode,
@@ -1548,27 +1556,43 @@ export default function EditScreen() {
         next.ids.every((val, idx) => val === selectedIdsRef.current[idx]);
       const primarySame = next.primaryId === primaryIdRef.current;
 
-      if (!idsSame) {
-        setSelectedIds(next.ids);
-      }
-      if (!primarySame) {
-        setPrimaryId(next.primaryId);
-      }
-      if (!multipleMode) {
-        if (element.type === 'signature') {
-          setShowSignatureBoard(true);
-        } else {
-          if (!idsSame || !primarySame || !panelOpen) {
-            resetTabToRegularForElement(element.type);
+      const commitReact = () => {
+        if (!mountedRef.current) return;
+        lastSelectedElementRef.current = element;
+        if (!idsSame) {
+          setSelectedIds(next.ids);
+        }
+        if (!primarySame) {
+          setPrimaryId(next.primaryId);
+        }
+        if (!multipleMode) {
+          if (element.type === 'signature') {
+            setShowSignatureBoard(true);
+          } else {
+            const prevPrimary = docRef.current.elements.find((el) => el.id === prevPrimaryId);
+            const typeChanged = !prevPrimary || prevPrimary.type !== element.type;
+            if (typeChanged || !panelOpen) {
+              resetTabToRegularForElement(element.type);
+            }
             setPanelOpen(true);
           }
+        } else if (next.ids.length >= 2) {
+          setPanelOpen(true);
+        } else if (next.ids.length === 1) {
+          resetTabToRegularForElement(element.type);
+          setPanelOpen(true);
         }
-      } else if (next.ids.length >= 2) {
-        setPanelOpen(true);
-      } else if (next.ids.length === 1) {
-        resetTabToRegularForElement(element.type);
-        setPanelOpen(true);
+      };
+
+      // Drag stays on the UI thread. Mounting a property panel is heavy JS — never
+      // do it while a transform is in flight, and otherwise wait until the gesture
+      // has finished so the two feel independent.
+      if (transformingRef.current) {
+        pendingSelectionCommitRef.current = commitReact;
+        return;
       }
+      pendingSelectionCommitRef.current = null;
+      InteractionManager.runAfterInteractions(commitReact);
     },
     [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement, panelOpen],
   );
@@ -1815,6 +1839,14 @@ export default function EditScreen() {
 
   const handleTransformEnd = useCallback(
     (payload: TransformCommitPayload) => {
+      const flushSelectionPanel = () => {
+        const pending = pendingSelectionCommitRef.current;
+        pendingSelectionCommitRef.current = null;
+        if (pending) {
+          InteractionManager.runAfterInteractions(pending);
+        }
+      };
+
       publishSnapGuides([]);
       const clean = sanitizeTransform(payload);
       const recordHistory = !transformingRef.current;
@@ -1885,6 +1917,7 @@ export default function EditScreen() {
           recordHistory,
         );
         clearGroupPreview();
+        flushSelectionPanel();
         return;
       }
 
@@ -1919,6 +1952,7 @@ export default function EditScreen() {
           recordHistory,
         );
         clearGroupPreview();
+        flushSelectionPanel();
         return;
       }
 
@@ -1965,6 +1999,7 @@ export default function EditScreen() {
         recordHistory,
       );
       clearGroupPreview();
+      flushSelectionPanel();
     },
     [
       setElements,
@@ -3207,13 +3242,10 @@ export default function EditScreen() {
             </Pressable>
           </View>
 
-          <View
-            pointerEvents={selectedIds.length > 0 ? 'auto' : 'none'}
-            style={[
-              styles.contextualToolbarHost,
-              selectedIds.length === 0 && styles.contextualToolbarHidden,
-            ]}>
-            {renderContextualToolbar()}
+          <View style={styles.contextualToolbarHost}>
+            <Animated.View style={[StyleSheet.absoluteFillObject, contextualToolbarAnimatedStyle]}>
+              {renderContextualToolbar()}
+            </Animated.View>
           </View>
         </View>
 
@@ -3706,13 +3738,11 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E2E8F0',
   },
   contextualToolbarHost: {
+    position: 'relative',
     width: '100%',
     height: 44,
     overflow: 'hidden',
     zIndex: 2,
-  },
-  contextualToolbarHidden: {
-    opacity: 0,
   },
   subToolbarRow: {
     width: '100%',
