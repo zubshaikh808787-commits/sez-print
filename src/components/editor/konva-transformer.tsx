@@ -730,8 +730,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     callbacksRef.current.onTransformStart?.(id, kind);
   }, []);
 
-  /** Kept in the gesture closure so Reanimated worklets never capture a missing identifier. */
-  const notifySelectJS = useCallback((_id: string) => {
+  /** Touch-down selection so drag on another element switches panel before the move threshold. */
+  const notifySelectJS = useCallback((id: string) => {
+    callbacksRef.current.onSelect(id);
   }, []);
 
   const notifyGroupResizeHandleBeginJS = useCallback(
@@ -834,7 +835,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       return;
     }
 
-    callbacksRef.current.onSelect(element.id);
+    if (!callbacksRef.current.selected) {
+      callbacksRef.current.onSelect(element.id);
+    }
   }, [element.id, triggerDoubleTapJS, cancelPendingRemoveJS]);
 
   const bodyDragGesture = useMemo(() => {
@@ -868,6 +871,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         if (bottomPanelVisibleSv) {
           bottomPanelVisibleSv.value = 1;
         }
+        runOnJS(notifySelectJS)(element.id);
         originLeftSv.value = originLeftSv.value + transX.value;
         originTopSv.value = originTopSv.value + transY.value;
         transX.value = 0;

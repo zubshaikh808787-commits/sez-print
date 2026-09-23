@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Alert,
   AppState,
@@ -338,6 +338,37 @@ function animateEditorSplit() {
   });
 }
 
+const PANEL_ELEMENT_TYPES: readonly ElementType[] = [
+  'text',
+  'barcode',
+  'qrcode',
+  'line',
+  'shape',
+  'table',
+  'time',
+  'arctext',
+  'degrees',
+  'image',
+];
+
+function hasPropertyPanel(type: ElementType) {
+  return PANEL_ELEMENT_TYPES.includes(type);
+}
+
+/**
+ * Keeps a property panel mounted after first use. Mounting a panel creates many native
+ * views on the UI thread, which stalls an in-flight drag; toggling display does not.
+ * Hidden slots skip re-rendering entirely.
+ */
+const KeepAlivePanelSlot = memo(
+  function KeepAlivePanelSlot({ visible, children }: { visible: boolean; children: ReactNode }) {
+    return <View style={visible ? null : panelSlotHidden}>{children}</View>;
+  },
+  (prev, next) => !prev.visible && !next.visible,
+);
+
+const panelSlotHidden = { display: 'none' } as const;
+
 function HeaderAction({
   icon,
   label,
@@ -619,7 +650,6 @@ export default function EditScreen() {
   const historyRef = useRef(new EditorHistory(MAX_HISTORY));
   const [historyRev, setHistoryRev] = useState(0);
   const transformingRef = useRef(false);
-  const pendingSelectionCommitRef = useRef<(() => void) | null>(null);
   const mountedRef = useRef(true);
   const dirtyRef = useRef(false);
   const patchBurstTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1060,6 +1090,51 @@ export default function EditScreen() {
     lastSelectedElementRef.current = primaryElement;
   }
   const displayElement = primaryElement ?? lastSelectedElementRef.current;
+
+  const panelSeedRef = useRef(new Map<ElementType, LabelElement>());
+  if (displayElement && hasPropertyPanel(displayElement.type)) {
+    panelSeedRef.current.set(displayElement.type, displayElement);
+  }
+  const [mountedPanelTypes, setMountedPanelTypes] = useState<ElementType[]>(() =>
+    displayElement && hasPropertyPanel(displayElement.type) ? [displayElement.type] : [],
+  );
+  const activePanelType =
+    displayElement && hasPropertyPanel(displayElement.type) ? displayElement.type : null;
+  if (activePanelType && !mountedPanelTypes.includes(activePanelType)) {
+    setMountedPanelTypes((prev) => (prev.includes(activePanelType) ? prev : [...prev, activePanelType]));
+  }
+
+  const docPanelTypesKey = useMemo(() => {
+    const types = new Set<ElementType>();
+    for (const el of doc.elements) {
+      if (hasPropertyPanel(el.type)) types.add(el.type);
+    }
+    return [...types].sort().join(',');
+  }, [doc.elements]);
+
+  useEffect(() => {
+    if (!docPanelTypesKey) return;
+    const pending = docPanelTypesKey.split(',') as ElementType[];
+    let frame: number | null = null;
+    const mountNext = () => {
+      if (!mountedRef.current || transformingRef.current) {
+        frame = requestAnimationFrame(mountNext);
+        return;
+      }
+      const type = pending.shift();
+      if (!type) return;
+      setMountedPanelTypes((prev) => (prev.includes(type) ? prev : [...prev, type]));
+      frame = requestAnimationFrame(mountNext);
+    };
+    const task = InteractionManager.runAfterInteractions(() => {
+      frame = requestAnimationFrame(mountNext);
+    });
+    return () => {
+      task.cancel();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [docPanelTypesKey]);
+
   const selectedElements = useMemo(
     () => doc.elements.filter((el) => selectedIds.includes(el.id)),
     [doc.elements, selectedIds],
@@ -1189,10 +1264,11 @@ export default function EditScreen() {
 
   const patchSelected = useCallback(
     (updates: Record<string, unknown>) => {
-      if (selectedIds.length !== 1) return;
-      patchElement(selectedIds[0], updates);
+      const id = primaryId ?? (selectedIds.length === 1 ? selectedIds[0] : null);
+      if (!id || selectedIds.length !== 1) return;
+      patchElement(id, updates);
     },
-    [selectedIds, patchElement],
+    [primaryId, selectedIds, patchElement],
   );
 
   const patchPrimary = useCallback(
@@ -1476,7 +1552,6 @@ export default function EditScreen() {
     setSelectedIds([]);
     setPrimaryId(null);
     setPanelOpen(false);
-    pendingSelectionCommitRef.current = null;
   }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
 
   const toggleMultipleMode = useCallback(() => {
@@ -1545,56 +1620,49 @@ export default function EditScreen() {
       if (!element || element.needPrinting === false || element.type === 'border') return;
       topBarSelectionVisibleSv.value = 1;
       bottomPanelVisibleSv.value = 1;
-      const prevPrimaryId = primaryIdRef.current;
+      activeSelectedIdSv.value = id;
+      lastSelectedElementRef.current = element;
+
       const next = reduceTapSelect({
         id,
         multipleMode,
         current: { ids: selectedIdsRef.current, primaryId: primaryIdRef.current },
       });
-      const idsSame =
-        next.ids.length === selectedIdsRef.current.length &&
-        next.ids.every((val, idx) => val === selectedIdsRef.current[idx]);
-      const primarySame = next.primaryId === primaryIdRef.current;
 
-      const commitReact = () => {
-        if (!mountedRef.current) return;
-        lastSelectedElementRef.current = element;
-        if (!idsSame) {
-          setSelectedIds(next.ids);
-        }
-        if (!primarySame) {
-          setPrimaryId(next.primaryId);
-        }
-        if (!multipleMode) {
-          if (element.type === 'signature') {
-            setShowSignatureBoard(true);
-          } else {
-            const prevPrimary = docRef.current.elements.find((el) => el.id === prevPrimaryId);
-            const typeChanged = !prevPrimary || prevPrimary.type !== element.type;
-            if (typeChanged || !panelOpen) {
-              resetTabToRegularForElement(element.type);
-            }
-            setPanelOpen(true);
-          }
-        } else if (next.ids.length >= 2) {
-          setPanelOpen(true);
-        } else if (next.ids.length === 1) {
-          resetTabToRegularForElement(element.type);
-          setPanelOpen(true);
-        }
-      };
+      if (!mountedRef.current) return;
 
-      // Drag stays on the UI thread. Mounting a property panel is heavy JS — never
-      // do it while a transform is in flight, and otherwise wait until the gesture
-      // has finished so the two feel independent.
-      if (transformingRef.current) {
-        pendingSelectionCommitRef.current = commitReact;
+      // e41f3aa: skip React work when the same element is already selected with panel open.
+      if (
+        !multipleMode &&
+        next.ids.length === 1 &&
+        next.ids[0] === id &&
+        selectedIdsRef.current.length === 1 &&
+        selectedIdsRef.current[0] === id &&
+        panelOpen
+      ) {
         return;
       }
-      pendingSelectionCommitRef.current = null;
-      InteractionManager.runAfterInteractions(commitReact);
+
+      setSelectedIds(next.ids);
+      setPrimaryId(next.primaryId);
+
+      // e41f3aa: lightweight panel open — no tab resets or deferred transitions on touch-down.
+      if (!multipleMode) {
+        if (element.type === 'signature') {
+          setShowSignatureBoard(true);
+        } else if (element.type === 'image') {
+          setImageTab('Regular');
+          setPanelOpen(true);
+        } else {
+          setPanelOpen(true);
+        }
+      } else if (next.ids.length >= 2) {
+        setPanelOpen(true);
+      } else if (next.ids.length === 1) {
+        setPanelOpen(true);
+      }
     },
-    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement, panelOpen],
+    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, activeSelectedIdSv, panelOpen],
   );
 
   const openPanelFor = useCallback((id: string) => {
@@ -1839,14 +1907,6 @@ export default function EditScreen() {
 
   const handleTransformEnd = useCallback(
     (payload: TransformCommitPayload) => {
-      const flushSelectionPanel = () => {
-        const pending = pendingSelectionCommitRef.current;
-        pendingSelectionCommitRef.current = null;
-        if (pending) {
-          InteractionManager.runAfterInteractions(pending);
-        }
-      };
-
       publishSnapGuides([]);
       const clean = sanitizeTransform(payload);
       const recordHistory = !transformingRef.current;
@@ -1917,7 +1977,6 @@ export default function EditScreen() {
           recordHistory,
         );
         clearGroupPreview();
-        flushSelectionPanel();
         return;
       }
 
@@ -1952,7 +2011,6 @@ export default function EditScreen() {
           recordHistory,
         );
         clearGroupPreview();
-        flushSelectionPanel();
         return;
       }
 
@@ -1999,7 +2057,6 @@ export default function EditScreen() {
         recordHistory,
       );
       clearGroupPreview();
-      flushSelectionPanel();
     },
     [
       setElements,
@@ -2967,8 +3024,9 @@ export default function EditScreen() {
     );
   };
 
-  const renderPanel = (targetEl: LabelElement | null = displayElement) => {
+  const renderPanel = (targetEl: LabelElement | null = displayElement, visible = true) => {
     if (!targetEl) return null;
+    const focusRequest = visible ? contentFocusRequest : 0;
     switch (targetEl.type) {
       case 'text':
         return (
@@ -2980,7 +3038,7 @@ export default function EditScreen() {
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}
-            contentFocusRequest={contentFocusRequest}
+            contentFocusRequest={focusRequest}
           />
         );
       case 'barcode':
@@ -3081,7 +3139,7 @@ export default function EditScreen() {
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}
-            contentFocusRequest={contentFocusRequest}
+            contentFocusRequest={focusRequest}
           />
         );
       case 'image':
@@ -3102,10 +3160,24 @@ export default function EditScreen() {
     }
   };
 
-  const activePanelContent = isMultiSelect
-    ? renderMultiSelectPanel()
-    : renderPanel(displayElement);
-  const propertyMode = panelOpen && selectedIds.length > 0 && activePanelContent !== null;
+  const activePanelContent = (
+    <>
+      {isMultiSelect ? renderMultiSelectPanel() : null}
+      {mountedPanelTypes.map((type) => {
+        const visible = !isMultiSelect && type === activePanelType;
+        const seed =
+          (visible ? displayElement : null) ??
+          panelSeedRef.current.get(type) ??
+          doc.elements.find((el) => el.type === type) ??
+          null;
+        return (
+          <KeepAlivePanelSlot key={type} visible={visible}>
+            {renderPanel(seed, visible)}
+          </KeepAlivePanelSlot>
+        );
+      })}
+    </>
+  );
 
   return (
     <View style={styles.root}>
