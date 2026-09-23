@@ -337,7 +337,7 @@ export const DEFAULT_TIME_STATE: TimeElementState = {
   rotation: 0,
   left: 0.5,
   top: 0.5,
-  width: 59.27,
+  width: 32,
   lockMovement: false,
   needPrinting: true,
   antiColor: false,
@@ -347,6 +347,9 @@ export const DEFAULT_TIME_STATE: TimeElementState = {
 export function formatOffset(value: number, unit: string) {
   return `${value} ${unit}`;
 }
+
+/** Widest typical live datetime string — used to size the time element box on one line. */
+export const TIME_DISPLAY_SAMPLE = '2026-09-23 23:59:59';
 
 export function formatLiveDate(date: Date) {
   const year = date.getFullYear();
@@ -360,6 +363,11 @@ export function formatLiveTime(date: Date) {
   const minutes = `${date.getMinutes()}`.padStart(2, '0');
   const seconds = `${date.getSeconds()}`.padStart(2, '0');
   return `${hours}:${minutes}:${seconds}`;
+}
+
+/** Single-line live datetime; NBSP keeps date and time from wrapping onto separate lines. */
+export function formatLiveDateTime(date: Date) {
+  return `${formatLiveDate(date)}\u00A0${formatLiveTime(date)}`;
 }
 
 export function applyTimeOffsets(

@@ -1,20 +1,21 @@
-import type {
-  ArcTextElementState,
-  BarcodeElementState,
-  DegreesElementState,
-  EditorElementState,
-  LineElementState,
-  QrcodeElementState,
-  LineSpacing,
-  Rotation,
-  ShapeElementState,
-  TableElementState,
-  TimeElementState,
+import {
+  TIME_DISPLAY_SAMPLE,
+  type ArcTextElementState,
+  type BarcodeElementState,
+  type DegreesElementState,
+  type EditorElementState,
+  type LineElementState,
+  type QrcodeElementState,
+  type LineSpacing,
+  type Rotation,
+  type ShapeElementState,
+  type TableElementState,
+  type TimeElementState,
 } from '@/components/editor/types';
 import type { SignatureStroke } from '@/components/editor/signature-drawing-board';
 import type { BorderStyleId } from '@/constants/border-library';
 import type { MediaGeometry } from '@/lib/media-geometry';
-import { computeTextElementHeightMm } from '@/lib/text-metrics';
+import { computeTextElementHeightMm, measureTextWidthMm } from '@/lib/text-metrics';
 
 export type TemplateBackground =
   | { type: 'none' }
@@ -446,14 +447,18 @@ export function elementSizeMm(element: LabelElement): { width: number; height: n
       });
       return { width: element.width, height };
     }
-    case 'time':
+    case 'time': {
+      const minWidth =
+        measureTextWidthMm(TIME_DISPLAY_SAMPLE, element.fontSize, 0, element.bold ?? false) + 1.5;
+      const width = Math.max(element.width, minWidth);
       if (typeof element.height === 'number' && element.height > 0) {
-        return { width: element.width, height: element.height };
+        return { width, height: element.height };
       }
       return {
-        width: element.width,
+        width,
         height: textBlockHeightMm(element.fontSize, 1),
       };
+    }
     default:
       return { width: element.width, height: element.height };
   }

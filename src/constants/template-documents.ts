@@ -5,13 +5,14 @@ import {
   DEFAULT_QRCODE_STATE,
   DEFAULT_SHAPE_STATE,
   DEFAULT_TIME_STATE,
+  TIME_DISPLAY_SAMPLE,
   createTableState,
 } from '@/components/editor/types';
 import { buildIndustryPreviewElements } from '@/constants/industry-template-elements';
 import { buildJewelryTemplateElements, canonicalizeJewelryDieCutDocument } from '@/constants/jewelry-template-elements';
 import { isJewelryDieCutPreviewType } from '@/constants/jewelry-diecut';
 import { buildRatTail143Elements } from '@/constants/rat-tail-143';
-import { templateFontSizes, textBlockHeightMm } from '@/lib/element-sizing';
+import { templateFontSizes, textBlockHeightMm, measureTextWidthMm } from '@/lib/element-sizing';
 import { generateId, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { CABLE_FLAG_DIECUT, isCableFlagPreviewType } from '@/constants/cable-flag-diecut';
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
@@ -148,6 +149,7 @@ function circleShape(widthMm: number, heightMm: number): LabelElement {
 }
 
 function timeElement(frame: Frame, fontSize: number): LabelElement {
+  const minWidth = measureTextWidthMm(TIME_DISPLAY_SAMPLE, fontSize) + 1.5;
   return {
     ...DEFAULT_TIME_STATE,
     id: generateId(),
@@ -155,7 +157,7 @@ function timeElement(frame: Frame, fontSize: number): LabelElement {
     fontSize,
     left: frame.left,
     top: frame.top,
-    width: frame.width,
+    width: Math.max(frame.width, minWidth),
     height: textBlockHeightMm(fontSize, 1),
     align: 'left',
   };

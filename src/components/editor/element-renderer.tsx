@@ -21,8 +21,7 @@ import { getClipartById } from '@/constants/clipart-library';
 import {
   DRAWING_COLORS,
   applyTimeOffsets,
-  formatLiveDate,
-  formatLiveTime,
+  formatLiveDateTime,
   type ArcTextElementState,
   type BarcodeElementState,
   type DegreesElementState,
@@ -245,8 +244,9 @@ function TimeContent({
       ]}>
       <Text
         allowFontScaling={false}
+        numberOfLines={1}
         style={[style, styles.textFill, { textAlign: align }]}>
-        {`${formatLiveDate(adjusted)} ${formatLiveTime(adjusted)}`}
+        {formatLiveDateTime(adjusted)}
       </Text>
     </View>
   );

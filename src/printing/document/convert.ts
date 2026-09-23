@@ -253,7 +253,7 @@ function convertTime(
   const hours = `${adjusted.getHours()}`.padStart(2, '0');
   const minutes = `${adjusted.getMinutes()}`.padStart(2, '0');
   const seconds = `${adjusted.getSeconds()}`.padStart(2, '0');
-  const text = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  const text = `${year}-${month}-${day}\u00A0${hours}:${minutes}:${seconds}`;
 
   const data: TextElementData = {
     text,

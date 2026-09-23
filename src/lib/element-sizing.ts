@@ -1,3 +1,4 @@
+import { DEFAULT_TIME_STATE, TIME_DISPLAY_SAMPLE } from '@/components/editor/types';
 import { elementSizeMm, mmToPt, ptToMm, textBlockHeightMm, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { isRatTailGeometry, ratTailBodyRectMm, scaleMediaGeometry } from '@/lib/media-geometry';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
@@ -178,7 +179,21 @@ export function fitShapeDefaults(widthMm: number, heightMm: number, existing: La
 }
 
 export function fitTimeDefaults(widthMm: number, heightMm: number, existing: LabelElement[] = []) {
-  return fitTextDefaults(widthMm, heightMm, existing);
+  const timeFonts = existing.flatMap((el) => (el.type === 'time' ? [el.fontSize] : []));
+  const minPt = Math.min(widthMm, heightMm) < 18 ? 4 : 6;
+  const fromExisting = median(timeFonts);
+  const labelCap = fitFontSizePt(widthMm, heightMm, 1);
+  // WePrint uses compact body-sized time (12 pt), not label-fit title sizing from fitTextDefaults.
+  const fontSize = fromExisting
+    ? Math.max(minPt, Math.min(28, Math.round(fromExisting * 2) / 2))
+    : Math.max(minPt, Math.min(DEFAULT_TIME_STATE.fontSize, labelCap));
+  const measured = measureTextWidthMm(TIME_DISPLAY_SAMPLE, fontSize) + 1.5;
+  const pad = padMm(widthMm, heightMm);
+  const maxW = Math.max(4, widthMm - pad * 2);
+  const boxW = Math.min(maxW, Math.max(4, measured));
+  const boxH = textBlockHeightMm(fontSize, 1);
+  const placed = placeInLabel(widthMm, heightMm, boxW, boxH, existing);
+  return { left: placed.left, top: placed.top, width: placed.width, fontSize };
 }
 
 export function fitTableDefaults(
