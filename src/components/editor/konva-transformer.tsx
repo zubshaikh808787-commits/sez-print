@@ -119,13 +119,12 @@ const HIT_TARGET_PX = 36;
 const TOOLTIP_MS = 80;
 
 /**
- * Drag activation / tap tolerance — restored to the 6b97449 "deliberate drag" feel.
+ * Drag activation / tap tolerance.
  * A finger must travel >10px before the element starts following (kills sudden-drag
- * on what was meant to be a tap), and a gesture that ends under 20px of travel snaps
- * back and is treated as a tap/select rather than a committed move.
+ * on what was meant to be a tap). Once that threshold is crossed, the move is kept —
+ * even a short seating onto a corner. Treating those as taps was snapping them back.
  */
 const DRAG_ACTIVATE_DIST_SQ_PX = 100; // (10px)^2
-const TAP_MAX_DIST_SQ_PX = 400; // (20px)^2
 
 /** Standard double-tap window. Wider gaps are two unrelated taps, not a double tap. */
 const DOUBLE_TAP_MAX_GAP_MS = 300;
@@ -969,9 +968,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       .onEnd((e) => {
         'worklet';
         liftSv.value = 1;
-        const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
-        // Under 20px translation, or never crossed the drag threshold, or locked: treat as a tap.
-        const isTap = !hasMovedSv.value || distSq < TAP_MAX_DIST_SQ_PX || element.lockMovement;
+        // A real move (past the 10px noise gate) keeps its position.
+        // Treating short corner seats as taps snapped them back.
+        const isTap = !hasMovedSv.value || element.lockMovement;
 
         if (isTap) {
           tapHandledSv.value = true;
