@@ -873,6 +873,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         originTopSv.value = originTopSv.value + transY.value;
         transX.value = 0;
         transY.value = 0;
+        if (liveBounds) {
+          liveBounds.leftMm.value = originLeftSv.value / sxSv.value;
+          liveBounds.topMm.value = originTopSv.value / sySv.value;
+          liveBounds.widthMm.value = animW.value / sxSv.value;
+          liveBounds.heightMm.value = animH.value / sySv.value;
+          liveBounds.visible.value = true;
+        }
       })
       .onStart((_e) => {
         'worklet';

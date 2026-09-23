@@ -1,10 +1,10 @@
-import React, { forwardRef, memo, useMemo } from 'react';
+import React, { forwardRef, memo, useEffect, useMemo } from 'react';
 import { Image } from 'expo-image';
 import { StyleSheet, Text, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import Svg, { Ellipse, Line, Rect } from 'react-native-svg';
 import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, type SharedValue } from 'react-native-reanimated';
 import type { TransformStartKind } from './konva-transformer';
 
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
@@ -13,7 +13,7 @@ import { DEFAULT_GRID_SPACING_MM } from '@/lib/editor/canvas-grid';
 import { type LiveRulerBounds } from '@/components/canvas-rulers';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
-import { type LabelDocument, type LabelElement, type MediaShape } from '@/lib/label-document';
+import { type LabelDocument, type LabelElement, type MediaShape, elementSizeMm } from '@/lib/label-document';
 import { JEWELRY_DIECUT, JEWELRY_DIECUT_PREVIEW_SINGLE } from '@/constants/jewelry-diecut';
 import { isCableFlagDieCutDocument } from '@/constants/cable-flag-diecut';
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
@@ -171,30 +171,105 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
   );
 }, (prev, next) => prev.chrome === next.chrome && idleElementRefsUnchanged(prev.elements, next.elements));
 
-/** Follows the active move/resize on the UI thread so the grid does not rebuild every frame. */
+/**
+ * Covers grid lines under the live element. Size/position use transform from a
+ * 1×1 anchor so the view cannot stretch to fill the artboard on first drag.
+ */
 const GridLivePlate = memo(function GridLivePlate({
   liveBounds,
+  showGridSv,
   pxPerMM,
   color,
   rotationDeg,
 }: {
   liveBounds: LiveRulerBounds;
+  showGridSv: SharedValue<number>;
   pxPerMM: number;
   color: string;
   rotationDeg: number;
 }) {
+  const style = useAnimatedStyle(() => {
+    const w = liveBounds.widthMm.value * pxPerMM;
+    const h = liveBounds.heightMm.value * pxPerMM;
+    const ready =
+      showGridSv.value > 0.5 &&
+      liveBounds.visible.value &&
+      Number.isFinite(w) &&
+      Number.isFinite(h) &&
+      w >= 1 &&
+      h >= 1;
+    return {
+      opacity: ready ? 1 : 0,
+      width: ready ? w : 1,
+      height: ready ? h : 1,
+      transform: [
+        { translateX: ready ? liveBounds.leftMm.value * pxPerMM : 0 },
+        { translateY: ready ? liveBounds.topMm.value * pxPerMM : 0 },
+        { rotate: `${rotationDeg}deg` },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      collapsable={false}
+      style={[
+        {
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          width: 1,
+          height: 1,
+          backgroundColor: color,
+        },
+        style,
+      ]}
+    />
+  );
+});
+
+const GridStaticPlate = memo(function GridStaticPlate({
+  id,
+  activeSelectedIdSv,
+  leftPx,
+  topPx,
+  widthPx,
+  heightPx,
+  color,
+  rotationDeg,
+}: {
+  id: string;
+  activeSelectedIdSv?: SharedValue<string>;
+  leftPx: number;
+  topPx: number;
+  widthPx: number;
+  heightPx: number;
+  color: string;
+  rotationDeg: number;
+}) {
   const style = useAnimatedStyle(() => ({
-    position: 'absolute',
-    opacity: liveBounds.visible.value ? 1 : 0,
-    left: liveBounds.leftMm.value * pxPerMM,
-    top: liveBounds.topMm.value * pxPerMM,
-    width: Math.max(1, liveBounds.widthMm.value * pxPerMM),
-    height: Math.max(1, liveBounds.heightMm.value * pxPerMM),
-    backgroundColor: color,
-    transform: [{ rotate: `${rotationDeg}deg` }],
+    opacity: activeSelectedIdSv && activeSelectedIdSv.value === id ? 0 : 1,
   }));
 
-  return <Animated.View pointerEvents="none" style={style} />;
+  return (
+    <Animated.View
+      pointerEvents="none"
+      collapsable={false}
+      style={[
+        {
+          position: 'absolute',
+          left: leftPx,
+          top: topPx,
+          width: widthPx,
+          height: heightPx,
+          backgroundColor: color,
+          transform: [{ rotate: `${rotationDeg}deg` }],
+        },
+        style,
+      ]}
+    />
+  );
 });
 
 export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function KonvaCanvas(
@@ -243,6 +318,10 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   const w = Math.max(1, canvasWidthPx);
   const h = Math.max(1, canvasHeightPx);
   const resolvedGridSpacingMm = gridSpacingMm ?? DEFAULT_GRID_SPACING_MM;
+  const showGridSv = useSharedValue(showGrid ? 1 : 0);
+  useEffect(() => {
+    showGridSv.value = showGrid ? 1 : 0;
+  }, [showGrid, showGridSv]);
 
   const isCircle = doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse';
   const cableFlag = isCableFlagDieCutDocument(doc);
@@ -540,26 +619,26 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             ? sortedElements.map((el) => {
                 if (el.visible === false || el.id === gridLiveElementId) return null;
                 const rotation = 'rotation' in el ? (el.rotation ?? 0) : 0;
+                const size = elementSizeMm(el);
                 return (
-                  <View
+                  <GridStaticPlate
                     key={el.id}
-                    pointerEvents="none"
-                    style={{
-                      position: 'absolute',
-                      left: el.left * pxPerMM,
-                      top: el.top * pxPerMM,
-                      width: Math.max(1, el.width * pxPerMM),
-                      height: Math.max(1, el.height * pxPerMM),
-                      backgroundColor: stickerFillColor,
-                      transform: [{ rotate: `${rotation}deg` }],
-                    }}
+                    id={el.id}
+                    activeSelectedIdSv={activeSelectedIdSv}
+                    leftPx={el.left * pxPerMM}
+                    topPx={el.top * pxPerMM}
+                    widthPx={Math.max(1, size.width * pxPerMM)}
+                    heightPx={Math.max(1, size.height * pxPerMM)}
+                    color={stickerFillColor}
+                    rotationDeg={rotation}
                   />
                 );
               })
             : null}
-          {showGrid && gridLiveElementId && liveBounds ? (
+          {liveBounds ? (
             <GridLivePlate
               liveBounds={liveBounds}
+              showGridSv={showGridSv}
               pxPerMM={pxPerMM}
               color={stickerFillColor}
               rotationDeg={gridLiveRotation}

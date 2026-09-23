@@ -26,7 +26,6 @@ export const CanvasGridOverlay = memo(function CanvasGridOverlay({
 }: CanvasGridOverlayProps) {
   const stroke = DEFAULT_GRID_COLOR;
   const paths = useMemo(() => {
-    if (!visible) return null;
     const lines = buildCanvasGridLines({ widthPx, heightPx, pxPerMM, spacingMm });
     if (!lines) return null;
     const vertical = lines.vertical.map((x) => ({ x1: x, y1: 0, x2: x, y2: heightPx }));
@@ -35,9 +34,7 @@ export const CanvasGridOverlay = memo(function CanvasGridOverlay({
       vertical: gridSegmentsToPathD(vertical),
       horizontal: gridSegmentsToPathD(horizontal),
     };
-  }, [visible, widthPx, heightPx, pxPerMM, spacingMm]);
-
-  if (!visible) return null;
+  }, [widthPx, heightPx, pxPerMM, spacingMm]);
 
   const canRender = shouldRenderCanvasGrid(spacingMm, pxPerMM) && paths;
   if (!canRender) return null;
@@ -47,10 +44,8 @@ export const CanvasGridOverlay = memo(function CanvasGridOverlay({
   return (
     <View
       pointerEvents="none"
-      style={StyleSheet.absoluteFillObject}
-      collapsable={false}
-      shouldRasterizeIOS
-      renderToHardwareTextureAndroid>
+      style={[StyleSheet.absoluteFillObject, { opacity: visible ? 1 : 0 }]}
+      collapsable={false}>
       <Svg pointerEvents="none" width={widthPx} height={heightPx}>
         {paths.vertical ? (
           <Path d={paths.vertical} stroke={stroke} strokeWidth={strokeWidth} fill="none" />
