@@ -61,7 +61,14 @@ class JoshPrinterManager(private val context: Context) {
         const val DEFAULT_DENSITY = -1   // -1 = use printer default (safe for all models)
         const val DEFAULT_SPEED = -1     // -1 = use printer default
         const val DEFAULT_GAP_TYPE = -1  // -1 = use printer default
-        const val DEFAULT_GAP_LENGTH = -1
+        const val DEFAULT_GAP_LENGTH_MM = -1.0
+        const val LABEL_GAP_MM = 3.0
+
+        /**
+         * PrintParamName.GAP_LENGTH is an alias of GAP_LENGTH_01MM (0.01 mm units), and
+         * setPrintPageGapLength(int) uses the same wire encoding, so both take mm × 100.
+         */
+        fun gapMmTo01mm(gapMm: Double): Int = Math.round(gapMm * 100.0).toInt()
         /** DothanTech JOSH heads are 203 DPI. 304 is TD-404 and must not size the bitmap. */
         const val HARDWARE_DPI = 203.0
         const val HARDWARE_DPM = 8.0
@@ -125,7 +132,7 @@ class JoshPrinterManager(private val context: Context) {
     private var density = DEFAULT_DENSITY
     private var speed = DEFAULT_SPEED
     private var gapType = DEFAULT_GAP_TYPE
-    private var gapLength = DEFAULT_GAP_LENGTH
+    private var gapLengthMm = DEFAULT_GAP_LENGTH_MM
 
     // ─── Last Error ────────────────────────────────────────────────────
 
@@ -789,7 +796,7 @@ class JoshPrinterManager(private val context: Context) {
         paramSpeed: Int = -1,
         direction: Int = 0,
         paramGapType: Int = GAP_TYPE_LABEL,
-        paramGapLength: Int = 3,
+        paramGapLengthMm: Double = LABEL_GAP_MM,
         hOffsetMm: Double = 0.0,
         vOffsetMm: Double = 0.0,
         alignment: String = "left",
@@ -918,7 +925,8 @@ class JoshPrinterManager(private val context: Context) {
             printLatch = latch
 
             val gapTypeValue = if (paramGapType >= 0) paramGapType else GAP_TYPE_LABEL
-            val gapLengthValue = if (paramGapLength >= 0) paramGapLength else 3
+            val gapLengthValue = gapMmTo01mm(if (paramGapLengthMm >= 0.0) paramGapLengthMm else LABEL_GAP_MM)
+            Log.i(TAG, "[$jobId] [JOSH-PRINT-P2:GAP] type=$gapTypeValue length=${paramGapLengthMm}mm → $gapLengthValue (0.01 mm)")
             try {
                 currentApi.setPrintPageGapType(gapTypeValue)
                 currentApi.setPrintPageGapLength(gapLengthValue)
@@ -1078,7 +1086,7 @@ class JoshPrinterManager(private val context: Context) {
         newDensity: Int? = null,
         newSpeed: Int? = null,
         newGapType: Int? = null,
-        newGapLength: Int? = null,
+        newGapLengthMm: Double? = null,
     ) {
         val currentApi = api
         newDensity?.let {
@@ -1102,11 +1110,12 @@ class JoshPrinterManager(private val context: Context) {
                 Log.d(TAG, "[CONFIG] gapType=$it")
             }
         }
-        newGapLength?.let {
-            gapLength = it
+        newGapLengthMm?.let {
+            gapLengthMm = it
             if (currentApi != null && state.get() == State.CONNECTED) {
-                currentApi.setPrintPageGapLength(it)
-                Log.d(TAG, "[CONFIG] gapLength=$it")
+                val gap01mm = gapMmTo01mm(it)
+                currentApi.setPrintPageGapLength(gap01mm)
+                Log.d(TAG, "[CONFIG] gapLength=${it}mm → $gap01mm (0.01 mm)")
             }
         }
     }
@@ -1272,7 +1281,7 @@ class JoshPrinterManager(private val context: Context) {
             "density" to density,
             "speed" to speed,
             "gapType" to gapType,
-            "gapLength" to gapLength,
+            "gapLength" to gapLengthMm,
         )
     }
 

@@ -20,6 +20,13 @@ Each completed sub-task is logged with the following structure:
 
 ## Standalone Bugfixes (Legacy Konva Canvas — Non-Phase 1)
 
+### Bugfix: Vertical Resize Height Jitter on Barcode/Shape/Image Elements (Legacy Konva Canvas) — *Retroactive Entry*
+- **Scope:** `src/lib/editor/label-bounds.ts` (`clampToLabelBounds`, anchor `'s'`), `src/components/editor/element-renderer.tsx`.
+- **Date Completed:** 2026-09-18 (commit `0675688`). **Entry written:** 2026-09-23 during the documentation sync. The checklist item existed with no progress entry.
+- **Problem & Root Cause (reconstructed from the commit diff):** In the `'s'` (bottom-handle) branch, `clampToLabelBounds` computed `targetH` and, when `top + targetH` exceeded the canvas height, moved `top` upward (`top = canvasH - targetH`). Dragging the south handle near the bottom edge therefore shifted the element's top edge on every frame, which showed as vertical jitter.
+- **What Was Done:** `top` is now fixed during an `'s'` resize (`top = clamp(top, 0, canvasH - minMm)`), and height is clamped to the space below it (`maxAllowedHeight = canvasH - top`), with `overflowed = targetH > maxAllowedHeight`. The same commit also stopped the `'e'` branch adjusting vertical headroom unless `naturalHeight` is provided; that part is logged under "Barcode Width Scaling & HRI Text Distortion" below.
+- **Verification & Quality Gate Results:** **None recorded.** No test output or on-device result was logged for this fix at the time. The later anchor audit in the next entry states that anchor `'s'` keeps `top` / `left` / `width` immutable, which covers the behaviour, but it was not recorded as verification of this item.
+
 ### Bugfix: Barcode Width Scaling & HRI Text Distortion (Legacy Konva Canvas)
 - **Scope:** Legacy Konva bounds clamping & element renderer (`src/lib/editor/label-bounds.ts`, `src/components/editor/element-renderer.tsx`).
 - **Date Completed:** 2026-09-18
@@ -57,8 +64,10 @@ Each completed sub-task is logged with the following structure:
 - **Verification & Quality Gate Results:**
   - `npx tsc --noEmit`: 0 errors.
   - `npm run test:labelx`: 100% PASS.
+
 ### Bugfix & Performance: QR Code Single-Path Vector Rendering & Fluid 120fps Gesture Scaling (Legacy Konva Canvas)
 - **Scope:** Legacy Konva element renderer & transformer (`src/components/editor/element-renderer.tsx`, `src/components/editor/konva-transformer.tsx`, `src/lib/editor/resize-policy.ts`).
+- **Checklist mapping:** This single entry is the record for the checklist item previously titled "QR Code Vector Rendering & Resize Bleed". The two were merged on 2026-09-23 (see the Documentation Sync entry at the end of this log): one change set, one date, one verification run. "Resize bleed" is item 2 below (headroom clamping).
 - **Date Completed:** 2026-09-18
 - **Problem & Root Cause:**
   - **Lag & Viewport Jank:** When resizing a QR element, `QrcodeContent` was rendering 400–600 individual `<Rect>` React Native SVG nodes. Continuously resizing a container with hundreds of native SVG subviews caused heavy native layout recalculations on every frame on Android/iOS.
@@ -82,11 +91,13 @@ Each completed sub-task is logged with the following structure:
 
 ---
 
-## Phase 1: Interactive Skia Canvas & Resizing Engine (Editor UI & Geometry)
+## Phase 1: Interactive Editor Canvas & Resizing Engine (Editor UI & Geometry)
 
-*Status: In Progress (Task 1.1 Rewired & Verified)*
+*Status: Complete, with scope reversal. Task 1.4 (2026-09-18) kept the live editor on Konva and made Skia print-only. Tasks 1.1–1.2 are **superseded**: the entry below records prototype work verified on `/dev-skia-test` only, and `edit.tsx` mounts `<KonvaCanvas>`. Task 1.3 is complete and canvas-agnostic. (This header previously read "Interactive Skia Canvas… In Progress (Task 1.1 Rewired & Verified)"; corrected 2026-09-23.)*
 
 ### Architectural Correction & Implementation Log: Dual-Reconciler Shared-Value Bridge, Barcode Module Rendering & QR 1:1 Square Lock
+> **Superseded (Tasks 1.1 & 1.2), noted 2026-09-23:** Everything in this entry was built and verified on the Skia editor prototype (`/dev-skia-test`). Task 1.4, logged the same day, kept the live editor on Konva, so none of it is on the live editor path. The record is kept as history. The live Konva equivalents (pinned-origin resize, QR square lock, headroom clamping) are logged under the Standalone Bugfixes above.
+
 - **Scope:** Skia canvas rendering tree, symbology module generation & Reanimated shared-value bridges ([`src/components/editor/skia-canvas.tsx`](./src/components/editor/skia-canvas.tsx), [`src/components/editor/skia-element-renderer.tsx`](./src/components/editor/skia-element-renderer.tsx), [`src/app/dev-skia-test.tsx`](./src/app/dev-skia-test.tsx)).
 - **Date Completed:** 2026-09-18
 - **Retraction & Root Cause Clarification:**
@@ -168,7 +179,7 @@ Each completed sub-task is logged with the following structure:
 - **Date Completed:** 2026-09-19
 - **Integration / Wiring Status:**
   - **Engine Status:** Built, mathematically proven, and 100% test-verified in `src/lib/barcode/barcode-snapping.ts`.
-  - **Live Canvas Wiring:** **PENDING Task 2.3.** The live Konva renderer (`src/components/editor/element-renderer.tsx`) currently still uses the legacy floating-point `bar.x * widthPx` rendering. Wiring the snapped integer dots and authentic matrices into `element-renderer.tsx` is the explicit deliverable of **Task 2.3** (after encoders in Task 2.2 are complete).
+  - **Live Canvas Wiring:** **Resolved by Task 2.3 (2026-09-19)** — see the Task 2.3 entry below. *Original note at time of 2.1:* The live Konva renderer (`src/components/editor/element-renderer.tsx`) currently still uses the legacy floating-point `bar.x * widthPx` rendering. Wiring the snapped integer dots and authentic matrices into `element-renderer.tsx` is the explicit deliverable of **Task 2.3** (after encoders in Task 2.2 are complete).
 - **What Was Done:**
   1. Implemented `snap1DBarcodeModules`:
      - Quantizes narrow-bar width ($X$-dimension) to exact integer hardware dots ($1, 2, 3, \dots$ dots) at target printer resolutions (203 & 300/304 DPI).
@@ -279,3 +290,87 @@ Each completed sub-task is logged with the following structure:
   - `template-resizing.test.ts`: 100% PASS.
   - `npm run test:labelx`: 100% PASS.
   - `npx tsc --noEmit`: 0 errors.
+
+---
+
+## Editor Feature: Multi-Select ("Multiple" Mode) — Konva Editor
+
+*Status: Implementation in progress (rewrite underway). Spec: `ARCHITECTURE_REDESIGN_PLAN.md` → "Editor Feature Track: Multi-Select".*
+
+### Multi-Select: Current State (recorded 2026-09-23)
+- **Scope:** `src/app/edit.tsx`, `src/components/editor/konva-canvas.tsx`, `src/components/editor/konva-transformer.tsx`, `src/lib/editor/selection.ts`, `src/lib/editor/resize-policy.ts`, `src/components/editor/multi-select-property-panel.tsx`.
+- **Commits so far:** `720aab6` "multi select fixed", `f4a21ca` "multiple selection blink fix". There is no per-change log for these commits; this entry records the state at the time of the documentation sync.
+- **Locked Technical Model:**
+  1. **Shared scale factor, reusing single-element resize logic:** a group resize yields one shared scale (`groupScaleXSv` / `groupScaleYSv` in `konva-transformer.tsx`). Each member's box comes from `resizeMemberByScale` — the same function single-element resize uses (`boundBoxMm` delegates to it).
+  2. **No origin movement during resize:** every member keeps its gesture-start `left` / `top`, live and on commit. Only `width` / `height` change.
+  3. **Shared capped ratio:** `sharedScaleLimits` (called from `edit.tsx` at resize start) sets `groupScaleMinSv` / `groupScaleMaxSv` to the highest per-member minimum scale and the lowest per-member canvas-edge scale. The whole group stops together when any member reaches its `minMm` or the canvas edge. Members with no resize behaviour for the dragged handle are excluded from the cap.
+- **Verification & Quality Gate Results (run 2026-09-23):**
+  - `npx tsx --tsconfig tsconfig.json src/lib/editor/__tests__/selection.test.ts`: 11/11 PASS.
+  - `src/lib/editor/__tests__/resize-member-by-scale.test.ts`: 7/7 PASS.
+  - `src/lib/editor/__tests__/multi-transform-verify.test.ts`: 4/4 PASS (shared move delta live = commit; origins stationary on east→south; group member = solo `resizeMemberByScale`; group stops at `minMm`).
+  - `npx tsc --noEmit`: not run as part of this entry.
+- **Outstanding Verification (on-device, not yet done):** live equals commit with no release jump; group stops together at both caps with mixed types; square-locked QR inside a one-axis group resize; ruler and chrome follow union bounds; no selection blink or unintended drag on touch-down add; mode-off clears selection and primary promotion; property panel and align actions as one undo step.
+- **Notes & Next Step:** Finish the rewrite, then run the on-device matrix above and log results here before ticking the checklist items.
+
+---
+
+## Documentation & Investigation Log
+
+### 2026-09-23 — Documentation Sync Pass + Independent Printer SDK Investigation
+- **Scope:** `ARCHITECTURE_REDESIGN_PLAN.md`, `CHECKLIST.md`, `PROGRESS.md`; new `SDKS.md`. Documentation only — no app code changed.
+- **What Was Done:**
+  1. **Printer SDK investigation → `SDKS.md` (new).** Read the five vendor SDKs directly (`javap` on JARs/AARs, `nm -D` / `strings` / SHA-1 on `.so`, vendor demos and PDFs, our Kotlin wrappers, and merged native libs in the build output). Recorded per-SDK contract, transports and risks; a ranked comparison table; cross-cutting findings; and open questions for product. Nothing was hardware-tested, and hardware-only facts are marked as such.
+  2. **Phase 6 rewritten** (plan and checklist) from a 3-task placeholder into a 7-task spec based on `SDKS.md`: build/packaging hygiene, universal driver contract, single TSPL/ESC-POS generator plus thin adapters, capability discovery, per-driver defect fixes, calibration store with migration, and wizard. Also corrected stale "current standing" claims: per-MAC offsets are already persisted in `printer-store.ts`, and head alignment already lives in `print-spec.ts` profiles.
+  3. **Multi-select section added** to all three docs: in-progress status, the locked technical model, and the outstanding verification list. The unit tests were run to record their current pass state.
+  4. **Barcode bounding-box bugfix:** added the missing checklist line under Phase 2 ("Bugfix (post-2.4)") to match its progress entry.
+  5. **QR entries merged, not split.** Checklist "QR Code Vector Rendering & Resize Bleed" and progress "QR Code Single-Path Vector Rendering & Fluid 120fps Gesture Scaling" describe one change set: same date, same files (`element-renderer.tsx`, `konva-transformer.tsx`, `resize-policy.ts`), and one verification run. "Resize bleed" is the headroom-clamp part of that work, not a separate fix with its own evidence. The checklist line now uses the progress title and lists all three files; the progress entry has a mapping note.
+  6. **Phase 1 contradiction resolved.** Tasks 1.1–1.2 are marked superseded by Task 1.4 in the plan and checklist (kept, struck through, with their Konva equivalents). Task 1.3 stays complete as canvas-agnostic. The plan's Phase 1 heading, roadmap line, architecture diagram editor node, and benchmark rows 1 and 3 no longer describe a Skia editor. The progress Phase 1 header status was corrected, and the Skia prototype entry is annotated as superseded.
+  7. **Other consistency fixes:** plan Phase 2 checkboxes ticked to match the checklist and progress log; plan benchmark row 9 updated to the real calibration state; plan Phase 1 test-file name corrected (`template-resizing.test.ts`); the Task 2.1 "PENDING Task 2.3" note marked resolved.
+  8. **Missing progress entry found:** checklist "Vertical Resize Height Jitter" (added in commit `0675688`) never had a progress entry. A retroactive entry was added from the commit diff, explicitly marked as having no recorded verification.
+- **Verification:** Cross-checked every checklist line against a progress entry and every plan checkbox against the checklist. Multi-select unit tests: 22/22 PASS.
+- **Notes & Next Step:** The product decisions listed in `SDKS.md` → "Open Questions for Product" (native-library collision, Label X licence key and data upload, Tez allowlist bypass, Dev width cap) block parts of Phase 6 Tasks 6.1 and 6.5.
+
+### 2026-09-23 — SDK Findings Verified Against App Code + Two Code Fixes
+- **Scope:** Verify five `SDKS.md` claims against our own wrappers and a real build; fix two low-risk defects; revise Phase 6 again. Files changed: `DevPrinterModule.kt`, `JoshPrinterManager.kt`, `JoshPrinterModule.kt`, `modules/josh-printer/src/index.ts`, `src/lib/printer/printer-manager.ts`, and all four docs.
+- **Verdicts** (evidence quoted in `SDKS.md` → "App-Side Verification Pass"):
+  1. **Tez reflection bypass — PARTIALLY TRUE.** We skip the SDK's `connect(DeviceItem)` (and its `NativeUtil.test3` allowlist gate): we reflectively set `DeviceItem` fields, then call the public `connect(boolean)`. `modelKey` values come from `resolveModelKey`: `380`, `YC3121`, `Z212`, `GE920`, `Y50` (default). **New finding:** the reflective `commandApi` setup calls `getDeclaredConstructor(String)` on the field's declared (abstract) type, so it likely always hits `commandApi setup failed`. The runtime effect **NEEDS HARDWARE** (logcat on connect).
+  2. **Josh reflection — CONFIRMED.** `JoshPrinterManager.initialize()` writes field `g` of `com.dothantech.common.a`; `isDeviceNameSupported` calls `com.dothantech.b.b.g(name)`.
+  3. **Native lib collision — CONFIRMED by build.** Without `pickFirst`, `:app:mergeDebugNativeLibs` fails with a duplicate `lib/arm64-v8a/libPrinterNative.so`. With it, the build succeeds and the APK carries the **Tez** copy (SHA-1 matched against all three candidates). `plugins/with-android-packaging.js` (registered in `app.json`) is the only source of the `pickFirst` rule. The checked-in `android/` is stale and lacks it, so it can't build without `expo prebuild`. Also found: Tez's code references Label X's `Code941` / `Compress` classes, so the two modules aren't independent.
+  4. **Josh gap unit bug — PARTIALLY TRUE → fixed in code, NEEDS HARDWARE.** The native default of `3` was real, but JS overrode it with the user's gap *rounded to whole mm*. Both paths fed that integer into 0.01 mm fields, so 3 mm was sent as 0.03 mm. Separately corrected: Josh DPI isn't purely hardcoded (the app setting selects 300 vs 203), but device-reported DPI is never read.
+  5. **Firmware field / 501–505 — Label X CONFIRMED with detail, Tez CONTRADICTED.** Label X POSTs `softwareVersion` (with `asKey`, `sn`, `mac`, `model`, `bluetoothname`) to `api.gj.luckjingle.com`; `"501"` / `"505"` only notify `DeviceForbiddenListener`s, and we register none. Tez has no network licence check.
+- **Code Fixes:**
+  - Dev `isAvailable()`: `catch` now returns `false` (was `true`).
+  - Josh gap: native takes mm (`Double`) and converts with `gapMmTo01mm` (mm × 100, rounded) before both `setPrintPageGapLength` and `GAP_LENGTH`. JS stops rounding (`Math.max(0, options.gapMm)`). A 3 mm gap is now sent as `300`. Logged as `[JOSH-PRINT-P2:GAP]`. Units are still to be confirmed on hardware by measuring label feed.
+- **Open Decisions (flagged, deliberately not decided in code):** Label X data upload + demo `asKey` (`SDKS.md` Q2); Tez licensing bypass (Q1); Dev 47.25 mm downscale (Q5); TD-404 dots/mm 12 vs 11.97 vs 11.81 — needs a caliper test (Q6). Also calibration key for TD-404 Wi-Fi (Q8).
+- **Docs:** `SDKS.md` gained the verification section and corrected Josh / Label X / Tez text, summary rows and questions. Phase 6 in plan and checklist was revised again: 3 sizing contracts, `PrinterBridge` contract, 5 isolated adapters (6.4a–e) in rollout order Dev → Label X → Tez/Shakti → Tejas/Rudra → Josh (with a note that this isn't the `SDKS.md` difficulty ranking), calibration-key open question, new gates (fresh-prebuild build, single-`.so` check, isolation test, Tez logcat).
+- **Verification:** `./gradlew :app:assembleDebug` (after prebuild, with `pickFirst`) — BUILD SUCCESSFUL, including the edited Kotlin. `npx tsc --noEmit` — no errors in changed files (3 pre-existing errors in `konva-canvas.tsx` / `canvas-grid.ts`). **No hardware print was run.**
+- **Next Step:** Hardware: Josh 3 mm gap feed, Tez connect logcat, TD-404 caliper. Product sign-off on Q1, Q2, Q5.
+
+### 2026-09-23 — Bridge-layer defects recorded (documentation only; no code change)
+- **Scope:** Ten defects in *our* wrappers (`modules/*-printer/`), not vendor SDK bytecode. Verified against source, then written into Phase 6 (plan tasks 6.2 / 6.4a–e + defect list), `SDKS.md` Integration risks (marked **Our-bridge**), and checklist parentheticals on existing 6.4a–e lines. **No app code was changed.**
+- **Verdicts:**
+  1. **Label X `isAvailable` never false — CONFIRMED.** `ensureSdkInitialized` catch only logs; `isAvailable` then always returns `true`. JS `"LuckPrinter SDK initialization failed"` is dead.
+  2. **Label X dither ignores `threshold` — CONFIRMED.** `applyFloydSteinbergDithering` uses `oldVal < 128f`; default `dither: true` skips `applyThresholdBinarization`. `SDKS.md` §4 "dithering on, threshold 145" corrected.
+  3. **Label X print promise can hang — CONFIRMED.** Settles only in `onPrintSuccess` / `onPrintFail`; no timeout. Opposite of Tez's 15 s false-success timer.
+  4. **Label X no `OnDestroy` — CONFIRMED.** Discovery `BroadcastReceiver` is unregistered on `stopScan` only; Dev/TD-404/Josh all have `OnDestroy`.
+  5. **Tez `isAvailable { true }` — CONFIRMED.**
+  6. **Tez no `OnDestroy` — CONFIRMED.**
+  7. **Josh `DataEnded` 200 ms false-success — CONFIRMED.** Same class as Tez's timer; Task 6.2 now requires declaring the *weakest* completion signal.
+  8. **Josh `bitmap.recycle()` only on success — CONFIRMED.** Timeout and `!lastPrintSuccess` skip it.
+  9. **Josh `"left"` also forces top — CONFIRMED** in both `containFitToPage` and `submitMmJob`.
+  10. **Dev native `commandSet` default `"escpos"` vs JS `"tspl"` — CONFIRMED.** `useEscPos = commandSet != "tspl"`; ESC/POS ignores `heightMm`. Current JS callers are safe.
+- **Checklist:** no new task lines. These belong on 6.4a–e; splitting them would duplicate ownership. Existing 6.4 lines gained short parentheticals.
+- **Hardware flag (not acted on):** the Tez `commandApi` logcat check remains the **next hardware action**, ahead of Josh gap feed and TD-404 caliper. If `getDeclaredConstructor(String)` on the abstract type always throws, `commandApi` is null after every connect — and with the 15 s timer resolving `success = true`, Tez may be reporting successful prints while never printing. **Correction (same day):** that assignment is a **code** bug (`new 〇Ooo.〇o0〇o0(modelKey)`); vendor allow-list (#3) is a separate issue. Socket connect can still succeed.
+
+### 2026-09-23 — Independent issue-register pass (`PRINTER_ISSUE_REGISTER.md`)
+- **Scope:** Re-verify 31 claimed printer issues against `modules/*-printer/` and vendor JARs/AARs only (not against prior summaries). Documentation updates only; **no app code changed.**
+- **Counts:** 15 AGREE, 16 PARTLY AGREE, 0 DISAGREE on the existence of a problem.
+- **Corrections folded into `SDKS.md`, this plan, checklist, `PRINTER_BRIDGES.md`:**
+  - `#1 commandApi`: abstract-type constructor claim confirmed; SPP RFCOMM can still open; **fix is our constructor**, not vendor-only.
+  - `#16`: `libPrinterNative.so` clash + different hashes; `Code941`/`Compress` reverse-dep is real (Tez JAR references, Luck AAR contains); not a proven company; Tez did not copy Label X’s `.so`.
+  - `#17`: 378/400 = 0.945 on **bitmap** axes; `SIZE` stays requested mm.
+  - `#20`: 12 vs 304/25.4 is ~0.26 mm/100 mm, not 1.6 mm.
+  - `#29`: minify-off is real; “all five die together” is a prediction (TD-404 least at risk).
+  - `#31`: our modules are Android-only; Luck/Caysn/Ninestar vendor iOS artifacts exist in-repo.
+- **Next Step:** Unchanged hardware order (Tez logcat → Josh gap → TD-404 caliper). Optional: construct `〇Ooo.〇o0〇o0` without waiting on Q1.
+

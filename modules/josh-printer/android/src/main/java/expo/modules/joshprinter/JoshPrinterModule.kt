@@ -251,8 +251,8 @@ class JoshPrinterModule : Module() {
         val density = (params["density"] as? Number)?.toInt()
         val speed = (params["speed"] as? Number)?.toInt()
         val gapType = (params["gapType"] as? Number)?.toInt()
-        val gapLength = (params["gapLength"] as? Number)?.toInt()
-        mgr.configureParams(density, speed, gapType, gapLength)
+        val gapLengthMm = (params["gapLength"] as? Number)?.toDouble()
+        mgr.configureParams(density, speed, gapType, gapLengthMm)
         promise.resolve(null)
       } catch (e: Exception) {
         promise.reject("CONFIG_FAILED", e.message ?: "Failed to configure params", e)
@@ -320,7 +320,7 @@ class JoshPrinterModule : Module() {
         ?: (options["orientation"] as? Number)?.toInt()
         ?: 0
       val gapType = (options["gapType"] as? Number)?.toInt() ?: 2
-      val gapLength = (options["gapLength"] as? Number)?.toInt() ?: 3
+      val gapLengthMm = (options["gapLength"] as? Number)?.toDouble() ?: JoshPrinterManager.LABEL_GAP_MM
       val hOffsetMm = (options["hOffsetMm"] as? Number)?.toDouble() ?: 0.0
       val vOffsetMm = (options["vOffsetMm"] as? Number)?.toDouble() ?: 0.0
       val alignment = (options["alignment"] as? String) ?: "center"
@@ -330,7 +330,7 @@ class JoshPrinterModule : Module() {
           val pngBytes = Base64.decode(pngBase64, Base64.DEFAULT)
           Log.i(
             "JoshPrinter",
-            "[JOSH-NATIVE-BRIDGE] ${widthMm}x${heightMm}mm dpi=$dpi gapType=$gapType gap=${gapLength}mm offset=${hOffsetMm}x${vOffsetMm} align=$alignment",
+            "[JOSH-NATIVE-BRIDGE] ${widthMm}x${heightMm}mm dpi=$dpi gapType=$gapType gap=${gapLengthMm}mm offset=${hOffsetMm}x${vOffsetMm} align=$alignment",
           )
           val result = mgr.printBitmap(
             pngBytes = pngBytes,
@@ -342,7 +342,7 @@ class JoshPrinterModule : Module() {
             paramSpeed = speed,
             direction = direction,
             paramGapType = gapType,
-            paramGapLength = gapLength,
+            paramGapLengthMm = gapLengthMm,
             hOffsetMm = hOffsetMm,
             vOffsetMm = vOffsetMm,
             alignment = alignment,

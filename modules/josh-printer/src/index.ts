@@ -55,6 +55,7 @@ export type JoshPngLabelOptions = {
   direction?: number;
   orientation?: number;
   gapType?: number;
+  /** Millimetres (fractional allowed); native converts to LPAPI's 0.01 mm unit. */
   gapLength?: number;
   hOffsetMm?: number;
   vOffsetMm?: number;

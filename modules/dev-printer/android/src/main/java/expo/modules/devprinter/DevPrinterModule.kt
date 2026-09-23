@@ -143,7 +143,7 @@ class DevPrinterModule : Module() {
         AutoReplyPrint.INSTANCE != null
       } catch (e: Throwable) {
         Log.w(TAG, "AutoReplyPrint SDK not available: ${e.message}")
-        true
+        false
       }
     }
 

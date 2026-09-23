@@ -18,8 +18,8 @@ graph TD
       Constraints["Responsive Anchor & Constraint Rules"]
   end
 
-  subgraph EditorCanvas["2. Interactive UI Canvas - Phase 1 & 3"]
-      SkiaCanvas["React Native Skia Canvas @ GPU Surface"]
+  subgraph EditorCanvas["2. Interactive UI Canvas - Phase 1 & 3 (Konva editor; Skia is print-only per Task 1.4)"]
+      EditorKonva["Konva Editor Canvas: RN SVG/Views"]
       ReanimatedWorklets["Worklet Transforms: Zero Bridge Overhead"]
       SingleAxisHandles["Two 28px Teal Handles + Dashed Selection Box"]
       ConstraintSolver["Live Constraint Engine: 60/120 fps"]
@@ -41,14 +41,14 @@ graph TD
   subgraph HardwareLayer["5. Universal Driver & Calibration - Phase 6 & 7"]
       Calibration["MAC-Keyed Calibration Offsets: hOffset, vOffset"]
       Alignment["Center-Fed vs Left-Aligned Printhead Geometry"]
-      UniversalHAL["Universal Driver Layer: Dev, Tez, Josh, LabelX, TD404"]
+      UniversalHAL["Universal Driver Layer: Dev, Tez, Josh, LabelX, TD404 - see SDKS.md"]
       ThermalSmoothing["Thermal Energy Density Smoothing"]
   end
 
   JSON --> Constraints
-  Constraints --> SkiaCanvas
+  Constraints --> EditorKonva
   Constraints --> HeadlessSkia
-  SkiaCanvas --> ReanimatedWorklets
+  EditorKonva --> ReanimatedWorklets
   ReanimatedWorklets --> SingleAxisHandles
   Constraints --> ConstraintSolver
 
@@ -56,7 +56,7 @@ graph TD
   Snapping --> QuietZones
   QuietZones --> ISOEncoders
   ISOEncoders --> HeadlessSkia
-  ISOEncoders --> SkiaCanvas
+  ISOEncoders --> EditorKonva
 
   HeadlessSkia --> Preflight
   Preflight --> MonoPacker
@@ -76,15 +76,15 @@ To establish unyielding software robustness, every subsystem is evaluated agains
 
 | Subsystem / Metric | Current Standard (As-Is) | Benchmark Standard (Target) | Gap / Delta | Robustness Verification Gate |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Editor Rendering & Gesture FPS** | React Native SVG/Views in `konva-canvas.tsx`. 35–50 fps during active gestures; layout drops when dragging complex items. | 100% GPU Skia Canvas (`@shopify/react-native-skia`). Solid 60/120 fps with under 8ms frame time on mid-range Android devices. | +25 to 70 fps improvement, zero layout recalculation overhead during active gesture. | Reanimated frame-drop profiler: 0 dropped frames over a 300-frame continuous drag session. |
+| **1. Editor Rendering & Gesture FPS** | React Native SVG/Views in `konva-canvas.tsx`. 35–50 fps during active gestures; layout drops when dragging complex items. | Konva editor (`konva-canvas.tsx`) with gesture geometry driven by Reanimated shared values on the UI thread (the original "100% GPU Skia editor" target was superseded by Task 1.4; Skia is print-only). Solid 60/120 fps with under 8ms frame time on mid-range Android devices. | +25 to 70 fps improvement, zero layout recalculation overhead during active gesture. | Reanimated frame-drop profiler: 0 dropped frames over a 300-frame continuous drag session. |
 | **2. Drag / Drop Precision** | Handled in `konva-transformer.tsx` with risk of float rounding jumps and DOM remount flashes. | Scale-aware Reanimated worklets; sub-millimeter 4-decimal precision (`0.0001mm`); zero magnetic snapping; stable single list. | Eliminates pointer slippage, frame flashing, and repulsive jump zones. | Automated synthetic drag test: touch point delta equals committed coordinate delta within ±0.005mm. |
-| **3. Resize UX & Handles** | React Native View elements scaled via matrix transforms; handles rendered as SVG elements outside Skia. | Two circular teal (`#54C8C8`, 28px) handles with native Skia vector arrow paths (↔ width, ↕ height); 44×44pt invisible touch targets. | Single coordinate space; zero desynchronization between selection handles and element content. | Visual parity test matching reference UI + touch target accuracy verification on mobile. |
+| **3. Resize UX & Handles** | React Native View elements scaled via matrix transforms; handles rendered as separate View/SVG nodes. | Two circular teal (`#54C8C8`, 28px) handles (↔ width, ↕ height) whose positions are derived from the same shared values that size the element in `konva-transformer.tsx`; 44×44pt invisible touch targets. (Originally specified as native Skia vector handles — superseded by Task 1.4.) | Single coordinate space; zero desynchronization between selection handles and element content. | Visual parity test matching reference UI + touch target accuracy verification on mobile. |
 | **4. Template Resizing Symmetry** | Linear multiplier (sx, sy). Aspect ratio shift squashes text vertically and distorts borders. | Constraint-based layout: perimeter border locking, dynamic module width recalculation for barcodes, text re-wrap reflow. | No clipped text, no deformed borders, preserved aspect ratios on key elements. | Template resize suite: converting 50×50mm to 50×25mm maintains border width ±0% and causes zero text truncation. |
 | **5. Barcode Module Precision** | Continuous floating-point SVG rectangles (`bar.width * px`). Fractional widths cause dot jitter on 1-bit thermal printhead. | Discrete integer module snapping (X-dimension in {1, 2, 3, ...} dots). Enforced 10x quiet zones. | Eliminates thermal dot jitter and optical scanner reading failures. | Optical scan verification: ≥ 99.9% first-pass decode rate with Honeywell/Zebra 1D/2D laser scanners. |
 | **6. 2D Code Symbology** | Pseudo-random noise matrix (`pseudoMatrix`) used to fake PDF417 and DataMatrix barcodes. | Full ISO/IEC 15438 (PDF417) and ISO/IEC 16022 (DataMatrix) algorithmic encoding with Reed-Solomon error correction. | Compliant barcodes readable by any standard scanner vs. completely unreadable placeholder noise. | Automated decode test using ZXing/ML-Kit reading generated buffers; 100% data fidelity. |
 | **7. Print Dispatch Latency** | Offscreen React Native DOM capture via `<ViewShot>`: 250–600ms per label. | Headless in-memory Skia direct rasterization: under 15ms per label directly to monochrome byte buffer. | **15 to 40x faster** print job generation; zero UI thread blocking. | Benchmark script: 100 labels rasterized in under 1.5s total CPU time. |
 | **8. Multi-Page Batch Memory** | Offscreen DOM mounted per page; Base64 PNG strings in Hermes heap. 50 pages ~150MB heap spike; OOM crash risk. | Streaming chunk pipeline: render dot stream → packetize TSPL → flush to native driver → garbage collect scanline. | Flat O(1) memory usage: under 15MB memory consumption regardless of job page count (even 1000 pages). | Memory leak test: 500-page batch run on low-end Android device with under 5MB total heap variation. |
-| **9. Hardware Margin Calibration** | Dynamic layout calculation, but mechanical offsets (hOffset, vOffset) are not saved per printer MAC address. | Persistent calibration profiles stored per printer MAC; center-fed vs. left-aligned auto-compensation. | Eliminates manual alignment guesswork when switching between printers. | Physical caliper test: printed box margin matches designed position within ±0.2mm. |
+| **9. Hardware Margin Calibration** | H/V offsets (`hOffsetMm`, `vOffsetMm`) are already persisted per printer device ID (MAC) in `printCalibration` in `src/stores/printer-store.ts`. Density, speed, detected DPI and head width are not part of that profile; DPI is hardcoded per driver (see `SDKS.md`); there is no guided calibration wizard. | Full calibration profile per printer MAC (offsets, density, speed, detected DPI/head width, firmware) plus guided wizard. Head alignment (center-fed vs. left-aligned) is taken from `src/lib/printer/print-spec.ts` profiles — none of the five vendor SDKs exposes it (see `SDKS.md`). | Eliminates manual alignment guesswork when switching between printers. | Physical caliper test: printed box margin matches designed position within ±0.2mm. |
 | **10. Print Preflight Validation** | Basic canvas size check only (`validatePrintSpec`). Silent failures on thin lines or clipped text. | Preflight rules engine: checks for sub-dot lines (under 1 dot), unscannable barcodes, text overflow, and low-contrast regions. | Proactive user warning and 1-tap auto-repair before wasting physical label stock. | Test harness: 10 synthetic malformed templates flagged with 100% precision before print transmission. |
 
 ---
@@ -94,7 +94,7 @@ To establish unyielding software robustness, every subsystem is evaluated agains
 The architecture redesign is partitioned into **7 distinct, equal-weight phases**. Each phase is scoped to represent approximately equal engineering complexity, cognitive load, and verification effort.
 
 ```
-Phase 1: Interactive Skia Canvas & Resizing Engine (Editor UI & Geometry)
+Phase 1: Interactive Editor Canvas & Resizing Engine (Konva editor; Skia print-only per Task 1.4)
 Phase 2: Integer-Module Optical Barcode & 2D Symbology Engine
 Phase 3: Constraint-Based Layout & Responsive Anchor Architecture
 Phase 4: Headless In-Memory Skia Direct Rasterizer (Print Pipeline)
@@ -105,7 +105,12 @@ Phase 7: Print Preflight Engine & Thermal Density Optimization
 
 ---
 
-### Phase 1: Interactive Skia Canvas & Resizing Engine (Editor UI & Geometry)
+### Phase 1: Interactive Editor Canvas & Resizing Engine (Editor UI & Geometry)
+
+> **Status: Complete, with scope reversal (Task 1.4, 2026-09-18).** Phase 1 was originally written as a Konva → Skia editor migration. Task 1.4 reversed that: the live editor stays permanently on Konva (`konva-canvas.tsx` / `konva-transformer.tsx`), and Skia is used **only** for the headless print rasterizer in Phase 4. The original Skia-editor text in sections 1–3 below is kept as history. Task statuses:
+> - **Task 1.1 & 1.2 — Superseded.** They were built against the Skia prototype (`skia-canvas.tsx`, `skia-element-renderer.tsx`) and verified only on `/dev-skia-test`; `edit.tsx` never mounted the Skia canvas. The goals they served (live scaling driven by shared values, handles that cannot desync from element bounds) are delivered on Konva by `konva-transformer.tsx` (shared-value handle/bounds geometry, pinned-origin resize via `resizeMemberByScale` in `src/lib/editor/resize-policy.ts`). The Skia prototype files remain in the tree but are not on the live editor path.
+> - **Task 1.3 — Complete, unaffected by the reversal.** `scaleDocumentToSize` in `src/lib/element-sizing.ts` is canvas-agnostic.
+> - **Task 1.4 — Complete.** Architectural decision record.
 
 #### 1. Architectural Scope & Weight
 - **Scope:** Complete migration of the visual editor from the hybrid React Native SVG/View tree (`konva-canvas.tsx`, `konva-transformer.tsx`) to a pure GPU-accelerated React Native Skia Canvas (`skia-canvas.tsx`, `skia-element-renderer.tsx`). Implementation of the modernized dynamic resizing logic in `src/lib/element-sizing.ts`.
@@ -118,7 +123,7 @@ Phase 7: Print Preflight Engine & Thermal Density Optimization
 - Resize handles are custom React Native View nodes styled to look like teal circles, but separate from the canvas drawing tree.
 - Template resizing (`scaleDocumentToSize` in `src/lib/element-sizing.ts`) multiplies all coordinates linearly (sx, sy), leading to text squashing, border distortion, and clipped elements when changing aspect ratios.
 - `skia-canvas.tsx` and `skia-element-renderer.tsx` were prototyped, but suffered from static dimension props (`widthPx`, `heightPx`), handle desync during live gesture scaling, and incomplete element support.
-- **What Needs to be Changed:**
+- **What Needs to be Changed (original Skia-editor spec — the Konva → Skia editor swap and Skia selection chrome items are superseded by Task 1.4; the `element-sizing.ts` items were delivered by Task 1.3):**
 - **Entire Refactor:** Replace `<KonvaCanvas>` in `src/app/edit.tsx` with `<SkiaCanvas>`.
 - **Partial Refactor:** Upgrade `skia-canvas.tsx` and `skia-element-renderer.tsx` so that element rendering scales dynamically during active gestures using Reanimated shared values (`curWidth`, `curHeight`, `transX`, `transY`).
 - **Partial Refactor:** Refactor `src/lib/element-sizing.ts` to implement aspect-ratio-aware document scaling:
@@ -140,14 +145,14 @@ Phase 7: Print Preflight Engine & Thermal Density Optimization
 - The gap is caused by React Native layout passes (Yoga) and cross-bridge layout sync during gestures. Skia eliminates Yoga from the gesture hot-path entirely by rendering on the GPU surface driven directly by Reanimated worklets.
 
 #### 4. Actionable Step-by-Step Tasks
-- [ ] **Task 1.1:** Refactor `skia-element-renderer.tsx` to support live scaling via Reanimated shared values:
+- [x] ~~**Task 1.1:** Refactor `skia-element-renderer.tsx` to support live scaling via Reanimated shared values~~ — **Superseded by Task 1.4.** Prototype work was done and verified on `/dev-skia-test` only (see `PROGRESS.md`). Konva equivalent: live shared-value scaling in `konva-transformer.tsx`.
 - Create GPU-composited transform matrix worklets for all element types: Text, Barcode, QR, Image, Shapes, Line, Table, Clipart, Signature.
 - Ensure Skia text layout correctly measures font metrics without triggering React re-renders.
-- [ ] **Task 1.2:** Implement Native Vector Handles in `skia-canvas.tsx`:
+- [x] ~~**Task 1.2:** Implement Native Vector Handles in `skia-canvas.tsx`~~ — **Superseded by Task 1.4.** Konva equivalent: handle positions derived from the same shared values that size the element in `konva-transformer.tsx`.
 - Draw circular teal `#54C8C8` anchors (28px diameter) with native Skia vector arrow paths (↔ width, ↕ height).
 - Bind handle positions to `useDerivedValue` reading `curWidth` and `curHeight` so handles never desynchronize from element boundaries.
 - Attach 44×44pt invisible touch targets via `GestureDetector` with `minDistance(0)`.
-- [ ] **Task 1.3:** Modernize Template Resizing in `src/lib/element-sizing.ts`:
+- [x] **Task 1.3:** Modernize Template Resizing in `src/lib/element-sizing.ts` (complete 2026-09-18; canvas-agnostic, unaffected by Task 1.4):
 - Rewrite `scaleDocumentToSize` to handle aspect ratio shifts gracefully:
   - Pin borders to (0, 0, W, H) and preserve `lineWidth`.
   - Recalculate text bounds with `computeWrappedLines` and update element height to accommodate text flow.
@@ -157,9 +162,37 @@ Phase 7: Print Preflight Engine & Thermal Density Optimization
   - Decoupled print/export pipeline to headless Skia in Phase 4 (clean boundary with no shared rendering code or gesture baggage).
 
 #### 5. Robustness Verification & Quality Gates
-- **Automated Test:** Run `src/lib/editor/__tests__/element-sizing.test.ts` to assert that scaling a document from 50×50mm to 50×20mm preserves border stroke, recomputes text height, and keeps all elements within label boundaries.
+- **Automated Test:** Run `src/lib/editor/__tests__/template-resizing.test.ts` (the file originally named here as `element-sizing.test.ts` does not exist) to assert that scaling a document from 50×50mm to 50×20mm preserves border stroke, recomputes text height, and keeps all elements within label boundaries.
 - **Performance Benchmark:** Execute a 300-frame automated drag and resize sequence. Frame time must remain under 16.6ms with zero garbage collector spikes.
 - **Visual Verification:** Confirm handles and selection box match reference UI with pixel-perfect fidelity at 1×, 2×, and 3× screen zoom levels.
+
+---
+
+### Editor Feature Track: Multi-Select ("Multiple" Mode) — Konva Editor
+
+> **Status: Implementation in progress (rewrite underway).** This is not a numbered phase; it is an editor feature built on the Konva editor that Task 1.4 kept. Recent commits: `720aab6` "multi select fixed", `f4a21ca` "multiple selection blink fix".
+
+#### 1. Scope
+- A "Multiple" toggle in the editor switches tap-to-select from replace to add/remove. The selected members can be moved, resized and aligned as one group, and edited together through a shared property panel.
+- **Files:** `src/app/edit.tsx` (mode state, group start snapshots, shared-scale limits, commit), `src/components/editor/konva-canvas.tsx`, `src/components/editor/konva-transformer.tsx` (group drag and resize worklets, `groupScaleXSv` / `groupScaleYSv` / `groupScaleMinSv` / `groupScaleMaxSv`), `src/lib/editor/selection.ts` (`reduceTapSelect`, `reduceMultipleModeToggle`, `unionBounds`, `alignGroupBounds`), `src/lib/editor/resize-policy.ts` (`resizeMemberByScale`, `sharedScaleLimits`, `capSharedScale`), `src/components/editor/multi-select-property-panel.tsx`.
+
+#### 2. Locked Technical Model
+These three rules are fixed. Later changes to multi-select must not break them.
+1. **One shared scale factor, reusing single-element resize logic.** A group resize produces one shared scale (per drag axis). Each member's new box is computed by calling `resizeMemberByScale` with that scale — the same function single-element resize uses (`boundBoxMm` delegates to it). There is no separate group-resize math, so a group member of a given type resizes exactly like that element resized alone.
+2. **No origin movement during resize.** Every member's `left` / `top` stays at its gesture-start value, both live and on commit. Only `width` / `height` change. This is the same pinned-origin rule as single-element resize: there is no group-centre pivot and no member is repositioned.
+3. **Shared capped ratio.** `sharedScaleLimits` takes, across all members, the highest minimum scale (the scale at which some member reaches its `minMm`) and the lowest maximum scale (the scale at which some member reaches the canvas edge). The live scale is clamped to that range, so the whole group stops together once any one member hits its limit — no member keeps shrinking or growing past another's clamp. Members whose resize policy has no behaviour for the dragged handle (for example, auto-height text on the south handle) are excluded from the cap and left unchanged.
+
+#### 3. Outstanding Verification
+- **Automated (passing as of 2026-09-23):** `src/lib/editor/__tests__/selection.test.ts` (11/11), `resize-member-by-scale.test.ts` (7/7), `multi-transform-verify.test.ts` (4/4).
+- **Not yet verified (on-device):**
+  - Live preview equals committed result for group resize on east and south handles, with no jump on release.
+  - The group stops together at the minimum-size cap and at the canvas-edge cap, with mixed element types (text, barcode, QR, shape, image).
+  - Square-locked members (QR) inside a group whose drag is on one axis only.
+  - Ruler highlight and selection chrome follow the union bounds during group drag and resize.
+  - Touch-down add-only behaviour: adding a member does not start an unintended drag, and there is no selection blink (the regression fixed in `f4a21ca`).
+  - Toggling Multiple mode off clears the selection. Removing the primary member promotes another member to primary.
+  - Group align actions and `multi-select-property-panel.tsx` edits apply to every member and undo as a single history step.
+  - `npx tsc --noEmit` clean on the final rewrite.
 
 ---
 
@@ -194,17 +227,19 @@ Phase 7: Print Preflight Engine & Thermal Density Optimization
   - Thermal printheads are discrete binary devices (a dot is either 100% heated or 100% cold). Continuous vector scaling works on computer displays with subpixel anti-aliasing, but fails on binary thermal heads. Integer module snapping guarantees that every bar and space maps to an exact integer number of thermal dots.
 
 #### 4. Actionable Step-by-Step Tasks
-- [ ] **Task 2.1:** Build Integer Module Snapping Engine in `src/lib/barcode/barcode-snapping.ts`:
+> **Status: Complete (2026-09-19).** All four tasks are logged in `PROGRESS.md`, followed by the post-2.4 bugfix "Barcode Selection/Bounding Box Sizing Mismatch vs WePrint".
+
+- [x] **Task 2.1:** Build Integer Module Snapping Engine in `src/lib/barcode/barcode-snapping.ts`:
   - Function `snapBarcodeToHardwareDots(contentWidthMm, totalModules, dpi)` returning quantized width and individual module dot counts (1, 2, 3 dots).
   - Enforce quiet zones (10× module width left/right margins).
-- [ ] **Task 2.2:** Implement Authentic PDF417 and DataMatrix Encoders in `src/lib/barcode/`:
+- [x] **Task 2.2:** Implement Authentic PDF417 and DataMatrix Encoders in `src/lib/barcode/`:
   - Integrate pure, lightweight TypeScript encoders for ISO/IEC 15438 (PDF417) with variable error correction (ECC Level 0 to 8).
   - Integrate ISO/IEC 16022 (DataMatrix ECC 200) square and rectangular module matrices.
   - Completely remove `pseudoMatrix` from the codebase.
-- [ ] **Task 2.3:** Update Barcode & 2D Symbology Rendering in `src/components/editor/element-renderer.tsx` & Data Pipeline:
+- [x] **Task 2.3:** Update Barcode & 2D Symbology Rendering in `src/components/editor/element-renderer.tsx` & Data Pipeline:
   - Render 1D barcode bars with quantized integer dot snapping and quiet zones.
   - Render real 2D matrix modules for PDF417 and DataMatrix using authentic grid cells.
-- [ ] **Task 2.4:** Build Real-Time Scannability Preflight Inspector in `src/lib/barcode/scannability-inspector.ts` & Property Panels:
+- [x] **Task 2.4:** Build Real-Time Scannability Preflight Inspector in `src/lib/barcode/scannability-inspector.ts` & Property Panels:
   - Add visual scannability indicator and warnings in `barcode-property-panel.tsx` and editor chrome when barcode density or physical size is below optical scanning thresholds for thermal printheads.
 
 #### 5. Robustness Verification & Quality Gates
@@ -398,54 +433,109 @@ Phase 7: Print Preflight Engine & Thermal Density Optimization
 
 ### Phase 6: Hardware Calibration, Printhead Margins & Universal Driver Layer
 
+> **Status: Not started.** Spec history: a 3-task placeholder until 2026-09-23. It was rewritten from the vendor-SDK investigation earlier that day, then **revised again the same day** after the app-side verification pass (`SDKS.md` → "App-Side Verification Pass"). Every statement below is backed by `SDKS.md`; items that still need a printer are marked **(hardware)**.
+> **Depends on:** Phase 4, for the 1-bit buffer every adapter consumes. Task 6.1 and the defect fixes inside each 6.4 adapter can start before Phase 4.
+
 #### 1. Architectural Scope & Weight
-- **Scope:** Unification of printer communication across all 5 printer models (`dev-printer`, `tez-printer`, `josh-printer`, `labelx-printer`, `td404-printer`). Implementation of media alignment compensation (center-fed vs. left-aligned) and persistent MAC-keyed hardware calibration.
-- **Weight:** Equal weight balanced between native mobile bridge modules, Bluetooth protocol engineering, and physical calibration UI.
+- **Scope:** Replace today's per-SDK branches in `src/lib/printer/universal-bridge.ts` / `printer-manager.ts` with **five isolated `PrinterBridge` adapters**, one per vendor SDK, behind a single job contract. Each adapter declares which of **three sizing contracts** its SDK uses, reports capabilities (resolution from the printer where possible), and returns an honest print outcome. The phase also covers the packaging defects that currently couple two of the SDKs, a per-printer calibration profile, and a guided calibration wizard.
+- **Weight:** Roughly one-third native/build work (Kotlin modules, Gradle, ProGuard, vendor coordination), one-third TypeScript contract, generator and adapters, and one-third calibration data and UI, plus a caliper pass on every printer family.
 
 #### 2. What is Currently Implemented vs. What Needs to be Changed
-- **Current Standing:**
-- The app communicates with 5 different printer hardware families, each with slightly different native code and parameter assumptions.
-- While DEV bridge TSPL sizing was recently made dynamic (`computeDevTsplPrintLayout`), physical guide alignment differences (e.g. some printers use center-justified rolls, others left-justified) are handled with ad-hoc conditional branches.
-- Mechanical printhead offsets (hOffset, vOffset) are not stored per physical printer MAC address. When a user connects to a different printer, calibrations are lost or cross-contaminated.
+- **Current Standing (verified in code and by build, 2026-09-23):**
+  - **Three sizing contracts across the five SDKs:**
+    - **A — mm-native job:** Josh (DothanTech LPAPI). `startJob(widthMm, heightMm)` + `drawBitmap(…mm)` / vector `draw*` + `commitJob`, with parameters in 0.01 mm. We currently use its pixel path (`printBitmap`) first.
+    - **B — mm page + 1-bit bitmap in dots, as raw commands we generate:** TD-404 / Tejas / Rudra (TSPL over our own RFCOMM; the Ninestar SDK is linked but unused) and Dev / Veer (TSPL or ESC/POS written through AutoReplyPrint's port).
+    - **C — bitmap only; physical size = pixels ÷ DPI:** Label X (no page parameter; length from the gap sensor) and Tez / Shakti (`CreatePage(int, int)` in whole mm).
+  - **The adapters are not isolated today.** Label X and Tez both package `libPrinterNative.so` (different SHA-1; `pickFirst` ships Tez’s). A fresh build fails without the `pickFirst` rule. Separately, the in-repo Tez JAR no longer contains `Code941` / `Compress` (commit `3d7ad75`) but still calls them; those classes load from the Luck AAR. Removing Label X can break Tez at **class** load time. Tez’s `.so` files are Tez’s own jniLibs.
+  - **TSPL is generated in three places:** `DevPrinterModule.kt`, `Td404PrinterModule.kt` and `src/lib/printer/tsc.ts`.
+  - **Resolution is never read from a printer:** Dev 8 dots/mm; TD-404 12.0 dots/mm at "304 DPI"; Josh 203 unless the app setting is exactly 300; Label X `widthMm × 8`; Tez 8 dots/mm with whole-mm pages. Four SDKs expose a query we don't call: Dev `CP_Printer_GetPrinterResolutionInfo`, Josh `getPrinterInfo().deviceDPI` / `deviceWidth`, Label X `is304Dpi` / `getPrintWidth`, Tez `Command.DPI()`.
+  - **Defect status** (vendor-SDK facts vs **our-bridge** defects; the latter were verified in `modules/*-printer/` on 2026-09-23 and are owned by the matching 6.4 adapter — **not fixed in this pass**):
+    - Josh gap unit (mm sent into a 0.01 mm field): **fixed in code 2026-09-23**; **(hardware)** feed check pending.
+    - Dev `isAvailable` returned `true` on SDK load failure: **fixed 2026-09-23**.
+    - Dev 378-dot cap: bitmap `fit = 378/400 = 0.945` on both axes; TSPL `SIZE` still requested mm. Product decision (`SDKS.md` Q5). Physical 47.25 mm needs a caliper.
+    - Dev TSPL `GAP` is rounded to whole mm.
+    - **Our-bridge — Dev:** native `commandSet` defaults to `"escpos"` (`useEscPos = commandSet != "tspl"`); ESC/POS ignores `heightMm`. Safe today only because the JS wrapper always sends `"tspl"`.
+    - Tez reflective `commandApi` construction targets the **declared abstract** type and always fails in static analysis, leaving `commandApi` null after skipped `connect(DeviceItem)`. **Code fix:** construct `〇Ooo.〇o0〇o0(modelKey)` without waiting on vendor auth. **(hardware)** logcat + print still needed to know if a unit has ever printed — **next hardware action**.
+    - Tez resolves success from a 15 s timer rather than a printer signal.
+    - Tez page size is whole-mm only.
+    - **Our-bridge — Tez:** `isAvailable` is hardcoded `true`; no `OnDestroy` to release scanner / printer state.
+    - Label X: height not enforced, no offsets, dead `commandMap`.
+    - **Our-bridge — Label X:** `isAvailable` can never return `false` (`ensureSdkInitialized` swallows exceptions); Floyd–Steinberg cutoff is hardcoded `128` so JS `threshold` 145 is unused on the default dither-on path; `printPngLabel` hangs forever if the SDK never calls success/fail (no timeout — opposite of Tez's false-success timer); no `OnDestroy` (BroadcastReceiver + connection leak).
+    - **Our-bridge — Josh:** `PrintProgress.DataEnded` posts a 200 ms delayed runnable that sets `lastPrintSuccess = true` with no hardware ACK (same class as Tez's 15 s timer); failed/timeout `printBitmap` paths skip `bitmap.recycle()`; `containFitToPage` / `submitMmJob` treat `"left"` as both left *and* top alignment.
+    - TD-404 dots/mm (12 / 11.97 / 11.81): **(hardware)** caliper measurement (`SDKS.md` Q6).
+  - **Packaging:** the local `android/` folder is stale relative to `app.json`: it lacks the `with-android-packaging` injections, so local Gradle builds fail until `expo prebuild` is re-run. There are no ProGuard keep rules for any SDK package; release builds work only because `android.enableMinifyInReleaseBuilds=false`. `nzio.jar` and the TD-404 AAR are unused.
+  - **Licensing / network (product/legal, `SDKS.md` Q1–Q2):** Label X POSTs `asKey` (vendor demo key), `sn`, `mac`, `model`, `softwareVersion` and `bluetoothname` to `api.gj.luckjingle.com`. A `"501"` / `"505"` response only notifies `DeviceForbiddenListener`s, and we register none. Tez's allowlist gate (`connectBefore` → `NativeUtil.test3`) is bypassed via reflection.
+  - **Calibration is partly built already.** `hOffsetMm` / `vOffsetMm` are persisted per `deviceId` (the Bluetooth MAC on Android, falling back to SDK id) in `printCalibration` in `src/stores/printer-store.ts`, and `src/app/calibration-print.tsx` prints a millimetre-true proof. Density, speed, detected DPI, head width and firmware are not stored. There is no key for printers without a Bluetooth MAC (TD-404 over Wi-Fi).
+  - **Head alignment** (`'center' | 'left'`) and head width live in `src/lib/printer/print-spec.ts` profiles; no SDK reports alignment.
+  - **Platform:** Our five Expo printer modules are Android-only. Vendor trees include iOS artifacts for Luck, Caysn, and Ninestar (docs); PrintSDK-68 and LPAPI have none in this repo. iPhone **app** print is not possible today.
 - **What Needs to be Changed:**
-- **Partial Refactor:** Formalize the **Universal Hardware Driver Layer** (`src/lib/printer/universal-driver.ts`):
-  - Unified driver interface with normalized command generation: `setupMedia(widthMm, heightMm, type, gapMm)`, `sendBitmap(buffer, x, y, w, h)`, `formFeed()`, `printCopies(n)`.
-- **New Feature:** Media Alignment Calibration:
-  - Auto-compute horizontal printhead offset based on printer model profile:
-    - Center-fed printers: `hOffset = (PrintheadWidth - LabelWidth) / 2`.
-    - Left-aligned printers: `hOffset = 0`.
-- **New Feature:** Persistent Printer Calibration Profile:
-  - Store calibration offsets (hOffset, vOffset, density, speed) in `AsyncStorage` keyed by printer Bluetooth MAC address.
-- **New Feature:** Interactive Calibration Wizard UI (`src/app/calibration-wizard.tsx`):
-  - User prints a 20×20mm calibration test square with center crosshairs, measures physical margins with a ruler, and enters measured values. App calculates and saves persistent offset corrections.
+  - **Decouple and harden the build** (6.1) so each adapter can be built, tested and removed independently.
+  - **A `PrinterBridge` contract** (6.2) with a `MonoPrintJob` input, declared `DriverCapabilities` including the sizing contract, and a three-state print outcome.
+  - **One generator** for contract B (6.3).
+  - **Five adapters** (6.4), rolled out in the requested order, each fixing its own verified defects.
+  - **Capability discovery** (6.5), a **calibration store** with a defined key strategy (6.6), and a **wizard** (6.7).
 
 #### 3. Current Standard vs. Benchmark Standard
 - **Current Standard:**
-- Margin accuracy across different printers: ±1.2mm error; requires code tweaks when switching between center-fed (Tez/Josh) and left-aligned (Dev) models.
-- Calibration persistence: Global or session-based; lost when switching devices.
+  - Three sizing contracts handled through ad-hoc per-SDK branches; two SDKs coupled at the native and class level; resolution never read from a printer; confirmed unit/scale defects (Dev 47.25 mm cap, whole-mm rounding in Dev and Tez, Josh 300 DPI scale when mis-set; the Josh gap unit is now fixed in code).
+  - Calibration: H/V offsets only, per Bluetooth device ID; no wizard; no key for Wi-Fi printers.
+  - Build correctness depends on a regenerated `android/` folder and on minify being off. Label X currently runs Tez’s `.so` via `pickFirst`. Minify-on without keep rules is **likely** to break Tez (reflection), Josh (injection) and Dev (JNA); TD-404 is mostly our Kotlin and is the least likely to die. Not observed on a minify-on APK.
+  - Margin accuracy per printer: **not measured.** No caliper data exists in this repo for any family.
 - **Benchmark Standard:**
-- Margin accuracy across all printer models: **≤ ±0.2mm** caliper accuracy.
-- Calibration persistence: Automatically loads unique offset profile whenever a specific Bluetooth MAC connects.
+  - One `PrinterBridge` contract; five adapters that can be built, tested and removed independently; every adapter declares its sizing contract and capabilities; resolution reported by the printer where the SDK supports it.
+  - Printed geometry matches the design within **±0.2 mm** (caliper) on every family, after calibration.
+  - The calibration profile loads automatically when a known printer connects; switching printers never cross-applies offsets.
+  - Release build with minify **on** prints correctly on all five families; the APK contains exactly the native libraries each SDK needs.
+  - A failed print is reported as failed; an unconfirmable print is reported as "sent, unconfirmed". No adapter reports success on a timer.
 - **Difference / Gap Analysis:**
-- Mechanical tolerances in thermal printer feed rollers and sensor positions vary by up to 1mm between manufacturing batches. Industry leaders provide user calibration wizards that store hardware-specific offsets.
+  - Most of today's inaccuracy is in our code (units, rounding, hardcoded DPI, a hard width cap), not in the vendors' printers. Those defects can be fixed and tested without hardware. Mechanical offsets and true DPI per unit can only be measured on hardware, which is what the calibration profile and wizard are for.
 
 #### 4. Actionable Step-by-Step Tasks
-- [ ] **Task 6.1:** Refactor Driver Layer into Unified Hardware Interface:
-- Standardize protocol generation across TSPL, CPCL, ESC/POS, and proprietary SDKs.
-- Centralize `PrintSpec` generation with explicit physical head width and feed alignment parameters.
-- [ ] **Task 6.2:** Build MAC-Keyed Calibration Storage in `src/lib/printer/calibration-store.ts`:
-- Methods: `getCalibration(macAddress)`, `saveCalibration(macAddress, profile)`.
-- Profile parameters: `horizontalOffsetMm`, `verticalOffsetMm`, `densityOverride`, `speedOverride`.
-- [ ] **Task 6.3:** Implement Interactive Calibration Wizard Screen:
-- Add "Calibrate Printer" option in printer connection settings.
-- 3-step wizard:
-  1. Print standardized 20×20mm test pattern with edge rulers.
-  2. Input measured physical offsets (X error mm, Y error mm).
-  3. Auto-save calibration coefficients and print confirmation test.
+- [ ] **Task 6.1:** SDK Build Integrity & Decoupling:
+  - Regenerate `android/` (`expo prebuild`) so the `with-android-packaging` injections are present locally. Add a check that fails fast if `libPrinterNative.so` has no `pickFirst` rule, instead of failing deep in `mergeDebugNativeLibs`.
+  - Resolve the Tez ↔ Label X coupling: (1) two different `libPrinterNative.so` binaries under one soname (`pickFirst` ships Tez today); (2) Tez JAR references `Code941`/`Compress` that only the Luck AAR still contains. Options: restore those two classes into the Tez JAR, vendor-certified shared native, or an explicit shared module. Company identity is unproven; the class names are shared.
+  - Add ProGuard/R8 keep rules for `com.sun.jna`, `com.caysn`, `com.print`, `com.dothantech`, `com.luckprinter`, `com.ninestar` and every class or member reached by name, then run a minify-on test release build.
+  - Remove unused binaries (`nzio.jar`, TD-404 `labelprinter.aar`). Do not switch TD-404 to the AAR: its manifest requires `usb.host`.
+  - Correct the TD-404 doc comments that claim `LabelCommand` is used, and the vector claims in `src/constants/printer-models.ts`.
+  - ~~Fix Dev `isAvailable` returning `true` from its `catch` block~~ — done 2026-09-23.
+- [ ] **Task 6.2:** `PrinterBridge` Contract in `src/lib/printer/universal-driver.ts`:
+  - `MonoPrintJob`: packed 1-bit rows in device dots (the Phase 4 output), `widthMm` / `heightMm` to 0.01 mm, media type (gap / black mark / continuous) and gap in mm, copies, and the applied calibration.
+  - `DriverCapabilities`: `sizingContract` (`'mm-job'` = A, `'raw-commands'` = B, `'bitmap-only'` = C), DPI and source (reported / profile / user), head width in dots, supported media types, offset support (native vs. baked into the bitmap), completion signal (printer ack / write-complete / none). **Declare the weakest signal the adapter can actually fall back to, not its best case.** Josh has a real `PrintProgress.Success` hardware ACK, but `DataEnded` silently falls back to a 200 ms timer that marks success; listing Josh as `printer ack` would mislabel that path. Tez's weakest signal is the 15 s timer (`none` / unconfirmed). Label X currently has no timeout at all (promise can hang).
+  - `PrinterBridge`: `connect` / `disconnect` / `status` / `capabilities()` / `print(job)`. `print` returns `'confirmed' | 'sent-unconfirmed' | 'failed'`.
+  - Route `universal-bridge.ts` / `printer-manager.ts` dispatch through the interface. Add native raw 1-bit entry points so no PNG or base64 round-trip is needed.
+- [ ] **Task 6.3:** Single TSPL / ESC-POS Generator (contract B):
+  - One TypeScript module (building on `src/lib/printer/tsc.ts`) replaces the generation in `DevPrinterModule.kt` and `Td404PrinterModule.kt`. Fractional-mm `SIZE` and `GAP`, dots/mm taken from capabilities. The Kotlin modules become transport-only (write bytes, read status).
+- [ ] **Task 6.4:** Five Isolated `PrinterBridge` Adapters, in the requested rollout order:
+  - [ ] **6.4a Dev / Veer** (contract B): consume the 6.3 generator; stop rounding `GAP`; width policy per `SDKS.md` Q5 (the 47.25 mm cap stays until decided); read `CP_Printer_GetPrinterResolutionInfo`. **Our-bridge:** make the native `commandSet` default `"tspl"` (or reject anything other than `"tspl"` / `"escpos"`) so a direct native call cannot silently switch to the ESC/POS geometry engine that ignores `heightMm`.
+  - [ ] **6.4b Label X / MiniX / GD985** (contract C): pad the bitmap to exact label dots so height is enforced; bake offsets into the bitmap; remove the dead `commandMap`; read `is304Dpi` / `getPrintWidth`; register a `DeviceForbiddenListener` so a licence rejection is visible (the behaviour on rejection and the `asKey` are per `SDKS.md` Q2). Needs 6.1's decoupling decision. **Our-bridge:** `isAvailable` must surface init failure (`ensureSdkInitialized` currently swallows); pass `threshold` into Floyd–Steinberg (cutoff is hardcoded 128; JS 145 never applies while `dither` defaults true); settle `printPngLabel` with a timeout (`'sent-unconfirmed'` or `'failed'`) instead of hanging if the SDK never callbacks; add `OnDestroy` to unregister the discovery `BroadcastReceiver` and disconnect.
+  - [ ] **6.4c Tez / Shakti** (contract C): connect path per `SDKS.md` Q1. Vendor authorization is required to use `connect(DeviceItem)` legally. Independently, if the workaround is kept, construct the concrete `commandApi` class `〇Ooo.〇o0〇o0(String)` — the current reflective call targets the abstract type **(hardware: confirm with logcat first — this is the next hardware action)**. Replace the 15 s timer success with `'sent-unconfirmed'`; define whole-mm `CreatePage` handling (pad vs. round); read `Command.DPI()`. Needs 6.1's decoupling decision. **Our-bridge:** stop hardcoding `isAvailable { true }` (this is module availability, not `getStatus`, which already sends `get_status()`); add `OnDestroy` to release scanner and printer state.
+  - [ ] **6.4d Tejas / Rudra (TD-404)** (contract B): consume the 6.3 generator; keep our own RFCOMM (drop the unused SDK); dots/mm per the `SDKS.md` Q6 caliper measurement; TCP 9100 from the phone only if Q9 puts it in scope (that also triggers the 6.6 alternate-key work).
+  - [ ] **6.4e Josh** (contract A): choose pixel vs. mm-job vs. vector path per `SDKS.md` Q4; keep the 0.01 mm gap conversion (fixed 2026-09-23) and confirm feed on hardware; take DPI from `getPrinterInfo().deviceDPI`; collapse the 4-strategy fallback so a partial send can't double-print (record the `DataEnded` 200 ms false-success fallback in the same pass — bytes transmitted is not a printed label); native vs. baked offsets per Q8. **Our-bridge:** recycle the page bitmap on timeout and `!lastPrintSuccess` as well as success; split horizontal vs vertical alignment in `containFitToPage` / `submitMmJob` (`"left"` currently also forces `top = 0`).
+  - **Why this order differs from `SDKS.md`'s difficulty ranking** (TD-404 → Dev → Josh → Label X → Tez): the rollout order was set by request on 2026-09-23 and isn't derived from the SDK evidence. Consequences to plan for:
+    - 6.4b and 6.4c can't be finished until 6.1's Tez ↔ Label X decision and `SDKS.md` Q1–Q3 are made, so those decisions are on the critical path early.
+    - TD-404, the adapter we already control end-to-end, comes fourth, so the shared generator (6.3) is first exercised on Dev.
+    - Josh comes last, so its gap-unit fix stays hardware-unconfirmed until 6.4e unless it is tested earlier.
+- [ ] **Task 6.5:** Hardware Capability Discovery:
+  - Query resolution and head width at connect through each adapter's `capabilities()`: Dev `CP_Printer_GetPrinterResolutionInfo`, Josh `getPrinterInfo()`, Label X `is304Dpi` / `getPrintWidth`, Tez `Command.DPI()`. TD-404 stays on profile or user selection (its `addQueryPrinterType()` response format is undocumented).
+  - Store the discovered values in the calibration profile; fall back to the `print-spec.ts` profile and record the source.
+- [ ] **Task 6.6:** Calibration Profile Store in `src/lib/printer/calibration-store.ts`:
+  - Migrate the existing `printCalibration` entries from `src/stores/printer-store.ts` without losing saved offsets.
+  - Profile: `hOffsetMm`, `vOffsetMm`, density, speed, detected DPI, head width, DPI source, firmware / model string, last-calibrated date.
+  - **Key strategy (open question, `SDKS.md` Q8):** Bluetooth MAC for Bluetooth printers (today's behaviour). **TD-404 over Wi-Fi/TCP needs an alternate key**, because it has no Bluetooth MAC and its IP isn't stable. Candidates are the printer serial or Wi-Fi MAC (neither documented for TD-404) or a user-assigned name. iOS, if in scope, needs a serial-based key. The store must support more than one key type from the start.
+- [ ] **Task 6.7:** Guided Calibration Wizard (extends `src/app/calibration-print.tsx`):
+  - Add "Calibrate Printer" to printer settings.
+  - Steps: (1) print the existing mm-true proof, (2) enter the measured X / Y error, (3) save to the profile and print a confirmation proof. Optionally add density and speed steps.
 
 #### 5. Robustness Verification & Quality Gates
-- **Physical Caliper Verification:** Calibrate a connected printer using the wizard. Print a 40×20mm border box. Measure top, bottom, left, and right margins with digital calipers. All margins must match designed positions within ±0.2mm.
-- **Multi-Device Test:** Switch connection between two different physical printers (e.g. Dev printer and Tez printer); verify each loads its own independent calibration profile without manual intervention.
+- **Golden-Byte Tests:** the TSPL and ESC/POS generator output for fixed jobs (fractional mm sizes, both DPIs, gap / black-mark / continuous) matches checked-in byte fixtures.
+- **Adapter Contract Tests:** each adapter runs against a mock transport or SDK shim and receives the correct units (e.g. Josh gap `300` for 3 mm, not `3`), with no scale factor other than 1.0, and returns a `'confirmed' | 'sent-unconfirmed' | 'failed'` outcome, never a timer-based success.
+- **Isolation Test:** each adapter module can be excluded from the build and the remaining four still build and pass their contract tests. (Today, excluding Label X would break Tez.)
+- **Migration Test:** existing `printCalibration` entries survive the move to `calibration-store.ts` unchanged.
+- **Release Build Gate:** from a fresh `expo prebuild`, a minify-on release APK builds; inspect it for exactly one intended `libPrinterNative.so` per ABI (by SHA-1), and print one label on each of the five families.
+- **Tez Connect Gate (hardware):** logcat on connect shows no `commandApi setup failed`, and a printed proof matches the design.
+- **Physical Caliper Verification (per family):** after calibration, print a 40×20 mm border box. Top, bottom, left and right margins must match the design within ±0.2 mm. Repeat at 203 and 300/304 DPI where the family has both.
+- **Multi-Device Test:** switch between two physical printers; each loads its own profile, with no cross-applied offsets.
+- **Failure-Signal Test:** power off or disconnect mid-job on each family. The app reports failure (or "unconfirmed"), never success.
 
 ---
 

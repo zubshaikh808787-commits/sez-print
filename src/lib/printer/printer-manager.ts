@@ -3307,8 +3307,7 @@ class PrinterManager {
         const profile = this.getActivePrinterProfile();
         const dpi = joshEffectiveDpi(options.dpi ?? profile.dpi);
         const gapType = joshGapTypeFromMedia(options.media ?? 'gap');
-        const gapLength =
-          options.gapMm != null ? Math.max(0, Math.round(options.gapMm)) : 3;
+        const gapLength = options.gapMm != null ? Math.max(0, options.gapMm) : 3;
         console.info(
           `[JOSH-PRINT-P1:PREFLIGHT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm dpi=${dpi} gapType=${gapType} gap=${gapLength}mm density=${options.density ?? 'auto'} speed=${options.speed ?? 'auto'} offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
         );
