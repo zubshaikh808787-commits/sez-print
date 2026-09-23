@@ -46,7 +46,7 @@ import {
   normalizeDocumentElements,
   scaleDocumentToSize,
 } from '@/lib/element-sizing';
-import { labelElementsOverlap } from '@/lib/editor/safe-mode';
+import { labelOverlapRegionsMm, overlapBannerPositionsPx } from '@/lib/editor/safe-mode';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
 import { GridSpacingPopover } from '@/components/editor/grid-spacing-popover';
 import { requestEditorGridToggle } from '@/lib/editor/editor-grid-toggle';
@@ -1006,10 +1006,20 @@ export default function EditScreen() {
     () => doc.elements.filter((el) => selectedIds.includes(el.id)),
     [doc.elements, selectedIds],
   );
-  const elementsOverlap = useMemo(
-    () => Boolean(editorSettings.safeMode) && labelElementsOverlap(doc.elements),
+  const overlapRegionsMm = useMemo(
+    () => (editorSettings.safeMode ? labelOverlapRegionsMm(doc.elements) : []),
     [editorSettings.safeMode, doc.elements],
   );
+  const overlapBannerPositions = useMemo(() => {
+    if (overlapRegionsMm.length === 0 || pxPerMM <= 0) return [];
+    return overlapBannerPositionsPx(
+      overlapRegionsMm,
+      pxPerMM,
+      canvasWidthPx || 1,
+      canvasHeightPx || 1,
+      RULER_SIZE,
+    );
+  }, [overlapRegionsMm, pxPerMM, canvasWidthPx, canvasHeightPx]);
   const isMultiSelect = selectedIds.length > 1;
 
   const docRef = useRef(doc);
@@ -3060,16 +3070,17 @@ export default function EditScreen() {
                   />
                 </View>
               </View>
-              {elementsOverlap ? (
+              {overlapBannerPositions.map((pos, index) => (
                 <View
+                  key={`overlap-${index}-${Math.round(pos.left)}-${Math.round(pos.top)}`}
                   pointerEvents="none"
                   style={[
                     styles.overlapBanner,
-                    { top: RULER_SIZE + 6, left: RULER_SIZE + 8 },
+                    { top: pos.top, left: pos.left },
                   ]}>
                   <Text style={styles.overlapBannerText}>Elements overlap</Text>
                 </View>
-              ) : null}
+              ))}
             </Animated.View>
           </View>
         </View>
@@ -3786,7 +3797,6 @@ const styles = StyleSheet.create({
   },
   overlapBanner: {
     position: 'absolute',
-    right: 8,
     zIndex: 40,
     alignItems: 'center',
     backgroundColor: '#FEF3C7',
