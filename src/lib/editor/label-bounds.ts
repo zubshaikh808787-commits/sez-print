@@ -45,12 +45,10 @@ export function roundMm(value: number): number {
  * Clamps element position and size strictly inside canvas bounds [0..widthMm, 0..heightMm].
  *
  * Modes:
- * - 'e': Fixes left at box.left (never changes). Clamps width to [minMm, canvas.widthMm - left].
- *        If naturalHeight > available vertical space, nudges top upward into headroom.
- *        If naturalHeight > canvas.heightMm even at top = 0, sets overflowed = true and caps height at canvas.heightMm.
- * - 's': Fixes top at box.top initially. If naturalHeight/box.height > available space, nudges top upward.
- *        If naturalHeight > canvas.heightMm, sets overflowed = true and caps height at canvas.heightMm.
- * - 'body': Clamps whole box position inside [0, canvas.widthMm - width] and [0, canvas.heightMm - height].
+ * - 'e' / 's': Origin (left, top) is never rewritten. Size is capped to remaining canvas
+ *        from that origin. If naturalHeight exceeds remaining height, overflowed is true
+ *        and height is capped — top does not nudge.
+ * - 'body': Clamps whole box position (repositioning is the point of a move/drag).
  */
 export function clampToLabelBounds(
   box: BoxMm,
@@ -71,48 +69,31 @@ export function clampToLabelBounds(
     : undefined;
   let overflowed = false;
 
-  if (opts.anchor === 'e') {
-    // 1. Fix left — MUST NEVER move during an 'e' resize
-    left = Math.min(left, canvasW - minMm);
+  if (opts.anchor === 'e' || opts.anchor === 's') {
+    const originLeft = left;
+    const originTop = top;
+    const maxAllowedWidth = Math.max(minMm, canvasW - originLeft);
+    const maxAllowedHeight = Math.max(minMm, canvasH - originTop);
 
-    // 2. Width is clamped strictly to the remaining space from the fixed left edge
-    const maxAllowedWidth = Math.max(minMm, canvasW - left);
-    width = Math.max(minMm, Math.min(width, maxAllowedWidth));
-
-    // 3. Vertical & auto-height handling (ONLY applies when naturalHeight is provided, e.g. text reflow)
-    if (naturalH !== undefined) {
-      const targetH = Math.max(minMm, naturalH);
-      if (top + targetH > canvasH) {
-        // Nudge upward into available headroom
-        top = Math.max(0, canvasH - targetH);
-      }
-      if (targetH > canvasH) {
-        overflowed = true;
-        height = canvasH;
-        top = 0;
+    if (opts.anchor === 'e') {
+      width = Math.max(minMm, Math.min(width, maxAllowedWidth));
+      if (naturalH !== undefined) {
+        const targetH = Math.max(minMm, naturalH);
+        overflowed = targetH > maxAllowedHeight;
+        height = Math.max(minMm, Math.min(targetH, maxAllowedHeight));
       } else {
+        height = Math.max(minMm, Math.min(height, maxAllowedHeight));
         overflowed = false;
-        height = targetH;
-        top = Math.max(0, Math.min(top, canvasH - height));
       }
     } else {
-      // Non-text elements or fixed-height elements: top and height MUST remain unchanged during width resize
-      top = Math.max(0, Math.min(top, canvasH - minMm));
-      height = Math.max(minMm, Math.min(height, canvasH - top));
-      overflowed = false;
+      const targetH = Math.max(minMm, naturalH ?? height);
+      overflowed = targetH > maxAllowedHeight;
+      height = Math.max(minMm, Math.min(targetH, maxAllowedHeight));
+      width = Math.max(minMm, Math.min(width, maxAllowedWidth));
     }
-  } else if (opts.anchor === 's') {
-    // 1. Fix top — MUST NEVER move during an 's' (bottom-handle) resize
-    top = Math.max(0, Math.min(top, canvasH - minMm));
 
-    // 2. Height is clamped strictly to the remaining available space below the fixed top edge
-    const maxAllowedHeight = Math.max(minMm, canvasH - top);
-    const targetH = Math.max(minMm, naturalH ?? height);
-    height = Math.max(minMm, Math.min(targetH, maxAllowedHeight));
-    overflowed = targetH > maxAllowedHeight;
-
-    // 3. Width handling
-    width = Math.max(minMm, width);
+    left = originLeft;
+    top = originTop;
   } else {
     // 'body' drag: allows elements to bleed or move partially outside the label canvas
     width = Math.max(minMm, width);

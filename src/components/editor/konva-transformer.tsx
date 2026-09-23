@@ -29,12 +29,8 @@ import { mmToPx, pxToMm } from '@/lib/label-coordinate-system';
 import { grabOffsetMm } from '@/lib/editor/view-transform';
 import { createFrameThrottled } from '@/lib/editor/drag-layer';
 import {
-  applyGroupResizeMemberWorklet,
-  resizeBehaviorToCode,
-} from '@/lib/editor/group-resize';
-import {
   aspectRatioOf,
-  boundBoxMm,
+  resizeMemberByScale,
   resizePolicyFor,
   type ResizeAnchor,
   type ResizeBehavior,
@@ -81,38 +77,21 @@ export type KonvaTransformerProps = {
   mediaShape?: MediaShape;
   liveBounds?: LiveRulerBounds;
   deselectGesture?: GestureType;
+  activeSelectedIdSv?: SharedValue<string>;
   topBarSelectionVisibleSv?: SharedValue<number>;
   bottomPanelVisibleSv?: SharedValue<number>;
-  /** Multi-select body-drag preview delta (mm). Followers apply; anchor drives via gesture. */
-  groupDragDeltaLeftMm?: SharedValue<number>;
-  groupDragDeltaTopMm?: SharedValue<number>;
-  groupDragAnchorIdSv?: SharedValue<string>;
-  /** 1 when selectedIds.length > 1 — enables group-drag preview on body pan. */
-  groupDragEligibleSv?: SharedValue<number>;
-  /** Incremented when committed props land and drag preview can tear down. */
-  transformSettlePulseSv?: SharedValue<number>;
-  /** Frozen at settle time so follower fold is order-independent across instances. */
-  groupDragSettleAnchorIdSv?: SharedValue<string>;
-  groupDragSettleDeltaLeftSv?: SharedValue<number>;
-  groupDragSettleDeltaTopSv?: SharedValue<number>;
-  groupResizeEligibleSv?: SharedValue<number>;
-  groupResizeReadySv?: SharedValue<number>;
-  groupResizeAnchorIdSv?: SharedValue<string>;
-  groupResizeScaleXSv?: SharedValue<number>;
-  groupResizeScaleYSv?: SharedValue<number>;
-  groupResizeHandleSv?: SharedValue<number>;
-  groupResizeFixedOriginLeftMm?: SharedValue<number>;
-  groupResizeFixedOriginTopMm?: SharedValue<number>;
-  groupResizeMinScaleXSv?: SharedValue<number>;
-  groupResizeMaxScaleXSv?: SharedValue<number>;
-  groupResizeMinScaleYSv?: SharedValue<number>;
-  groupResizeMaxScaleYSv?: SharedValue<number>;
-  groupResizeSettleAnchorIdSv?: SharedValue<string>;
-  groupResizeSettleScaleXSv?: SharedValue<number>;
-  groupResizeSettleScaleYSv?: SharedValue<number>;
-  groupResizeSettleHandleSv?: SharedValue<number>;
-  groupResizeSettleFixedOriginLeftMm?: SharedValue<number>;
-  groupResizeSettleFixedOriginTopMm?: SharedValue<number>;
+  multipleMode?: boolean;
+  /** 1 when selectedIds.length > 1 */
+  groupEligibleSv?: SharedValue<number>;
+  groupAnchorIdSv?: SharedValue<string>;
+  groupDeltaLeftMm?: SharedValue<number>;
+  groupDeltaTopMm?: SharedValue<number>;
+  groupScaleXSv?: SharedValue<number>;
+  groupScaleYSv?: SharedValue<number>;
+  /** 0 = east, 1 = south */
+  groupHandleSv?: SharedValue<number>;
+  groupScaleMinSv?: SharedValue<number>;
+  groupScaleMaxSv?: SharedValue<number>;
   onGroupResizeHandleBegin?: (handle: 'e' | 's') => void;
   /** 1 when Safe Mode is on — drags may leave the label, then spring back on release. */
   safeModeSv?: SharedValue<number>;
@@ -139,6 +118,15 @@ export type KonvaTransformerProps = {
 const HIT_TARGET_PX = 36;
 const TOOLTIP_MS = 80;
 
+/**
+ * Drag activation / tap tolerance — restored to the 6b97449 "deliberate drag" feel.
+ * A finger must travel >10px before the element starts following (kills sudden-drag
+ * on what was meant to be a tap), and a gesture that ends under 20px of travel snaps
+ * back and is treated as a tap/select rather than a committed move.
+ */
+const DRAG_ACTIVATE_DIST_SQ_PX = 100; // (10px)^2
+const TAP_MAX_DIST_SQ_PX = 400; // (20px)^2
+
 /** Standard double-tap window. Wider gaps are two unrelated taps, not a double tap. */
 const DOUBLE_TAP_MAX_GAP_MS = 300;
 /** Soft overshoot so a Safe Mode release outside the label settles back inside. */
@@ -150,6 +138,27 @@ const DOUBLE_TAP_MIN_GAP_MS = 30;
 const DOUBLE_TAP_MAX_DIST_PX = 32;
 /** Dedupes the native, UI-thread, and JS-thread detectors firing for one gesture. */
 const DOUBLE_TAP_DEDUPE_MS = 350;
+
+function asResizeBehavior(value: string | ResizeBehavior): ResizeBehavior {
+  'worklet';
+  if (value === 'aspect' || value === 'square' || value === 'height' || value === 'width') {
+    return value;
+  }
+  return 'width';
+}
+
+function logMultiTransformBox(
+  phase: string,
+  id: string,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+) {
+  console.log(
+    `[multi-transform] ${phase} ${id} l=${left.toFixed(2)} t=${top.toFixed(2)} w=${width.toFixed(2)} h=${height.toFixed(2)}`,
+  );
+}
 
 type HandlePosition = ResizeAnchor;
 
@@ -168,34 +177,19 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   mediaShape,
   liveBounds,
   deselectGesture,
+  activeSelectedIdSv,
   topBarSelectionVisibleSv,
   bottomPanelVisibleSv,
-  groupDragDeltaLeftMm,
-  groupDragDeltaTopMm,
-  groupDragAnchorIdSv,
-  groupDragEligibleSv,
-  transformSettlePulseSv,
-  groupDragSettleAnchorIdSv,
-  groupDragSettleDeltaLeftSv,
-  groupDragSettleDeltaTopSv,
-  groupResizeEligibleSv,
-  groupResizeReadySv,
-  groupResizeAnchorIdSv,
-  groupResizeScaleXSv,
-  groupResizeScaleYSv,
-  groupResizeHandleSv,
-  groupResizeFixedOriginLeftMm,
-  groupResizeFixedOriginTopMm,
-  groupResizeMinScaleXSv,
-  groupResizeMaxScaleXSv,
-  groupResizeMinScaleYSv,
-  groupResizeMaxScaleYSv,
-  groupResizeSettleAnchorIdSv,
-  groupResizeSettleScaleXSv,
-  groupResizeSettleScaleYSv,
-  groupResizeSettleHandleSv,
-  groupResizeSettleFixedOriginLeftMm,
-  groupResizeSettleFixedOriginTopMm,
+  multipleMode = false,
+  groupEligibleSv,
+  groupAnchorIdSv,
+  groupDeltaLeftMm,
+  groupDeltaTopMm,
+  groupScaleXSv,
+  groupScaleYSv,
+  groupHandleSv,
+  groupScaleMinSv,
+  groupScaleMaxSv,
   onGroupResizeHandleBegin,
   onSelect,
   onOpenPanel,
@@ -288,16 +282,12 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const anchorStartLeftMmSv = useSharedValue(finiteMm(element.left));
   const anchorStartTopMmSv = useSharedValue(finiteMm(element.top));
   const hasMovedSv = useSharedValue(false);
-  const followerFoldedSv = useSharedValue(0);
-  const followerResizeFoldedSv = useSharedValue(0);
-  const followerResizeStartLeftMmSv = useSharedValue(0);
-  const followerResizeStartTopMmSv = useSharedValue(0);
-  const followerResizeStartWidthMmSv = useSharedValue(0);
-  const followerResizeStartHeightMmSv = useSharedValue(0);
-  const resizeBehaviorECodeSv = useSharedValue(resizeBehaviorToCode(resizePolicy.behavior.e));
-  const resizeBehaviorSCodeSv = useSharedValue(resizeBehaviorToCode(resizePolicy.behavior.s));
-  const followerLiveLeftPxSv = useSharedValue(0);
-  const followerLiveTopPxSv = useSharedValue(0);
+  const followerStartLeftMmSv = useSharedValue(finiteMm(element.left));
+  const followerStartTopMmSv = useSharedValue(finiteMm(element.top));
+  const followerStartWidthMmSv = useSharedValue(sizeMm.width);
+  const followerStartHeightMmSv = useSharedValue(sizeMm.height);
+  const resizeBehaviorESv = useSharedValue(resizePolicy.behavior.e ?? 'none');
+  const resizeBehaviorSSv = useSharedValue(resizePolicy.behavior.s ?? 'none');
   const beginTimeSv = useSharedValue(0);
   const tooltipRef = useRef<TooltipHandle | null>(null);
   const lastTooltipAt = useRef(0);
@@ -325,6 +315,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     charSpacingSv.value = textCharSpacing;
     boldSv.value = textBold;
     verticalDisplaySv.value = textVerticalDisplay;
+    resizeBehaviorESv.value = resizePolicy.behavior.e ?? 'none';
+    resizeBehaviorSSv.value = resizePolicy.behavior.s ?? 'none';
   }, [
     padZoom,
     sizeMm.width,
@@ -360,129 +352,22 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     charSpacingSv,
     boldSv,
     verticalDisplaySv,
+    resizeBehaviorESv,
+    resizeBehaviorSSv,
+    resizePolicy.behavior.e,
+    resizePolicy.behavior.s,
   ]);
-
-  const tracePropsSync = useCallback(
-    (info: {
-      phase: 'skip' | 'apply';
-      reason: string;
-      tPropsSync: number;
-      elementLeftMm: number;
-      elementTopMm: number;
-      originLeftPx: number;
-      originTopPx: number;
-      baseLeftPx: number;
-      baseTopPx: number;
-      followerFolded: number;
-      groupDragActive: boolean;
-      isInteracting: boolean;
-    }) => {
-      if (!__DEV__) return;
-      console.log('[group-drag-props-sync]', element.id, info);
-    },
-    [element.id],
-  );
 
   useEffect(() => {
     // Don't clobber an in-progress gesture. A gesture folds its own final
-    // position/size into these shared values synchronously as soon as it ends
-    // (see the `onEnd` handlers below), so by the time this effect sees the
-    // matching props update, it's just reasserting the value already on screen.
-    const groupDragActive = Boolean(
-      groupDragAnchorIdSv?.value &&
-        groupDragAnchorIdSv.value !== '' &&
+    // position/size into these shared values synchronously as soon as it ends.
+    const groupActive = Boolean(
+      groupAnchorIdSv?.value &&
+        groupAnchorIdSv.value !== '' &&
         selectedSv.value,
     );
-    const groupResizeActive = Boolean(
-      groupResizeAnchorIdSv?.value &&
-        groupResizeAnchorIdSv.value !== '' &&
-        selectedSv.value,
-    );
-    const tPropsSync = Date.now();
-    if (isInteracting.value || groupDragActive || groupResizeActive) {
-      if (__DEV__) {
-        tracePropsSync({
-          phase: 'skip',
-          reason: isInteracting.value
-            ? 'isInteracting'
-            : groupDragActive
-              ? 'groupDragActive'
-              : 'groupResizeActive',
-          tPropsSync,
-          elementLeftMm: finiteMm(element.left),
-          elementTopMm: finiteMm(element.top),
-          originLeftPx: originLeftSv.value,
-          originTopPx: originTopSv.value,
-          baseLeftPx,
-          baseTopPx,
-          followerFolded: followerFoldedSv.value,
-          groupDragActive,
-          isInteracting: isInteracting.value,
-        });
-      }
+    if (isInteracting.value || groupActive) {
       return;
-    }
-
-    // After settle fold, keep the baked origin until committed props match it.
-    if (followerFoldedSv.value === 1) {
-      const foldedLeftMm = pxToMm(originLeftSv.value, pxPerMMSafe);
-      const foldedTopMm = pxToMm(originTopSv.value, pxPerMMSafe);
-      if (
-        Math.abs(finiteMm(element.left) - foldedLeftMm) > 0.005 ||
-        Math.abs(finiteMm(element.top) - foldedTopMm) > 0.005
-      ) {
-        if (__DEV__) {
-          tracePropsSync({
-            phase: 'skip',
-            reason: 'followerFolded_propsMismatch',
-            tPropsSync,
-            elementLeftMm: finiteMm(element.left),
-            elementTopMm: finiteMm(element.top),
-            originLeftPx: originLeftSv.value,
-            originTopPx: originTopSv.value,
-            baseLeftPx,
-            baseTopPx,
-            followerFolded: followerFoldedSv.value,
-            groupDragActive,
-            isInteracting: isInteracting.value,
-          });
-        }
-        return;
-      }
-      followerFoldedSv.value = 0;
-    }
-
-    if (followerResizeFoldedSv.value === 1) {
-      const foldedLeftMm = pxToMm(originLeftSv.value, pxPerMMSafe);
-      const foldedTopMm = pxToMm(originTopSv.value, pxPerMMSafe);
-      const foldedWMm = pxToMm(animW.value, pxPerMMSafe);
-      const foldedHMm = pxToMm(animH.value, pxPerMMSafe);
-      if (
-        Math.abs(finiteMm(element.left) - foldedLeftMm) > 0.005 ||
-        Math.abs(finiteMm(element.top) - foldedTopMm) > 0.005 ||
-        Math.abs(finiteMm(sizeMm.width) - foldedWMm) > 0.005 ||
-        Math.abs(finiteMm(sizeMm.height) - foldedHMm) > 0.005
-      ) {
-        return;
-      }
-      followerResizeFoldedSv.value = 0;
-    }
-
-    if (__DEV__) {
-      tracePropsSync({
-        phase: 'apply',
-        reason: 'sync',
-        tPropsSync,
-        elementLeftMm: finiteMm(element.left),
-        elementTopMm: finiteMm(element.top),
-        originLeftPx: originLeftSv.value,
-        originTopPx: originTopSv.value,
-        baseLeftPx,
-        baseTopPx,
-        followerFolded: followerFoldedSv.value,
-        groupDragActive,
-        isInteracting: isInteracting.value,
-      });
     }
 
     transX.value = 0;
@@ -495,8 +380,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     startW.value = baseWidthPx;
     startH.value = baseHeightPx;
     liftSv.value = 1;
-    followerFoldedSv.value = 0;
-    followerResizeFoldedSv.value = 0;
   }, [
     element.left,
     element.top,
@@ -516,53 +399,15 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     animH,
     animRot,
     isInteracting,
-    groupDragAnchorIdSv,
-    groupResizeAnchorIdSv,
+    groupAnchorIdSv,
     selectedSv,
-    followerFoldedSv,
-    followerResizeFoldedSv,
-    tracePropsSync,
-    pxPerMMSafe,
     startW,
     startH,
     liftSv,
   ]);
 
-  const traceSettleFold = useCallback(
-    (info: {
-      role: 'follower' | 'anchor' | 'other';
-      settleAnchorId: string;
-      settleDeltaLeft: number;
-      settleDeltaTop: number;
-      tSettle: number;
-      liveLastLeftPx: number;
-      liveLastTopPx: number;
-      originBeforeFoldLeftPx: number;
-      originBeforeFoldTopPx: number;
-      settleResultLeftPx: number;
-      settleResultTopPx: number;
-      jumpPxLeft: number;
-      jumpPxTop: number;
-    }) => {
-      if (!__DEV__) return;
-      console.log('[group-drag-settle]', element.id, {
-        role: info.role,
-        settleAnchorId: info.settleAnchorId,
-        settleDeltaMm: { left: info.settleDeltaLeft, top: info.settleDeltaTop },
-        tSettle: info.tSettle,
-        LIVE_LAST_FRAME: { leftPx: info.liveLastLeftPx, topPx: info.liveLastTopPx },
-        SETTLE_RESULT: { leftPx: info.settleResultLeftPx, topPx: info.settleResultTopPx },
-        JUMP_PX: { left: info.jumpPxLeft, top: info.jumpPxTop },
-        originBeforeFoldPx: {
-          left: info.originBeforeFoldLeftPx,
-          top: info.originBeforeFoldTopPx,
-        },
-      });
-    },
-    [element.id],
-  );
-
   const lastTapRef = useRef({ id: '', time: 0 });
+  const pendingRemoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callbacksRef = useRef({
     onSelect,
     onOpenPanel,
@@ -573,6 +418,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     onTransformEnd,
     onQuickRotate,
     selected,
+    multipleMode,
   });
   callbacksRef.current = {
     onSelect,
@@ -584,6 +430,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     onTransformEnd,
     onQuickRotate,
     selected,
+    multipleMode,
   };
   const pointerToMmRef = useRef(pointerToMm);
   pointerToMmRef.current = pointerToMm;
@@ -625,12 +472,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       );
       const roundedLeft = clamped.left;
       const roundedTop = clamped.top;
+      logMultiTransformBox('commit', element.id, roundedLeft, roundedTop, widthMm, heightMm);
 
       if (Math.abs(roundedLeft - element.left) < 0.005 && Math.abs(roundedTop - element.top) < 0.005) {
-        if (groupDragAnchorIdSv?.value === element.id) {
-          groupDragAnchorIdSv.value = '';
-          if (groupDragDeltaLeftMm) groupDragDeltaLeftMm.value = 0;
-          if (groupDragDeltaTopMm) groupDragDeltaTopMm.value = 0;
+        if (groupAnchorIdSv?.value === element.id) {
+          groupAnchorIdSv.value = '';
+          if (groupDeltaLeftMm) groupDeltaLeftMm.value = 0;
+          if (groupDeltaTopMm) groupDeltaTopMm.value = 0;
         }
         isInteracting.value = false;
         return;
@@ -644,7 +492,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         heightMm: roundMm(heightMm),
         rotation: ((Math.round(baseRotation) % 360) + 360) % 360,
       });
-      // isInteracting stays true until edit.tsx settles committed props and pulses transformSettlePulseSv.
+      isInteracting.value = false;
     },
     [
       sizeMm.width,
@@ -656,199 +504,80 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       element.top,
       baseRotation,
       isInteracting,
-      groupDragAnchorIdSv,
-      groupDragDeltaLeftMm,
-      groupDragDeltaTopMm,
+      groupAnchorIdSv,
+      groupDeltaLeftMm,
+      groupDeltaTopMm,
     ],
   );
 
   useAnimatedReaction(
-    () => groupDragAnchorIdSv?.value ?? '',
+    () => groupAnchorIdSv?.value ?? '',
     (anchorId) => {
       if (anchorId && anchorId !== element.id && selectedSv.value) {
-        followerFoldedSv.value = 0;
-      }
-    },
-  );
-
-  useAnimatedReaction(
-    () => groupResizeAnchorIdSv?.value ?? '',
-    (anchorId) => {
-      if (anchorId && anchorId !== element.id && selectedSv.value) {
-        followerResizeStartLeftMmSv.value =
+        followerStartLeftMmSv.value =
           (originLeftSv.value + transX.value) / sxSv.value;
-        followerResizeStartTopMmSv.value =
+        followerStartTopMmSv.value =
           (originTopSv.value + transY.value) / sySv.value;
-        followerResizeStartWidthMmSv.value = animW.value / sxSv.value;
-        followerResizeStartHeightMmSv.value = animH.value / sySv.value;
-        followerResizeFoldedSv.value = 0;
+        followerStartWidthMmSv.value = animW.value / sxSv.value;
+        followerStartHeightMmSv.value = animH.value / sySv.value;
       }
     },
   );
 
   useAnimatedReaction(
     () => ({
-      anchorId: groupDragAnchorIdSv?.value ?? '',
-      deltaLeft: groupDragDeltaLeftMm?.value ?? 0,
-      deltaTop: groupDragDeltaTopMm?.value ?? 0,
-      originLeft: originLeftSv.value,
-      originTop: originTopSv.value,
-      offsetX: transX.value,
-      offsetY: transY.value,
-      sx: sxSv.value,
-      sy: sySv.value,
-      selected: selectedSv.value,
-      folded: followerFoldedSv.value,
+      anchor: groupAnchorIdSv?.value ?? '',
+      dx: groupDeltaLeftMm?.value ?? 0,
+      dy: groupDeltaTopMm?.value ?? 0,
+      scaleX: groupScaleXSv?.value ?? 1,
+      scaleY: groupScaleYSv?.value ?? 1,
+      handle: groupHandleSv?.value ?? 0,
     }),
     (cur) => {
-      if (
-        cur.folded === 0 &&
-        cur.anchorId &&
-        cur.anchorId !== element.id &&
-        cur.selected &&
-        (Math.abs(cur.deltaLeft) > 0.0005 || Math.abs(cur.deltaTop) > 0.0005)
-      ) {
-        followerLiveLeftPxSv.value =
-          cur.originLeft + cur.offsetX + cur.deltaLeft * cur.sx;
-        followerLiveTopPxSv.value =
-          cur.originTop + cur.offsetY + cur.deltaTop * cur.sy;
+      if (!cur.anchor || cur.anchor === element.id || !selectedSv.value) {
+        return;
       }
-    },
-  );
-
-  useAnimatedReaction(
-    () => transformSettlePulseSv?.value ?? -1,
-    (current, previous) => {
-      if (previous === null || current === previous) return;
-
-      const settleAnchorId = groupDragSettleAnchorIdSv?.value ?? '';
-      const settleDeltaLeft = groupDragSettleDeltaLeftSv?.value ?? 0;
-      const settleDeltaTop = groupDragSettleDeltaTopSv?.value ?? 0;
-      const settleResizeAnchor = groupResizeSettleAnchorIdSv?.value ?? '';
-      const tSettle = Date.now();
-      const liveLastLeftPx = followerLiveLeftPxSv.value;
-      const liveLastTopPx = followerLiveTopPxSv.value;
-      const originBeforeFoldLeftPx = originLeftSv.value;
-      const originBeforeFoldTopPx = originTopSv.value;
-
-      const isFollowerFold =
-        Boolean(
-          settleAnchorId &&
-            settleAnchorId !== element.id &&
-            selectedSv.value &&
-            (Math.abs(settleDeltaLeft) > 0.0005 || Math.abs(settleDeltaTop) > 0.0005),
-        );
-
-      if (isFollowerFold) {
-        originLeftSv.value = originLeftSv.value + settleDeltaLeft * sxSv.value;
-        originTopSv.value = originTopSv.value + settleDeltaTop * sySv.value;
-        followerFoldedSv.value = 1;
-      }
-
-      const isResizeFollowerFold = Boolean(
-        settleResizeAnchor &&
-          settleResizeAnchor !== element.id &&
-          selectedSv.value &&
-          groupResizeSettleScaleXSv &&
-          groupResizeSettleScaleYSv &&
-          groupResizeSettleFixedOriginLeftMm &&
-          groupResizeSettleFixedOriginTopMm,
-      );
-
-      if (isResizeFollowerFold) {
-        const handle = groupResizeSettleHandleSv?.value === 1 ? 1 : 0;
-        const behaviorCode =
-          handle === 0 ? resizeBehaviorECodeSv.value : resizeBehaviorSCodeSv.value;
-        const scaleX = groupResizeSettleScaleXSv!.value;
-        const scaleY = groupResizeSettleScaleYSv!.value;
-        let naturalHeightMm: number | undefined;
-        if (isAutoTextSv.value && handle === 0) {
-          const proposedWidth =
-            followerResizeStartWidthMmSv.value * scaleX;
-          naturalHeightMm = computeTextElementHeightMm({
-            text: textContentSv.value,
-            fontSize: textFontSizeSv.value,
-            widthMm: proposedWidth,
-            autoWrapping: autoWrappingSv.value,
-            lineSpacing: lineSpacingSv.value,
-            charSpacing: charSpacingSv.value,
-            bold: boldSv.value,
-            verticalDisplay: verticalDisplaySv.value,
-          });
-        }
-        const box = applyGroupResizeMemberWorklet({
-          startLeft: followerResizeStartLeftMmSv.value,
-          startTop: followerResizeStartTopMmSv.value,
-          startWidth: followerResizeStartWidthMmSv.value,
-          startHeight: followerResizeStartHeightMmSv.value,
-          fixedOriginLeft: groupResizeSettleFixedOriginLeftMm!.value,
-          fixedOriginTop: groupResizeSettleFixedOriginTopMm!.value,
-          scaleX,
-          scaleY,
-          handle,
-          behaviorCode,
-          aspect: aspectSv.value > 0 ? aspectSv.value : 1,
-          naturalHeightMm,
+      const handle: ResizeAnchor = cur.handle === 1 ? 's' : 'e';
+      const rawBehavior = handle === 'e' ? resizeBehaviorESv.value : resizeBehaviorSSv.value;
+      let naturalHeightMm: number | undefined;
+      if (isAutoTextSv.value && handle === 'e') {
+        naturalHeightMm = computeTextElementHeightMm({
+          text: textContentSv.value,
+          fontSize: textFontSizeSv.value,
+          widthMm: followerStartWidthMmSv.value * cur.scaleX,
+          autoWrapping: autoWrappingSv.value,
+          lineSpacing: lineSpacingSv.value,
+          charSpacing: charSpacingSv.value,
+          bold: boldSv.value,
+          verticalDisplay: verticalDisplaySv.value,
         });
-        originLeftSv.value = box.left * sxSv.value;
-        originTopSv.value = box.top * sySv.value;
-        animW.value = box.width * sxSv.value;
-        animH.value = box.height * sySv.value;
-        followerResizeFoldedSv.value = 1;
       }
-
-      const settleResultLeftPx = originLeftSv.value;
-      const settleResultTopPx = originTopSv.value;
-
-      runOnJS(traceSettleFold)({
-        role: isFollowerFold || isResizeFollowerFold
-          ? 'follower'
-          : settleAnchorId && settleAnchorId === element.id
-            ? 'anchor'
-            : settleResizeAnchor && settleResizeAnchor === element.id
-              ? 'anchor'
-              : 'other',
-        settleAnchorId: settleAnchorId || settleResizeAnchor,
-        settleDeltaLeft,
-        settleDeltaTop,
-        tSettle,
-        liveLastLeftPx,
-        liveLastTopPx,
-        originBeforeFoldLeftPx,
-        originBeforeFoldTopPx,
-        settleResultLeftPx,
-        settleResultTopPx,
-        jumpPxLeft: settleResultLeftPx - liveLastLeftPx,
-        jumpPxTop: settleResultTopPx - liveLastTopPx,
-      });
-
-      if (groupDragAnchorIdSv) {
-        groupDragAnchorIdSv.value = '';
-      }
-      if (groupDragDeltaLeftMm) {
-        groupDragDeltaLeftMm.value = 0;
-      }
-      if (groupDragDeltaTopMm) {
-        groupDragDeltaTopMm.value = 0;
-      }
-      if (settleResizeAnchor) {
-        if (groupResizeAnchorIdSv) {
-          groupResizeAnchorIdSv.value = '';
-        }
-        if (groupResizeScaleXSv) {
-          groupResizeScaleXSv.value = 1;
-        }
-        if (groupResizeScaleYSv) {
-          groupResizeScaleYSv.value = 1;
-        }
-        if (groupResizeSettleAnchorIdSv) {
-          groupResizeSettleAnchorIdSv.value = '';
-        }
-        if (groupResizeReadySv) {
-          groupResizeReadySv.value = 0;
-        }
-      }
-      isInteracting.value = false;
+      const start = {
+        left: followerStartLeftMmSv.value,
+        top: followerStartTopMmSv.value,
+        width: followerStartWidthMmSv.value,
+        height: followerStartHeightMmSv.value,
+      };
+      const box =
+        rawBehavior === 'none'
+          ? start
+          : resizeMemberByScale({
+              start,
+              handle,
+              behavior: asResizeBehavior(rawBehavior),
+              scaleX: cur.scaleX,
+              scaleY: cur.scaleY,
+              aspect: aspectSv.value > 0 ? aspectSv.value : 1,
+              minMm: minResizeMmSv.value,
+              canvas: { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
+              naturalHeightMm,
+            });
+      originLeftSv.value = (box.left + cur.dx) * sxSv.value;
+      originTopSv.value = (box.top + cur.dy) * sySv.value;
+      animW.value = Math.max(1, box.width * sxSv.value);
+      animH.value = Math.max(1, box.height * sySv.value);
+      transX.value = 0;
+      transY.value = 0;
     },
   );
 
@@ -897,7 +626,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     [pxPerMMSafe],
   );
 
-  /** Committed resize: millimetres via boundBoxMm, then written to the store. */
+  /** Committed resize: same resizeMemberByScale as live preview. Origin never moves. */
   const dispatchResizeCommit = useCallback(
     (handle: ResizeAnchor, nextWPx: number, nextHPx: number, rot: number) => {
       tooltipRef.current?.setText(null);
@@ -907,21 +636,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         return;
       }
       const start = resizeStartRef.current;
-      const next = boundBoxMm({
-        anchor: handle,
-        behavior,
-        start,
-        proposed: {
-          width: pxToMm(nextWPx, pxPerMMSafe),
-          height: pxToMm(nextHPx, pxPerMMSafe),
-        },
-        aspect: aspectRatioOf(element),
-        minMm: resizePolicy.minMm,
-        canvas: { widthMm: canvasWidthMm, heightMm: canvasHeightMm },
-      });
+      const startW = Math.max(0.001, start.width);
+      const startH = Math.max(0.001, start.height);
+      const scaleX = pxToMm(nextWPx, pxPerMMSafe) / startW;
+      const scaleY = pxToMm(nextHPx, pxPerMMSafe) / startH;
 
       let fontSize: number | undefined;
-      let finalHeightMm = next.height;
+      let naturalHeightMm: number | undefined;
       if (element.type === 'text' || element.type === 'degrees') {
         const rawText =
           element.contentType === 'Data Source' && element.columnNameContent
@@ -930,60 +651,48 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               ? element.text
               : element.content;
         const fs = 'fontSize' in element && typeof element.fontSize === 'number' ? element.fontSize : 12;
-        const naturalHeightMm = computeTextElementHeightMm({
+        naturalHeightMm = computeTextElementHeightMm({
           text: rawText,
           fontSize: fs,
-          widthMm: next.width,
+          widthMm: startW * scaleX,
           autoWrapping: element.autoWrapping ?? 'Word',
           lineSpacing: element.lineSpacing ?? '1.0',
           charSpacing: element.charSpacing ?? 0,
           bold: element.bold ?? false,
           verticalDisplay: element.verticalDisplay ?? false,
         });
-        const clamped = clampToLabelBounds(
-          { left: next.left, top: next.top, width: next.width, height: naturalHeightMm },
-          { widthMm: canvasWidthMm, heightMm: canvasHeightMm },
-          { anchor: handle === 's' ? 's' : 'e', minMm: resizePolicy.minMm, naturalHeight: naturalHeightMm },
-        );
-        next.left = clamped.left;
-        next.top = clamped.top;
-        next.width = clamped.width;
-        finalHeightMm = clamped.height;
         fontSize = fs;
       } else if (element.type === 'time') {
         const fs = 'fontSize' in element && typeof element.fontSize === 'number' ? element.fontSize : 12;
-        const naturalHeightMm = textBlockHeightMm(fs, 1);
-        const clamped = clampToLabelBounds(
-          { left: next.left, top: next.top, width: next.width, height: naturalHeightMm },
-          { widthMm: canvasWidthMm, heightMm: canvasHeightMm },
-          { anchor: handle === 's' ? 's' : 'e', minMm: resizePolicy.minMm, naturalHeight: naturalHeightMm },
-        );
-        next.left = clamped.left;
-        next.top = clamped.top;
-        next.width = clamped.width;
-        finalHeightMm = clamped.height;
+        naturalHeightMm = textBlockHeightMm(fs, 1);
         fontSize = fs;
       }
 
-      const rotation = ((Math.round(rot) % 360) + 360) % 360;
+      const next = resizeMemberByScale({
+        start,
+        handle,
+        behavior,
+        scaleX,
+        scaleY,
+        aspect: aspectRatioOf(element),
+        minMm: resizePolicy.minMm,
+        canvas: { widthMm: canvasWidthMm, heightMm: canvasHeightMm },
+        naturalHeightMm,
+      });
 
-      const isGroupResize =
-        groupResizeEligibleSv?.value === 1 &&
-        groupResizeReadySv?.value === 1 &&
-        groupResizeAnchorIdSv?.value === element.id;
+      const rotation = ((Math.round(rot) % 360) + 360) % 360;
+      logMultiTransformBox('commit', element.id, next.left, next.top, next.width, next.height);
 
       callbacksRef.current.onTransformEnd({
         id: element.id,
         leftMm: next.left,
         topMm: next.top,
         widthMm: next.width,
-        heightMm: finalHeightMm,
+        heightMm: next.height,
         rotation,
         fontSize,
       });
-      if (!isGroupResize) {
-        isInteracting.value = false;
-      }
+      isInteracting.value = false;
     },
     [
       pxPerMMSafe,
@@ -992,9 +701,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       element,
       resizePolicy,
       isInteracting,
-      groupResizeEligibleSv,
-      groupResizeReadySv,
-      groupResizeAnchorIdSv,
     ],
   );
 
@@ -1011,21 +717,18 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   );
 
   const bodyHitSlop = useMemo(() => {
-    const target = 42;
+    const target = 48;
+    const minSlop = 16;
     return {
-      top: Math.max(12, (target - Math.max(1, baseHeightPx)) / 2),
-      bottom: Math.max(12, (target - Math.max(1, baseHeightPx)) / 2),
-      left: Math.max(12, (target - Math.max(1, baseWidthPx)) / 2),
-      right: Math.max(12, (target - Math.max(1, baseWidthPx)) / 2),
+      top: Math.max(minSlop, (target - Math.max(1, baseHeightPx)) / 2),
+      bottom: Math.max(minSlop, (target - Math.max(1, baseHeightPx)) / 2),
+      left: Math.max(minSlop, (target - Math.max(1, baseWidthPx)) / 2),
+      right: Math.max(minSlop, (target - Math.max(1, baseWidthPx)) / 2),
     };
   }, [baseHeightPx, baseWidthPx]);
 
   const notifyTransformStartJS = useCallback((id: string, kind: TransformStartKind) => {
     callbacksRef.current.onTransformStart?.(id, kind);
-  }, []);
-
-  const notifySelectJS = useCallback((id: string) => {
-    callbacksRef.current.onSelect(id);
   }, []);
 
   const notifyGroupResizeHandleBeginJS = useCallback(
@@ -1036,7 +739,27 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   );
 
   const lastDoubleTapTimeRef = useRef(0);
+  const lastLiveLogAtRef = useRef(0);
+  const cancelPendingRemoveJS = useCallback(() => {
+    if (pendingRemoveTimerRef.current) {
+      clearTimeout(pendingRemoveTimerRef.current);
+      pendingRemoveTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => cancelPendingRemoveJS(), [cancelPendingRemoveJS]);
+
+  const logLiveBoxJS = useCallback(
+    (left: number, top: number, width: number, height: number) => {
+      const now = Date.now();
+      if (now - lastLiveLogAtRef.current < 200) return;
+      lastLiveLogAtRef.current = now;
+      logMultiTransformBox('live', element.id, left, top, width, height);
+    },
+    [element.id],
+  );
+
   const triggerDoubleTapJS = useCallback(() => {
+    cancelPendingRemoveJS();
     const now = Date.now();
     if (now - lastDoubleTapTimeRef.current < DOUBLE_TAP_DEDUPE_MS) {
       return;
@@ -1045,7 +768,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     lastTapRef.current = { id: '', time: 0 };
     lastTapTimeSv.value = 0;
 
-    callbacksRef.current.onSelect(element.id);
+    if (!callbacksRef.current.selected) {
+      callbacksRef.current.onSelect(element.id);
+    }
 
     const openWithAnchor = (anchor?: ElementAnchorRect) => {
       if (
@@ -1078,7 +803,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     } else {
       openWithAnchor();
     }
-  }, [element.id, element.type, lastTapTimeSv]);
+  }, [element.id, element.type, lastTapTimeSv, cancelPendingRemoveJS]);
 
   const triggerSingleTapJS = useCallback(() => {
     const now = Date.now();
@@ -1089,17 +814,29 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       now - last.time < DOUBLE_TAP_MAX_GAP_MS;
     lastTapRef.current = { id: element.id, time: now };
 
-    callbacksRef.current.onSelect(element.id);
-
     if (isDouble) {
       lastTapRef.current = { id: '', time: 0 };
       triggerDoubleTapJS();
+      return;
     }
-  }, [element.id, triggerDoubleTapJS]);
+
+    // Add-to-selection is immediate. Remove is deferred so a second tap
+    // within the double-tap window can open quick-edit instead of toggling off.
+    if (callbacksRef.current.multipleMode && callbacksRef.current.selected) {
+      cancelPendingRemoveJS();
+      pendingRemoveTimerRef.current = setTimeout(() => {
+        pendingRemoveTimerRef.current = null;
+        callbacksRef.current.onSelect(element.id);
+      }, DOUBLE_TAP_MAX_GAP_MS);
+      return;
+    }
+
+    callbacksRef.current.onSelect(element.id);
+  }, [element.id, triggerDoubleTapJS, cancelPendingRemoveJS]);
 
   const bodyDragGesture = useMemo(() => {
     const pan = Gesture.Pan()
-      .enabled(!element.lockMovement)
+      .enabled(true)
       .minDistance(0)
       .maxPointers(1)
       .shouldCancelWhenOutside(false)
@@ -1116,10 +853,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         beginTimeSv.value = tNow;
         hasMovedSv.value = false;
         tapHandledSv.value = false;
-        // Immediately prime interaction and selection on UI thread
-        // so positions and visual boundary are locked instantly with 0ms delay
-        isInteracting.value = true;
-        selectedSv.value = true;
+        // Instant selection ring on the UI thread — no JS bridge hop on touch-down.
+        if (activeSelectedIdSv) {
+          activeSelectedIdSv.value = element.id;
+        }
         if (topBarSelectionVisibleSv) {
           topBarSelectionVisibleSv.value = 1;
         }
@@ -1130,40 +867,48 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         originTopSv.value = originTopSv.value + transY.value;
         transX.value = 0;
         transY.value = 0;
-
-        if (
-          groupDragEligibleSv &&
-          groupDragEligibleSv.value === 1 &&
-          groupDragAnchorIdSv &&
-          groupDragDeltaLeftMm &&
-          groupDragDeltaTopMm
-        ) {
-          groupDragAnchorIdSv.value = element.id;
-          anchorStartLeftMmSv.value = originLeftSv.value / sxSv.value;
-          anchorStartTopMmSv.value = originTopSv.value / sySv.value;
-          groupDragDeltaLeftMm.value = 0;
-          groupDragDeltaTopMm.value = 0;
-        }
-
-        // Prime JS selection + panel content immediately on touch-down, not after drag threshold.
-        runOnJS(notifySelectJS)(element.id);
       })
       .onStart((_e) => {
         'worklet';
-        isInteracting.value = true;
-        selectedSv.value = true;
       })
       .onUpdate((e) => {
         'worklet';
         const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
         if (!hasMovedSv.value) {
-          if (distSq < 100) {
-            // Less than 10px: stationary touch noise, ignore so taps are rock solid
+          if (element.lockMovement) {
+            return;
+          }
+          if (distSq < DRAG_ACTIVATE_DIST_SQ_PX) {
+            // Under 10px: stationary touch noise / tap intent — don't start dragging.
             return;
           }
           hasMovedSv.value = true;
+          isInteracting.value = true;
+          selectedSv.value = true;
           liftSv.value = DRAG_LIFT_OPACITY;
+          runOnJS(cancelPendingRemoveJS)();
+
+          if (
+            groupEligibleSv &&
+            groupEligibleSv.value === 1 &&
+            groupAnchorIdSv &&
+            groupDeltaLeftMm &&
+            groupDeltaTopMm
+          ) {
+            groupAnchorIdSv.value = element.id;
+            anchorStartLeftMmSv.value = originLeftSv.value / sxSv.value;
+            anchorStartTopMmSv.value = originTopSv.value / sySv.value;
+            groupDeltaLeftMm.value = 0;
+            groupDeltaTopMm.value = 0;
+            if (groupScaleXSv) groupScaleXSv.value = 1;
+            if (groupScaleYSv) groupScaleYSv.value = 1;
+          }
+
           runOnJS(notifyTransformStartJS)(element.id, 'move');
+        }
+
+        if (element.lockMovement) {
+          return;
         }
 
         const z = padZoomSv.value > 0 ? padZoomSv.value : 1;
@@ -1199,21 +944,23 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         }
 
         if (
-          groupDragAnchorIdSv &&
-          groupDragAnchorIdSv.value === element.id &&
-          groupDragDeltaLeftMm &&
-          groupDragDeltaTopMm
+          groupAnchorIdSv &&
+          groupAnchorIdSv.value === element.id &&
+          groupDeltaLeftMm &&
+          groupDeltaTopMm
         ) {
-          groupDragDeltaLeftMm.value = placed.left - anchorStartLeftMmSv.value;
-          groupDragDeltaTopMm.value = placed.top - anchorStartTopMmSv.value;
+          groupDeltaLeftMm.value = placed.left - anchorStartLeftMmSv.value;
+          groupDeltaTopMm.value = placed.top - anchorStartTopMmSv.value;
         }
+
+        runOnJS(logLiveBoxJS)(placed.left, placed.top, placed.width, placed.height);
       })
       .onEnd((e) => {
         'worklet';
         liftSv.value = 1;
-        // A real move (past the 10px noise gate) keeps its position.
-        // Treating short drags as taps snapped elements back when seating them on a corner.
-        const isTap = !hasMovedSv.value;
+        const distSq = e.translationX * e.translationX + e.translationY * e.translationY;
+        // Under 20px translation, or never crossed the drag threshold, or locked: treat as a tap.
+        const isTap = !hasMovedSv.value || distSq < TAP_MAX_DIST_SQ_PX || element.lockMovement;
 
         if (isTap) {
           tapHandledSv.value = true;
@@ -1222,14 +969,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           isInteracting.value = false;
 
           if (
-            groupDragAnchorIdSv &&
-            groupDragAnchorIdSv.value === element.id &&
-            groupDragDeltaLeftMm &&
-            groupDragDeltaTopMm
+            groupAnchorIdSv &&
+            groupAnchorIdSv.value === element.id &&
+            groupDeltaLeftMm &&
+            groupDeltaTopMm
           ) {
-            groupDragAnchorIdSv.value = '';
-            groupDragDeltaLeftMm.value = 0;
-            groupDragDeltaTopMm.value = 0;
+            groupAnchorIdSv.value = '';
+            groupDeltaLeftMm.value = 0;
+            groupDeltaTopMm.value = 0;
           }
 
           const tNow = Date.now();
@@ -1282,13 +1029,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               Math.abs(commitLeftPx - originLeftSv.value) > 0.5 ||
               Math.abs(commitTopPx - originTopSv.value) > 0.5;
             if (
-              groupDragAnchorIdSv &&
-              groupDragAnchorIdSv.value === element.id &&
-              groupDragDeltaLeftMm &&
-              groupDragDeltaTopMm
+              groupAnchorIdSv &&
+              groupAnchorIdSv.value === element.id &&
+              groupDeltaLeftMm &&
+              groupDeltaTopMm
             ) {
-              groupDragDeltaLeftMm.value = inside.left - anchorStartLeftMmSv.value;
-              groupDragDeltaTopMm.value = inside.top - anchorStartTopMmSv.value;
+              groupDeltaLeftMm.value = inside.left - anchorStartLeftMmSv.value;
+              groupDeltaTopMm.value = inside.top - anchorStartTopMmSv.value;
             }
             if (liveBounds && bounce) {
               liveBounds.leftMm.value = withSpring(inside.left, SAFE_MODE_SPRING);
@@ -1328,14 +1075,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           tapHandledSv.value = true;
 
           if (
-            groupDragAnchorIdSv &&
-            groupDragAnchorIdSv.value === element.id &&
-            groupDragDeltaLeftMm &&
-            groupDragDeltaTopMm
+            groupAnchorIdSv &&
+            groupAnchorIdSv.value === element.id &&
+            groupDeltaLeftMm &&
+            groupDeltaTopMm
           ) {
-            groupDragAnchorIdSv.value = '';
-            groupDragDeltaLeftMm.value = 0;
-            groupDragDeltaTopMm.value = 0;
+            groupAnchorIdSv.value = '';
+            groupDeltaLeftMm.value = 0;
+            groupDeltaTopMm.value = 0;
           }
 
           const tNow = Date.now();
@@ -1397,35 +1144,21 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     lastTapYSv,
     tapHandledSv,
     notifyTransformStartJS,
-    notifySelectJS,
-    groupDragEligibleSv,
-    groupDragAnchorIdSv,
-    groupDragDeltaLeftMm,
-    groupDragDeltaTopMm,
+    activeSelectedIdSv,
+    groupEligibleSv,
+    groupAnchorIdSv,
+    groupDeltaLeftMm,
+    groupDeltaTopMm,
+    groupScaleXSv,
+    groupScaleYSv,
     anchorStartLeftMmSv,
     anchorStartTopMmSv,
     triggerDoubleTapJS,
     triggerSingleTapJS,
     safeModeSv,
+    cancelPendingRemoveJS,
+    logLiveBoxJS,
   ]);
-
-  const doubleTapGesture = useMemo(() => {
-    return Gesture.Tap()
-      .numberOfTaps(2)
-      .maxDuration(500)
-      .maxDelay(DOUBLE_TAP_MAX_GAP_MS)
-      .hitSlop(bodyHitSlop)
-      .runOnJS(true)
-      .onEnd((_e, success) => {
-        if (success) {
-          triggerDoubleTapJS();
-        }
-      });
-  }, [bodyHitSlop, triggerDoubleTapJS]);
-
-  const composedElementGesture = useMemo(() => {
-    return Gesture.Simultaneous(bodyDragGesture, doubleTapGesture);
-  }, [bodyDragGesture, doubleTapGesture]);
 
   const createHandleGesture = useCallback(
     (handle: HandlePosition, behavior: ResizeBehavior) => {
@@ -1460,24 +1193,24 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             startH.value,
           );
           runOnJS(notifyTransformStartJS)(element.id, 'resize');
+          if (
+            groupEligibleSv &&
+            groupEligibleSv.value === 1 &&
+            groupAnchorIdSv &&
+            groupScaleXSv &&
+            groupScaleYSv
+          ) {
+            groupAnchorIdSv.value = element.id;
+            groupScaleXSv.value = 1;
+            groupScaleYSv.value = 1;
+            if (groupHandleSv) groupHandleSv.value = handle === 's' ? 1 : 0;
+            if (groupDeltaLeftMm) groupDeltaLeftMm.value = 0;
+            if (groupDeltaTopMm) groupDeltaTopMm.value = 0;
+            runOnJS(notifyGroupResizeHandleBeginJS)(handle);
+          }
         })
         .onUpdate((e) => {
           'worklet';
-          if (
-            groupResizeEligibleSv &&
-            groupResizeReadySv &&
-            groupResizeAnchorIdSv &&
-            groupResizeScaleXSv &&
-            groupResizeScaleYSv &&
-            groupResizeEligibleSv.value === 1 &&
-            groupResizeReadySv.value === 1 &&
-            groupResizeAnchorIdSv.value === ''
-          ) {
-            groupResizeAnchorIdSv.value = element.id;
-            groupResizeScaleXSv.value = 1;
-            groupResizeScaleYSv.value = 1;
-            runOnJS(notifyGroupResizeHandleBeginJS)(handle);
-          }
           const z = padZoomSv.value > 0 ? padZoomSv.value : 1;
           const rad = (startRot.value * Math.PI) / 180;
           const cos = Math.cos(rad);
@@ -1487,184 +1220,107 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           const dx = rawDx * cos + rawDy * sin;
           const dy = -rawDx * sin + rawDy * cos;
 
-          const originW = startW.value;
-          const originH = startH.value;
-          const originLeft = originLeftSv.value;
-          const originTop = originTopSv.value;
-          const canvasWPx = canvasWMmSv.value * sxSv.value;
-          const canvasHPx = canvasHMmSv.value * sySv.value;
-          const minPx = Math.max(2, minResizeMmSv.value * sxSv.value);
-          const aspect = aspectSv.value > 0 ? aspectSv.value : 1;
-
-          let nw = originW;
-          let nh = originH;
-          let left = originLeft;
-          let top = originTop;
-
-          if (behavior === 'width' && handle === 'e') {
-            const proposedWPx = originW + dx;
-            const proposedWMm = Math.max(minResizeMmSv.value, proposedWPx / sxSv.value);
-            let naturalHMm: number | undefined;
-
-            if (isAutoTextSv.value) {
-              naturalHMm = computeTextElementHeightMm({
-                text: textContentSv.value,
-                fontSize: textFontSizeSv.value,
-                widthMm: proposedWMm,
-                autoWrapping: autoWrappingSv.value,
-                lineSpacing: lineSpacingSv.value,
-                charSpacing: charSpacingSv.value,
-                bold: boldSv.value,
-                verticalDisplay: verticalDisplaySv.value,
-              });
+          const originW = Math.max(1, startW.value);
+          const originH = Math.max(1, startH.value);
+          let scaleX = 1;
+          let scaleY = 1;
+          if (handle === 'e') {
+            scaleX = (originW + dx) / originW;
+            if (behavior === 'square' || behavior === 'aspect') {
+              scaleY = scaleX;
             }
-
-            const clamped = clampToLabelBounds(
-              {
-                left: originLeft / sxSv.value,
-                top: originTop / sySv.value,
-                width: proposedWMm,
-                height: originH / sySv.value,
-              },
-              { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
-              { anchor: 'e', minMm: minResizeMmSv.value, naturalHeight: naturalHMm },
-            );
-
-            nw = clamped.width * sxSv.value;
-            nh = clamped.height * sySv.value;
-            left = clamped.left * sxSv.value;
-            top = clamped.top * sySv.value;
-          } else if (behavior === 'height' && handle === 's') {
-            const proposedHPx = originH + dy;
-            const proposedHMm = Math.max(minResizeMmSv.value, proposedHPx / sySv.value);
-
-            const clamped = clampToLabelBounds(
-              {
-                left: originLeft / sxSv.value,
-                top: originTop / sySv.value,
-                width: originW / sxSv.value,
-                height: proposedHMm,
-              },
-              { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
-              { anchor: 's', minMm: minResizeMmSv.value },
-            );
-
-            nw = clamped.width * sxSv.value;
-            nh = clamped.height * sySv.value;
-            left = clamped.left * sxSv.value;
-            top = clamped.top * sySv.value;
-          } else if (behavior === 'square') {
-            const maxAvailable = Math.max(minPx, Math.min(canvasWPx - originLeft, canvasHPx - originTop));
-            const proposed = handle === 'e' ? originW + dx : originH + dy;
-            const targetSize = Math.max(minPx, Math.min(maxAvailable, proposed));
-            nw = targetSize;
-            nh = targetSize;
-            left = originLeft;
-            top = originTop;
-          } else if (behavior === 'aspect') {
-            if (handle === 'e') {
-              const maxW = Math.max(minPx, Math.min(canvasWPx - originLeft, (canvasHPx - originTop) * aspect));
-              const proposedW = originW + dx;
-              const targetW = Math.max(minPx, Math.min(maxW, proposedW));
-              nw = targetW;
-              nh = targetW / aspect;
-              left = originLeft;
-              top = originTop;
-            } else {
-              const maxH = Math.max(minPx, Math.min(canvasHPx - originTop, (canvasWPx - originLeft) / aspect));
-              const proposedH = originH + dy;
-              const targetH = Math.max(minPx, Math.min(maxH, proposedH));
-              nw = targetH * aspect;
-              nh = targetH;
-              left = originLeft;
-              top = originTop;
+          } else {
+            scaleY = (originH + dy) / originH;
+            if (behavior === 'square' || behavior === 'aspect') {
+              scaleX = scaleY;
             }
           }
 
           if (
-            groupResizeEligibleSv &&
-            groupResizeReadySv &&
-            groupResizeAnchorIdSv &&
-            groupResizeScaleXSv &&
-            groupResizeScaleYSv &&
-            groupResizeMinScaleXSv &&
-            groupResizeMaxScaleXSv &&
-            groupResizeMinScaleYSv &&
-            groupResizeMaxScaleYSv &&
-            groupResizeEligibleSv.value === 1 &&
-            groupResizeReadySv.value === 1 &&
-            groupResizeAnchorIdSv.value === element.id
+            groupEligibleSv &&
+            groupEligibleSv.value === 1 &&
+            groupAnchorIdSv &&
+            groupAnchorIdSv.value === element.id &&
+            groupScaleXSv &&
+            groupScaleYSv &&
+            groupScaleMinSv &&
+            groupScaleMaxSv
           ) {
-            const startWMm = startW.value / sxSv.value;
-            const startHMm = startH.value / sySv.value;
-            const propW = nw / sxSv.value;
-            const propH = nh / sySv.value;
-            let proposedScaleX = 1;
-            let proposedScaleY = 1;
+            const driving = handle === 'e' ? scaleX : scaleY;
+            const capped = Math.min(
+              Math.max(driving, groupScaleMinSv.value),
+              groupScaleMaxSv.value,
+            );
             if (handle === 'e') {
-              proposedScaleX = propW / Math.max(0.001, startWMm);
-              if (behavior === 'square' || behavior === 'aspect') {
-                proposedScaleY = proposedScaleX;
-              }
+              scaleX = capped;
+              scaleY = behavior === 'square' || behavior === 'aspect' ? capped : 1;
             } else {
-              proposedScaleY = propH / Math.max(0.001, startHMm);
-              if (behavior === 'square' || behavior === 'aspect') {
-                proposedScaleX = proposedScaleY;
-              }
+              scaleY = capped;
+              scaleX = behavior === 'square' || behavior === 'aspect' ? capped : 1;
             }
-            const axesLinked =
-              Math.abs(proposedScaleX - proposedScaleY) < 1e-9 &&
-              Math.abs(proposedScaleX - 1) > 1e-9;
-            let scaleX = proposedScaleX;
-            let scaleY = proposedScaleY;
-            if (handle === 'e') {
-              scaleX = Math.min(
-                Math.max(scaleX, groupResizeMinScaleXSv.value),
-                groupResizeMaxScaleXSv.value,
-              );
-              scaleY = axesLinked ? scaleX : 1;
-            } else {
-              scaleY = Math.min(
-                Math.max(scaleY, groupResizeMinScaleYSv.value),
-                groupResizeMaxScaleYSv.value,
-              );
-              scaleX = axesLinked ? scaleY : 1;
-            }
-            groupResizeScaleXSv.value = scaleX;
-            groupResizeScaleYSv.value = scaleY;
+            groupScaleXSv.value = scaleX;
+            groupScaleYSv.value = scaleY;
+            if (groupHandleSv) groupHandleSv.value = handle === 's' ? 1 : 0;
           }
 
-          animW.value = nw;
-          animH.value = nh;
-          transX.value = left - originLeftSv.value;
-          transY.value = top - originTopSv.value;
+          const startWMm = originW / sxSv.value;
+          const startHMm = originH / sySv.value;
+          let naturalHeightMm: number | undefined;
+          if (isAutoTextSv.value && handle === 'e') {
+            naturalHeightMm = computeTextElementHeightMm({
+              text: textContentSv.value,
+              fontSize: textFontSizeSv.value,
+              widthMm: startWMm * scaleX,
+              autoWrapping: autoWrappingSv.value,
+              lineSpacing: lineSpacingSv.value,
+              charSpacing: charSpacingSv.value,
+              bold: boldSv.value,
+              verticalDisplay: verticalDisplaySv.value,
+            });
+          }
+
+          const box = resizeMemberByScale({
+            start: {
+              left: originLeftSv.value / sxSv.value,
+              top: originTopSv.value / sySv.value,
+              width: startWMm,
+              height: startHMm,
+            },
+            handle,
+            behavior,
+            scaleX,
+            scaleY,
+            aspect: aspectSv.value > 0 ? aspectSv.value : 1,
+            minMm: minResizeMmSv.value,
+            canvas: { widthMm: canvasWMmSv.value, heightMm: canvasHMmSv.value },
+            naturalHeightMm,
+          });
+
+          animW.value = Math.max(1, box.width * sxSv.value);
+          animH.value = Math.max(1, box.height * sySv.value);
+          transX.value = 0;
+          transY.value = 0;
 
           if (liveBounds) {
-            liveBounds.leftMm.value = left / sxSv.value;
-            liveBounds.topMm.value = top / sySv.value;
-            liveBounds.widthMm.value = nw / sxSv.value;
-            liveBounds.heightMm.value = nh / sySv.value;
+            liveBounds.leftMm.value = box.left;
+            liveBounds.topMm.value = box.top;
+            liveBounds.widthMm.value = box.width;
+            liveBounds.heightMm.value = box.height;
             liveBounds.visible.value = true;
           }
+
+          runOnJS(logLiveBoxJS)(box.left, box.top, box.width, box.height);
 
           const now = Date.now();
           if (now - lastTooltipTimeSv.value >= 80) {
             lastTooltipTimeSv.value = now;
-            runOnJS(updateTooltipJS)(nw, nh);
+            runOnJS(updateTooltipJS)(animW.value, animH.value);
           }
         })
         .onEnd(() => {
           'worklet';
-          // Fold the gesture offset into the origin now, so the view is
-          // already sitting at its final pixel size/position.
-          originLeftSv.value = originLeftSv.value + transX.value;
-          originTopSv.value = originTopSv.value + transY.value;
           transX.value = 0;
           transY.value = 0;
-          // isInteracting stays true until the JS-side commit callback below
-          // has actually queued the store update — otherwise an unrelated
-          // re-render landing in the gap could snap this back to the stale
-          // pre-resize props.
           runOnJS(dispatchResizeCommit)(handle, animW.value, animH.value, animRot.value);
         });
     },
@@ -1689,15 +1345,15 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       updateTooltipJS,
       notifyTransformStartJS,
       notifyGroupResizeHandleBeginJS,
-      groupResizeEligibleSv,
-      groupResizeReadySv,
-      groupResizeAnchorIdSv,
-      groupResizeScaleXSv,
-      groupResizeScaleYSv,
-      groupResizeMinScaleXSv,
-      groupResizeMaxScaleXSv,
-      groupResizeMinScaleYSv,
-      groupResizeMaxScaleYSv,
+      groupEligibleSv,
+      groupAnchorIdSv,
+      groupScaleXSv,
+      groupScaleYSv,
+      groupHandleSv,
+      groupScaleMinSv,
+      groupScaleMaxSv,
+      groupDeltaLeftMm,
+      groupDeltaTopMm,
       bodyDragGesture,
       padZoomSv,
       canvasWMmSv,
@@ -1716,6 +1372,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       verticalDisplaySv,
       liveBounds,
       lastTooltipTimeSv,
+      logLiveBoxJS,
     ],
   );
 
@@ -1729,83 +1386,23 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   }, [createHandleGesture, resizePolicy]);
 
   const containerStyle = useAnimatedStyle(() => {
-    let liveW = Math.max(1, animW.value);
-    let liveH = Math.max(1, animH.value);
-    let liveLeft = originLeftSv.value + transX.value;
-    let liveTop = originTopSv.value + transY.value;
+    const liveW = Math.max(1, animW.value);
+    const liveH = Math.max(1, animH.value);
+    const liveLeft = originLeftSv.value + transX.value;
+    const liveTop = originTopSv.value + transY.value;
     const liveRot = animRot.value;
-
-    const anchorId = groupDragAnchorIdSv?.value ?? '';
-    const deltaLeftMm = groupDragDeltaLeftMm?.value ?? 0;
-    const deltaTopMm = groupDragDeltaTopMm?.value ?? 0;
-    if (
-      followerFoldedSv.value === 0 &&
-      anchorId &&
-      anchorId !== element.id &&
-      selectedSv.value &&
-      (Math.abs(deltaLeftMm) > 0.0005 || Math.abs(deltaTopMm) > 0.0005)
-    ) {
-      liveLeft += deltaLeftMm * sxSv.value;
-      liveTop += deltaTopMm * sySv.value;
-    }
-
-    const resizeAnchorId = groupResizeAnchorIdSv?.value ?? '';
-    const scaleX = groupResizeScaleXSv?.value ?? 1;
-    const scaleY = groupResizeScaleYSv?.value ?? 1;
-    if (
-      followerResizeFoldedSv.value === 0 &&
-      resizeAnchorId &&
-      resizeAnchorId !== element.id &&
-      selectedSv.value &&
-      groupResizeFixedOriginLeftMm &&
-      groupResizeFixedOriginTopMm &&
-      (Math.abs(scaleX - 1) > 0.0001 || Math.abs(scaleY - 1) > 0.0001)
-    ) {
-      const handle = groupResizeHandleSv?.value === 1 ? 1 : 0;
-      const behaviorCode =
-        handle === 0 ? resizeBehaviorECodeSv.value : resizeBehaviorSCodeSv.value;
-      let naturalHeightMm: number | undefined;
-      if (isAutoTextSv.value && handle === 0) {
-        naturalHeightMm = computeTextElementHeightMm({
-          text: textContentSv.value,
-          fontSize: textFontSizeSv.value,
-          widthMm: followerResizeStartWidthMmSv.value * scaleX,
-          autoWrapping: autoWrappingSv.value,
-          lineSpacing: lineSpacingSv.value,
-          charSpacing: charSpacingSv.value,
-          bold: boldSv.value,
-          verticalDisplay: verticalDisplaySv.value,
-        });
-      }
-      const box = applyGroupResizeMemberWorklet({
-        startLeft: followerResizeStartLeftMmSv.value,
-        startTop: followerResizeStartTopMmSv.value,
-        startWidth: followerResizeStartWidthMmSv.value,
-        startHeight: followerResizeStartHeightMmSv.value,
-        fixedOriginLeft: groupResizeFixedOriginLeftMm.value,
-        fixedOriginTop: groupResizeFixedOriginTopMm.value,
-        scaleX,
-        scaleY,
-        handle,
-        behaviorCode,
-        aspect: aspectSv.value > 0 ? aspectSv.value : 1,
-        naturalHeightMm,
-      });
-      liveLeft = box.left * sxSv.value;
-      liveTop = box.top * sySv.value;
-      liveW = box.width * sxSv.value;
-      liveH = box.height * sySv.value;
-    }
+    const isPrimaryTouch = activeSelectedIdSv?.value === element.id;
+    const zBoost = isPrimaryTouch ? 100 : selectedSv.value ? 50 : 0;
 
     return {
-      position: 'absolute',
+      position: 'absolute' as const,
       left: liveLeft,
       top: liveTop,
       width: liveW,
       height: liveH,
       transform: [{ rotate: `${liveRot}deg` }],
       opacity: (element.opacity ?? 1) * liftSv.value,
-      zIndex: selectedSv.value ? 100 + (element.zIndex ?? 1) : (element.zIndex ?? 1),
+      zIndex: zBoost + (element.zIndex ?? 1),
     };
   });
 
@@ -1894,8 +1491,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const borderStrokeColor = isOverflowed ? '#EF4444' : selectionColor || CHROME_SELECTION_STROKE;
 
   const selectionOverlayStyle = useAnimatedStyle(() => {
+    const showChrome = selectedSv.value;
     return {
-      opacity: selectedSv.value ? 1 : 0,
+      opacity: showChrome ? 1 : 0,
+      pointerEvents: (showChrome ? 'box-none' : 'none') as 'box-none' | 'none',
     };
   });
 
@@ -1907,7 +1506,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
   return (
     <Animated.View ref={containerRef} style={containerStyle} collapsable={false}>
-      <GestureDetector gesture={composedElementGesture}>
+      <GestureDetector gesture={bodyDragGesture}>
         <View
           collapsable={false}
           style={styles.fillContainer}
@@ -1936,7 +1535,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       </GestureDetector>
 
       <Animated.View
-        pointerEvents={selected ? 'box-none' : 'none'}
         style={[StyleSheet.absoluteFill, selectionOverlayStyle]}>
         <View
           pointerEvents="none"
@@ -1980,6 +1578,32 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         ) : null}
       </Animated.View>
     </Animated.View>
+  );
+}, (prev, next) => {
+  return (
+    prev.element === next.element &&
+    prev.selected === next.selected &&
+    prev.pxPerMM === next.pxPerMM &&
+    prev.padZoom === next.padZoom &&
+    prev.selectionColor === next.selectionColor &&
+    prev.canvasWidthMm === next.canvasWidthMm &&
+    prev.canvasHeightMm === next.canvasHeightMm &&
+    prev.mediaShape === next.mediaShape &&
+    prev.liveBounds === next.liveBounds &&
+    prev.deselectGesture === next.deselectGesture &&
+    prev.activeSelectedIdSv === next.activeSelectedIdSv &&
+    prev.topBarSelectionVisibleSv === next.topBarSelectionVisibleSv &&
+    prev.bottomPanelVisibleSv === next.bottomPanelVisibleSv &&
+    prev.multipleMode === next.multipleMode &&
+    prev.groupEligibleSv === next.groupEligibleSv &&
+    prev.groupAnchorIdSv === next.groupAnchorIdSv &&
+    prev.groupDeltaLeftMm === next.groupDeltaLeftMm &&
+    prev.groupDeltaTopMm === next.groupDeltaTopMm &&
+    prev.groupScaleXSv === next.groupScaleXSv &&
+    prev.groupScaleYSv === next.groupScaleYSv &&
+    prev.groupHandleSv === next.groupHandleSv &&
+    prev.groupScaleMinSv === next.groupScaleMinSv &&
+    prev.groupScaleMaxSv === next.groupScaleMaxSv
   );
 });
 

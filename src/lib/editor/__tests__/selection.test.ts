@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   alignGroupBounds,
   clearSelection,
+  reduceMultipleModeToggle,
   reduceTapSelect,
   selectionFromIds,
   unionBounds,
@@ -28,17 +29,47 @@ test('reduceTapSelect multiple mode adds unselected element', () => {
   assert.deepEqual(next, { ids: ['a', 'b'], primaryId: 'b' });
 });
 
-test('reduceTapSelect multiple mode promotes already-selected without removing', () => {
+test('reduceTapSelect multiple mode removes already-selected element', () => {
   const next = reduceTapSelect({
     id: 'a',
     multipleMode: true,
     current: { ids: ['a', 'b'], primaryId: 'b' },
   });
-  assert.deepEqual(next, { ids: ['a', 'b'], primaryId: 'a' });
+  assert.deepEqual(next, { ids: ['b'], primaryId: 'b' });
+});
+
+test('reduceTapSelect multiple mode removing last member clears selection', () => {
+  const next = reduceTapSelect({
+    id: 'a',
+    multipleMode: true,
+    current: { ids: ['a'], primaryId: 'a' },
+  });
+  assert.deepEqual(next, { ids: [], primaryId: null });
+});
+
+test('reduceTapSelect multiple mode removing primary promotes remaining last id', () => {
+  const next = reduceTapSelect({
+    id: 'b',
+    multipleMode: true,
+    current: { ids: ['a', 'b', 'c'], primaryId: 'b' },
+  });
+  assert.deepEqual(next, { ids: ['a', 'c'], primaryId: 'c' });
 });
 
 test('clearSelection resets ids and primary', () => {
   assert.deepEqual(clearSelection(), { ids: [], primaryId: null });
+});
+
+test('reduceMultipleModeToggle ON carries a pre-existing single selection', () => {
+  const current = { ids: ['a'], primaryId: 'a' };
+  assert.deepEqual(reduceMultipleModeToggle(true, current), current);
+});
+
+test('reduceMultipleModeToggle OFF clears the whole selection', () => {
+  assert.deepEqual(
+    reduceMultipleModeToggle(false, { ids: ['a', 'b'], primaryId: 'b' }),
+    { ids: [], primaryId: null },
+  );
 });
 
 test('selectionFromIds picks last id as primary when omitted', () => {

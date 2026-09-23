@@ -38,34 +38,19 @@ type KonvaCanvasProps = {
   showGrid?: boolean;
   gridSpacingMm?: number;
   liveBounds?: LiveRulerBounds;
+  activeSelectedIdSv?: SharedValue<string>;
   topBarSelectionVisibleSv?: SharedValue<number>;
   bottomPanelVisibleSv?: SharedValue<number>;
-  groupDragDeltaLeftMm?: SharedValue<number>;
-  groupDragDeltaTopMm?: SharedValue<number>;
-  groupDragAnchorIdSv?: SharedValue<string>;
-  groupDragEligibleSv?: SharedValue<number>;
-  transformSettlePulseSv?: SharedValue<number>;
-  groupDragSettleAnchorIdSv?: SharedValue<string>;
-  groupDragSettleDeltaLeftSv?: SharedValue<number>;
-  groupDragSettleDeltaTopSv?: SharedValue<number>;
-  groupResizeEligibleSv?: SharedValue<number>;
-  groupResizeReadySv?: SharedValue<number>;
-  groupResizeAnchorIdSv?: SharedValue<string>;
-  groupResizeScaleXSv?: SharedValue<number>;
-  groupResizeScaleYSv?: SharedValue<number>;
-  groupResizeHandleSv?: SharedValue<number>;
-  groupResizeFixedOriginLeftMm?: SharedValue<number>;
-  groupResizeFixedOriginTopMm?: SharedValue<number>;
-  groupResizeMinScaleXSv?: SharedValue<number>;
-  groupResizeMaxScaleXSv?: SharedValue<number>;
-  groupResizeMinScaleYSv?: SharedValue<number>;
-  groupResizeMaxScaleYSv?: SharedValue<number>;
-  groupResizeSettleAnchorIdSv?: SharedValue<string>;
-  groupResizeSettleScaleXSv?: SharedValue<number>;
-  groupResizeSettleScaleYSv?: SharedValue<number>;
-  groupResizeSettleHandleSv?: SharedValue<number>;
-  groupResizeSettleFixedOriginLeftMm?: SharedValue<number>;
-  groupResizeSettleFixedOriginTopMm?: SharedValue<number>;
+  multipleMode?: boolean;
+  groupEligibleSv?: SharedValue<number>;
+  groupAnchorIdSv?: SharedValue<string>;
+  groupDeltaLeftMm?: SharedValue<number>;
+  groupDeltaTopMm?: SharedValue<number>;
+  groupScaleXSv?: SharedValue<number>;
+  groupScaleYSv?: SharedValue<number>;
+  groupHandleSv?: SharedValue<number>;
+  groupScaleMinSv?: SharedValue<number>;
+  groupScaleMaxSv?: SharedValue<number>;
   onGroupResizeHandleBegin?: (handle: 'e' | 's') => void;
   onSelect: (id: string) => void;
   onDeselectAll: () => void;
@@ -99,34 +84,19 @@ type ElementChrome = {
   mediaShape?: MediaShape;
   liveBounds?: LiveRulerBounds;
   deselectGesture?: GestureType;
+  activeSelectedIdSv?: SharedValue<string>;
   topBarSelectionVisibleSv?: SharedValue<number>;
   bottomPanelVisibleSv?: SharedValue<number>;
-  groupDragDeltaLeftMm?: SharedValue<number>;
-  groupDragDeltaTopMm?: SharedValue<number>;
-  groupDragAnchorIdSv?: SharedValue<string>;
-  groupDragEligibleSv?: SharedValue<number>;
-  transformSettlePulseSv?: SharedValue<number>;
-  groupDragSettleAnchorIdSv?: SharedValue<string>;
-  groupDragSettleDeltaLeftSv?: SharedValue<number>;
-  groupDragSettleDeltaTopSv?: SharedValue<number>;
-  groupResizeEligibleSv?: SharedValue<number>;
-  groupResizeReadySv?: SharedValue<number>;
-  groupResizeAnchorIdSv?: SharedValue<string>;
-  groupResizeScaleXSv?: SharedValue<number>;
-  groupResizeScaleYSv?: SharedValue<number>;
-  groupResizeHandleSv?: SharedValue<number>;
-  groupResizeFixedOriginLeftMm?: SharedValue<number>;
-  groupResizeFixedOriginTopMm?: SharedValue<number>;
-  groupResizeMinScaleXSv?: SharedValue<number>;
-  groupResizeMaxScaleXSv?: SharedValue<number>;
-  groupResizeMinScaleYSv?: SharedValue<number>;
-  groupResizeMaxScaleYSv?: SharedValue<number>;
-  groupResizeSettleAnchorIdSv?: SharedValue<string>;
-  groupResizeSettleScaleXSv?: SharedValue<number>;
-  groupResizeSettleScaleYSv?: SharedValue<number>;
-  groupResizeSettleHandleSv?: SharedValue<number>;
-  groupResizeSettleFixedOriginLeftMm?: SharedValue<number>;
-  groupResizeSettleFixedOriginTopMm?: SharedValue<number>;
+  multipleMode?: boolean;
+  groupEligibleSv?: SharedValue<number>;
+  groupAnchorIdSv?: SharedValue<string>;
+  groupDeltaLeftMm?: SharedValue<number>;
+  groupDeltaTopMm?: SharedValue<number>;
+  groupScaleXSv?: SharedValue<number>;
+  groupScaleYSv?: SharedValue<number>;
+  groupHandleSv?: SharedValue<number>;
+  groupScaleMinSv?: SharedValue<number>;
+  groupScaleMaxSv?: SharedValue<number>;
   onGroupResizeHandleBegin?: (handle: 'e' | 's') => void;
   onSelect: (id: string) => void;
   onOpenPanel: (id: string) => void;
@@ -170,34 +140,19 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           mediaShape={chrome.mediaShape}
           liveBounds={chrome.liveBounds}
           deselectGesture={chrome.deselectGesture}
+          activeSelectedIdSv={chrome.activeSelectedIdSv}
           topBarSelectionVisibleSv={chrome.topBarSelectionVisibleSv}
           bottomPanelVisibleSv={chrome.bottomPanelVisibleSv}
-          groupDragDeltaLeftMm={chrome.groupDragDeltaLeftMm}
-          groupDragDeltaTopMm={chrome.groupDragDeltaTopMm}
-          groupDragAnchorIdSv={chrome.groupDragAnchorIdSv}
-          groupDragEligibleSv={chrome.groupDragEligibleSv}
-          transformSettlePulseSv={chrome.transformSettlePulseSv}
-          groupDragSettleAnchorIdSv={chrome.groupDragSettleAnchorIdSv}
-          groupDragSettleDeltaLeftSv={chrome.groupDragSettleDeltaLeftSv}
-          groupDragSettleDeltaTopSv={chrome.groupDragSettleDeltaTopSv}
-          groupResizeEligibleSv={chrome.groupResizeEligibleSv}
-          groupResizeReadySv={chrome.groupResizeReadySv}
-          groupResizeAnchorIdSv={chrome.groupResizeAnchorIdSv}
-          groupResizeScaleXSv={chrome.groupResizeScaleXSv}
-          groupResizeScaleYSv={chrome.groupResizeScaleYSv}
-          groupResizeHandleSv={chrome.groupResizeHandleSv}
-          groupResizeFixedOriginLeftMm={chrome.groupResizeFixedOriginLeftMm}
-          groupResizeFixedOriginTopMm={chrome.groupResizeFixedOriginTopMm}
-          groupResizeMinScaleXSv={chrome.groupResizeMinScaleXSv}
-          groupResizeMaxScaleXSv={chrome.groupResizeMaxScaleXSv}
-          groupResizeMinScaleYSv={chrome.groupResizeMinScaleYSv}
-          groupResizeMaxScaleYSv={chrome.groupResizeMaxScaleYSv}
-          groupResizeSettleAnchorIdSv={chrome.groupResizeSettleAnchorIdSv}
-          groupResizeSettleScaleXSv={chrome.groupResizeSettleScaleXSv}
-          groupResizeSettleScaleYSv={chrome.groupResizeSettleScaleYSv}
-          groupResizeSettleHandleSv={chrome.groupResizeSettleHandleSv}
-          groupResizeSettleFixedOriginLeftMm={chrome.groupResizeSettleFixedOriginLeftMm}
-          groupResizeSettleFixedOriginTopMm={chrome.groupResizeSettleFixedOriginTopMm}
+          multipleMode={chrome.multipleMode}
+          groupEligibleSv={chrome.groupEligibleSv}
+          groupAnchorIdSv={chrome.groupAnchorIdSv}
+          groupDeltaLeftMm={chrome.groupDeltaLeftMm}
+          groupDeltaTopMm={chrome.groupDeltaTopMm}
+          groupScaleXSv={chrome.groupScaleXSv}
+          groupScaleYSv={chrome.groupScaleYSv}
+          groupHandleSv={chrome.groupHandleSv}
+          groupScaleMinSv={chrome.groupScaleMinSv}
+          groupScaleMaxSv={chrome.groupScaleMaxSv}
           onGroupResizeHandleBegin={chrome.onGroupResizeHandleBegin}
           onSelect={chrome.onSelect}
           onOpenPanel={chrome.onOpenPanel}
@@ -255,34 +210,19 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     showGrid = false,
     gridSpacingMm = DEFAULT_GRID_SPACING_MM,
     liveBounds,
+    activeSelectedIdSv,
     topBarSelectionVisibleSv,
     bottomPanelVisibleSv,
-    groupDragDeltaLeftMm,
-    groupDragDeltaTopMm,
-    groupDragAnchorIdSv,
-    groupDragEligibleSv,
-    transformSettlePulseSv,
-    groupDragSettleAnchorIdSv,
-    groupDragSettleDeltaLeftSv,
-    groupDragSettleDeltaTopSv,
-    groupResizeEligibleSv,
-    groupResizeReadySv,
-    groupResizeAnchorIdSv,
-    groupResizeScaleXSv,
-    groupResizeScaleYSv,
-    groupResizeHandleSv,
-    groupResizeFixedOriginLeftMm,
-    groupResizeFixedOriginTopMm,
-    groupResizeMinScaleXSv,
-    groupResizeMaxScaleXSv,
-    groupResizeMinScaleYSv,
-    groupResizeMaxScaleYSv,
-    groupResizeSettleAnchorIdSv,
-    groupResizeSettleScaleXSv,
-    groupResizeSettleScaleYSv,
-    groupResizeSettleHandleSv,
-    groupResizeSettleFixedOriginLeftMm,
-    groupResizeSettleFixedOriginTopMm,
+    multipleMode = false,
+    groupEligibleSv,
+    groupAnchorIdSv,
+    groupDeltaLeftMm,
+    groupDeltaTopMm,
+    groupScaleXSv,
+    groupScaleYSv,
+    groupHandleSv,
+    groupScaleMinSv,
+    groupScaleMaxSv,
     onGroupResizeHandleBegin,
     onSelect,
     onDeselectAll,
@@ -425,6 +365,9 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         .onEnd((_e, success) => {
           'worklet';
           if (success) {
+            if (activeSelectedIdSv) {
+              activeSelectedIdSv.value = '';
+            }
             if (topBarSelectionVisibleSv) {
               topBarSelectionVisibleSv.value = 0;
             }
@@ -434,7 +377,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
             runOnJS(onDeselectAll)();
           }
         }),
-    [onDeselectAll, topBarSelectionVisibleSv, bottomPanelVisibleSv],
+    [onDeselectAll, activeSelectedIdSv, topBarSelectionVisibleSv, bottomPanelVisibleSv],
   );
 
   const canvasWidthMm = isRatTailGeometry(doc.mediaGeometry)
@@ -464,34 +407,19 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       mediaShape: doc.mediaShape,
       liveBounds,
       deselectGesture,
+      activeSelectedIdSv,
       topBarSelectionVisibleSv,
       bottomPanelVisibleSv,
-      groupDragDeltaLeftMm,
-      groupDragDeltaTopMm,
-      groupDragAnchorIdSv,
-      groupDragEligibleSv,
-      transformSettlePulseSv,
-      groupDragSettleAnchorIdSv,
-      groupDragSettleDeltaLeftSv,
-      groupDragSettleDeltaTopSv,
-      groupResizeEligibleSv,
-      groupResizeReadySv,
-      groupResizeAnchorIdSv,
-      groupResizeScaleXSv,
-      groupResizeScaleYSv,
-      groupResizeHandleSv,
-      groupResizeFixedOriginLeftMm,
-      groupResizeFixedOriginTopMm,
-      groupResizeMinScaleXSv,
-      groupResizeMaxScaleXSv,
-      groupResizeMinScaleYSv,
-      groupResizeMaxScaleYSv,
-      groupResizeSettleAnchorIdSv,
-      groupResizeSettleScaleXSv,
-      groupResizeSettleScaleYSv,
-      groupResizeSettleHandleSv,
-      groupResizeSettleFixedOriginLeftMm,
-      groupResizeSettleFixedOriginTopMm,
+      multipleMode,
+      groupEligibleSv,
+      groupAnchorIdSv,
+      groupDeltaLeftMm,
+      groupDeltaTopMm,
+      groupScaleXSv,
+      groupScaleYSv,
+      groupHandleSv,
+      groupScaleMinSv,
+      groupScaleMaxSv,
       onGroupResizeHandleBegin,
       onSelect,
       onOpenPanel,
@@ -515,34 +443,19 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       doc.mediaShape,
       liveBounds,
       deselectGesture,
+      activeSelectedIdSv,
       topBarSelectionVisibleSv,
       bottomPanelVisibleSv,
-      groupDragDeltaLeftMm,
-      groupDragDeltaTopMm,
-      groupDragAnchorIdSv,
-      groupDragEligibleSv,
-      transformSettlePulseSv,
-      groupDragSettleAnchorIdSv,
-      groupDragSettleDeltaLeftSv,
-      groupDragSettleDeltaTopSv,
-      groupResizeEligibleSv,
-      groupResizeReadySv,
-      groupResizeAnchorIdSv,
-      groupResizeScaleXSv,
-      groupResizeScaleYSv,
-      groupResizeHandleSv,
-      groupResizeFixedOriginLeftMm,
-      groupResizeFixedOriginTopMm,
-      groupResizeMinScaleXSv,
-      groupResizeMaxScaleXSv,
-      groupResizeMinScaleYSv,
-      groupResizeMaxScaleYSv,
-      groupResizeSettleAnchorIdSv,
-      groupResizeSettleScaleXSv,
-      groupResizeSettleScaleYSv,
-      groupResizeSettleHandleSv,
-      groupResizeSettleFixedOriginLeftMm,
-      groupResizeSettleFixedOriginTopMm,
+      multipleMode,
+      groupEligibleSv,
+      groupAnchorIdSv,
+      groupDeltaLeftMm,
+      groupDeltaTopMm,
+      groupScaleXSv,
+      groupScaleYSv,
+      groupHandleSv,
+      groupScaleMinSv,
+      groupScaleMaxSv,
       onGroupResizeHandleBegin,
       onSelect,
       onOpenPanel,
