@@ -1,3 +1,5 @@
+import { resizeTableCells } from '@/lib/editor/table-cells';
+
 export type PropertyTab = 'Regular' | 'Position' | 'Content' | 'Paragraph' | 'Font';
 export type BarcodePropertyTab = 'Regular' | 'Position' | 'Content' | 'Encoding' | 'Font';
 export type QrcodePropertyTab = 'Regular' | 'Position' | 'Content' | 'Encoding';
@@ -240,12 +242,16 @@ export const DEFAULT_SHAPE_STATE: ShapeElementState = {
 
 export type TablePropertyTab = 'Regular' | 'Position' | 'Table';
 
+export type { TableCellContent } from '@/lib/editor/table-cells';
+
 export type TableElementState = {
   lineWidth: number;
   rowCount: number;
   columnCount: number;
   rowHeights: number[];
   columnWidths: number[];
+  /** Per-cell text content and formatting. */
+  cells?: import('@/lib/editor/table-cells').TableCellContent[][];
   rotation: Rotation;
   left: number;
   top: number;
@@ -286,6 +292,7 @@ export function createTableState(rows: number, columns: number): TableElementSta
     columnCount,
     rowHeights,
     columnWidths,
+    cells: resizeTableCells(undefined, rowCount, columnCount),
     rotation: 0,
     left: 2,
     top: 2,

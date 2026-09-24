@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { editorBridge } from '@/constants/editor-bridge';
 import { Palette, Type } from '@/constants/ui';
 import { IosAlertModal, IosAlertInput } from '@/components/ui/ios-alert-modal';
 import { parseExcelFile } from '@/lib/excel';
@@ -128,8 +129,14 @@ function ExcelSpreadsheetPreview({ file }: { file: ImportedExcelFile }) {
 
 export default function DataFileScreen() {
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ type?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    type?: string | string[];
+    from?: string | string[];
+    labelId?: string | string[];
+  }>();
   const paramType = Array.isArray(params.type) ? params.type[0] : params.type;
+  const fromParam = Array.isArray(params.from) ? params.from[0] : params.from;
+  const returnToLabelSettings = fromParam === 'label-settings';
   const initialTab = (paramType as (typeof TABS)[number]) || 'Excel';
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(
     TABS.includes(initialTab) ? initialTab : 'Excel'
@@ -441,6 +448,12 @@ export default function DataFileScreen() {
                 <Pressable
                   style={({ pressed }) => [styles.actionPrintBtn, pressed && styles.pressed]}
                   onPress={() => {
+                    if (returnToLabelSettings) {
+                      if (!item.excel) return;
+                      editorBridge.dataSourceFileId = item.excel.id;
+                      router.back();
+                      return;
+                    }
                     if (item.excel) setActiveExcelFile(item.excel.id);
                     router.push({
                       pathname: '/print',
@@ -452,7 +465,7 @@ export default function DataFileScreen() {
                       },
                     });
                   }}>
-                  <Text style={styles.actionPrintText}>Print</Text>
+                  <Text style={styles.actionPrintText}>{returnToLabelSettings ? 'Use' : 'Print'}</Text>
                 </Pressable>
 
                 <Pressable

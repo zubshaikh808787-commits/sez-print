@@ -4,12 +4,15 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { PositionControls } from '@/components/editor/position-controls';
+import { formatDataSourceColumn } from '@/lib/editor/data-source-display';
 import { fitFontSizeToLabel } from '@/lib/editor/label-bounds';
+import { useSettingsStore } from '@/stores/settings-store';
 
 import {
   DRAWING_COLORS,
   formatMm,
   formatPt,
+  formatInt,
   type AutoWrapping,
   type ContentType,
   type EditorElementState,
@@ -32,6 +35,8 @@ function SectionGap() {
   return <View style={styles.sectionGap} />;
 }
 
+const PRESS_HIT_SLOP = 10;
+
 function SegmentRow<T extends string>({
   label,
   options,
@@ -53,7 +58,8 @@ function SegmentRow<T extends string>({
             <Pressable
               key={option}
               onPress={() => onSelect(option)}
-              style={[styles.segmentChip, active && styles.segmentChipActive]}>
+              hitSlop={PRESS_HIT_SLOP}
+              style={({ pressed }) => [styles.segmentChip, active && styles.segmentChipActive, pressed && styles.pressed]}>
               <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
                 {option}
               </Text>
@@ -85,11 +91,23 @@ function StepperRow({
         <Pressable
           disabled={minusDisabled}
           onPress={onMinus}
-          style={[styles.stepperCircle, minusDisabled && styles.stepperCircleDisabled]}>
+          hitSlop={PRESS_HIT_SLOP}
+          style={({ pressed }) => [
+            styles.stepperCircle,
+            minusDisabled && styles.stepperCircleDisabled,
+            pressed && !minusDisabled && styles.pressed,
+          ]}>
           <Text style={[styles.stepperSymbol, minusDisabled && styles.stepperSymbolDisabled]}>−</Text>
         </Pressable>
         <Text style={styles.stepperValue}>{value}</Text>
-        <Pressable onPress={onPlus} style={[styles.stepperCircle, styles.stepperCircleActive]}>
+        <Pressable
+          onPress={onPlus}
+          hitSlop={PRESS_HIT_SLOP}
+          style={({ pressed }) => [
+            styles.stepperCircle,
+            styles.stepperCircleActive,
+            pressed && styles.pressed,
+          ]}>
           <Text style={[styles.stepperSymbol, styles.stepperSymbolActive]}>+</Text>
         </Pressable>
       </View>
@@ -122,7 +140,10 @@ function ToggleRow({
 
 function NavRow({ label, value, onPress }: { label: string; value: string; onPress?: () => void }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}>
+    <Pressable
+      onPress={onPress}
+      hitSlop={PRESS_HIT_SLOP}
+      style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}>
       <Text style={styles.rowLabel}>{label}</Text>
       <View style={styles.navRight}>
         <Text style={styles.navValue}>{value}</Text>
@@ -137,7 +158,7 @@ function StyleButtons({
   patch,
 }: {
   state: EditorElementState;
-  patch: (updates: Partial<EditorElementState>) => void;
+  patch: (updates: Partial<EditorElementState & { degreesOffset?: number }>) => void;
 }) {
   const items = [
     { key: 'bold', label: 'B', style: styles.boldGlyph, active: state.bold, field: 'bold' as const },
@@ -151,7 +172,8 @@ function StyleButtons({
         <Pressable
           key={item.key}
           onPress={() => patch({ [item.field]: !item.active })}
-          style={[styles.styleBtn, item.active && styles.styleBtnActive]}>
+          hitSlop={PRESS_HIT_SLOP}
+          style={({ pressed }) => [styles.styleBtn, item.active && styles.styleBtnActive, pressed && styles.pressed]}>
           <Text style={[styles.styleBtnText, item.style, item.active && styles.styleBtnTextActive]}>
             {item.label}
           </Text>
@@ -166,7 +188,7 @@ function AlignButtons({
   patch,
 }: {
   state: EditorElementState;
-  patch: (updates: Partial<EditorElementState>) => void;
+  patch: (updates: Partial<EditorElementState & { degreesOffset?: number }>) => void;
 }) {
   const icons: { icon: IconName; align: TextAlign }[] = [
     { icon: 'text.alignleft', align: 'left' },
@@ -181,7 +203,8 @@ function AlignButtons({
         <Pressable
           key={align}
           onPress={() => patch({ align })}
-          style={[styles.alignBtn, state.align === align && styles.alignBtnActive]}>
+          hitSlop={PRESS_HIT_SLOP}
+          style={({ pressed }) => [styles.alignBtn, state.align === align && styles.alignBtnActive, pressed && styles.pressed]}>
           <AppIcon name={icon} tintColor={state.align === align ? '#FFFFFF' : '#556473'} size={16} />
         </Pressable>
       ))}
@@ -210,6 +233,7 @@ function FontSlider({
           <Pressable
             key={i}
             style={styles.sliderTickHit}
+            hitSlop={PRESS_HIT_SLOP}
             onPress={() => onChange(min + ((max - min) * i) / 4)}
           />
         ))}
@@ -235,7 +259,8 @@ function ColorRow({
             <Pressable
               key={`${color}-${index}`}
               onPress={() => onSelect(index)}
-              style={[styles.colorOuter, active && styles.colorOuterActive]}>
+              hitSlop={PRESS_HIT_SLOP}
+              style={({ pressed }) => [styles.colorOuter, active && styles.colorOuterActive, pressed && styles.pressed]}>
               <View
                 style={[
                   styles.colorDot,
@@ -259,11 +284,14 @@ type TextPropertyPanelProps = {
   activeTab: PropertyTab;
   onTabChange: (tab: PropertyTab) => void;
   state: EditorElementState;
-  patch: (updates: Partial<EditorElementState>) => void;
+  patch: (updates: Partial<EditorElementState & { degreesOffset?: number }>) => void;
+  onColumnNamePress?: () => void;
   labelWidthMm: number;
   labelHeightMm: number;
   elementHeightMm: number;
   contentFocusRequest?: number;
+  /** Table cell editor: hide table/element chrome, keep text + scan controls. */
+  panelScope?: 'element' | 'tableCell';
 };
 
 export function TextPropertyPanel({
@@ -271,12 +299,21 @@ export function TextPropertyPanel({
   onTabChange,
   state,
   patch,
+  onColumnNamePress,
   labelWidthMm,
   labelHeightMm,
   elementHeightMm,
   contentFocusRequest = 0,
+  panelScope = 'element',
 }: TextPropertyPanelProps) {
+  const isTableCell = panelScope === 'tableCell';
   const contentInputRef = useRef<TextInput>(null);
+  const degreesOffset =
+    'degreesOffset' in state && typeof state.degreesOffset === 'number' ? state.degreesOffset : 1;
+
+  const openScan = useCallback(() => {
+    router.push({ pathname: '/scan', params: { from: 'edit' } });
+  }, []);
 
   useEffect(() => {
     if (contentFocusRequest > 0 && activeTab === 'Content') {
@@ -285,9 +322,10 @@ export function TextPropertyPanel({
   }, [activeTab, contentFocusRequest]);
 
   const handleFitToLabel = useCallback(() => {
+    const showColumnName = useSettingsStore.getState().editor.showColumnName;
     const rawText =
       state.contentType === 'Data Source' && state.columnNameContent
-        ? `{${state.columnNameContent}}`
+        ? formatDataSourceColumn(state.columnNameContent, showColumnName)
         : state.text;
     const targetMaxH = Math.max(2, labelHeightMm - Math.max(0, state.top));
     const fittedFs = fitFontSizeToLabel({
@@ -325,6 +363,23 @@ export function TextPropertyPanel({
         onMinus={() => patch({ width: Math.max(0.5, state.width - 0.1) })}
         onPlus={() => patch({ width: state.width + 0.1 })}
       />
+      <Divider />
+      <StepperRow
+        label="Height"
+        value={formatMm(elementHeightMm)}
+        onMinus={() =>
+          patch({
+            height: Math.max(0.5, elementHeightMm - 0.1),
+            autoTextHeight: false,
+          })
+        }
+        onPlus={() =>
+          patch({
+            height: elementHeightMm + 0.1,
+            autoTextHeight: false,
+          })
+        }
+      />
     </>
   );
 
@@ -338,7 +393,7 @@ export function TextPropertyPanel({
         {TABS.map((tab) => {
           const active = tab === activeTab;
           return (
-            <Pressable key={tab} onPress={() => onTabChange(tab)} style={styles.tabItem}>
+            <Pressable key={tab} onPress={() => onTabChange(tab)} hitSlop={PRESS_HIT_SLOP} style={styles.tabItem}>
               <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab}</Text>
               {active ? <View style={styles.tabIndicator} /> : <View style={styles.tabSpacer} />}
             </Pressable>
@@ -353,13 +408,43 @@ export function TextPropertyPanel({
               label="Content Type"
               options={['Manual', 'Degrees', 'Data Source'] as const}
               selected={state.contentType}
-              onSelect={(contentType: ContentType) => patch({ contentType })}
+              onSelect={(contentType: ContentType) =>
+                patch(
+                  contentType === 'Degrees'
+                    ? { contentType, degreesOffset: degreesOffset || 1 }
+                    : { contentType },
+                )
+              }
             />
+            {state.contentType === 'Degrees' && (
+              <>
+                <Divider />
+                <StepperRow
+                  label="Degrees Offset"
+                  value={formatInt(degreesOffset)}
+                  onMinus={() => patch({ degreesOffset: Math.max(0, degreesOffset - 1) })}
+                  onPlus={() => patch({ degreesOffset: degreesOffset + 1 })}
+                />
+              </>
+            )}
             <Divider />
-            <View style={styles.contentRow}>
-              <Text style={styles.rowLabel}>Content</Text>
-              <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
-            </View>
+            {state.contentType === 'Data Source' ? (
+              <NavRow
+                label="Content"
+                value={state.columnNameContent || 'Select column'}
+                onPress={onColumnNamePress}
+              />
+            ) : (
+              <View style={styles.contentRow}>
+                <Text style={styles.rowLabel}>Content</Text>
+                <Pressable
+                  onPress={openScan}
+                  hitSlop={PRESS_HIT_SLOP}
+                  style={({ pressed }) => [pressed && styles.pressed]}>
+                  <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
+                </Pressable>
+              </View>
+            )}
             <SectionGap />
             <StepperRow
               label="Char Spacing"
@@ -389,16 +474,22 @@ export function TextPropertyPanel({
               onValueChange={(verticalDisplay) => patch({ verticalDisplay })}
             />
             <Divider />
-            <ToggleRow
-              label="Auto Text Height"
-              value={state.autoTextHeight}
-              onValueChange={(autoTextHeight) => patch({ autoTextHeight })}
-            />
-            <PanelNote>
-              After &apos;Auto Calculate Height&apos; turn off, if the height is too low, the text will be
-              reduced to fit the height.
-            </PanelNote>
-            <SectionGap />
+            {!isTableCell ? (
+              <>
+                <ToggleRow
+                  label="Auto Text Height"
+                  value={state.autoTextHeight}
+                  onValueChange={(autoTextHeight) => patch({ autoTextHeight })}
+                />
+                <PanelNote>
+                  After &apos;Auto Calculate Height&apos; turn off, if the height is too low, the text will be
+                  reduced to fit the height.
+                </PanelNote>
+                <SectionGap />
+              </>
+            ) : (
+              <SectionGap />
+            )}
             <NavRow label="Font" value={state.fontFamily} onPress={() => router.push({ pathname: '/font-library', params: { from: 'edit' } })} />
             <Divider />
             <StepperRow
@@ -411,7 +502,7 @@ export function TextPropertyPanel({
             <View style={styles.block}>
               <View style={styles.rowHeaderWithAction}>
                 <Text style={styles.rowLabel}>Font Size</Text>
-                <Pressable onPress={handleFitToLabel} style={styles.fitChip}>
+                <Pressable onPress={handleFitToLabel} hitSlop={PRESS_HIT_SLOP} style={styles.fitChip}>
                   <Text style={styles.fitChipText}>Fit to Label</Text>
                 </Pressable>
               </View>
@@ -422,38 +513,37 @@ export function TextPropertyPanel({
               <Text style={styles.rowLabel}>Font Style</Text>
               <StyleButtons state={state} patch={patch} />
             </View>
-            <SectionGap />
-            <View style={styles.block}>
-              <Text style={styles.rowLabel}>Font Style</Text>
-              <StyleButtons state={state} patch={patch} />
-            </View>
             <Divider />
             <View style={styles.block}>
               <Text style={styles.rowLabel}>Hor Alignment</Text>
               <AlignButtons state={state} patch={patch} />
             </View>
             <Divider />
-            <SegmentRow
-              label={`Rotation Angle (${normalizeRotation(state.rotation)}°)`}
-              options={['0°', '90°', '180°', '270°'] as const}
-              selected={`${normalizeRotation(state.rotation)}°`}
-              onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
-            />
-            <Divider />
-            {positionSteppers}
-            <SectionGap />
-            <ToggleRow
-              label="Lock Movement"
-              value={state.lockMovement}
-              onValueChange={(lockMovement) => patch({ lockMovement })}
-            />
-            <Divider />
-            <ToggleRow
-              label="Need Printing"
-              value={state.needPrinting}
-              onValueChange={(needPrinting) => patch({ needPrinting })}
-            />
-            <Divider />
+            {!isTableCell ? (
+              <>
+                <SegmentRow
+                  label={`Rotation Angle (${normalizeRotation(state.rotation)}°)`}
+                  options={['0°', '90°', '180°', '270°'] as const}
+                  selected={`${normalizeRotation(state.rotation)}°`}
+                  onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
+                />
+                <Divider />
+                {positionSteppers}
+                <SectionGap />
+                <ToggleRow
+                  label="Lock Movement"
+                  value={state.lockMovement}
+                  onValueChange={(lockMovement) => patch({ lockMovement })}
+                />
+                <Divider />
+                <ToggleRow
+                  label="Need Printing"
+                  value={state.needPrinting}
+                  onValueChange={(needPrinting) => patch({ needPrinting })}
+                />
+                <Divider />
+              </>
+            ) : null}
             <ToggleRow
               label="Anti-Color"
               value={state.antiColor}
@@ -471,16 +561,20 @@ export function TextPropertyPanel({
         )}
 
         {activeTab === 'Position' && (
-          <PositionControls
-            left={state.left}
-            top={state.top}
-            width={state.width}
-            height={elementHeightMm}
-            labelWidthMm={labelWidthMm}
-            labelHeightMm={labelHeightMm}
-            textAlign={state.align}
-            onPatch={patch}
-          />
+          <>
+            {!isTableCell ? positionSteppers : null}
+            {!isTableCell ? <SectionGap /> : null}
+            <PositionControls
+              left={state.left}
+              top={state.top}
+              width={state.width}
+              height={elementHeightMm}
+              labelWidthMm={labelWidthMm}
+              labelHeightMm={labelHeightMm}
+              textAlign={state.align}
+              onPatch={patch}
+            />
+          </>
         )}
 
         {activeTab === 'Content' && (
@@ -489,27 +583,54 @@ export function TextPropertyPanel({
               label="Content Type"
               options={['Manual', 'Degrees', 'Data Source'] as const}
               selected={state.contentType}
-              onSelect={(contentType: ContentType) => patch({ contentType })}
+              onSelect={(contentType: ContentType) =>
+                patch(
+                  contentType === 'Degrees'
+                    ? { contentType, degreesOffset: degreesOffset || 1 }
+                    : { contentType },
+                )
+              }
             />
+            {state.contentType === 'Degrees' && (
+              <>
+                <Divider />
+                <StepperRow
+                  label="Degrees Offset"
+                  value={formatInt(degreesOffset)}
+                  onMinus={() => patch({ degreesOffset: Math.max(0, degreesOffset - 1) })}
+                  onPlus={() => patch({ degreesOffset: degreesOffset + 1 })}
+                />
+              </>
+            )}
             <Divider />
-            <View style={styles.contentRow}>
-              <Text style={styles.rowLabel}>Content</Text>
-              <Pressable
-                onPress={() => router.push('/scan')}
-                hitSlop={8}
-                style={({ pressed }) => [pressed && styles.pressed]}>
-                <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
-              </Pressable>
-            </View>
-            <TextInput
-              ref={contentInputRef}
-              style={styles.contentInput}
-              value={state.text}
-              onChangeText={(text) => patch({ text })}
-              multiline
-              placeholder="Enter label text"
-              placeholderTextColor="#94A3B8"
-            />
+            {state.contentType === 'Data Source' ? (
+              <NavRow
+                label="Content"
+                value={state.columnNameContent || 'Select column'}
+                onPress={onColumnNamePress}
+              />
+            ) : (
+              <>
+                <View style={styles.contentRow}>
+                  <Text style={styles.rowLabel}>Content</Text>
+                  <Pressable
+                    onPress={openScan}
+                    hitSlop={PRESS_HIT_SLOP}
+                    style={({ pressed }) => [pressed && styles.pressed]}>
+                    <AppIcon name="viewfinder" tintColor={ACCENT} size={22} />
+                  </Pressable>
+                </View>
+                <TextInput
+                  ref={contentInputRef}
+                  style={styles.contentInput}
+                  value={state.text}
+                  onChangeText={(text) => patch({ text })}
+                  multiline
+                  placeholder="Enter label text"
+                  placeholderTextColor="#94A3B8"
+                />
+              </>
+            )}
           </>
         )}
 
@@ -542,18 +663,22 @@ export function TextPropertyPanel({
               value={state.verticalDisplay}
               onValueChange={(verticalDisplay) => patch({ verticalDisplay })}
             />
-            <Divider />
-            <ToggleRow
-              label="Auto Text Height"
-              value={state.autoTextHeight}
-              onValueChange={(autoTextHeight) => patch({ autoTextHeight })}
-            />
-            <View style={styles.noteWrap}>
-              <PanelNote>
-                After &apos;Auto Calculate Height&apos; turn off, if the height is too low, the text will be
-                reduced to fit the height.
-              </PanelNote>
-            </View>
+            {!isTableCell ? (
+              <>
+                <Divider />
+                <ToggleRow
+                  label="Auto Text Height"
+                  value={state.autoTextHeight}
+                  onValueChange={(autoTextHeight) => patch({ autoTextHeight })}
+                />
+                <View style={styles.noteWrap}>
+                  <PanelNote>
+                    After &apos;Auto Calculate Height&apos; turn off, if the height is too low, the text will be
+                    reduced to fit the height.
+                  </PanelNote>
+                </View>
+              </>
+            ) : null}
           </>
         )}
 

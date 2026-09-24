@@ -3,6 +3,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 
 import { AppIcon, type AppIconName } from '@/components/app-icon';
 
 import { PositionControls } from '@/components/editor/position-controls';
+import { resizeTableCells } from '@/lib/editor/table-cells';
 import {
   DRAWING_COLORS,
   divideTableColumnWidths,
@@ -174,6 +175,7 @@ function TableSettingsSection({
     patch({
       rowCount: next,
       rowHeights: divideTableRowHeights(state.height, next),
+      cells: resizeTableCells(state.cells, next, state.columnCount),
     });
   };
 
@@ -182,6 +184,7 @@ function TableSettingsSection({
     patch({
       columnCount: next,
       columnWidths: divideTableColumnWidths(state.width, next),
+      cells: resizeTableCells(state.cells, state.rowCount, next),
     });
   };
 

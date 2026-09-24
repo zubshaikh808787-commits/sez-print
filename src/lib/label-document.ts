@@ -15,6 +15,7 @@ import {
 import type { SignatureStroke } from '@/components/editor/signature-drawing-board';
 import type { BorderStyleId } from '@/constants/border-library';
 import type { MediaGeometry } from '@/lib/media-geometry';
+import type { LabelSettings } from '@/lib/label-settings';
 import { computeTextElementHeightMm, measureTextWidthMm } from '@/lib/text-metrics';
 
 export type TemplateBackground =
@@ -170,6 +171,8 @@ export type LabelDocument = {
   templateCategory?: string;
   /** Present when this label is an N-up series edited panel-by-panel. */
   ups?: LabelUpsConfig;
+  /** Per-label print/layout options (mirror mode, offsets, gap, etc.). */
+  settings?: LabelSettings;
 };
 
 let idCounter = 0;

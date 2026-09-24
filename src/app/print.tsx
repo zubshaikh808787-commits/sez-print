@@ -78,6 +78,7 @@ import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { resolveLabelSettings } from '@/lib/label-settings';
 import { loadAndRenderPdf, printPdfToThermal, type RenderedPdfPage } from '@/lib/pdf-printer';
 
 import { fitLabelSize, printMediaSizeMm, type LabelSizeMm } from '@/lib/label-geometry';
@@ -464,6 +465,20 @@ export default function PrintScreen() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const printingLockRef = useRef(false);
   const upsGapInitialized = useRef(false);
+  const labelSettingsInitialized = useRef(false);
+
+  useEffect(() => {
+    if (!sourceDocument || labelSettingsInitialized.current) return;
+    labelSettingsInitialized.current = true;
+    const settings = resolveLabelSettings(sourceDocument);
+    setGapLength(settings.gapLengthMm);
+    setDarkness(settings.printDarkness);
+    setSpeed(settings.printSpeed);
+    setHOffset(settings.hOffsetMm);
+    setVOffset(settings.vOffsetMm);
+    setOrientation(`${sourceDocument.orientation}°` as (typeof ORIENTATIONS)[number]);
+    setPaperType(sourceDocument.paperType);
+  }, [sourceDocument]);
 
   const shotRef = useRef<ViewShot>(null);
 

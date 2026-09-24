@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
-import { AppIcon, type AppIconName } from '@/components/app-icon';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { AppIcon } from '@/components/app-icon';
+import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useMemo } from 'react';
 
 import { PositionControls } from '@/components/editor/position-controls';
+import { TextAlignButtons } from '@/components/editor/text-align-buttons';
 import {
   DRAWING_COLORS,
   formatMm,
@@ -15,7 +16,6 @@ import {
   type TextAlign,
   type TextFlag,
 } from '@/components/editor/types';
-import { Palette } from '@/constants/ui';
 import { BARCODE_MODES } from '@/lib/barcode-code128';
 import {
   computeOptimalDimensionsMm,
@@ -25,19 +25,34 @@ import {
 
 const ACCENT = '#48C3C7';
 const TABS: BarcodePropertyTab[] = ['Regular', 'Position', 'Content', 'Encoding', 'Font'];
-type IconName = AppIconName;
 
-function pickEncodeMode(current: string, onSelect: (mode: string) => void) {
-  Alert.alert(
-    'Encode Mode',
-    'Choose the barcode symbology.',
-    [
-      ...BARCODE_MODES.map((mode) => ({
-        text: mode === current ? `${mode} ✓` : mode,
-        onPress: () => onSelect(mode),
-      })),
-      { text: 'Cancel', style: 'cancel' as const },
-    ],
+function EncodeModePicker({
+  selected,
+  onSelect,
+}: {
+  selected: string;
+  onSelect: (mode: string) => void;
+}) {
+  return (
+    <View style={styles.block}>
+      <Text style={styles.rowLabel}>Encode Mode</Text>
+      <View style={styles.encodeWrap}>
+        {BARCODE_MODES.map((mode) => {
+          const active = mode === selected;
+          return (
+            <Pressable
+              key={mode}
+              onPress={() => onSelect(mode)}
+              hitSlop={4}
+              style={[styles.encodeChip, active && styles.encodeChipActive]}>
+              <Text style={[styles.encodeChipText, active && styles.encodeChipTextActive]} numberOfLines={1}>
+                {mode}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
@@ -229,25 +244,7 @@ function AlignButtons({
   align: TextAlign;
   patch: (updates: Partial<BarcodeElementState>) => void;
 }) {
-  const icons: { icon: IconName; value: TextAlign }[] = [
-    { icon: 'text.alignleft', value: 'left' },
-    { icon: 'text.aligncenter', value: 'center' },
-    { icon: 'text.alignright', value: 'right' },
-    { icon: 'text.justify', value: 'justify' },
-    { icon: 'arrow.left.and.right', value: 'spacing' },
-  ];
-  return (
-    <View style={styles.alignRow}>
-      {icons.map(({ icon, value }) => (
-        <Pressable
-          key={value}
-          onPress={() => patch({ align: value })}
-          style={[styles.alignBtn, align === value && styles.alignBtnActive]}>
-          <AppIcon name={icon} tintColor={align === value ? '#FFFFFF' : '#556473'} size={16} />
-        </Pressable>
-      ))}
-    </View>
-  );
+  return <TextAlignButtons align={align} onChange={(value) => patch({ align: value })} />;
 }
 
 function FontSlider({ value, onChange }: { value: number; onChange: (next: number) => void }) {
@@ -519,11 +516,7 @@ export function BarcodePropertyPanel({
 
   const encodingSection = (
     <>
-      <NavRow
-        label="Encode Mode"
-        value={state.encodeMode}
-        onPress={() => pickEncodeMode(state.encodeMode, (encodeMode) => patch({ encodeMode }))}
-      />
+      <EncodeModePicker selected={state.encodeMode} onSelect={(encodeMode) => patch({ encodeMode })} />
       <Divider />
       <SegmentRow
         label="Text Flag"
@@ -564,11 +557,7 @@ export function BarcodePropertyPanel({
             <Divider />
             <BarcodeContentFields state={state} patch={patch} onColumnNamePress={onColumnNamePress} />
             <Divider />
-            <NavRow
-              label="Encode Mode"
-              value={state.encodeMode}
-              onPress={() => pickEncodeMode(state.encodeMode, (encodeMode) => patch({ encodeMode }))}
-            />
+            <EncodeModePicker selected={state.encodeMode} onSelect={(encodeMode) => patch({ encodeMode })} />
             <Divider />
             <SegmentRow
               label="Text Flag"
@@ -722,6 +711,20 @@ const styles = StyleSheet.create({
   segmentChipActive: { backgroundColor: ACCENT },
   segmentText: { fontSize: 12, fontWeight: '600', color: '#556473', textAlign: 'center' },
   segmentTextActive: { color: '#FFFFFF' },
+  encodeWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  encodeChip: {
+    minWidth: '30%',
+    flexGrow: 1,
+    minHeight: 34,
+    borderRadius: 8,
+    backgroundColor: '#EEF1F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  encodeChipActive: { backgroundColor: ACCENT },
+  encodeChipText: { fontSize: 12, fontWeight: '600', color: '#556473', textAlign: 'center' },
+  encodeChipTextActive: { color: '#FFFFFF' },
   stepperRow: {
     minHeight: 52,
     paddingHorizontal: 16,
@@ -803,16 +806,6 @@ const styles = StyleSheet.create({
   italicGlyph: { fontStyle: 'italic' },
   underlineGlyph: { textDecorationLine: 'underline' },
   strikeGlyph: { textDecorationLine: 'line-through' },
-  alignRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  alignBtn: {
-    flex: 1,
-    minHeight: 36,
-    borderRadius: 8,
-    backgroundColor: '#EEF1F5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  alignBtnActive: { backgroundColor: ACCENT },
   sliderBlock: { marginTop: 10, paddingBottom: 4 },
   sliderTrack: { height: 4, borderRadius: 2, backgroundColor: '#E2E8F0', position: 'relative' },
   sliderFill: { position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 2, backgroundColor: ACCENT },

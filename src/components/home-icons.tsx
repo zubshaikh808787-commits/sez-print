@@ -306,7 +306,7 @@ export function PrintPhotoIcon({ color = TEAL, size = 32 }: { color?: string; si
 }
 
 /**
- * 4-corner brackets with "C" — used for the 2ups Label home tile.
+ * 4-corner brackets with "C" — Label Clone (scan a label QR / barcode).
  */
 export function LabelCloneIcon({ color = TEAL, size = 32 }: { color?: string; size?: number }) {
   const scale = size / 32;
@@ -390,6 +390,48 @@ export function LabelCloneIcon({ color = TEAL, size = 32 }: { color?: string; si
         }}>
         C
       </Text>
+    </View>
+  );
+}
+
+/** Two side-by-side panels — 2ups Label home tile. */
+export function TwoUpsLabelIcon({ color = TEAL, size = 32 }: { color?: string; size?: number }) {
+  const scale = size / 32;
+  const panelW = 11 * scale;
+  const panelH = 18 * scale;
+  const stroke = 2 * scale;
+  const radius = 2.5 * scale;
+  const gap = 3 * scale;
+
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap,
+      }}>
+      <View
+        style={{
+          width: panelW,
+          height: panelH,
+          borderWidth: stroke,
+          borderColor: color,
+          borderRadius: radius,
+        }}
+      />
+      <View
+        style={{
+          width: panelW,
+          height: panelH,
+          borderWidth: stroke,
+          borderColor: color,
+          borderRadius: radius,
+          opacity: 0.72,
+        }}
+      />
     </View>
   );
 }

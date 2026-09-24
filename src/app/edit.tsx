@@ -42,12 +42,15 @@ import {
   fitTextDefaults,
   fitNewTextDefaults,
   fitTimeDefaults,
+  mergeTextElementPatch,
   NEW_TEXT_PLACEHOLDER,
+  computeTextElementHeightMm,
+  textBlockHeightMm,
   normalizeDocumentElements,
   scaleDocumentToSize,
 } from '@/lib/element-sizing';
 import { labelOverlapRegionsMm, overlapBannerPositionsPx } from '@/lib/editor/safe-mode';
-import { clampToLabelBounds } from '@/lib/editor/label-bounds';
+import { clampToLabelBounds, fitFontSizeToLabel } from '@/lib/editor/label-bounds';
 import { GridSpacingPopover } from '@/components/editor/grid-spacing-popover';
 import { requestEditorGridToggle } from '@/lib/editor/editor-grid-toggle';
 import {
@@ -83,10 +86,18 @@ import {
 import { collectImageFileUris, placeImportedImageMm } from '@/lib/editor/image-ingest';
 import { ingestEditorImage, sweepEditorImageFiles } from '@/lib/editor/image-ingest-native';
 import {
+  ensureTableCells,
+  patchTableCellInElement,
+  tableCellToEditorState,
+  type SelectedTableCell,
+} from '@/lib/editor/table-cells';
+import {
   isPaletteDropOnArtboard,
   paletteDropTopLeftMm,
   paletteDropTypeForLabel,
 } from '@/lib/editor/palette-drop';
+import { formatDataSourceColumn } from '@/lib/editor/data-source-display';
+import { applyPictureAdsorption } from '@/lib/editor/picture-adsorption';
 import { chromeStrokeForFill, paletteGhostSizePx } from '@/lib/editor/canvas-chrome';
 import { PaletteDragGhost } from '@/components/editor/palette-drag-ghost';
 import { PaletteToolItem } from '@/components/editor/palette-tool-item';
@@ -139,7 +150,7 @@ import { TableSizePicker } from '@/components/editor/table-size-picker';
 import { TextPropertyPanel } from '@/components/editor/text-property-panel';
 import { TimePropertyPanel } from '@/components/editor/time-property-panel';
 import { QuickValueModal } from '@/components/editor/quick-value-modal';
-import { MultiSelectPropertyPanel } from '@/components/editor/multi-select-property-panel';
+import { PositionLayerActionsProvider } from '@/components/editor/position-controls';
 import {
   getQuickEditPatch,
   getQuickEditPlaceholder,
@@ -153,7 +164,6 @@ import {
   reduceMultipleModeToggle,
   reduceTapSelect,
   selectionFromIds,
-  supportsMultiSelectPanel,
 } from '@/lib/editor/selection';
 import {
   DEFAULT_ARCTEXT_STATE,
@@ -169,6 +179,7 @@ import {
   type ArcTextPropertyTab,
   type BarcodePropertyTab,
   type LinePropertyTab,
+  type EditorElementState,
   type PropertyTab,
   type QrcodePropertyTab,
   type ShapePropertyTab,
@@ -196,7 +207,6 @@ import {
 import { CANVAS_BOTTOM_CHIP_CLEARANCE_PX, STAGE_PADDING_PX, clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
-import { computeTextElementHeightMm, textBlockHeightMm } from '@/lib/element-sizing';
 import {
   isJewelryDieCutDocument,
   JEWELRY_DIECUT,
@@ -206,7 +216,12 @@ import { isRatTail143Document, refitRatTail143Document } from '@/constants/rat-t
 import { hasStockSilhouette } from '@/lib/stock-silhouette';
 import { isRatTailGeometry, ratTailBodyRectMm } from '@/lib/media-geometry';
 import { useLabelStore } from '@/stores/label-store';
-import { DEFAULT_EDITOR_SETTINGS, useSettingsStore } from '@/stores/settings-store';
+import {
+  DEFAULT_EDITOR_SETTINGS,
+  EDITOR_BORDER_SELECTION_COLORS,
+  EDITOR_TABLE_SELECTION_COLORS,
+  useSettingsStore,
+} from '@/stores/settings-store';
 import {
   EditorHistory,
   alignBox,
@@ -250,6 +265,7 @@ const TOOL_ROWS: { icon: IconName; label: string }[][] = [
   ],
   [
     { icon: 'square.on.square', label: 'Label Clone' },
+    { icon: 'rectangle.split.2x1', label: '2ups Label' },
     { icon: 'square.dashed', label: 'Border' },
     { icon: 'signature', label: 'Signature' },
   ],
@@ -568,7 +584,7 @@ export default function EditScreen() {
       };
     }
 
-    // 2ups Label: copy elements from the source document with fresh ids.
+    // Clone / duplicate: copy elements from the source document with fresh ids.
     let elements: LabelElement[] = [];
     if (params.cloneFromId) {
       const source = useLabelStore.getState().getDocument(params.cloneFromId);
@@ -662,6 +678,7 @@ export default function EditScreen() {
   const [showLabelMenu, setShowLabelMenu] = useState(false);
   const [labelMenuTop, setLabelMenuTop] = useState(0);
   const [showTablePicker, setShowTablePicker] = useState(false);
+  const [borderOptionsOpen, setBorderOptionsOpen] = useState(false);
   const [showSignatureBoard, setShowSignatureBoard] = useState(false);
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [saveAsVisible, setSaveAsVisible] = useState(false);
@@ -791,6 +808,15 @@ export default function EditScreen() {
   const [lineTab, setLineTab] = useState<LinePropertyTab>('Regular');
   const [shapeTab, setShapeTab] = useState<ShapePropertyTab>('Regular');
   const [tableTab, setTableTab] = useState<TablePropertyTab>('Regular');
+  const [selectedTableCell, setSelectedTableCell] = useState<SelectedTableCell | null>(null);
+  const selectedTableCellRef = useRef<SelectedTableCell | null>(null);
+  // Single writer for cell selection. The ref is the synchronous source of truth that
+  // callbacks read; the state exists only so the canvas repaints the highlight. Assigning
+  // either one directly lets the two consumers drift apart.
+  const commitSelectedTableCell = useCallback((next: SelectedTableCell | null) => {
+    selectedTableCellRef.current = next;
+    setSelectedTableCell(next);
+  }, []);
   const [timeTab, setTimeTab] = useState<TimePropertyTab>('Regular');
   const [arcTextTab, setArcTextTab] = useState<ArcTextPropertyTab>('Regular');
   const [degreesTab, setDegreesTab] = useState<PropertyTab>('Regular');
@@ -807,6 +833,7 @@ export default function EditScreen() {
     type: ElementType;
     value: string;
     anchorRect?: ElementAnchorRect;
+    tableCell?: { tableId: string; row: number; col: number };
   } | null>(null);
 
   const initialSplitRestoredRef = useRef(false);
@@ -1073,7 +1100,6 @@ export default function EditScreen() {
   useEffect(() => {
     setPadZoom(1);
   }, [doc.widthMm, doc.heightMm, doc.templatePreviewType]);
-  const selectionColor = chromeStrokeForFill(artboardFill);
 
   const primaryElement = useMemo(() => {
     if (primaryId) {
@@ -1084,6 +1110,36 @@ export default function EditScreen() {
     }
     return null;
   }, [doc.elements, primaryId, selectedIds]);
+
+  const selectionColor = useMemo(() => {
+    const selectedType =
+      primaryElement?.type ??
+      (selectedIds.length === 1
+        ? doc.elements.find((el) => el.id === selectedIds[0])?.type
+        : undefined);
+    if (selectedType === 'table') {
+      const idx = Math.max(
+        0,
+        Math.min(EDITOR_TABLE_SELECTION_COLORS.length - 1, editorSettings.tableColorIndex),
+      );
+      return EDITOR_TABLE_SELECTION_COLORS[idx];
+    }
+    if (selectedIds.length > 0) {
+      const idx = Math.max(
+        0,
+        Math.min(EDITOR_BORDER_SELECTION_COLORS.length - 1, editorSettings.borderColorIndex),
+      );
+      return EDITOR_BORDER_SELECTION_COLORS[idx];
+    }
+    return chromeStrokeForFill(artboardFill);
+  }, [
+    primaryElement?.type,
+    selectedIds,
+    doc.elements,
+    editorSettings.borderColorIndex,
+    editorSettings.tableColorIndex,
+    artboardFill,
+  ]);
 
   const selectedElement = selectedIds.length === 1 ? primaryElement : null;
   const lastSelectedElementRef = useRef<LabelElement | null>(null);
@@ -1114,23 +1170,46 @@ export default function EditScreen() {
   }, [doc.elements]);
 
   useEffect(() => {
-    if (!docPanelTypesKey) return;
-    const pending = docPanelTypesKey.split(',') as ElementType[];
+    const liveTypes = docPanelTypesKey
+      ? (docPanelTypesKey.split(',') as ElementType[])
+      : [];
+
+    setMountedPanelTypes((prev) => {
+      const liveSet = new Set(liveTypes);
+      const pruned = prev.filter((type) => liveSet.has(type));
+      return pruned.length === prev.length ? prev : pruned;
+    });
+
+    if (liveTypes.length === 0) return;
+
+    let cancelled = false;
     let frame: number | null = null;
     const mountNext = () => {
-      if (!mountedRef.current || transformingRef.current) {
+      if (cancelled || !mountedRef.current) return;
+      if (transformingRef.current) {
         frame = requestAnimationFrame(mountNext);
         return;
       }
-      const type = pending.shift();
-      if (!type) return;
-      setMountedPanelTypes((prev) => (prev.includes(type) ? prev : [...prev, type]));
-      frame = requestAnimationFrame(mountNext);
+      let added = false;
+      setMountedPanelTypes((prev) => {
+        const liveSet = new Set(liveTypes);
+        const pruned = prev.filter((type) => liveSet.has(type));
+        const missing = liveTypes.find((type) => !pruned.includes(type));
+        if (!missing) {
+          return pruned.length === prev.length ? prev : pruned;
+        }
+        added = true;
+        return [...pruned, missing];
+      });
+      if (added) {
+        frame = requestAnimationFrame(mountNext);
+      }
     };
     const task = InteractionManager.runAfterInteractions(() => {
       frame = requestAnimationFrame(mountNext);
     });
     return () => {
+      cancelled = true;
       task.cancel();
       if (frame !== null) cancelAnimationFrame(frame);
     };
@@ -1154,8 +1233,6 @@ export default function EditScreen() {
       RULER_SIZE,
     );
   }, [overlapRegionsMm, pxPerMM, canvasWidthPx, canvasHeightPx]);
-  const isMultiSelect = selectedIds.length > 1;
-
   const docRef = useRef(doc);
   docRef.current = doc;
   dirtyRef.current = dirty;
@@ -1256,7 +1333,13 @@ export default function EditScreen() {
     (id: string, updates: Record<string, unknown>) => {
       historyRef.current.begin(docRef.current.elements);
       setElements((elements) =>
-        elements.map((el) => (el.id === id ? ({ ...el, ...updates } as LabelElement) : el)),
+        elements.map((el) => {
+          if (el.id !== id) return el;
+          if (el.type === 'text' || el.type === 'degrees') {
+            return mergeTextElementPatch(el, updates);
+          }
+          return { ...el, ...updates } as LabelElement;
+        }),
       );
       scheduleHistoryCommit();
     },
@@ -1265,11 +1348,127 @@ export default function EditScreen() {
 
   const patchSelected = useCallback(
     (updates: Record<string, unknown>) => {
-      const id = primaryId ?? (selectedIds.length === 1 ? selectedIds[0] : null);
-      if (!id || selectedIds.length !== 1) return;
+      const id =
+        primaryId ??
+        (selectedIds.length === 1
+          ? selectedIds[0]
+          : selectedIds.length > 1
+          ? selectedIds[selectedIds.length - 1]
+          : null);
+      if (!id) return;
       patchElement(id, updates);
     },
     [primaryId, selectedIds, patchElement],
+  );
+
+  // Writes to an explicit cell target. Kept free of selection state so callers reached from
+  // a focus effect (scan / font / column-name results) can't run against a stale closure.
+  const patchTableCellAt = useCallback(
+    (
+      target: SelectedTableCell,
+      updates: Partial<EditorElementState & { degreesOffset?: number }>,
+    ) => {
+      const table = docRef.current.elements.find(
+        (el): el is Extract<LabelElement, { type: 'table' }> =>
+          el.id === target.tableId && el.type === 'table',
+      );
+      if (
+        !table ||
+        target.row < 0 ||
+        target.col < 0 ||
+        target.row >= table.rowCount ||
+        target.col >= table.columnCount
+      ) {
+        console.log(
+          `[table-cell] patch-rejected target=${JSON.stringify(target)} found=${!!table} rowCount=${table?.rowCount} colCount=${table?.columnCount}`,
+        );
+        return false;
+      }
+      historyRef.current.begin(docRef.current.elements);
+      setElements((elements) =>
+        elements.map((el) => {
+          if (el.id !== target.tableId || el.type !== 'table') return el;
+          return patchTableCellInElement(el, target.row, target.col, updates);
+        }),
+      );
+      scheduleHistoryCommit();
+      return true;
+    },
+    [setElements, scheduleHistoryCommit],
+  );
+
+  const patchTableCellSelected = useCallback(
+    (updates: Partial<EditorElementState & { degreesOffset?: number }>) => {
+      const cell = selectedTableCellRef.current;
+      if (!cell) return false;
+      return patchTableCellAt(cell, updates);
+    },
+    [patchTableCellAt],
+  );
+
+  const handleTableCellPress = useCallback(
+    (tableId: string, cell: { row: number; col: number } | null) => {
+      if (cell) {
+        const tableEl = docRef.current.elements.find(
+          (el): el is Extract<LabelElement, { type: 'table' }> =>
+            el.id === tableId && el.type === 'table',
+        );
+        if (
+          !tableEl ||
+          cell.row < 0 ||
+          cell.col < 0 ||
+          cell.row >= tableEl.rowCount ||
+          cell.col >= tableEl.columnCount
+        ) {
+          console.log(
+            `[table-cell] select-rejected tableId=${tableId} cell=${JSON.stringify(cell)} rowCount=${tableEl?.rowCount} colCount=${tableEl?.columnCount}`,
+          );
+          return;
+        }
+        commitSelectedTableCell({ tableId, row: cell.row, col: cell.col });
+        setTextTab('Regular');
+        console.log(
+          `[table-cell] select-highlight tableId=${tableId} row=${cell.row} col=${cell.col} panel=TextPropertyPanel`,
+        );
+      } else {
+        commitSelectedTableCell(null);
+        setTableTab('Regular');
+        console.log(`[table-cell] clear-cell tableId=${tableId} panel=TablePropertyPanel`);
+      }
+      setPanelOpen(true);
+    },
+    [commitSelectedTableCell],
+  );
+
+  const handleTableCellQuickEdit = useCallback(
+    (tableId: string, cell: { row: number; col: number }, anchorRect?: ElementAnchorRect) => {
+      handleTableCellPress(tableId, cell);
+      const tableEl = docRef.current.elements.find(
+        (el): el is Extract<LabelElement, { type: 'table' }> =>
+          el.id === tableId && el.type === 'table',
+      );
+      if (!tableEl) {
+        console.log(`[table-cell] quick-edit-miss tableId=${tableId} — table not found`);
+        return;
+      }
+      const table = ensureTableCells(tableEl);
+      const value = table.cells?.[cell.row]?.[cell.col]?.text ?? '';
+      console.log(
+        `[table-cell] quick-edit-open tableId=${tableId} row=${cell.row} col=${cell.col} valueLen=${value.length} dialog=QuickValueModal`,
+      );
+      InteractionManager.runAfterInteractions(() => {
+        setTimeout(() => {
+          setQuickEditTarget({
+            id: tableId,
+            type: 'text',
+            value,
+            anchorRect,
+            tableCell: { tableId, row: cell.row, col: cell.col },
+          });
+        }, 80);
+      });
+    },
+    [handleTableCellPress],
   );
 
   const patchPrimary = useCallback(
@@ -1302,7 +1501,9 @@ export default function EditScreen() {
       let element: LabelElement;
       switch (type) {
         case 'text': {
-          const fit = fitNewTextDefaults(maxW, maxH, elements);
+          const fit = defaults.autoFitSize
+            ? fitTextDefaults(maxW, maxH, elements)
+            : fitNewTextDefaults(maxW, maxH, elements);
           element = {
             ...DEFAULT_ELEMENT_STATE,
             ...base,
@@ -1316,6 +1517,36 @@ export default function EditScreen() {
             autoTextHeight: defaults.autoTextHeight,
             ...overrides,
           };
+          if (defaults.autoFitFont && element.type === 'text') {
+            const targetMaxH = Math.max(2, maxH - Math.max(0, element.top));
+            const fittedFs = fitFontSizeToLabel({
+              text: element.text,
+              widthMm: element.width,
+              maxHeightMm: targetMaxH,
+              initialFontSize: element.fontSize,
+              autoWrapping: element.autoWrapping,
+              lineSpacing: element.lineSpacing,
+              charSpacing: element.charSpacing,
+              bold: element.bold,
+              verticalDisplay: element.verticalDisplay,
+            });
+            element = { ...element, fontSize: fittedFs };
+            if (element.autoTextHeight) {
+              element = {
+                ...element,
+                height: computeTextElementHeightMm({
+                  text: element.text,
+                  fontSize: fittedFs,
+                  widthMm: element.width,
+                  autoWrapping: element.autoWrapping,
+                  lineSpacing: element.lineSpacing,
+                  charSpacing: element.charSpacing,
+                  bold: element.bold,
+                  verticalDisplay: element.verticalDisplay,
+                }),
+              };
+            }
+          }
           break;
         }
         case 'barcode': {
@@ -1441,18 +1672,20 @@ export default function EditScreen() {
         }
         case 'image': {
           const fit = fitClipartDefaults(maxW, maxH, elements);
+          const tiled = defaults.tileImage && overrides.contentFit == null && overrides.uri == null;
           element = {
             id: base.id,
             type: 'image',
             uri: '',
             rotation: 0,
-            left: fit.left,
-            top: fit.top,
-            width: fit.width,
-            height: fit.height,
+            left: tiled ? 0 : fit.left,
+            top: tiled ? 0 : fit.top,
+            width: tiled ? maxW : fit.width,
+            height: tiled ? maxH : fit.height,
             lockMovement: false,
             needPrinting: true,
             antiColor: false,
+            contentFit: tiled ? 'fill' : 'contain',
             ...overrides,
           };
           break;
@@ -1514,6 +1747,15 @@ export default function EditScreen() {
           return null;
       }
       element = clampElementToLabel(element, docRef.current);
+      if (
+        editorSettings.pictureAdsorption &&
+        (element.type === 'image' || element.type === 'clipart')
+      ) {
+        const snapped = applyPictureAdsorption(element, docRef.current.elements, true);
+        if (snapped) {
+          element = { ...element, ...snapped };
+        }
+      }
       const maxZ = docRef.current.elements.reduce((max, el) => Math.max(max, el.zIndex ?? 0), 0);
       element.zIndex = maxZ + 1;
       setElements((items) => [...items, element], true);
@@ -1521,18 +1763,52 @@ export default function EditScreen() {
       setPrimaryId(element.id);
       return element;
     },
-    [defaults, pickerRows, pickerColumns, setElements],
+    [defaults, pickerRows, pickerColumns, setElements, editorSettings.pictureAdsorption],
   );
 
   const deleteSelected = useCallback(() => {
-    if (selectedIds.length === 0) return;
+    const ids = selectedIdsRef.current;
+    if (ids.length === 0) return;
+
+    transformingRef.current = false;
+    transformKindRef.current = null;
+    dragStartPositionsRef.current = null;
+    resizeStartSnapshotsRef.current = null;
+    clearGroupPreview();
+
+    selectedIdsRef.current = [];
+    primaryIdRef.current = null;
+    activeSelectedIdSv.value = '';
     topBarSelectionVisibleSv.value = 0;
     bottomPanelVisibleSv.value = 0;
-    setElements((elements) => elements.filter((el) => !selectedIds.includes(el.id)), true);
+    groupEligibleSv.value = 0;
+
+    lastSelectedElementRef.current = null;
+    setQuickEditTarget(null);
+    setTextEditId(null);
+    textEditInputRef.current?.blur();
+
+    const remaining = docRef.current.elements.filter((el) => !ids.includes(el.id));
+    for (const [type] of panelSeedRef.current) {
+      if (!remaining.some((el) => el.type === type)) {
+        panelSeedRef.current.delete(type);
+      }
+    }
+
+    setElements((elements) => elements.filter((el) => !ids.includes(el.id)), true);
     setSelectedIds([]);
     setPrimaryId(null);
+    commitSelectedTableCell(null);
     setPanelOpen(false);
-  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
+  }, [
+    setElements,
+    commitSelectedTableCell,
+    clearGroupPreview,
+    activeSelectedIdSv,
+    topBarSelectionVisibleSv,
+    bottomPanelVisibleSv,
+    groupEligibleSv,
+  ]);
 
   const duplicateSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
@@ -1545,15 +1821,23 @@ export default function EditScreen() {
     const next = selectionFromIds(result.newIds);
     setSelectedIds(next.ids);
     setPrimaryId(next.primaryId);
-  }, [selectedIds, setElements, topBarSelectionVisibleSv, bottomPanelVisibleSv]);
+    commitSelectedTableCell(null);
+  }, [
+    selectedIds,
+    setElements,
+    topBarSelectionVisibleSv,
+    bottomPanelVisibleSv,
+    commitSelectedTableCell,
+  ]);
 
   const handleDeselectAll = useCallback(() => {
     topBarSelectionVisibleSv.value = 0;
     bottomPanelVisibleSv.value = 0;
     setSelectedIds([]);
     setPrimaryId(null);
+    commitSelectedTableCell(null);
     setPanelOpen(false);
-  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv]);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, commitSelectedTableCell]);
 
   const toggleMultipleMode = useCallback(() => {
     const turningOn = !multipleMode;
@@ -1656,8 +1940,16 @@ export default function EditScreen() {
         activeSelectedIdSv.value = '';
         topBarSelectionVisibleSv.value = 0;
         bottomPanelVisibleSv.value = 0;
+        commitSelectedTableCell(null);
         setPanelOpen(false);
         return;
+      }
+
+      if (
+        !next.primaryId ||
+        next.primaryId !== selectedTableCellRef.current?.tableId
+      ) {
+        commitSelectedTableCell(null);
       }
 
       topBarSelectionVisibleSv.value = 1;
@@ -1682,7 +1974,14 @@ export default function EditScreen() {
         setPanelOpen(true);
       }
     },
-    [multipleMode, topBarSelectionVisibleSv, bottomPanelVisibleSv, activeSelectedIdSv, panelOpen],
+    [
+      multipleMode,
+      topBarSelectionVisibleSv,
+      bottomPanelVisibleSv,
+      activeSelectedIdSv,
+      panelOpen,
+      commitSelectedTableCell,
+    ],
   );
 
   const openPanelFor = useCallback((id: string) => {
@@ -1757,6 +2056,23 @@ export default function EditScreen() {
   const handleQuickEditConfirm = useCallback(
     (newValue: string) => {
       if (!quickEditTarget) return;
+      const cell = quickEditTarget.tableCell;
+      if (cell) {
+        historyRef.current.begin(docRef.current.elements);
+        setElements((elements) =>
+          elements.map((el) => {
+            if (el.id !== cell.tableId || el.type !== 'table') return el;
+            return patchTableCellInElement(el, cell.row, cell.col, {
+              text: newValue,
+              contentType: 'Manual',
+            });
+          }),
+        );
+        scheduleHistoryCommit();
+        commitSelectedTableCell(cell);
+        setQuickEditTarget(null);
+        return;
+      }
       const element = docRef.current.elements.find((el) => el.id === quickEditTarget.id);
       if (element) {
         const patch = getQuickEditPatch(element, newValue);
@@ -1764,7 +2080,13 @@ export default function EditScreen() {
       }
       setQuickEditTarget(null);
     },
-    [quickEditTarget, patchElement],
+    [
+      quickEditTarget,
+      patchElement,
+      setElements,
+      scheduleHistoryCommit,
+      commitSelectedTableCell,
+    ],
   );
 
   const handleQuickEditCancel = useCallback(() => {
@@ -1928,6 +2250,14 @@ export default function EditScreen() {
   const handleTransformEnd = useCallback(
     (payload: TransformCommitPayload) => {
       publishSnapGuides([]);
+      if (!docRef.current.elements.some((el) => el.id === payload.id)) {
+        transformingRef.current = false;
+        dragStartPositionsRef.current = null;
+        resizeStartSnapshotsRef.current = null;
+        transformKindRef.current = null;
+        clearGroupPreview();
+        return;
+      }
       const clean = sanitizeTransform(payload);
       const recordHistory = !transformingRef.current;
       if (transformingRef.current) {
@@ -1944,6 +2274,45 @@ export default function EditScreen() {
       transformKindRef.current = null;
       const ids = selectedIdsRef.current;
       const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
+
+      const applyAutoFitFont = (el: LabelElement): LabelElement => {
+        if (!defaults.autoFitFont || (el.type !== 'text' && el.type !== 'degrees')) return el;
+        const showColumnName = useSettingsStore.getState().editor.showColumnName;
+        const raw =
+          el.type === 'text'
+            ? el.contentType === 'Data Source' && el.columnNameContent
+              ? formatDataSourceColumn(el.columnNameContent, showColumnName)
+              : el.text
+            : el.contentType === 'Data Source' && el.columnNameContent
+              ? formatDataSourceColumn(el.columnNameContent, showColumnName)
+              : el.content;
+        const targetMaxH = Math.max(2, canvas.heightMm - Math.max(0, el.top));
+        const fittedFs = fitFontSizeToLabel({
+          text: raw,
+          widthMm: el.width,
+          maxHeightMm: targetMaxH,
+          initialFontSize: el.fontSize,
+          autoWrapping: el.autoWrapping,
+          lineSpacing: el.lineSpacing,
+          charSpacing: el.charSpacing,
+          bold: el.bold,
+          verticalDisplay: el.verticalDisplay,
+        });
+        const next = { ...el, fontSize: fittedFs } as LabelElement;
+        if ('autoTextHeight' in next && next.autoTextHeight !== false) {
+          (next as { height: number }).height = computeTextElementHeightMm({
+            text: raw,
+            fontSize: fittedFs,
+            widthMm: el.width,
+            autoWrapping: el.autoWrapping,
+            lineSpacing: el.lineSpacing,
+            charSpacing: el.charSpacing,
+            bold: el.bold,
+            verticalDisplay: el.verticalDisplay,
+          });
+        }
+        return next;
+      };
 
       const patchBox = (
         el: LabelElement,
@@ -2044,8 +2413,9 @@ export default function EditScreen() {
             if (naturalH !== undefined) {
               targetHeight = naturalH;
             }
+            let next: LabelElement;
             if (kind === 'resize') {
-              return patchBox(
+              next = patchBox(
                 el,
                 {
                   left: clean.leftMm,
@@ -2056,23 +2426,41 @@ export default function EditScreen() {
                 clean.rotation,
                 fs,
               );
+            } else {
+              const clamped = clampToLabelBounds(
+                { left: clean.leftMm, top: clean.topMm, width: clean.widthMm, height: targetHeight },
+                canvas,
+                { anchor: 'body', naturalHeight: targetHeight },
+              );
+              next = patchBox(
+                el,
+                {
+                  left: clamped.left,
+                  top: clamped.top,
+                  width: clamped.width,
+                  height: clamped.height,
+                },
+                clean.rotation,
+                fs,
+              );
             }
-            const clamped = clampToLabelBounds(
-              { left: clean.leftMm, top: clean.topMm, width: clean.widthMm, height: targetHeight },
-              canvas,
-              { anchor: 'body', naturalHeight: targetHeight },
-            );
-            return patchBox(
-              el,
-              {
-                left: clamped.left,
-                top: clamped.top,
-                width: clamped.width,
-                height: clamped.height,
-              },
-              clean.rotation,
-              fs,
-            );
+            if (
+              editorSettings.pictureAdsorption &&
+              (next.type === 'image' || next.type === 'clipart')
+            ) {
+              const snapped = applyPictureAdsorption(
+                next,
+                elements.map((item) => (item.id === next.id ? next : item)),
+                true,
+              );
+              if (snapped) {
+                next = { ...next, ...snapped };
+              }
+            }
+            if (kind === 'resize' && (next.type === 'text' || next.type === 'degrees')) {
+              next = applyAutoFitFont(next);
+            }
+            return next;
           }),
         recordHistory,
       );
@@ -2088,6 +2476,8 @@ export default function EditScreen() {
       groupHandleSv,
       groupScaleXSv,
       groupScaleYSv,
+      editorSettings.pictureAdsorption,
+      defaults.autoFitFont,
     ],
   );
 
@@ -2192,11 +2582,21 @@ export default function EditScreen() {
   }, [canvasMm, setElements]);
 
   const reorderSelected = useCallback(
-    (kind: 'front' | 'back') => {
+    (kind: 'front' | 'back' | 'forward' | 'backward') => {
       if (selectedIds.length === 0) return;
       setElements((elements) => reorderElements(elements, selectedIds, kind), true);
     },
     [selectedIds, setElements],
+  );
+
+  const positionLayerActions = useMemo(
+    () => ({
+      onSendToBack: () => reorderSelected('back'),
+      onBringToFront: () => reorderSelected('front'),
+      onSendBackward: () => reorderSelected('backward'),
+      onBringForward: () => reorderSelected('forward'),
+    }),
+    [reorderSelected],
   );
 
   const toggleHideSelected = useCallback(() => {
@@ -2330,6 +2730,92 @@ export default function EditScreen() {
     setDirty(true);
   }, []);
 
+  const placeIngestedImageOnCanvas = useCallback(
+    async (uri: string, width?: number, height?: number) => {
+      setImageIngesting(true);
+      try {
+        const ingested = await ingestEditorImage({
+          uri,
+          width,
+          height,
+        });
+        if (!mountedRef.current) return;
+        const current = docRef.current;
+        const content = isRatTailGeometry(current.mediaGeometry)
+          ? ratTailBodyRectMm(current.mediaGeometry)
+          : isJewelryDieCutDocument(current)
+            ? { left: 0, top: 0, width: current.widthMm, height: Math.min(current.heightMm, JEWELRY_DIECUT.bodyHeightMm) }
+            : undefined;
+        const placed = defaults.tileImage
+          ? {
+              left: content?.left ?? 0,
+              top: content?.top ?? 0,
+              width: content?.width ?? current.widthMm,
+              height: content?.height ?? current.heightMm,
+            }
+          : placeImportedImageMm({
+              widthPx: ingested.widthPx,
+              heightPx: ingested.heightPx,
+              pxPerMM,
+              canvas: { widthMm: current.widthMm, heightMm: current.heightMm },
+              content,
+            });
+        const el = addElement('image', {
+          uri: ingested.previewUri,
+          printUri: ingested.printUri,
+          left: placed.left,
+          top: placed.top,
+          width: placed.width,
+          height: placed.height,
+          contentFit: defaults.tileImage ? 'fill' : 'contain',
+          aspectRatioLocked: !defaults.tileImage,
+          originalAspect: ingested.originalAspect,
+          workingWidthPx: ingested.workingWidthPx,
+          workingHeightPx: ingested.workingHeightPx,
+        });
+        if (el) {
+          setImageTab('Regular');
+          setPanelOpen(true);
+        }
+      } catch (error) {
+        if (!mountedRef.current) return;
+        Alert.alert(
+          'Could not place photo',
+          error instanceof Error ? error.message : 'The image could not be decoded.',
+        );
+      } finally {
+        if (mountedRef.current) setImageIngesting(false);
+      }
+    },
+    [addElement, pxPerMM, defaults.tileImage],
+  );
+
+  const applyCroppedImageToElement = useCallback(
+    async (elementId: string, uri: string, width?: number, height?: number) => {
+      setImageIngesting(true);
+      try {
+        const ingested = await ingestEditorImage({ uri, width, height });
+        if (!mountedRef.current) return;
+        patchElement(elementId, {
+          uri: ingested.previewUri,
+          printUri: ingested.printUri,
+          originalAspect: ingested.originalAspect,
+          workingWidthPx: ingested.workingWidthPx,
+          workingHeightPx: ingested.workingHeightPx,
+        });
+      } catch (error) {
+        if (!mountedRef.current) return;
+        Alert.alert(
+          'Could not update photo',
+          error instanceof Error ? error.message : 'The image could not be decoded.',
+        );
+      } finally {
+        if (mountedRef.current) setImageIngesting(false);
+      }
+    },
+    [patchElement],
+  );
+
   const handlePickImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -2341,54 +2827,16 @@ export default function EditScreen() {
     const asset = result.assets[0];
     if (!asset.uri) return;
 
-    setImageIngesting(true);
-    try {
-      const ingested = await ingestEditorImage({
+    router.push({
+      pathname: '/image-crop',
+      params: {
         uri: asset.uri,
-        width: asset.width,
-        height: asset.height,
-      });
-      if (!mountedRef.current) return;
-      const current = docRef.current;
-      const content = isRatTailGeometry(current.mediaGeometry)
-        ? ratTailBodyRectMm(current.mediaGeometry)
-        : isJewelryDieCutDocument(current)
-          ? { left: 0, top: 0, width: current.widthMm, height: Math.min(current.heightMm, JEWELRY_DIECUT.bodyHeightMm) }
-          : undefined;
-      const placed = placeImportedImageMm({
-        widthPx: ingested.widthPx,
-        heightPx: ingested.heightPx,
-        pxPerMM,
-        canvas: { widthMm: current.widthMm, heightMm: current.heightMm },
-        content,
-      });
-      const el = addElement('image', {
-        uri: ingested.previewUri,
-        printUri: ingested.printUri,
-        left: placed.left,
-        top: placed.top,
-        width: placed.width,
-        height: placed.height,
-        contentFit: 'contain',
-        aspectRatioLocked: true,
-        originalAspect: ingested.originalAspect,
-        workingWidthPx: ingested.workingWidthPx,
-        workingHeightPx: ingested.workingHeightPx,
-      });
-      if (el) {
-        setImageTab('Regular');
-        setPanelOpen(true);
-      }
-    } catch (error) {
-      if (!mountedRef.current) return;
-      Alert.alert(
-        'Could not place photo',
-        error instanceof Error ? error.message : 'The image could not be decoded.',
-      );
-    } finally {
-      if (mountedRef.current) setImageIngesting(false);
-    }
-  }, [addElement, pxPerMM]);
+        width: String(asset.width ?? 0),
+        height: String(asset.height ?? 0),
+        mode: 'import',
+      },
+    });
+  }, []);
 
   useEffect(() => {
     const keep = collectImageFileUris([
@@ -2401,7 +2849,33 @@ export default function EditScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      const stored = useLabelStore.getState().getDocument(docRef.current.id);
+      if (stored && stored.updatedAt > docRef.current.updatedAt) {
+        let normalized = { ...stored, elements: normalizeDocumentElements(stored) };
+        if (isJewelryDieCutDocument(normalized)) {
+          normalized = canonicalizeJewelryDieCutDocument(normalized);
+        } else if (isRatTail143Document(normalized)) {
+          normalized = refitRatTail143Document(normalized);
+        }
+        setDoc(normalized);
+        docRef.current = normalized;
+      }
+
       const applyCapture = (kind: 'Text' | 'Barcode' | 'QRCode', data: string, encodeMode?: string) => {
+        // A table cell only ever holds text, so a decoded scan lands as plain Manual
+        // content there — never as a barcode/QR graphic, whatever the symbology was.
+        const cellTarget = selectedTableCellRef.current;
+        if (cellTarget) {
+          const written = patchTableCellAt(cellTarget, { text: data, contentType: 'Manual' });
+          console.log(
+            `[table-cell] scan-write kind=${kind} target=${JSON.stringify(cellTarget)} textLen=${data.length} written=${written} as=Manual-text`,
+          );
+          if (written) {
+            setTextTab('Content');
+            setPanelOpen(true);
+            return;
+          }
+        }
         if (kind === 'QRCode') {
           addElement('qrcode', {
             contentType: 'Manual',
@@ -2419,6 +2893,18 @@ export default function EditScreen() {
           setBarcodeTab('Content');
           setPanelOpen(true);
         } else {
+          const selectedId =
+            selectedIds.length === 1 ? selectedIds[0] : null;
+          const selected =
+            selectedId != null
+              ? docRef.current.elements.find((el) => el.id === selectedId)
+              : undefined;
+          if (selected?.type === 'text') {
+            patchElement(selected.id, { text: data, contentType: 'Manual' });
+            setTextTab('Content');
+            setPanelOpen(true);
+            return;
+          }
           addElement('text', { text: data, contentType: 'Manual' });
           setTextTab('Content');
           setPanelOpen(true);
@@ -2462,8 +2948,11 @@ export default function EditScreen() {
         const consumer = editorBridge.columnNameConsumer;
         editorBridge.columnNameResult = null;
         editorBridge.columnNameConsumer = null;
-        if (consumer && selectedIds.length === 1) {
-          patchElement(selectedIds[0], { columnNameContent: value });
+        const tableCell = selectedTableCellRef.current;
+        if (consumer && tableCell) {
+          patchTableCellAt(tableCell, { columnNameContent: value, contentType: 'Data Source' });
+        } else if (consumer && selectedIdsRef.current.length === 1) {
+          patchElement(selectedIdsRef.current[0], { columnNameContent: value });
         }
       }
 
@@ -2499,14 +2988,34 @@ export default function EditScreen() {
       if (editorBridge.fontResult) {
         const fontName = editorBridge.fontResult;
         editorBridge.fontResult = null;
-        if (selectedIds.length === 1) {
-          const el = docRef.current.elements.find((e) => e.id === selectedIds[0]);
+        const tableCell = selectedTableCellRef.current;
+        const targetId = primaryIdRef.current;
+        if (tableCell) {
+          patchTableCellAt(tableCell, { fontFamily: fontName });
+        } else if (targetId) {
+          const el = docRef.current.elements.find((e) => e.id === targetId);
           if (el && 'fontFamily' in el) {
             patchElement(el.id, { fontFamily: fontName });
           }
         }
       }
-    }, [addElement, patchElement, selectedIds]),
+
+      if (editorBridge.imageCropResult) {
+        const crop = editorBridge.imageCropResult;
+        editorBridge.imageCropResult = null;
+        if (crop.mode === 'import') {
+          void placeIngestedImageOnCanvas(crop.uri, crop.width, crop.height);
+        } else if (crop.elementId) {
+          void applyCroppedImageToElement(crop.elementId, crop.uri, crop.width, crop.height);
+        }
+      }
+    }, [
+      addElement,
+      patchElement,
+      patchTableCellAt,
+      placeIngestedImageOnCanvas,
+      applyCroppedImageToElement,
+    ]),
   );
 
   // Reload when navigated to an existing label while the screen is mounted.
@@ -2520,6 +3029,21 @@ export default function EditScreen() {
   }, [params.labelId, openDocument]);
 
   const handleColumnNamePress = useCallback(() => {
+    const tableCell = selectedTableCellRef.current;
+    if (
+      tableCell &&
+      selectedElement?.type === 'table' &&
+      selectedElement.id === tableCell.tableId
+    ) {
+      const table = ensureTableCells(selectedElement);
+      const cell = table.cells![tableCell.row][tableCell.col];
+      editorBridge.columnNameConsumer = 'text';
+      router.push({
+        pathname: '/column-name',
+        params: { value: cell.columnNameContent ?? '' },
+      });
+      return;
+    }
     if (!selectedElement || !('columnNameContent' in selectedElement)) return;
     editorBridge.columnNameConsumer =
       selectedElement.type === 'text'
@@ -2698,9 +3222,15 @@ export default function EditScreen() {
         clipartReplaceIdRef.current = null;
         router.push({ pathname: '/clipart', params: { from: 'edit' } });
         break;
-      case 'Border':
-        router.push({ pathname: '/border-library', params: { from: 'edit' } });
+      case 'Border': {
+        const existingBorder = docRef.current.elements.find((el) => el.type === 'border');
+        if (existingBorder) {
+          setBorderOptionsOpen(true);
+        } else {
+          router.push({ pathname: '/border-library', params: { from: 'edit' } });
+        }
         break;
+      }
       case 'Excel':
         router.push({ pathname: '/data-file', params: { type: 'Excel' } });
         break;
@@ -2714,6 +3244,9 @@ export default function EditScreen() {
         router.push({ pathname: '/asr', params: { from: 'edit' } });
         break;
       case 'Label Clone':
+        saveDocument(false);
+        router.push({ pathname: '/scan', params: { mode: 'labelClone' } });
+        break;
       case '2ups Label':
         saveDocument(false);
         router.push({
@@ -2815,7 +3348,7 @@ export default function EditScreen() {
       <Pressable
         style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
         onPress={deleteSelected}
-        hitSlop={8}
+        hitSlop={12}
         accessibilityRole="button"
         accessibilityLabel="Delete selected element">
         <AppIcon name="trash" tintColor="#FFFFFF" size={18} />
@@ -3001,6 +3534,10 @@ export default function EditScreen() {
                     onTransformMove={handleTransformMove}
                     onTransformEnd={handleTransformEnd}
                     onQuickRotate={handleRotateElement}
+                    onTableCellPress={handleTableCellPress}
+                    onTableCellQuickEdit={handleTableCellQuickEdit}
+                    selectedTableCell={selectedTableCell}
+                    tableSelectionColor={selectionColor}
                     pointerToMm={windowPointToArtboardMm}
                     snapMoveMm={snapMoveMm}
                     snapGuides={snapGuides}
@@ -3025,25 +3562,6 @@ export default function EditScreen() {
     </Animated.View>
   );
 
-  const canShowMultiSelectPanel =
-    isMultiSelect &&
-    primaryElement !== null &&
-    selectedElements.every(supportsMultiSelectPanel);
-
-  const renderMultiSelectPanel = () => {
-    if (!canShowMultiSelectPanel || !primaryElement) return null;
-    return (
-      <MultiSelectPropertyPanel
-        primary={primaryElement}
-        selectedElements={selectedElements}
-        labelWidthMm={labelBounds.widthMm}
-        labelHeightMm={labelBounds.heightMm}
-        onPatchPrimary={patchPrimary}
-        onPatchAllSelected={patchAllSelected}
-      />
-    );
-  };
-
   const renderPanel = (targetEl: LabelElement | null = displayElement, visible = true) => {
     if (!targetEl) return null;
     const focusRequest = visible ? contentFocusRequest : 0;
@@ -3055,6 +3573,7 @@ export default function EditScreen() {
             onTabChange={setTextTab}
             state={targetEl}
             patch={patchSelected}
+            onColumnNamePress={handleColumnNamePress}
             labelWidthMm={labelBounds.widthMm}
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}
@@ -3111,7 +3630,34 @@ export default function EditScreen() {
             elementHeightMm={selectedElementHeightMm}
           />
         );
-      case 'table':
+      case 'table': {
+        const table = ensureTableCells(targetEl);
+        const activeCell =
+          selectedTableCell &&
+          selectedTableCell.tableId === targetEl.id &&
+          selectedTableCell.row < table.rowCount &&
+          selectedTableCell.col < table.columnCount
+            ? selectedTableCell
+            : null;
+        if (activeCell) {
+          const cell = table.cells![activeCell.row][activeCell.col];
+          const cellState = tableCellToEditorState(cell, table, activeCell.row, activeCell.col);
+          const cellHeightMm = table.rowHeights[activeCell.row] ?? table.height / table.rowCount;
+          return (
+            <TextPropertyPanel
+              activeTab={textTab}
+              onTabChange={setTextTab}
+              state={cellState}
+              patch={patchTableCellSelected}
+              onColumnNamePress={handleColumnNamePress}
+              labelWidthMm={labelBounds.widthMm}
+              labelHeightMm={labelBounds.heightMm}
+              elementHeightMm={cellHeightMm}
+              contentFocusRequest={focusRequest}
+              panelScope="tableCell"
+            />
+          );
+        }
         return (
           <TablePropertyPanel
             activeTab={tableTab}
@@ -3123,6 +3669,7 @@ export default function EditScreen() {
             elementHeightMm={selectedElementHeightMm}
           />
         );
+      }
       case 'time':
         return (
           <TimePropertyPanel
@@ -3181,10 +3728,9 @@ export default function EditScreen() {
   };
 
   const activePanelContent = (
-    <>
-      {isMultiSelect ? renderMultiSelectPanel() : null}
+    <PositionLayerActionsProvider value={positionLayerActions}>
       {mountedPanelTypes.map((type) => {
-        const visible = !isMultiSelect && type === activePanelType;
+        const visible = type === activePanelType;
         const seed =
           (visible ? displayElement : null) ??
           panelSeedRef.current.get(type) ??
@@ -3196,7 +3742,7 @@ export default function EditScreen() {
           </KeepAlivePanelSlot>
         );
       })}
-    </>
+    </PositionLayerActionsProvider>
   );
 
   return (
@@ -3523,6 +4069,11 @@ export default function EditScreen() {
         visible={showLabelMenu}
         topOffset={labelMenuTop}
         onClose={() => setShowLabelMenu(false)}
+        onLabelSettings={() => {
+          saveDocument(false);
+          editorBridge.labelSettingsDoc = docRef.current;
+          router.push({ pathname: '/label-settings', params: { labelId: docRef.current.id } });
+        }}
         onOpen={() => setShowOpenModal(true)}
         onSave={() => saveDocument()}
         onSaveAs={handleSaveAs}
@@ -3539,6 +4090,27 @@ export default function EditScreen() {
           );
         }}
       />
+
+      {borderOptionsOpen && (
+        <BorderOptionsSheet
+          lineWidth={
+            doc.elements.find((el) => el.type === 'border')?.lineWidth ?? 0.55
+          }
+          onChangeWidth={(lineWidth) => {
+            const border = docRef.current.elements.find((el) => el.type === 'border');
+            if (border) patchElement(border.id, { lineWidth });
+          }}
+          onReplace={() => {
+            setBorderOptionsOpen(false);
+            router.push({ pathname: '/border-library', params: { from: 'edit' } });
+          }}
+          onRemove={() => {
+            setElements((elements) => elements.filter((el) => el.type !== 'border'), true);
+            setBorderOptionsOpen(false);
+          }}
+          onCancel={() => setBorderOptionsOpen(false)}
+        />
+      )}
 
       {showTablePicker && (
         <TableSizePicker
@@ -3706,6 +4278,69 @@ export default function EditScreen() {
         onConfirm={handleQuickEditConfirm}
       />
     </View>
+  );
+}
+
+function BorderOptionsSheet({
+  lineWidth,
+  onChangeWidth,
+  onReplace,
+  onRemove,
+  onCancel,
+}: {
+  lineWidth: number;
+  onChangeWidth: (next: number) => void;
+  onReplace: () => void;
+  onRemove: () => void;
+  onCancel: () => void;
+}) {
+  const trackWidth = useRef(1);
+  const min = 0.1;
+  const max = 1;
+  const ratio = Math.min(1, Math.max(0, (lineWidth - min) / (max - min)));
+  const setFromX = (x: number) => {
+    const nextRatio = Math.min(1, Math.max(0, x / trackWidth.current));
+    const next = Math.round((min + nextRatio * (max - min)) * 100) / 100;
+    onChangeWidth(next);
+  };
+
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={onCancel}>
+      <View style={styles.borderSheetBackdrop}>
+        <View style={styles.borderSheetCard}>
+          <Text style={styles.borderSheetTitle}>Border</Text>
+          <View style={styles.borderSheetActions}>
+            <Pressable style={styles.borderReplaceBtn} onPress={onReplace}>
+              <Text style={styles.borderReplaceText}>Replace</Text>
+            </Pressable>
+            <Pressable style={styles.borderRemoveBtn} onPress={onRemove}>
+              <Text style={styles.borderRemoveText}>Cancel The Border</Text>
+            </Pressable>
+          </View>
+          <View style={styles.borderRangeLabels}>
+            <Text style={styles.borderRangeText}>MIN 0.1</Text>
+            <Text style={styles.borderRangeText}>MAX 1.0</Text>
+          </View>
+          <View
+            style={styles.borderSliderHit}
+            onLayout={(event) => {
+              trackWidth.current = event.nativeEvent.layout.width || 1;
+            }}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={(event) => setFromX(event.nativeEvent.locationX)}
+            onResponderMove={(event) => setFromX(event.nativeEvent.locationX)}>
+            <View style={styles.borderSliderTrack}>
+              <View style={[styles.borderSliderFill, { width: `${ratio * 100}%` }]} />
+            </View>
+            <View style={[styles.borderSliderThumb, { left: `${ratio * 100}%` }]} />
+          </View>
+        </View>
+        <Pressable style={styles.borderCancelBtn} onPress={onCancel}>
+          <Text style={styles.borderCancelText}>Cancel</Text>
+        </Pressable>
+      </View>
+    </Modal>
   );
 }
 
@@ -4327,5 +4962,100 @@ const styles = StyleSheet.create({
     width: StyleSheet.hairlineWidth,
     height: 18,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  borderSheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 12,
+    paddingBottom: 16,
+    gap: 8,
+  },
+  borderSheetCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 18,
+  },
+  borderSheetTitle: {
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#8E8E93',
+    marginBottom: 14,
+  },
+  borderSheetActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  borderReplaceBtn: {
+    flex: 1,
+    backgroundColor: '#3EC6C9',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  borderReplaceText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  borderRemoveBtn: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#E25B5B',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  borderRemoveText: {
+    color: '#E25B5B',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  borderRangeLabels: {
+    marginTop: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  borderRangeText: {
+    fontSize: 12,
+    color: '#9AA0A6',
+  },
+  borderSliderHit: {
+    marginTop: 8,
+    height: 28,
+    justifyContent: 'center',
+  },
+  borderSliderTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D7DDE3',
+    overflow: 'hidden',
+  },
+  borderSliderFill: {
+    height: 4,
+    backgroundColor: '#3EC6C9',
+  },
+  borderSliderThumb: {
+    position: 'absolute',
+    width: 22,
+    height: 22,
+    marginLeft: -11,
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  borderCancelBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  borderCancelText: {
+    color: '#007AFF',
+    fontSize: 17,
+    fontWeight: '600',
   },
 });

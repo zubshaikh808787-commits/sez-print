@@ -253,7 +253,108 @@ function encodeUpcA(input: string): number[] | null {
   return bitsToModules(bits);
 }
 
+function invertPattern(bits: string): string {
+  return bits
+    .split('')
+    .map((bit) => (bit === '0' ? '1' : '0'))
+    .join('');
+}
+
+const UPC_A_LEFT_G = UPC_A_LEFT.map(invertPattern);
+
+const EAN13_PARITY: Record<number, ('L' | 'G')[]> = {
+  0: ['L', 'L', 'L', 'L', 'L', 'L'],
+  1: ['L', 'L', 'G', 'L', 'G', 'G'],
+  2: ['L', 'L', 'G', 'G', 'L', 'G'],
+  3: ['L', 'L', 'G', 'G', 'G', 'L'],
+  4: ['L', 'G', 'L', 'L', 'G', 'G'],
+  5: ['L', 'G', 'G', 'L', 'L', 'G'],
+  6: ['L', 'G', 'G', 'G', 'L', 'L'],
+  7: ['L', 'G', 'L', 'G', 'L', 'G'],
+  8: ['L', 'G', 'L', 'G', 'G', 'L'],
+  9: ['L', 'G', 'G', 'L', 'G', 'L'],
+};
+
+function eanChecksum(digits: string): number {
+  let sum = 0;
+  for (let i = digits.length - 1, weight = 1; i >= 0; i -= 1, weight = weight === 1 ? 3 : 1) {
+    sum += Number(digits[i]) * weight;
+  }
+  return (10 - (sum % 10)) % 10;
+}
+
+function encodeEan13(input: string): number[] | null {
+  const digits = input.replace(/\D/g, '');
+  if (digits.length < 12 || digits.length > 13) return null;
+  const payload =
+    digits.length === 12 ? `${digits}${eanChecksum(digits)}` : digits.slice(0, 13);
+  const lead = Number(payload[0]);
+  const parity = EAN13_PARITY[lead];
+  if (!parity) return null;
+  let bits = '101';
+  for (let i = 0; i < 6; i += 1) {
+    const digit = Number(payload[i + 1]);
+    bits += parity[i] === 'L' ? UPC_A_LEFT[digit] : UPC_A_LEFT_G[digit];
+  }
+  bits += '01010';
+  for (let i = 7; i < 13; i += 1) bits += UPC_A_RIGHT[Number(payload[i])];
+  bits += '101';
+  return bitsToModules(bits);
+}
+
+function encodeEan8(input: string): number[] | null {
+  const digits = input.replace(/\D/g, '');
+  if (digits.length < 7 || digits.length > 8) return null;
+  const payload =
+    digits.length === 7 ? `${digits}${eanChecksum(digits)}` : digits.slice(0, 8);
+  let bits = '101';
+  for (let i = 0; i < 4; i += 1) bits += UPC_A_LEFT[Number(payload[i])];
+  bits += '01010';
+  for (let i = 4; i < 8; i += 1) bits += UPC_A_RIGHT[Number(payload[i])];
+  bits += '101';
+  return bitsToModules(bits);
+}
+
 export const BARCODE_MODES = ['CODE-128', 'CODE-39', 'ITF', 'EAN-13', 'EAN-8', 'UPC-A'] as const;
+export type BarcodeMode = (typeof BARCODE_MODES)[number];
+
+export type BarcodeSymbology = 'code128' | 'code39' | 'itf' | 'ean13' | 'ean8' | 'upca';
+
+/** Map editor encode mode to internal symbology id. */
+export function encodeModeToSymbology(mode: string): BarcodeSymbology {
+  switch (mode) {
+    case 'CODE-39':
+      return 'code39';
+    case 'ITF':
+      return 'itf';
+    case 'EAN-13':
+      return 'ean13';
+    case 'EAN-8':
+      return 'ean8';
+    case 'UPC-A':
+      return 'upca';
+    default:
+      return 'code128';
+  }
+}
+
+/** Map editor encode mode to TSPL BARCODE type string. */
+export function encodeModeToTsplType(mode: string): string {
+  switch (mode) {
+    case 'CODE-39':
+      return '39';
+    case 'ITF':
+      return '25';
+    case 'EAN-13':
+      return 'EAN13';
+    case 'EAN-8':
+      return 'EAN8';
+    case 'UPC-A':
+      return 'UPCA';
+    default:
+      return '128';
+  }
+}
 
 /** Encode barcode content for the selected mode into alternating [bar, space, ...] module counts. */
 export function barcodeModulesForMode(mode: string, input: string): number[] | null {
@@ -264,8 +365,14 @@ export function barcodeModulesForMode(mode: string, input: string): number[] | n
   if (mode === 'UPC-A') {
     return encodeUpcA(content);
   }
-  if (mode === 'ITF' || mode === 'EAN-13' || mode === 'EAN-8') {
+  if (mode === 'ITF') {
     return encodeItf(content);
+  }
+  if (mode === 'EAN-13') {
+    return encodeEan13(content);
+  }
+  if (mode === 'EAN-8') {
+    return encodeEan8(content);
   }
   return encodeCode128(content);
 }

@@ -1,26 +1,18 @@
-import { useState } from 'react';
-import { Alert, StyleSheet, TextInput } from 'react-native';
+import { Alert } from 'react-native';
+import { useEffect } from 'react';
 
 import {
   SettingsActionCard,
   SettingsCard,
   SettingsColorRow,
   SettingsScreenShell,
-  SettingsSegmentRow,
   SettingsToggleGroup,
   SettingsToggleRow,
 } from '@/components/settings-ui';
-import { clampGridSpacingMm, GRID_SPACING_MAX_MM, GRID_SPACING_MIN_MM } from '@/lib/editor/canvas-grid';
 import { requestEditorGridToggle } from '@/lib/editor/editor-grid-toggle';
 import {
-  GRID_CUSTOM_LABEL,
-  GRID_PRINT_DISCLAIMER,
-  GRID_SPACING_OPTIONS,
-  isPresetGridSpacing,
-  spacingOptionForMm,
-} from '@/lib/editor/grid-settings-ui';
-import {
-  DEFAULT_EDITOR_SETTINGS,
+  EDITOR_BORDER_SELECTION_COLORS,
+  EDITOR_TABLE_SELECTION_COLORS,
   useSettingsStore,
 } from '@/stores/settings-store';
 
@@ -30,26 +22,37 @@ export default function EditorSettingsScreen() {
     highlightColumnName,
     pictureAdsorption,
     editorGrid,
-    editorGridSpacingMm,
-    showNudgePad,
-    borderColorIndex,
-    tableColorIndex,
+    borderColorIndex: storedBorderColorIndex,
+    tableColorIndex: storedTableColorIndex,
   } = useSettingsStore((s) => s.editor);
+  const borderColorIndex = Math.max(
+    0,
+    Math.min(EDITOR_BORDER_SELECTION_COLORS.length - 1, storedBorderColorIndex),
+  );
+  const tableColorIndex = Math.max(
+    0,
+    Math.min(EDITOR_TABLE_SELECTION_COLORS.length - 1, storedTableColorIndex),
+  );
   const patchEditor = useSettingsStore((s) => s.patchEditor);
   const restoreEditorDefaults = useSettingsStore((s) => s.restoreEditorDefaults);
-
-  const gridSpacingMm =
-    editorGridSpacingMm ?? DEFAULT_EDITOR_SETTINGS.editorGridSpacingMm ?? 5;
-  const [customOpen, setCustomOpen] = useState(() => !isPresetGridSpacing(gridSpacingMm));
-  const [customDraft, setCustomDraft] = useState(() => String(clampGridSpacingMm(gridSpacingMm)));
 
   const setShowColumnName = (v: boolean) => patchEditor({ showColumnName: v });
   const setHighlightColumnName = (v: boolean) => patchEditor({ highlightColumnName: v });
   const setPictureAdsorption = (v: boolean) => patchEditor({ pictureAdsorption: v });
-  const setShowNudgePad = (v: boolean) => patchEditor({ showNudgePad: v });
-  const setBorderColorIndex = (v: number) => patchEditor({ borderColorIndex: v });
-  const setTableColorIndex = (v: number) => patchEditor({ tableColorIndex: v });
+  const setBorderColorIndex = (v: number) =>
+    patchEditor({ borderColorIndex: Math.max(0, Math.min(EDITOR_BORDER_SELECTION_COLORS.length - 1, v)) });
+  const setTableColorIndex = (v: number) =>
+    patchEditor({ tableColorIndex: Math.max(0, Math.min(EDITOR_TABLE_SELECTION_COLORS.length - 1, v)) });
   const setEditorGrid = (v: boolean) => requestEditorGridToggle(v, patchEditor);
+
+  useEffect(() => {
+    if (storedBorderColorIndex !== borderColorIndex || storedTableColorIndex !== tableColorIndex) {
+      patchEditor({
+        ...(storedBorderColorIndex !== borderColorIndex ? { borderColorIndex } : {}),
+        ...(storedTableColorIndex !== tableColorIndex ? { tableColorIndex } : {}),
+      });
+    }
+  }, [storedBorderColorIndex, storedTableColorIndex, borderColorIndex, tableColorIndex, patchEditor]);
 
   const restoreDefaults = () => {
     restoreEditorDefaults();
@@ -79,75 +82,19 @@ export default function EditorSettingsScreen() {
         description="Place a Image or Logo close to the QR code and it will automatically be displayed in the center of the QR code."
       />
 
-      <SettingsToggleGroup
-        label="Editor Grid"
-        value={editorGrid}
-        onValueChange={setEditorGrid}
-        description={GRID_PRINT_DISCLAIMER}
-      />
-
-      {editorGrid ? (
-        <SettingsCard>
-          <SettingsSegmentRow
-            label="Grid spacing"
-            options={GRID_SPACING_OPTIONS}
-            selected={customOpen ? GRID_CUSTOM_LABEL : spacingOptionForMm(gridSpacingMm)}
-            onSelect={(label) => {
-              if (label === GRID_CUSTOM_LABEL) {
-                setCustomOpen(true);
-                setCustomDraft(String(clampGridSpacingMm(gridSpacingMm)));
-                return;
-              }
-              const mm = Number.parseFloat(label);
-              if (!Number.isFinite(mm)) return;
-              setCustomOpen(false);
-              patchEditor({ editorGridSpacingMm: clampGridSpacingMm(mm) });
-            }}
-            showDivider={customOpen}
-          />
-          {customOpen ? (
-            <>
-              <TextInput
-                value={customDraft}
-                onChangeText={setCustomDraft}
-                onEndEditing={() => {
-                  const mm = Number.parseFloat(customDraft.replace(',', '.'));
-                  if (!Number.isFinite(mm)) return;
-                  const clamped = clampGridSpacingMm(mm);
-                  setCustomDraft(String(clamped));
-                  patchEditor({ editorGridSpacingMm: clamped });
-                }}
-                keyboardType="decimal-pad"
-                returnKeyType="done"
-                selectTextOnFocus
-                placeholder={`${GRID_SPACING_MIN_MM}–${GRID_SPACING_MAX_MM} mm`}
-                style={styles.customInput}
-                accessibilityLabel="Custom grid spacing in millimetres"
-              />
-            </>
-          ) : null}
-        </SettingsCard>
-      ) : null}
-
-      <SettingsCard>
-        <SettingsToggleRow
-          label="Touch Control Pad"
-          value={showNudgePad}
-          onValueChange={setShowNudgePad}
-        />
-      </SettingsCard>
+      <SettingsToggleGroup label="Editor Grid" value={editorGrid} onValueChange={setEditorGrid} />
 
       <SettingsCard>
         <SettingsColorRow
           label="Color of The Selected Border"
-          colors={['#FCA5A5', '#EF4444', '#991B1B']}
+          colors={[...EDITOR_BORDER_SELECTION_COLORS]}
           selectedIndex={borderColorIndex}
           onSelect={setBorderColorIndex}
           showDivider
         />
         <SettingsColorRow
           label="Color of The Selected Table Cell"
-          colors={['#FFFFFF', '#17A6B8', '#214668']}
+          colors={[...EDITOR_TABLE_SELECTION_COLORS]}
           selectedIndex={tableColorIndex}
           onSelect={setTableColorIndex}
         />
@@ -157,18 +104,3 @@ export default function EditorSettingsScreen() {
     </SettingsScreenShell>
   );
 }
-
-const styles = StyleSheet.create({
-  customInput: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#CBD5E1',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 16,
-    color: '#0F172A',
-    backgroundColor: '#F8FAFC',
-  },
-});

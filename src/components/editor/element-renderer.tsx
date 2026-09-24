@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, Platform } from 'react-native';
 import Svg, {
   Circle,
   Defs,
@@ -17,6 +17,8 @@ import QRCode from 'react-native-qrcode-svg';
 import { ClipartIcon } from '@/components/clipart-icon';
 import { SignaturePreview } from '@/components/editor/signature-drawing-board';
 import { BorderPreview } from '@/components/border-preview';
+import { formatDataSourceColumn } from '@/lib/editor/data-source-display';
+import { useSettingsStore } from '@/stores/settings-store';
 import { getClipartById } from '@/constants/clipart-library';
 import {
   DRAWING_COLORS,
@@ -39,7 +41,12 @@ import { encodeDataMatrix } from '@/lib/barcode/datamatrix';
 import { encodePdf417 } from '@/lib/barcode/pdf417';
 import { generateQrMatrix } from '@/printing/renderer/qrcode';
 import { applySerialOffset, lineSpacingMultiplier } from '@/lib/serial-content';
-import { useSettingsStore } from '@/stores/settings-store';
+import {
+  charSpacingToLetterSpacing,
+  computeWrappedLines,
+  measureTextWidthMm,
+} from '@/lib/text-metrics';
+import { ensureTableCells } from '@/lib/editor/table-cells';
 import { ptToMm, type LabelElement } from '@/lib/label-document';
 
 /** Design-space black (gallery/editor). Print still flattens to 1-bit in the raster pipeline. */
@@ -99,6 +106,8 @@ type ContentProps = {
   forPrint?: boolean;
   /** Host label media — circular borders draw as rings. */
   mediaShape?: string | null;
+  selectedTableCell?: { row: number; col: number } | null;
+  tableSelectionColor?: string;
 };
 
 function textStyleFor(
@@ -142,20 +151,98 @@ function textStyleFor(
   };
 }
 
+type TextLayoutFields = Pick<
+  EditorElementState,
+  | 'contentType'
+  | 'columnNameContent'
+  | 'fontSize'
+  | 'width'
+  | 'charSpacing'
+  | 'bold'
+  | 'align'
+  | 'autoWrapping'
+  | 'verticalDisplay'
+  | 'lineSpacing'
+  | 'italic'
+  | 'underline'
+  | 'strikethrough'
+  | 'fontFamily'
+  | 'drawingColorIndex'
+  | 'antiColor'
+> & { degreesOffset?: number };
+
+function resolveTextRaw(
+  element: Pick<TextLayoutFields, 'contentType' | 'columnNameContent' | 'degreesOffset'>,
+  textValue: string,
+  showColumnName: boolean,
+): string {
+  if (element.contentType === 'Data Source' && element.columnNameContent) {
+    return formatDataSourceColumn(element.columnNameContent, showColumnName);
+  }
+  if (element.contentType === 'Degrees') {
+    return applySerialOffset(textValue, element.degreesOffset ?? 1, 1);
+  }
+  return textValue;
+}
+
+function dataColumnHighlightStyle(
+  element: Pick<TextLayoutFields, 'contentType' | 'columnNameContent'>,
+  highlightColumnName: boolean,
+) {
+  if (
+    highlightColumnName &&
+    element.contentType === 'Data Source' &&
+    element.columnNameContent
+  ) {
+    return { backgroundColor: 'rgba(255, 235, 59, 0.35)' };
+  }
+  return null;
+}
+
+function formatTextForRender(element: TextLayoutFields, raw: string) {
+  if (element.verticalDisplay) {
+    return { text: raw.split('').join('\n'), numberOfLines: undefined as number | undefined };
+  }
+  if (element.autoWrapping === 'Close') {
+    return {
+      text: raw.replace(/\r?\n/g, ' '),
+      numberOfLines: 1 as number | undefined,
+      ellipsizeMode: 'tail' as const,
+    };
+  }
+  const lines = computeWrappedLines({
+    text: raw,
+    fontSize: element.fontSize,
+    widthMm: element.width,
+    autoWrapping: element.autoWrapping ?? 'Word',
+    charSpacing: element.charSpacing ?? 0,
+    bold: element.bold ?? false,
+    verticalDisplay: false,
+  });
+  return { text: lines.join('\n'), numberOfLines: undefined as number | undefined };
+}
+
+function letterSpacingStyle(element: Pick<TextLayoutFields, 'charSpacing' | 'fontSize'>) {
+  const spacing = element.charSpacing ?? 0;
+  if (spacing <= 0) return null;
+  return {
+    letterSpacing: charSpacingToLetterSpacing(spacing, element.fontSize, Platform.OS),
+  };
+}
+
 function TextContent({
   element,
   scale,
 }: {
-  element: EditorElementState & { verticalDisplay?: boolean; charSpacing?: number };
+  element: TextLayoutFields & { text: string };
   scale: number;
   widthPx: number;
 }) {
+  const showColumnName = useSettingsStore((s) => s.editor.showColumnName);
+  const highlightColumnName = useSettingsStore((s) => s.editor.highlightColumnName);
   const style = textStyleFor(element, scale);
-  const raw =
-    element.contentType === 'Data Source' && element.columnNameContent
-      ? `{${element.columnNameContent}}`
-      : element.text;
-  const text = element.verticalDisplay ? raw.split('').join('\n') : raw;
+  const raw = resolveTextRaw(element, element.text, showColumnName);
+  const formatted = formatTextForRender(element, raw);
   const align = element.align === 'spacing' ? 'justify' : element.align;
   return (
     <View
@@ -166,6 +253,7 @@ function TextContent({
           alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
         },
         element.antiColor && styles.antiBg,
+        dataColumnHighlightStyle(element, highlightColumnName),
       ]}>
       <Text
         allowFontScaling={false}
@@ -173,10 +261,11 @@ function TextContent({
           style,
           styles.textFill,
           { textAlign: align },
-          element.charSpacing ? { letterSpacing: element.charSpacing } : null,
+          letterSpacingStyle(element),
         ]}
-        numberOfLines={element.verticalDisplay ? undefined : element.autoWrapping === 'Close' ? 1 : undefined}>
-        {text}
+        numberOfLines={formatted.numberOfLines}
+        ellipsizeMode={'ellipsizeMode' in formatted ? formatted.ellipsizeMode : undefined}>
+        {formatted.text}
       </Text>
     </View>
   );
@@ -190,16 +279,11 @@ function DegreesContent({
   scale: number;
   widthPx: number;
 }) {
+  const showColumnName = useSettingsStore((s) => s.editor.showColumnName);
+  const highlightColumnName = useSettingsStore((s) => s.editor.highlightColumnName);
   const style = textStyleFor(element, scale);
-  const base =
-    element.contentType === 'Data Source' && element.columnNameContent
-      ? `{${element.columnNameContent}}`
-      : element.content;
-  const resolved =
-    element.contentType === 'Degrees'
-      ? applySerialOffset(base, element.degreesOffset, 1)
-      : base;
-  const text = element.verticalDisplay ? resolved.split('').join('\n') : resolved;
+  const raw = resolveTextRaw(element, element.content, showColumnName);
+  const formatted = formatTextForRender(element, raw);
   const align = element.align === 'spacing' ? 'justify' : element.align;
   return (
     <View
@@ -210,11 +294,19 @@ function DegreesContent({
           alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
         },
         element.antiColor && styles.antiBg,
+        dataColumnHighlightStyle(element, highlightColumnName),
       ]}>
       <Text
         allowFontScaling={false}
-        style={[style, styles.textFill, { textAlign: align }]}>
-        {text}
+        style={[
+          style,
+          styles.textFill,
+          { textAlign: align },
+          letterSpacingStyle(element),
+        ]}
+        numberOfLines={formatted.numberOfLines}
+        ellipsizeMode={'ellipsizeMode' in formatted ? formatted.ellipsizeMode : undefined}>
+        {formatted.text}
       </Text>
     </View>
   );
@@ -263,9 +355,10 @@ function BarcodeContent({
   heightPx: number;
   scale: number;
 }) {
+  const showColumnName = useSettingsStore((s) => s.editor.showColumnName);
   const content =
     element.contentType === 'Data Source' && element.columnNameContent
-      ? `{${element.columnNameContent}}`
+      ? formatDataSourceColumn(element.columnNameContent, showColumnName)
       : element.content || '0123456789';
   const rawModules = useMemo(
     () => barcodeModulesForMode(element.encodeMode, content),
@@ -278,6 +371,8 @@ function BarcodeContent({
   const hri = formatBarcodeHri(element.encodeMode, content);
   const labelHeight = showLabel ? Math.max(8, Math.round(labelSize * 1.2)) : 0;
   const widthMm = element.width > 0 ? element.width : widthPx / (scale || 1);
+  const align = element.align === 'spacing' ? 'justify' : element.align;
+  const labelStyle = textStyleFor(element, scale);
 
   // Quantize barcode modules to integer hardware dots without internal quiet zone padding,
   // matching WePrint's tight fit where the selection box hugs the outermost bars and text exactly.
@@ -287,20 +382,25 @@ function BarcodeContent({
   }, [rawModules, widthMm]);
 
   const label = showLabel ? (
-    <View style={{ width: '100%', height: labelHeight, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }}>
+    <View
+      style={{
+        width: '100%',
+        height: labelHeight,
+        flexShrink: 0,
+        alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
+        justifyContent: 'center',
+      }}>
       <Text
         numberOfLines={1}
         allowFontScaling={false}
-        style={{
-          width: '100%',
-          fontSize: labelSize,
-          lineHeight: labelHeight,
-          color,
-          textAlign: 'center',
-          fontFamily: resolveFontFamily(element.fontFamily),
-          fontWeight: element.bold ? '600' : '400',
-          includeFontPadding: false,
-        }}>
+        style={[
+          labelStyle,
+          {
+            width: '100%',
+            lineHeight: labelHeight,
+            textAlign: align,
+          },
+        ]}>
         {hri}
       </Text>
     </View>
@@ -351,9 +451,10 @@ function QrcodeContent({
   widthPx: number;
   heightPx: number;
 }) {
+  const showColumnName = useSettingsStore((s) => s.editor.showColumnName);
   const content =
     element.contentType === 'Data Source' && element.columnNameContent
-      ? `{${element.columnNameContent}}`
+      ? formatDataSourceColumn(element.columnNameContent, showColumnName)
       : element.contentType === 'Degrees'
       ? applySerialOffset(element.content || 'https://example.com', element.degreesOffset, 1)
       : element.content || 'https://example.com';
@@ -632,21 +733,35 @@ function ShapeContent({
   );
 }
 
+/** Traces what the highlight renderer actually reads, only when the value changes. */
+let lastHighlightRead = '\u0000';
+function logHighlightRead(cell: { row: number; col: number } | null | undefined) {
+  const key = cell ? `${cell.row},${cell.col}` : 'none';
+  if (key === lastHighlightRead) return;
+  lastHighlightRead = key;
+  console.log(`[table-cell] highlight-render reads=${key}`);
+}
+
 function TableContent({
   element,
   widthPx,
   heightPx,
   scale,
+  selectedTableCell,
+  tableSelectionColor = '#48C3C7',
 }: {
   element: TableElementState;
   widthPx: number;
   heightPx: number;
   scale: number;
+  selectedTableCell?: { row: number; col: number } | null;
+  tableSelectionColor?: string;
 }) {
-  const tableColorIndex = useSettingsStore((s) => s.editor.tableColorIndex);
-  const color = inkColor(
-    element.drawingColorIndex > 0 ? element.drawingColorIndex : tableColorIndex,
-  );
+  const showColumnName = useSettingsStore((s) => s.editor.showColumnName);
+  const highlightColumnName = useSettingsStore((s) => s.editor.highlightColumnName);
+  const table = ensureTableCells(element);
+  logHighlightRead(selectedTableCell);
+  const color = inkColor(element.drawingColorIndex > 0 ? element.drawingColorIndex : 1);
   const strokeWidth = Math.max(1, element.lineWidth * scale);
   const totalRowMm = element.rowHeights.reduce((sum, h) => sum + h, 0) || 1;
   const totalColMm = element.columnWidths.reduce((sum, w) => sum + w, 0) || 1;
@@ -664,31 +779,112 @@ function TableContent({
     colLines.push((acc / totalColMm) * widthPx);
   }
 
+  const cellLayouts: {
+    row: number;
+    col: number;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  }[] = [];
+  for (let r = 0; r < element.rowCount; r++) {
+    for (let c = 0; c < element.columnCount; c++) {
+      cellLayouts.push({
+        row: r,
+        col: c,
+        left: colLines[c] ?? 0,
+        top: rowLines[r] ?? 0,
+        width: Math.max(1, (colLines[c + 1] ?? widthPx) - (colLines[c] ?? 0)),
+        height: Math.max(1, (rowLines[r + 1] ?? heightPx) - (rowLines[r] ?? 0)),
+      });
+    }
+  }
+
   return (
-    <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
-      {rowLines.map((y, i) => (
-        <Line
-          key={`r${i}`}
-          x1={0}
-          y1={Math.min(heightPx - strokeWidth / 2, Math.max(strokeWidth / 2, y))}
-          x2={widthPx}
-          y2={Math.min(heightPx - strokeWidth / 2, Math.max(strokeWidth / 2, y))}
-          stroke={color}
-          strokeWidth={strokeWidth}
-        />
-      ))}
-      {colLines.map((x, i) => (
-        <Line
-          key={`c${i}`}
-          x1={Math.min(widthPx - strokeWidth / 2, Math.max(strokeWidth / 2, x))}
-          y1={0}
-          x2={Math.min(widthPx - strokeWidth / 2, Math.max(strokeWidth / 2, x))}
-          y2={heightPx}
-          stroke={color}
-          strokeWidth={strokeWidth}
-        />
-      ))}
-    </Svg>
+    <View style={styles.fill}>
+      <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`} preserveAspectRatio="none">
+        {rowLines.map((y, i) => (
+          <Line
+            key={`r${i}`}
+            x1={0}
+            y1={Math.min(heightPx - strokeWidth / 2, Math.max(strokeWidth / 2, y))}
+            x2={widthPx}
+            y2={Math.min(heightPx - strokeWidth / 2, Math.max(strokeWidth / 2, y))}
+            stroke={color}
+            strokeWidth={strokeWidth}
+          />
+        ))}
+        {colLines.map((x, i) => (
+          <Line
+            key={`c${i}`}
+            x1={Math.min(widthPx - strokeWidth / 2, Math.max(strokeWidth / 2, x))}
+            y1={0}
+            x2={Math.min(widthPx - strokeWidth / 2, Math.max(strokeWidth / 2, x))}
+            y2={heightPx}
+            stroke={color}
+            strokeWidth={strokeWidth}
+          />
+        ))}
+      </Svg>
+      {cellLayouts.map(({ row, col, left, top, width, height }) => {
+        const cell = table.cells?.[row]?.[col];
+        const selected = selectedTableCell?.row === row && selectedTableCell?.col === col;
+        const raw = cell ? resolveTextRaw(cell, cell.text, showColumnName) : '';
+        const flat = raw.replace(/\r?\n/g, ' ');
+        const padX = Math.max(1, scale * 0.4);
+        const innerW = Math.max(1, width - padX * 2);
+        const measuredPx = cell
+          ? measureTextWidthMm(flat, cell.fontSize, 0, cell.bold) * scale * 1.12
+          : 0;
+        const scaleX = measuredPx > innerW ? innerW / measuredPx : 1;
+        const style = cell ? textStyleFor(cell, scale) : undefined;
+        const align = cell?.align === 'spacing' ? 'justify' : cell?.align ?? 'left';
+        return (
+          <View
+            key={`cell-${row}-${col}`}
+            pointerEvents="none"
+            style={[
+              {
+                position: 'absolute',
+                left,
+                top,
+                width,
+                height,
+                overflow: 'hidden',
+                justifyContent: 'center',
+                alignItems: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'stretch',
+                paddingHorizontal: Math.max(1, scale * 0.4),
+                paddingVertical: Math.max(0, scale * 0.2),
+              },
+              selected && {
+                backgroundColor: `${tableSelectionColor}99`,
+                borderWidth: Math.max(1, scale * 0.15),
+                borderColor: tableSelectionColor,
+              },
+              cell && dataColumnHighlightStyle(cell, highlightColumnName),
+            ]}>
+            {cell && flat ? (
+              <Text
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                style={[
+                  style,
+                  letterSpacingStyle(cell),
+                  {
+                    textAlign: align,
+                    width: scaleX < 1 ? measuredPx : '100%',
+                    ...(scaleX < 1
+                      ? { transform: [{ scaleX }], transformOrigin: 'left center' as const }
+                      : null),
+                  },
+                ]}>
+                {flat}
+              </Text>
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
   );
 }
 
@@ -703,11 +899,13 @@ function ArcTextContent({
   heightPx: number;
   scale: number;
 }) {
+  const showColumnName = useSettingsStore((s) => s.editor.showColumnName);
+  const highlightColumnName = useSettingsStore((s) => s.editor.highlightColumnName);
   const color = element.antiColor ? '#FFFFFF' : inkColor(element.drawingColorIndex);
   const isPlaceholder = !element.text || element.text.trim().length === 0;
   const displayText =
     element.contentType === 'Data Source' && element.columnNameContent
-      ? element.columnNameContent
+      ? formatDataSourceColumn(element.columnNameContent, showColumnName)
       : isPlaceholder
       ? 'Double-tap to enter text'
       : element.text;
@@ -735,7 +933,12 @@ function ArcTextContent({
     : color;
 
   return (
-    <View style={[styles.fill, element.antiColor && styles.antiBg]}>
+    <View
+      style={[
+        styles.fill,
+        element.antiColor && styles.antiBg,
+        dataColumnHighlightStyle(element, highlightColumnName),
+      ]}>
       <Svg width="100%" height="100%" viewBox={`0 0 ${widthPx} ${heightPx}`}>
         {/* Circular guide line matching reference specification */}
         <Circle
@@ -782,6 +985,8 @@ export function ElementContentView({
   scale,
   forPrint,
   mediaShape,
+  selectedTableCell,
+  tableSelectionColor,
 }: ContentProps) {
   switch (element.type) {
     case 'text':
@@ -810,7 +1015,14 @@ export function ElementContentView({
       );
     case 'table':
       return (
-        <TableContent element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />
+        <TableContent
+          element={element}
+          widthPx={widthPx}
+          heightPx={heightPx}
+          scale={scale}
+          selectedTableCell={selectedTableCell}
+          tableSelectionColor={tableSelectionColor}
+        />
       );
     case 'arctext':
       return (
@@ -868,15 +1080,18 @@ export function ElementContentView({
     }
     case 'border': {
       const circular = mediaShape === 'circle' || mediaShape === 'ellipse';
+      const insetPx = Math.max(2, Math.round(scale * 2));
+      const innerW = Math.max(1, widthPx - insetPx * 2);
+      const innerH = Math.max(1, heightPx - insetPx * 2);
       return (
-        <View style={styles.fillVisible}>
+        <View style={[styles.fillVisible, { padding: insetPx }]}>
           <BorderPreview
             styleId={element.borderStyle}
             scale={scale}
             lineWidthMm={element.lineWidth || 0.55}
             circular={circular}
-            widthPx={widthPx}
-            heightPx={heightPx}
+            widthPx={innerW}
+            heightPx={innerH}
           />
         </View>
       );

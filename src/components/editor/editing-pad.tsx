@@ -73,7 +73,7 @@ function PadBtn({
         }, HOLD_MS);
       }}
       onPressOut={clear}
-      hitSlop={4}
+      hitSlop={10}
       style={({ pressed }) => [
         styles.btn,
         active && styles.btnActive,

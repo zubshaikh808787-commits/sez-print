@@ -61,6 +61,14 @@ type KonvaCanvasProps = {
   onTransformMove?: (payload: TransformMovePayload) => void;
   onTransformEnd: (payload: TransformCommitPayload) => void;
   onQuickRotate?: (id: string) => void;
+  onTableCellPress?: (tableId: string, cell: { row: number; col: number } | null) => void;
+  onTableCellQuickEdit?: (
+    tableId: string,
+    cell: { row: number; col: number },
+    anchorRect?: ElementAnchorRect,
+  ) => void;
+  selectedTableCell?: { tableId: string; row: number; col: number } | null;
+  tableSelectionColor?: string;
   /** Window point → artboard mm. Drag commit goes through this, not raw px. */
   pointerToMm?: (windowX: number, windowY: number) => { x: number; y: number } | null;
   snapMoveMm?: (input: {
@@ -106,6 +114,14 @@ type ElementChrome = {
   onTransformMove?: (payload: TransformMovePayload) => void;
   onTransformEnd: (payload: TransformCommitPayload) => void;
   onQuickRotate?: (id: string) => void;
+  onTableCellPress?: (tableId: string, cell: { row: number; col: number } | null) => void;
+  onTableCellQuickEdit?: (
+    tableId: string,
+    cell: { row: number; col: number },
+    anchorRect?: ElementAnchorRect,
+  ) => void;
+  selectedTableCell?: { row: number; col: number } | null;
+  tableSelectionColor?: string;
   pointerToMm?: (windowX: number, windowY: number) => { x: number; y: number } | null;
   snapMoveMm?: (input: {
     id: string;
@@ -162,6 +178,16 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           onTransformMove={chrome.onTransformMove}
           onTransformEnd={chrome.onTransformEnd}
           onQuickRotate={chrome.onQuickRotate}
+          onTableCellPress={chrome.onTableCellPress}
+          onTableCellQuickEdit={chrome.onTableCellQuickEdit}
+          selectedTableCell={
+            element.type === 'table' &&
+            chrome.selectedTableCell &&
+            chrome.selectedIds.includes(element.id)
+              ? { row: chrome.selectedTableCell.row, col: chrome.selectedTableCell.col }
+              : null
+          }
+          tableSelectionColor={chrome.tableSelectionColor ?? chrome.selectionColor}
           pointerToMm={chrome.pointerToMm}
           snapMoveMm={chrome.snapMoveMm}
           safeModeSv={chrome.safeModeSv}
@@ -308,6 +334,10 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
     onTransformMove,
     onTransformEnd,
     onQuickRotate,
+    onTableCellPress,
+    onTableCellQuickEdit,
+    selectedTableCell,
+    tableSelectionColor,
     pointerToMm,
     snapMoveMm,
     snapGuides = [],
@@ -508,6 +538,13 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       onTransformMove,
       onTransformEnd,
       onQuickRotate,
+      onTableCellPress,
+      onTableCellQuickEdit,
+      selectedTableCell:
+        selectedTableCell && selectedIds.includes(selectedTableCell.tableId)
+          ? { row: selectedTableCell.row, col: selectedTableCell.col }
+          : null,
+      tableSelectionColor: tableSelectionColor ?? selectionColor,
       pointerToMm,
       snapMoveMm,
       safeModeSv,
@@ -544,6 +581,10 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       onTransformMove,
       onTransformEnd,
       onQuickRotate,
+      onTableCellPress,
+      onTableCellQuickEdit,
+      selectedTableCell,
+      tableSelectionColor,
       pointerToMm,
       snapMoveMm,
       safeModeSv,

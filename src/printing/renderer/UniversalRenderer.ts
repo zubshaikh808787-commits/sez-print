@@ -22,7 +22,7 @@ import {
   withDpi,
   type RenderedBitmap,
 } from '@/printing/raster/bitmap';
-import { drawCode128 } from '@/printing/renderer/barcode';
+import { drawBarcodeByMode } from '@/printing/renderer/barcode';
 import { drawQrCode } from '@/printing/renderer/qrcode';
 import { drawText } from '@/printing/renderer/text';
 
@@ -115,7 +115,8 @@ export function renderPrintDocument(
       continue;
     }
     if (el.type === 'barcode' && isBarcodeData(el.data)) {
-      drawCode128(canvas, el.data.payload, box.x0, box.y0, box.widthDots, box.heightDots);
+      const mode = el.data.encodeMode ?? 'CODE-128';
+      drawBarcodeByMode(canvas, el.data.payload, mode, box.x0, box.y0, box.widthDots, box.heightDots);
       continue;
     }
     if (el.type === 'rectangle') {

@@ -1,11 +1,53 @@
-import { AppIcon, type AppIconName } from '@/components/app-icon';
 import { Pressable, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { createContext, useContext } from 'react';
 
+import {
+  AlignBottomIcon,
+  AlignHorizontalCenterIcon,
+  AlignObjectCenterHIcon,
+  AlignObjectLeftIcon,
+  AlignObjectRightIcon,
+  AlignTopIcon,
+  AlignVerticalCenterIcon,
+  BringForwardIcon,
+  BringToFrontIcon,
+  CenterCheckIcon,
+  FitToCanvasIcon,
+  NudgeDownIcon,
+  NudgeLeftIcon,
+  NudgeRightIcon,
+  NudgeUpIcon,
+  SendBackwardIcon,
+  SendToBackIcon,
+  StretchHorizontalIcon,
+  StretchVerticalIcon,
+} from '@/components/editor/position-icons';
 import type { TextAlign } from '@/components/editor/types';
 
-type IconName = AppIconName;
-
 const NUDGE_MM = 0.5;
+const PRESS_HIT_SLOP = 10;
+
+export type PositionLayerActions = {
+  onSendToBack?: () => void;
+  onBringToFront?: () => void;
+  onSendBackward?: () => void;
+  onBringForward?: () => void;
+};
+
+const PositionLayerActionsContext = createContext<PositionLayerActions | undefined>(undefined);
+
+export function PositionLayerActionsProvider({
+  value,
+  children,
+}: {
+  value: PositionLayerActions;
+  children: ReactNode;
+}) {
+  return (
+    <PositionLayerActionsContext.Provider value={value}>{children}</PositionLayerActionsContext.Provider>
+  );
+}
 
 export type PositionControlsProps = {
   left: number;
@@ -15,8 +57,9 @@ export type PositionControlsProps = {
   labelWidthMm: number;
   labelHeightMm: number;
   onPatch: (updates: Record<string, number | string>) => void;
-  /** When provided, text-align buttons also update the align property. */
+  /** When provided, horizontal-align buttons also update the text align property. */
   textAlign?: TextAlign;
+  layerActions?: PositionLayerActions;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -32,7 +75,10 @@ export function PositionControls({
   labelHeightMm,
   onPatch,
   textAlign,
+  layerActions: layerActionsProp,
 }: PositionControlsProps) {
+  const layerActionsFromContext = useContext(PositionLayerActionsContext);
+  const layerActions = layerActionsProp ?? layerActionsFromContext;
   const maxLeft = Math.max(0, labelWidthMm - width);
   const maxTop = Math.max(0, labelHeightMm - height);
 
@@ -79,18 +125,49 @@ export function PositionControls({
   };
 
   const stretchWidth = () => {
-    onPatch({ left: 0, width: labelWidthMm });
+    onPatch({
+      left: 0,
+      width: labelWidthMm,
+      ...(textAlign !== undefined ? { align: 'spacing' as TextAlign } : {}),
+    });
   };
 
-  const padBtn = (icon: IconName, onPress: () => void) => (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.padBtn, pressed && styles.pressed]}>
-      <AppIcon name={icon} tintColor="#556473" size={18} />
+  const stretchHeight = () => {
+    onPatch({ top: 0, height: labelHeightMm });
+  };
+
+  const fitToCanvas = () => {
+    onPatch({
+      left: 0,
+      top: 0,
+      width: labelWidthMm,
+      height: labelHeightMm,
+      ...(textAlign !== undefined ? { align: 'spacing' as TextAlign } : {}),
+    });
+  };
+
+  const padBtn = (icon: ReactNode, onPress: () => void) => (
+    <Pressable onPress={onPress} hitSlop={PRESS_HIT_SLOP} style={({ pressed }) => [styles.padBtn, pressed && styles.pressed]}>
+      {icon}
     </Pressable>
   );
 
-  const gridBtn = (icon: IconName, onPress: () => void) => (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.gridBtn, pressed && styles.pressed]}>
-      <AppIcon name={icon} tintColor="#556473" size={17} />
+  const gridBtn = (icon: ReactNode, onPress: () => void) => (
+    <Pressable
+      onPress={onPress}
+      hitSlop={PRESS_HIT_SLOP}
+      style={({ pressed }) => [styles.gridBtn, pressed && styles.pressed]}>
+      {icon}
+    </Pressable>
+  );
+
+  const layerBtn = (icon: ReactNode, onPress?: () => void) => (
+    <Pressable
+      disabled={!onPress}
+      onPress={onPress}
+      hitSlop={PRESS_HIT_SLOP}
+      style={({ pressed }) => [styles.layerBtn, !onPress && styles.layerBtnDisabled, pressed && onPress && styles.pressed]}>
+      {icon}
     </Pressable>
   );
 
@@ -98,112 +175,102 @@ export function PositionControls({
     <>
       <View style={styles.positionWrap}>
         <View style={styles.padColumn}>
-          {padBtn('arrowtriangle.up.fill', () => nudge(0, -NUDGE_MM))}
+          {padBtn(<NudgeUpIcon />, () => nudge(0, -NUDGE_MM))}
           <View style={styles.padMiddleRow}>
-            {padBtn('arrowtriangle.left.fill', () => nudge(-NUDGE_MM, 0))}
+            {padBtn(<NudgeLeftIcon />, () => nudge(-NUDGE_MM, 0))}
             <Pressable
               onPress={() => alignTo('center')}
+              hitSlop={PRESS_HIT_SLOP}
               style={({ pressed }) => [styles.padBtn, styles.padCenter, pressed && styles.pressed]}>
-              <AppIcon name="checkmark" tintColor="#556473" size={16} />
+              <CenterCheckIcon />
             </Pressable>
-            {padBtn('arrowtriangle.right.fill', () => nudge(NUDGE_MM, 0))}
+            {padBtn(<NudgeRightIcon />, () => nudge(NUDGE_MM, 0))}
           </View>
-          {padBtn('arrowtriangle.down.fill', () => nudge(0, NUDGE_MM))}
+          {padBtn(<NudgeDownIcon />, () => nudge(0, NUDGE_MM))}
         </View>
+
         <View style={styles.alignGrid}>
-          {gridBtn('align.vertical.center', () => alignTo('center-v'))}
-          {gridBtn('align.horizontal.center', () => alignTo('center-h'))}
-          {gridBtn('arrow.up.left.and.arrow.down.right', () => alignTo('center'))}
-          {gridBtn('text.alignleft', () => alignTo('left'))}
-          {gridBtn('text.aligncenter', () => alignTo('center-h'))}
-          {gridBtn('text.alignright', () => alignTo('right'))}
-          {gridBtn('arrow.left.and.right', stretchWidth)}
-          {gridBtn('align.vertical.top', () => alignTo('top'))}
-          {gridBtn('align.vertical.center', () => alignTo('center-v'))}
-          {gridBtn('align.vertical.bottom', () => alignTo('bottom'))}
-          {gridBtn('arrow.up.and.down', () => onPatch({ top: maxTop }))}
+          <View style={styles.alignRow}>
+            {gridBtn(<AlignVerticalCenterIcon />, () => alignTo('center-v'))}
+            {gridBtn(<AlignHorizontalCenterIcon />, () => alignTo('center-h'))}
+            {gridBtn(<FitToCanvasIcon />, fitToCanvas)}
+          </View>
+          <View style={styles.alignRow}>
+            {gridBtn(<AlignObjectLeftIcon />, () => alignTo('left'))}
+            {gridBtn(<AlignObjectCenterHIcon />, () => alignTo('center-h'))}
+            {gridBtn(<AlignObjectRightIcon />, () => alignTo('right'))}
+            {gridBtn(<StretchHorizontalIcon />, stretchWidth)}
+          </View>
+          <View style={styles.alignRow}>
+            {gridBtn(<AlignTopIcon />, () => alignTo('top'))}
+            {gridBtn(<AlignVerticalCenterIcon />, () => alignTo('center-v'))}
+            {gridBtn(<AlignBottomIcon />, () => alignTo('bottom'))}
+            {gridBtn(<StretchVerticalIcon />, stretchHeight)}
+          </View>
         </View>
       </View>
-      <View style={styles.positionActions}>
-        {(
-          [
-            ['arrow.left.to.line', () => alignTo('left')] as const,
-            ['arrow.right.to.line', () => alignTo('right')] as const,
-            ['arrow.up.left.and.arrow.down.right', () => {
-              onPatch({ left: 0, top: 0, width: labelWidthMm });
-            }] as const,
-            ['arrow.down.right.and.arrow.up.left', () => alignTo('center')] as const,
-          ] satisfies [IconName, () => void][]
-        ).map(([icon, onPress]) => (
-          <Pressable
-            key={icon}
-            onPress={onPress}
-            style={({ pressed }) => [styles.positionActionBtn, pressed && styles.pressed]}>
-            <AppIcon name={icon} tintColor="#556473" size={20} />
-          </Pressable>
-        ))}
+
+      <View style={styles.layerRow}>
+        {layerBtn(<SendToBackIcon />, layerActions?.onSendToBack)}
+        {layerBtn(<BringToFrontIcon />, layerActions?.onBringToFront)}
+        {layerBtn(<SendBackwardIcon />, layerActions?.onSendBackward)}
+        {layerBtn(<BringForwardIcon />, layerActions?.onBringForward)}
       </View>
     </>
   );
 }
 
+const BTN = {
+  size: 44,
+  radius: 6,
+  bg: '#EEF1F5',
+  centerBg: '#E8ECF1',
+  gap: 6,
+} as const;
+
 const styles = StyleSheet.create({
-  pressed: {
-    opacity: 0.75,
-  },
+  pressed: { opacity: 0.72 },
   positionWrap: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
     gap: 16,
   },
-  padColumn: {
-    alignItems: 'center',
-    gap: 6,
-  },
-  padMiddleRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
+  padColumn: { alignItems: 'center', gap: BTN.gap },
+  padMiddleRow: { flexDirection: 'row', gap: BTN.gap },
   padBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 6,
-    backgroundColor: '#EEF1F5',
+    width: BTN.size,
+    height: BTN.size,
+    borderRadius: BTN.radius,
+    backgroundColor: BTN.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  padCenter: {
-    backgroundColor: '#E8ECF1',
-  },
-  alignGrid: {
-    flex: 1,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
+  padCenter: { backgroundColor: BTN.centerBg },
+  alignGrid: { flex: 1, gap: BTN.gap },
+  alignRow: { flexDirection: 'row', gap: BTN.gap },
   gridBtn: {
-    width: '22%',
-    minWidth: 44,
-    height: 44,
-    borderRadius: 6,
-    backgroundColor: '#EEF1F5',
+    flex: 1,
+    height: BTN.size,
+    borderRadius: BTN.radius,
+    backgroundColor: BTN.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  positionActions: {
+  layerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
     paddingHorizontal: 16,
     paddingBottom: 16,
-    gap: 8,
+    gap: BTN.gap,
   },
-  positionActionBtn: {
+  layerBtn: {
     flex: 1,
-    height: 44,
-    borderRadius: 6,
-    backgroundColor: '#EEF1F5',
+    height: BTN.size,
+    borderRadius: BTN.radius,
+    backgroundColor: BTN.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  layerBtnDisabled: { opacity: 0.4 },
 });

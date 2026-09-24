@@ -30,6 +30,7 @@ import {
   type MediaShape,
 } from '@/lib/label-document';
 import { DRAWING_COLORS } from '@/components/editor/types';
+import { encodeModeToSymbology } from '@/lib/barcode-code128';
 import { applySerialOffset } from '@/lib/serial-content';
 import { logPrintTrace } from '@/printing/trace';
 import { dotsPerMm as dotsPerMmForDpi } from '@/lib/printer/print-spec';
@@ -302,7 +303,15 @@ function convertBarcode(
 
   const data: BarcodeElementData = {
     payload,
-    symbology: 'code128',
+    symbology: encodeModeToSymbology(el.encodeMode ?? 'CODE-128'),
+    encodeMode: el.encodeMode ?? 'CODE-128',
+    textFlag: el.textFlag,
+    fontSizePt: el.fontSize,
+    bold: el.bold,
+    italic: el.italic,
+    underline: el.underline,
+    strikethrough: el.strikethrough,
+    align: el.align,
   };
 
   return { ...base, type: 'barcode', data };

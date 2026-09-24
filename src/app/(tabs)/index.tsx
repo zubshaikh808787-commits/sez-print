@@ -17,8 +17,8 @@ import {
   DocBadgeIcon,
   ImgToLabelIcon,
   JewelleryLabelIcon,
-  LabelCloneIcon,
   NewLabelIcon,
+  TwoUpsLabelIcon,
   PrintPhotoIcon,
   ScanLabelIcon,
   ShareNodeIcon,
@@ -358,7 +358,7 @@ export default function HomeScreen() {
             <View style={styles.categoryRow}>
               <Tile
                 style={[styles.menuQuarter, { width: quarterTileWidth }]}
-                iconComponent={<LabelCloneIcon size={30} color={Palette.accent} />}
+                iconComponent={<TwoUpsLabelIcon size={30} color={Palette.accent} />}
                 label="2ups Label"
                 href="/new-label-setup?isTwoUps=true"
               />

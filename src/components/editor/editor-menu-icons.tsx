@@ -185,11 +185,18 @@ export function ToolMenuIcon({
       );
 
     case 'Label Clone':
-    case '2ups Label':
       return (
         <Svg width={size} height={size} viewBox="0 0 32 32">
           <Path d="M 4.5 10 V 5.5 H 9 M 23 5.5 H 27.5 V 10 M 4.5 22 V 26.5 H 9 M 23 26.5 H 27.5 V 22" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           <Path d="M 19 12.5 C 18 11.5 17 11.2 15.5 11.2 C 12.8 11.2 11.5 13.2 11.5 16 C 11.5 18.8 12.8 20.8 15.5 20.8 C 17 20.8 18 20.5 19 19.5" stroke={accentColor} strokeWidth="2.2" strokeLinecap="round" fill="none" />
+        </Svg>
+      );
+
+    case '2ups Label':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 32 32">
+          <Rect x="4.5" y="8" width="10" height="16" rx="1.5" stroke={color} strokeWidth="1.8" fill="none" />
+          <Rect x="17.5" y="8" width="10" height="16" rx="1.5" stroke={accentColor} strokeWidth="1.8" fill="none" />
         </Svg>
       );
 

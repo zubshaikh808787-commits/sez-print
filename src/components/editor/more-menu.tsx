@@ -10,6 +10,7 @@ type LabelSettingsMenuProps = {
   visible: boolean;
   topOffset: number;
   onClose: () => void;
+  onLabelSettings?: () => void;
   onOpen?: () => void;
   onSave?: () => void;
   onSaveAs?: () => void;
@@ -21,6 +22,7 @@ export function LabelSettingsMenu({
   visible,
   topOffset,
   onClose,
+  onLabelSettings,
   onOpen,
   onSave,
   onSaveAs,
@@ -31,7 +33,7 @@ export function LabelSettingsMenu({
     {
       label: 'Label Settings',
       icon: 'hexagon',
-      onPress: () => router.push('/default-property-settings'),
+      onPress: onLabelSettings ?? (() => router.push('/default-property-settings')),
     },
     {
       label: 'Skia Canvas Test (Dev)',

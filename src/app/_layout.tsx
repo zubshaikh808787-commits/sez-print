@@ -89,6 +89,8 @@ function AppRoot() {
         <Stack.Screen name="editing-settings" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="editor-settings" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="default-property-settings" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="label-settings" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="drawing-color" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="cache-settings" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="app-permissions" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="printing-history" options={{ animation: 'slide_from_right' }} />
@@ -97,6 +99,7 @@ function AppRoot() {
         <Stack.Screen name="calibration-print" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="canvas-skia-prototype" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="phase2-canvas" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="image-crop" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="phase3-image-import" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="phase4-text" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="phase5-barcode-qr" options={{ animation: 'slide_from_right' }} />

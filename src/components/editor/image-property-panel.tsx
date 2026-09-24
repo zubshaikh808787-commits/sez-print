@@ -2,12 +2,12 @@ import { useCallback } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 
 import { AppIcon } from '@/components/app-icon';
 import { PositionControls } from '@/components/editor/position-controls';
 import { formatMm, normalizeRotation } from '@/components/editor/types';
 import type { ImageElementState } from '@/lib/label-document';
-import { ingestEditorImage } from '@/lib/editor/image-ingest-native';
 
 const ACCENT = '#48C3C7';
 const TABS = ['Regular', 'Position', 'Rotate'] as const;
@@ -111,7 +111,7 @@ function ToggleRow({
 export type ImagePropertyPanelProps = {
   activeTab: ImagePropertyTab;
   onTabChange: (tab: ImagePropertyTab) => void;
-  state: ImageElementState;
+  state: ImageElementState & { id?: string };
   patch: (updates: Partial<ImageElementState>) => void;
   labelWidthMm: number;
   labelHeightMm: number;
@@ -127,7 +127,6 @@ export function ImagePropertyPanel({
   labelWidthMm,
   labelHeightMm,
   elementHeightMm,
-  onBusyChange,
 }: ImagePropertyPanelProps) {
   const currentRotation = normalizeRotation(state.rotation ?? 0);
   const isAspectLocked = state.aspectRatioLocked ?? true;
@@ -137,40 +136,36 @@ export function ImagePropertyPanel({
     patch({ rotation: normalizeRotation(currentRotation + 90) });
   }, [currentRotation, patch]);
 
-  const applyIngestedAsset = useCallback(
-    async (uri: string, width?: number, height?: number) => {
-      onBusyChange?.(true);
-      try {
-        const ingested = await ingestEditorImage({ uri, width, height });
-        patch({
-          uri: ingested.previewUri,
-          printUri: ingested.printUri,
-          originalAspect: ingested.originalAspect,
-          workingWidthPx: ingested.workingWidthPx,
-          workingHeightPx: ingested.workingHeightPx,
-        });
-      } catch (error) {
-        Alert.alert(
-          'Could not update photo',
-          error instanceof Error ? error.message : 'The image could not be decoded.',
-        );
-      } finally {
-        onBusyChange?.(false);
+  const openCropScreen = useCallback(
+    (uri: string, width: number, height: number, mode: 'recrop' | 'replace') => {
+      if (!state.id) {
+        Alert.alert('Crop unavailable', 'Select the image on the canvas first.');
+        return;
       }
+      router.push({
+        pathname: '/image-crop',
+        params: {
+          uri,
+          width: String(width),
+          height: String(height),
+          mode,
+          elementId: state.id,
+        },
+      });
     },
-    [onBusyChange, patch],
+    [state.id],
   );
 
-  const handleCropImage = useCallback(async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      allowsEditing: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
-    await applyIngestedAsset(asset.uri, asset.width, asset.height);
-  }, [applyIngestedAsset]);
+  const handleCropImage = useCallback(() => {
+    const sourceUri = state.printUri || state.uri;
+    if (!sourceUri) return;
+    openCropScreen(
+      sourceUri,
+      state.workingWidthPx ?? 0,
+      state.workingHeightPx ?? 0,
+      'recrop',
+    );
+  }, [openCropScreen, state.printUri, state.uri, state.workingWidthPx, state.workingHeightPx]);
 
   const handleReplaceImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -180,8 +175,9 @@ export function ImagePropertyPanel({
     });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
-    await applyIngestedAsset(asset.uri, asset.width, asset.height);
-  }, [applyIngestedAsset]);
+    if (!asset.uri) return;
+    openCropScreen(asset.uri, asset.width ?? 0, asset.height ?? 0, 'replace');
+  }, [openCropScreen]);
 
   const handleFlipH = useCallback(() => {
     patch({ flipH: !state.flipH });

@@ -16,6 +16,9 @@ import { SettingsStackHeader } from '@/components/settings-stack-header';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { androidRipple, cardShadow, Palette } from '@/constants/ui';
 
+const SETTINGS_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 } as const;
+const SETTINGS_CHIP_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 } as const;
+
 export function SettingsScreenShell({
   title,
   children,
@@ -60,6 +63,7 @@ export function SettingsNavRow({ label, onPress }: { label: string; onPress?: ()
     <Pressable
       onPress={onPress}
       disabled={!onPress}
+      hitSlop={SETTINGS_HIT_SLOP}
       android_ripple={androidRipple}
       style={({ pressed }) => [styles.navRow, pressed && onPress && styles.pressed]}>
       <Text style={styles.rowLabel}>{label}</Text>
@@ -82,9 +86,15 @@ export function SettingsToggleRow({
   return (
     <>
       <View style={styles.toggleRow}>
-        <Text style={styles.toggleLabel} numberOfLines={2}>
-          {label}
-        </Text>
+        <Pressable
+          onPress={() => onValueChange(!value)}
+          hitSlop={SETTINGS_HIT_SLOP}
+          style={styles.toggleLabelPress}
+          android_ripple={androidRipple}>
+          <Text style={styles.toggleLabel} numberOfLines={2}>
+            {label}
+          </Text>
+        </Pressable>
         <View style={styles.switchWrap}>
           <Switch
             value={value}
@@ -235,6 +245,7 @@ export function SettingsSegmentGroup<T extends string>({
             <Pressable
               key={option}
               onPress={() => onSelect(option)}
+              hitSlop={SETTINGS_CHIP_HIT_SLOP}
               style={[styles.segmentChip, active && styles.segmentChipActive]}>
               <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
                 {option}
@@ -295,6 +306,9 @@ export function SettingsColorRow({
               <Pressable
                 key={`${color}-${index}`}
                 onPress={() => onSelect(index)}
+                hitSlop={SETTINGS_HIT_SLOP}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
                 style={[styles.colorOuter, active && styles.colorOuterActive]}>
                 <View
                   style={[
@@ -336,11 +350,12 @@ export function SettingsStepperRow({
           <Pressable
             disabled={minusDisabled}
             onPress={onMinus}
+            hitSlop={SETTINGS_HIT_SLOP}
             style={[styles.stepperCircle, minusDisabled && styles.stepperCircleDisabled]}>
             <Text style={[styles.stepperSymbol, minusDisabled && styles.stepperSymbolDisabled]}>−</Text>
           </Pressable>
           <Text style={styles.stepperValue}>{value}</Text>
-          <Pressable onPress={onPlus} style={styles.stepperCircle}>
+          <Pressable onPress={onPlus} hitSlop={SETTINGS_HIT_SLOP} style={styles.stepperCircle}>
             <Text style={styles.stepperSymbol}>+</Text>
           </Pressable>
         </View>
@@ -362,6 +377,8 @@ export function SettingsActionCard({
   return (
     <Pressable
       onPress={onPress}
+      hitSlop={SETTINGS_HIT_SLOP}
+      android_ripple={androidRipple}
       style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}>
       <Text style={[styles.actionText, danger && styles.actionTextDanger]}>{label}</Text>
     </Pressable>
@@ -400,14 +417,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  toggleLabel: {
+  toggleLabelPress: {
     flex: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingRight: 8,
+  },
+  toggleLabel: {
     flexShrink: 1,
     fontSize: 15,
     fontWeight: '500',
     color: '#2C3E50',
     lineHeight: 20,
-    paddingRight: 16,
+    paddingRight: 8,
     includeFontPadding: false,
     ...Platform.select({
       android: { textAlignVertical: 'center' as const },
@@ -536,7 +558,7 @@ const styles = StyleSheet.create({
   },
   segmentChip: {
     flex: 1,
-    minHeight: 34,
+    minHeight: 44,
     borderRadius: 8,
     backgroundColor: '#EEF1F5',
     alignItems: 'center',
@@ -572,9 +594,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   colorOuter: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -583,9 +605,9 @@ const styles = StyleSheet.create({
     borderColor: Palette.accent,
   },
   colorDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
   },
   colorDotWhite: {
     borderWidth: 1,
@@ -605,9 +627,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   stepperCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1.5,
     borderColor: Palette.accent,
     alignItems: 'center',

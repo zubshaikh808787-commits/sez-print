@@ -3,8 +3,91 @@ import { elementSizeMm, mmToPt, ptToMm, textBlockHeightMm, type LabelDocument, t
 import { isRatTailGeometry, ratTailBodyRectMm, scaleMediaGeometry } from '@/lib/media-geometry';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
 import { computeTextElementHeightMm, computeWrappedLines, measureTextWidthMm } from '@/lib/text-metrics';
+import { formatDataSourceColumn } from '@/lib/editor/data-source-display';
+import { ensureTableCells } from '@/lib/editor/table-cells';
+import { applySerialOffset } from '@/lib/serial-content';
+import { useSettingsStore } from '@/stores/settings-store';
 export { computeTextElementHeightMm, computeWrappedLines, measureTextWidthMm } from '@/lib/text-metrics';
 export { textBlockHeightMm } from '@/lib/label-document';
+
+type TextLikeElement = Extract<LabelElement, { type: 'text' } | { type: 'degrees' }>;
+
+function textRawContent(el: TextLikeElement): string {
+  if (el.contentType === 'Data Source' && el.columnNameContent) {
+    const showColumnName = useSettingsStore.getState().editor.showColumnName;
+    return formatDataSourceColumn(el.columnNameContent, showColumnName);
+  }
+  const base = 'text' in el ? el.text : el.content;
+  if (el.contentType === 'Degrees') {
+    const offset = 'degreesOffset' in el && typeof el.degreesOffset === 'number' ? el.degreesOffset : 1;
+    return applySerialOffset(base, offset, 1);
+  }
+  return base;
+}
+
+/** Merge typography patches and reflow/clear height for auto-text-height elements. */
+export function mergeTextElementPatch(
+  el: TextLikeElement,
+  updates: Record<string, unknown>,
+): LabelElement {
+  let merged = { ...el, ...updates } as TextLikeElement;
+
+  if (updates.contentType === 'Degrees' && !('degreesOffset' in merged)) {
+    merged = { ...merged, degreesOffset: 1 } as TextLikeElement;
+  }
+
+  const typographyKeys = new Set([
+    'text',
+    'content',
+    'fontSize',
+    'width',
+    'charSpacing',
+    'lineSpacing',
+    'autoWrapping',
+    'verticalDisplay',
+    'autoTextHeight',
+    'bold',
+    'contentType',
+    'columnNameContent',
+    'degreesOffset',
+  ]);
+  const touchesTypography = Object.keys(updates).some((key) => typographyKeys.has(key));
+  if (!touchesTypography) {
+    return merged as LabelElement;
+  }
+
+  const autoHeight = merged.autoTextHeight !== false && merged.autoWrapping !== 'Close';
+  const computedHeight = computeTextElementHeightMm({
+    text: textRawContent(merged),
+    fontSize: merged.fontSize,
+    widthMm: merged.width,
+    autoWrapping: merged.autoWrapping ?? 'Word',
+    lineSpacing: merged.lineSpacing ?? '1.0',
+    charSpacing: merged.charSpacing ?? 0,
+    bold: merged.bold ?? false,
+    verticalDisplay: merged.verticalDisplay ?? false,
+  });
+
+  if (updates.autoTextHeight === true || (autoHeight && updates.autoTextHeight !== false)) {
+    const { height: _removed, ...withoutHeight } = merged as TextLikeElement & { height?: number };
+    return withoutHeight as LabelElement;
+  }
+
+  if (updates.autoTextHeight === false) {
+    return { ...merged, height: typeof merged.height === 'number' ? merged.height : computedHeight } as LabelElement;
+  }
+
+  if (autoHeight) {
+    const { height: _removed, ...withoutHeight } = merged as TextLikeElement & { height?: number };
+    return withoutHeight as LabelElement;
+  }
+
+  if (typeof updates.height === 'number') {
+    return merged as LabelElement;
+  }
+
+  return merged as LabelElement;
+}
 
 const PAD_RATIO = 0.05;
 const MIN_PAD_MM = 0.5;
@@ -319,7 +402,11 @@ export function normalizeDocumentElements(doc: LabelDocument): LabelElement[] {
         return true;
       })
     : doc.elements;
-  return elements.map((el) => clampElementToLabel(el, doc));
+  return elements.map((el) => {
+    const clamped = clampElementToLabel(el, doc);
+    if (clamped.type === 'table') return ensureTableCells(clamped);
+    return clamped;
+  });
 }
 
 /**

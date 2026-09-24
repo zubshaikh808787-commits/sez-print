@@ -70,7 +70,15 @@ export type ImageElementData = {
 
 export type BarcodeElementData = {
   payload: string;
-  symbology?: 'code128' | 'code39';
+  symbology?: 'code128' | 'code39' | 'itf' | 'ean13' | 'ean8' | 'upca';
+  encodeMode?: string;
+  textFlag?: 'Hide' | 'Top' | 'Bottom';
+  fontSizePt?: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  align?: 'left' | 'center' | 'right' | 'justify' | 'spacing';
 };
 
 export type ShapeElementData = {

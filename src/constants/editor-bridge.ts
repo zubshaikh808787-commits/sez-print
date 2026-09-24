@@ -14,6 +14,16 @@ export type ClipartResult = {
   id: string;
 };
 
+export type ImageCropMode = 'import' | 'replace' | 'recrop';
+
+export type ImageCropResult = {
+  uri: string;
+  width: number;
+  height: number;
+  mode: ImageCropMode;
+  elementId?: string;
+};
+
 export const editorBridge = {
   columnNameResult: null as string | null,
   columnNameConsumer: null as 'qrcode' | 'arctext' | 'degrees' | 'text' | 'barcode' | null,
@@ -23,6 +33,11 @@ export const editorBridge = {
   clipartResult: null as ClipartResult | null,
   borderResult: null as import('@/constants/border-library').BorderStyleId | null,
   fontResult: null as string | null,
+  /** Set when picking a data file from Label Settings. */
+  dataSourceFileId: null as string | null,
+  /** Latest in-editor document snapshot for label-settings when store is stale. */
+  labelSettingsDoc: null as import('@/lib/label-document').LabelDocument | null,
+  imageCropResult: null as ImageCropResult | null,
 };
 
 export function isQrScanType(type: string) {

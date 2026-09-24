@@ -8,6 +8,12 @@ import type { LabelOrientation, PaperType } from '@/lib/label-document';
 
 export type ColorMode = 'Original' | 'B & W' | 'Halftone';
 
+/** Selection outline swatches — Editor Settings → Color of The Selected Border. */
+export const EDITOR_BORDER_SELECTION_COLORS = ['#111111', '#9CA3AF'] as const;
+
+/** Selection outline swatches — Editor Settings → Color of The Selected Table Cell. */
+export const EDITOR_TABLE_SELECTION_COLORS = ['#111111', '#D1D5DB'] as const;
+
 export type EditorSettings = {
   showColumnName: boolean;
   highlightColumnName: boolean;
@@ -81,8 +87,8 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   showNudgePad: false,
   canvasSplitRatio: DEFAULT_CANVAS_SPLIT_RATIO,
   canvasSplitFullscreen: false,
-  borderColorIndex: 1,
-  tableColorIndex: 1,
+  borderColorIndex: 0,
+  tableColorIndex: 0,
 };
 
 export const DEFAULT_PROPERTY_SETTINGS: DefaultPropertySettings = {

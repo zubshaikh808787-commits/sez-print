@@ -66,9 +66,12 @@ function LightbulbIcon({ active = false, size = 38 }: { active?: boolean; size?:
 
 export default function ScanScreen() {
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ from?: string | string[] }>();
+  const params = useLocalSearchParams<{ from?: string | string[]; mode?: string | string[] }>();
   const fromParam = Array.isArray(params.from) ? params.from[0] : params.from;
+  const modeParam = Array.isArray(params.mode) ? params.mode[0] : params.mode;
+  const isLabelClone = modeParam === 'labelClone';
   const returnToEdit = fromParam === 'edit';
+  const screenTitle = isLabelClone ? 'Label Clone' : 'Scan';
   const [permission, requestPermission] = useCameraPermissions();
   const [torch, setTorch] = useState(false);
   const [scannedResult, setScannedResult] = useState<{ type: string; data: string } | null>(null);
@@ -115,6 +118,65 @@ export default function ScanScreen() {
     setScannedResult(payload);
   };
 
+  const openLabelFromImage = async (uri: string, width: number, height: number) => {
+    router.replace({
+      pathname: '/new-label-setup',
+      params: {
+        importImageUri: uri,
+        importImageWidth: String(width || 0),
+        importImageHeight: String(height || 0),
+        isSingleCanvas: 'true',
+      },
+    });
+  };
+
+  const processLabelCloneImage = async (uri: string, width: number, height: number) => {
+    try {
+      const results = await scanFromURLAsync(uri, SCAN_CODE_TYPES);
+      const payload = results.map(payloadFromBarcodeResult).find(Boolean);
+      if (payload) {
+        setScannedResult(payload);
+        return;
+      }
+    } catch (error) {
+      if (!isScanEmptyError(error)) {
+        Alert.alert('Error', 'Unable to read this photo. Try another image, or import the label image directly.');
+        return;
+      }
+    }
+
+    Alert.alert(
+      'No Code Found',
+      'No QR code or barcode was detected in this photo. Import the photo as your label design instead?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Import Label Image',
+          onPress: () => {
+            void openLabelFromImage(uri, width, height);
+          },
+        },
+      ],
+    );
+  };
+
+  const handleImportLabelFromImage = async () => {
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (res.canceled || !res.assets?.[0]?.uri) return;
+
+      const asset = res.assets[0];
+      await processLabelCloneImage(asset.uri, asset.width ?? 0, asset.height ?? 0);
+    } catch {
+      Alert.alert('Error', 'Unable to open this image. Try another photo.');
+    }
+  };
+
   const handlePhotoPick = async () => {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
@@ -125,7 +187,13 @@ export default function ScanScreen() {
 
       if (res.canceled || !res.assets?.[0]?.uri) return;
 
-      const results = await scanFromURLAsync(res.assets[0].uri, SCAN_CODE_TYPES);
+      const asset = res.assets[0];
+      if (isLabelClone) {
+        await processLabelCloneImage(asset.uri, asset.width ?? 0, asset.height ?? 0);
+        return;
+      }
+
+      const results = await scanFromURLAsync(asset.uri, SCAN_CODE_TYPES);
       const payload = results.map(payloadFromBarcodeResult).find(Boolean);
       if (payload) {
         setScannedResult(payload);
@@ -211,7 +279,7 @@ export default function ScanScreen() {
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backButton}>
             <Text style={styles.backChevron}>‹</Text>
           </Pressable>
-          <Text style={styles.headerTitle}>Scan</Text>
+          <Text style={styles.headerTitle}>{screenTitle}</Text>
           <View style={styles.headerRightPlaceholder} />
         </View>
 
@@ -221,7 +289,9 @@ export default function ScanScreen() {
           </View>
           <Text style={styles.permissionHeading}>Camera Permission Needed</Text>
           <Text style={styles.permissionSub}>
-            Please enable camera access so Sez Print can scan barcodes, QR codes, and label tags.
+            {isLabelClone
+              ? 'Please enable camera access so you can scan a label QR code or barcode to clone that design.'
+              : 'Please enable camera access so Sez Print can scan barcodes, QR codes, and label tags.'}
           </Text>
 
           <Pressable
@@ -235,6 +305,16 @@ export default function ScanScreen() {
             onPress={() => setManualModalVisible(true)}>
             <Text style={styles.secondaryButtonText}>Enter Barcode Manually</Text>
           </Pressable>
+
+          {isLabelClone ? (
+            <Pressable
+              style={({ pressed }) => [styles.importLabelButton, pressed && styles.btnPressed]}
+              onPress={() => {
+                void handleImportLabelFromImage();
+              }}>
+              <Text style={styles.importLabelButtonText}>Import Label from Image</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {/* Manual Modal Fallback */}
@@ -303,12 +383,20 @@ export default function ScanScreen() {
 
         {/* Bottom Dark Mask */}
         <View style={[styles.maskDark, styles.maskBottom]}>
-          {/* "If not recognized, enter manually" Button */}
           <Pressable
             style={({ pressed }) => [styles.manualEntryBtn, pressed && styles.btnPressed]}
             onPress={() => setManualModalVisible(true)}>
             <Text style={styles.manualEntryText}>If not recognized, enter manually</Text>
           </Pressable>
+          {isLabelClone ? (
+            <Pressable
+              style={({ pressed }) => [styles.importLabelBtn, pressed && styles.btnPressed]}
+              onPress={() => {
+                void handleImportLabelFromImage();
+              }}>
+              <Text style={styles.importLabelBtnText}>Import Label from Image</Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
@@ -317,9 +405,9 @@ export default function ScanScreen() {
         <Pressable onPress={() => router.back()} hitSlop={14} style={styles.backButton}>
           <Text style={styles.backChevron}>‹</Text>
         </Pressable>
-        <Text style={styles.headerTitle}>Scan</Text>
+        <Text style={styles.headerTitle}>{screenTitle}</Text>
         <Pressable onPress={handlePhotoPick} hitSlop={14} style={styles.photoButton}>
-          <Text style={styles.photoText}>Photo</Text>
+          <Text style={styles.photoText}>{isLabelClone ? 'Gallery' : 'Photo'}</Text>
         </Pressable>
       </View>
 
@@ -375,7 +463,7 @@ export default function ScanScreen() {
               <View style={styles.successBadge}>
                 <Text style={styles.successCheck}>✓</Text>
               </View>
-              <Text style={styles.resultHeading}>Label Scanned</Text>
+              <Text style={styles.resultHeading}>{isLabelClone ? 'Code Scanned' : 'Label Scanned'}</Text>
               <Text style={styles.resultTypeTag}>{scannedResult?.type?.toUpperCase() ?? 'CODE'}</Text>
             </View>
 
@@ -391,7 +479,11 @@ export default function ScanScreen() {
                 style={({ pressed }) => [styles.actionBtn, styles.primaryActionBtn, pressed && styles.btnPressed]}
                 onPress={handleUseInEditor}>
                 <Text style={styles.primaryActionText}>
-                  {returnToEdit ? 'Use in Label Editor' : 'Open in Label Editor'}
+                  {returnToEdit
+                    ? 'Use in Label Editor'
+                    : isLabelClone
+                      ? 'Create Label from Scan'
+                      : 'Open in Label Editor'}
                 </Text>
               </Pressable>
 
@@ -613,6 +705,35 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: '400',
     letterSpacing: 0.2,
+  },
+  importLabelBtn: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#17A6B8',
+    backgroundColor: 'rgba(23, 166, 184, 0.35)',
+    borderRadius: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+  },
+  importLabelBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  importLabelButton: {
+    backgroundColor: '#17A6B8',
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  importLabelButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   bottomSection: {
     position: 'absolute',

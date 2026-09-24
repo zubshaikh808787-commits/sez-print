@@ -70,7 +70,8 @@ export default function NewLabelSetupScreen() {
   }>();
   const isImportImage = Boolean(params.importImageUri);
   const isSingleCanvas = params.isSingleCanvas === 'true' || isImportImage;
-  const isTwoUps = !isSingleCanvas && (params.isTwoUps === 'true' || params.isClone === 'true');
+  const isClone = params.isClone === 'true';
+  const isTwoUps = !isSingleCanvas && params.isTwoUps === 'true';
   const isJewellery3Up = !isSingleCanvas && params.isJewellery3Up === 'true';
   const defaults = useSettingsStore((s) => s.defaults);
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
@@ -82,11 +83,15 @@ export default function NewLabelSetupScreen() {
         : 'Imported Image Label'
       : isJewellery3Up
         ? 'Jewellery Label'
-        : isTwoUps
+        : isClone
           ? params.cloneName
-            ? `${params.cloneName} · 2ups`
-            : '2ups label'
-          : 'Default label',
+            ? `${params.cloneName} Copy`
+            : 'Label Copy'
+          : isTwoUps
+            ? params.cloneName
+              ? `${params.cloneName} · 2ups`
+              : '2ups label'
+            : 'Default label',
   );
   const [labelWidth, setLabelWidth] = useState(
     params.defaultWidth
@@ -255,7 +260,13 @@ export default function NewLabelSetupScreen() {
           <Text style={styles.backChevron}>‹</Text>
         </Pressable>
         <Text style={styles.headerTitle}>
-          {isImportImage ? 'Label Sizing Setup' : isTwoUps ? '2ups label' : t('editor.newLabel')}
+          {isImportImage
+            ? 'Label Sizing Setup'
+            : isTwoUps
+              ? '2ups label'
+              : isClone
+                ? 'Label Clone'
+                : t('editor.newLabel')}
         </Text>
         <View style={styles.headerSpacer} />
       </View>

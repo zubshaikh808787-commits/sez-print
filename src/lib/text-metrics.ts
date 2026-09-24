@@ -18,6 +18,23 @@ export function mmToPt(mm: number): number {
 }
 
 /**
+ * Convert stored char spacing (mm) to React Native `letterSpacing`.
+ * iOS expects points; Android expects em units relative to font size.
+ */
+export function charSpacingToLetterSpacing(
+  charSpacingMm: number,
+  fontSizePt: number,
+  platformOs: 'ios' | 'android' | 'macos' | 'windows' | 'web',
+): number {
+  if (!charSpacingMm) return 0;
+  if (platformOs === 'ios' || platformOs === 'macos') {
+    return mmToPt(charSpacingMm);
+  }
+  const emMm = ptToMm(fontSizePt);
+  return emMm > 0 ? charSpacingMm / emMm : 0;
+}
+
+/**
  * Line spacing multiplier helper.
  */
 export function lineSpacingMultiplier(spacing?: LineSpacing): number {
@@ -223,6 +240,25 @@ export function measureTextWidthMm(
     totalMm += charWidthEm(ch, bold) * emToMm + charSpacingMm;
   }
   return totalMm;
+}
+
+/**
+ * Keep a string on one line. When it is wider than `availableMm`, return the
+ * negative character spacing (mm) that pulls it back inside that width.
+ * Newlines are flattened so nothing drops to a second line.
+ */
+export function singleLineSqueezeSpacingMm(
+  text: string,
+  fontSizePt: number,
+  availableMm: number,
+  bold = false,
+): { text: string; charSpacingMm: number } {
+  const flat = text.replace(/\r?\n/g, ' ');
+  if (!flat) return { text: '', charSpacingMm: 0 };
+  const natural = measureTextWidthMm(flat, fontSizePt, 0, bold);
+  const target = Math.max(0.2, availableMm);
+  if (natural <= target) return { text: flat, charSpacingMm: 0 };
+  return { text: flat, charSpacingMm: (target - natural) / flat.length };
 }
 
 export type ComputeWrappedLinesParams = {

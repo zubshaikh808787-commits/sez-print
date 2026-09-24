@@ -19,6 +19,13 @@ import Svg, { Path as SvgPath, Line as SvgLine } from 'react-native-svg';
 import { AppIcon } from '@/components/app-icon';
 import { type LiveRulerBounds } from '@/components/canvas-rulers';
 import { ElementContentView } from '@/components/editor/element-renderer';
+import {
+  ensureTableCells,
+  hitTestTableCell,
+  hitTestTableCellFromViewPoint,
+  pointerMmToTableLocal,
+  sameTableCellSelection,
+} from '@/lib/editor/table-cells';
 import { elementSizeMm, textBlockHeightMm, type LabelElement, type MediaShape } from '@/lib/label-document';
 import { computeTextElementHeightMm } from '@/lib/text-metrics';
 import { clampToLabelBounds, fitFontSizeToLabel } from '@/lib/editor/label-bounds';
@@ -27,7 +34,9 @@ import { finiteMm, roundMm } from '@/lib/editor/engine';
 import { fullyInsideLabelMm } from '@/lib/editor/safe-mode';
 import { mmToPx, pxToMm } from '@/lib/label-coordinate-system';
 import { grabOffsetMm } from '@/lib/editor/view-transform';
+import { formatDataSourceColumn } from '@/lib/editor/data-source-display';
 import { createFrameThrottled } from '@/lib/editor/drag-layer';
+import { useSettingsStore } from '@/stores/settings-store';
 import {
   aspectRatioOf,
   resizeMemberByScale,
@@ -106,6 +115,16 @@ export type KonvaTransformerProps = {
   onTransformMove?: (payload: TransformMovePayload) => void;
   onTransformEnd: (payload: TransformCommitPayload) => void;
   onQuickRotate?: (id: string) => void;
+  /** cell=null clears cell selection and shows table-level panel. */
+  onTableCellPress?: (tableId: string, cell: { row: number; col: number } | null) => void;
+  /** Double-tap a cell: open the existing QuickValueModal for that cell's text. */
+  onTableCellQuickEdit?: (
+    tableId: string,
+    cell: { row: number; col: number },
+    anchorRect?: ElementAnchorRect,
+  ) => void;
+  selectedTableCell?: { row: number; col: number } | null;
+  tableSelectionColor?: string;
   /** Window point → artboard mm. Drag commit goes through this, not raw px. */
   pointerToMm?: (windowX: number, windowY: number) => { x: number; y: number } | null;
   /** Magnetic snap for move-drag. Returns millimetre left/top. */
@@ -201,6 +220,10 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   onTransformMove,
   onTransformEnd,
   onQuickRotate,
+  onTableCellPress,
+  onTableCellQuickEdit,
+  selectedTableCell,
+  tableSelectionColor,
   pointerToMm,
   snapMoveMm,
   safeModeSv,
@@ -254,13 +277,18 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   const lastTapYSv = useSharedValue(0);
   const tapHandledSv = useSharedValue(false);
 
+  const showColumnName = useSettingsStore((s) => s.editor.showColumnName);
   const isTextElement = element.type === 'text' || element.type === 'degrees';
   const isAutoHeight = isTextElement && element.autoTextHeight !== false && element.autoWrapping !== 'Close';
   const textContent =
     element.type === 'text'
-      ? (element.contentType === 'Data Source' && element.columnNameContent ? `{${element.columnNameContent}}` : element.text)
+      ? element.contentType === 'Data Source' && element.columnNameContent
+        ? formatDataSourceColumn(element.columnNameContent, showColumnName)
+        : element.text
       : element.type === 'degrees'
-        ? (element.contentType === 'Data Source' && element.columnNameContent ? `{${element.columnNameContent}}` : element.content)
+        ? element.contentType === 'Data Source' && element.columnNameContent
+          ? formatDataSourceColumn(element.columnNameContent, showColumnName)
+          : element.content
         : '';
   const textFontSize = 'fontSize' in element && typeof element.fontSize === 'number' ? element.fontSize : 12;
   const textAutoWrapping = 'autoWrapping' in element ? element.autoWrapping ?? 'Word' : 'Word';
@@ -414,6 +442,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   ]);
 
   const lastTapRef = useRef({ id: '', time: 0 });
+  const lastTapAbsRef = useRef({ x: NaN, y: NaN });
+  const lastTapViewRef = useRef({ x: NaN, y: NaN });
   const pendingRemoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callbacksRef = useRef({
     onSelect,
@@ -424,6 +454,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     onTransformMove,
     onTransformEnd,
     onQuickRotate,
+    onTableCellPress,
+    onTableCellQuickEdit,
     selected,
     multipleMode,
   });
@@ -436,6 +468,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     onTransformMove,
     onTransformEnd,
     onQuickRotate,
+    onTableCellPress,
+    onTableCellQuickEdit,
     selected,
     multipleMode,
   };
@@ -748,6 +782,56 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     callbacksRef.current.onSelect(id, 'touch');
   }, []);
 
+  const noteTapAbsJS = useCallback((x: number, y: number) => {
+    lastTapAbsRef.current = { x, y };
+  }, []);
+
+  const noteTapViewJS = useCallback((x: number, y: number) => {
+    lastTapViewRef.current = { x, y };
+  }, []);
+
+  const resolveTableCellHitJS = useCallback(
+    (
+      viewX?: number,
+      viewY?: number,
+      windowX?: number,
+      windowY?: number,
+    ): { row: number; col: number } | null => {
+      if (element.type !== 'table') return null;
+      const box = elementBoxRef.current;
+      const table = ensureTableCells({
+        ...element,
+        left: box.left,
+        top: box.top,
+        width: box.width,
+        height: box.height,
+      });
+      const vx = Number.isFinite(viewX) ? viewX! : lastTapViewRef.current.x;
+      const vy = Number.isFinite(viewY) ? viewY! : lastTapViewRef.current.y;
+      if (Number.isFinite(vx) && Number.isFinite(vy) && baseWidthPx > 0 && baseHeightPx > 0) {
+        const hit = hitTestTableCellFromViewPoint(table, vx, vy, baseWidthPx, baseHeightPx);
+        if (hit) return hit;
+      }
+      const wx = Number.isFinite(windowX) ? windowX! : lastTapAbsRef.current.x;
+      const wy = Number.isFinite(windowY) ? windowY! : lastTapAbsRef.current.y;
+      const pt = pointerToMmRef.current?.(wx, wy);
+      if (!pt) return null;
+      const local = pointerMmToTableLocal(table, pt);
+      return hitTestTableCell(table, local.x, local.y);
+    },
+    [element, baseWidthPx, baseHeightPx],
+  );
+
+  /** Highlight the cell under the finger on touch-down, before the gesture ends. */
+  const highlightTableCellJS = useCallback(
+    (viewX?: number, viewY?: number, windowX?: number, windowY?: number) => {
+      if (element.type !== 'table' || !callbacksRef.current.onTableCellPress) return;
+      const hit = resolveTableCellHitJS(viewX, viewY, windowX, windowY);
+      if (hit) callbacksRef.current.onTableCellPress(element.id, hit);
+    },
+    [element.id, element.type, resolveTableCellHitJS],
+  );
+
   const notifyGroupResizeHandleBeginJS = useCallback(
     (handle: 'e' | 's') => {
       onGroupResizeHandleBegin?.(handle);
@@ -775,7 +859,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     [element.id],
   );
 
-  const triggerDoubleTapJS = useCallback(() => {
+  const triggerDoubleTapJS = useCallback(
+    (viewX?: number, viewY?: number, windowX?: number, windowY?: number) => {
     cancelPendingRemoveJS();
     const now = Date.now();
     if (now - lastDoubleTapTimeRef.current < DOUBLE_TAP_DEDUPE_MS) {
@@ -785,8 +870,20 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     lastTapRef.current = { id: '', time: 0 };
     lastTapTimeSv.value = 0;
 
-    // Touch-down already selected this element.
     const openWithAnchor = (anchor?: ElementAnchorRect) => {
+      if (element.type === 'table') {
+        const hit = resolveTableCellHitJS(viewX, viewY, windowX, windowY);
+        console.log(
+          `[table-cell] double-tap tableId=${element.id} view=${viewX},${viewY} window=${windowX},${windowY} hit=${JSON.stringify(hit)} handler=${hit ? 'per-cell-quick-edit' : 'whole-table-onOpenPanel'}`,
+        );
+        if (hit && callbacksRef.current.onTableCellQuickEdit) {
+          callbacksRef.current.onTableCellPress?.(element.id, hit);
+          callbacksRef.current.onTableCellQuickEdit(element.id, hit, anchor);
+          return;
+        }
+        callbacksRef.current.onOpenPanel(element.id);
+        return;
+      }
       if (
         element.type === 'text' ||
         element.type === 'barcode' ||
@@ -817,9 +914,12 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     } else {
       openWithAnchor();
     }
-  }, [element.id, element.type, lastTapTimeSv, cancelPendingRemoveJS]);
+  },
+  [element.id, element.type, lastTapTimeSv, cancelPendingRemoveJS, resolveTableCellHitJS],
+  );
 
-  const triggerSingleTapJS = useCallback(() => {
+  const triggerSingleTapJS = useCallback(
+    (viewX?: number, viewY?: number, windowX?: number, windowY?: number) => {
     const now = Date.now();
     const last = lastTapRef.current;
     const isDouble =
@@ -830,7 +930,18 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
     if (isDouble) {
       lastTapRef.current = { id: '', time: 0 };
-      triggerDoubleTapJS();
+      triggerDoubleTapJS(viewX, viewY, windowX, windowY);
+      return;
+    }
+
+    if (element.type === 'table' && callbacksRef.current.onTableCellPress) {
+      const hit = resolveTableCellHitJS(viewX, viewY, windowX, windowY);
+      console.log(
+        `[table-cell] single-tap tableId=${element.id} wasSelected=${wasSelectedAtTouchRef.current} view=${viewX},${viewY} window=${windowX},${windowY} computedHit=${JSON.stringify(hit)}`,
+      );
+      if (hit) {
+        callbacksRef.current.onTableCellPress(element.id, hit);
+      }
       return;
     }
 
@@ -843,7 +954,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
         callbacksRef.current.onSelect(element.id, 'toggle');
       }, DOUBLE_TAP_MAX_GAP_MS);
     }
-  }, [element.id, triggerDoubleTapJS, cancelPendingRemoveJS]);
+  },
+  [element.id, element.type, triggerDoubleTapJS, cancelPendingRemoveJS, resolveTableCellHitJS],
+  );
 
   const bodyDragGesture = useMemo(() => {
     const pan = Gesture.Pan()
@@ -860,6 +973,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     return pan
       .onBegin((_e) => {
         'worklet';
+        runOnJS(noteTapAbsJS)(_e.absoluteX, _e.absoluteY);
+        runOnJS(noteTapViewJS)(_e.x, _e.y);
         const tNow = Date.now();
         beginTimeSv.value = tNow;
         hasMovedSv.value = false;
@@ -877,6 +992,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           bottomPanelVisibleSv.value = 1;
         }
         runOnJS(notifySelectJS)(element.id);
+        if (element.type === 'table') {
+          runOnJS(highlightTableCellJS)(_e.x, _e.y, _e.absoluteX, _e.absoluteY);
+        }
         originLeftSv.value = originLeftSv.value + transX.value;
         originTopSv.value = originTopSv.value + transY.value;
         transX.value = 0;
@@ -1015,13 +1133,17 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           ) {
             // Confirmed double tap on UI thread
             lastTapTimeSv.value = 0;
-            runOnJS(triggerDoubleTapJS)();
+            runOnJS(noteTapViewJS)(e.x, e.y);
+            runOnJS(noteTapAbsJS)(e.absoluteX, e.absoluteY);
+            runOnJS(triggerDoubleTapJS)(e.x, e.y, e.absoluteX, e.absoluteY);
           } else {
             // First tap
             lastTapTimeSv.value = tNow;
             lastTapXSv.value = e.absoluteX;
             lastTapYSv.value = e.absoluteY;
-            runOnJS(triggerSingleTapJS)();
+            runOnJS(noteTapViewJS)(e.x, e.y);
+            runOnJS(noteTapAbsJS)(e.absoluteX, e.absoluteY);
+            runOnJS(triggerSingleTapJS)(e.x, e.y, e.absoluteX, e.absoluteY);
           }
         } else {
           originLeftSv.value = originLeftSv.value + transX.value;
@@ -1124,12 +1246,24 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             nearLastTap
           ) {
             lastTapTimeSv.value = 0;
-            runOnJS(triggerDoubleTapJS)();
+            if (_e) {
+              runOnJS(noteTapViewJS)(_e.x, _e.y);
+              runOnJS(noteTapAbsJS)(_e.absoluteX, _e.absoluteY);
+              runOnJS(triggerDoubleTapJS)(_e.x, _e.y, _e.absoluteX, _e.absoluteY);
+            } else {
+              runOnJS(triggerDoubleTapJS)();
+            }
           } else {
             lastTapTimeSv.value = tNow;
             lastTapXSv.value = tapX;
             lastTapYSv.value = tapY;
-            runOnJS(triggerSingleTapJS)();
+            if (_e) {
+              runOnJS(noteTapViewJS)(_e.x, _e.y);
+              runOnJS(noteTapAbsJS)(_e.absoluteX, _e.absoluteY);
+              runOnJS(triggerSingleTapJS)(_e.x, _e.y, _e.absoluteX, _e.absoluteY);
+            } else {
+              runOnJS(triggerSingleTapJS)();
+            }
           }
         }
       });
@@ -1164,6 +1298,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     tapHandledSv,
     notifyTransformStartJS,
     notifySelectJS,
+    highlightTableCellJS,
+    noteTapAbsJS,
+    noteTapViewJS,
     activeSelectedIdSv,
     groupEligibleSv,
     groupAnchorIdSv,
@@ -1441,11 +1578,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
           opacity: element.opacity ?? 1,
         }}>
         <ElementContentView
-            element={element}
+          element={element}
           widthPx={baseWidthPx}
           heightPx={baseHeightPx}
           scale={pxPerMMSafe}
           mediaShape={borderMediaShape}
+          selectedTableCell={element.type === 'table' ? selectedTableCell : null}
+          tableSelectionColor={tableSelectionColor}
         />
       </View>
     );
@@ -1542,11 +1681,13 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             ? {
                 onClick: (e: any) => {
                   e?.stopPropagation?.();
-                  triggerSingleTapJS();
+                  const ne = e?.nativeEvent;
+                  triggerSingleTapJS(ne?.locationX, ne?.locationY, ne?.pageX, ne?.pageY);
                 },
                 onDoubleClick: (e: any) => {
                   e?.stopPropagation?.();
-                  triggerDoubleTapJS();
+                  const ne = e?.nativeEvent;
+                  triggerDoubleTapJS(ne?.locationX, ne?.locationY, ne?.pageX, ne?.pageY);
                 },
               }
             : {})}>
@@ -1557,6 +1698,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               heightPx={baseHeightPx}
               scale={pxPerMMSafe}
               mediaShape={borderMediaShape}
+              selectedTableCell={element.type === 'table' ? selectedTableCell : null}
+              tableSelectionColor={tableSelectionColor}
             />
           </View>
         </View>
@@ -1608,7 +1751,14 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     </Animated.View>
   );
 }, (prev, next) => {
+  // Cell selection is value-identity, not reference-identity: chrome rebuilds the
+  // {row,col} object on every pass, so a reference check would force needless renders
+  // while omitting it entirely would freeze the highlight on its last painted cell.
+  if (!sameTableCellSelection(prev.selectedTableCell, next.selectedTableCell)) return false;
   return (
+    prev.tableSelectionColor === next.tableSelectionColor &&
+    prev.onTableCellPress === next.onTableCellPress &&
+    prev.onTableCellQuickEdit === next.onTableCellQuickEdit &&
     prev.element === next.element &&
     prev.selected === next.selected &&
     prev.pxPerMM === next.pxPerMM &&
