@@ -6,40 +6,62 @@ import { PdfScopeSelector } from '@/components/pdf-editor/pdf-scope-selector';
 import {
   ninePointToOffsetNorm,
   parsePageRange,
+  tiledRepeatCount,
   type NinePoint,
-  type PageScope,
   type PdfWatermark,
 } from '@/lib/pdf-editor/session';
 
-const WORD_PRESETS = ['CONFIDENTIAL', 'SAMPLE', 'PAID', 'DRAFT', 'COPY', 'URGENT'];
+const WORD_PRESETS = [
+  'CONFIDENTIAL',
+  'SAMPLE',
+  'PAID',
+  'DO NOT COPY',
+  'DRAFT',
+  'ORIGINAL',
+  'APPROVED',
+  'URGENT',
+];
 
 const COLOR_PRESETS = [
   { label: 'Red', hex: '#DC2626' },
-  { label: 'Slate', hex: '#1F2937' },
+  { label: 'Crimson', hex: '#991B1B' },
+  { label: 'Slate', hex: '#374151' },
+  { label: 'Dark', hex: '#111827' },
   { label: 'Blue', hex: '#2563EB' },
   { label: 'Green', hex: '#059669' },
   { label: 'Gold', hex: '#D97706' },
+  { label: 'Purple', hex: '#7C3AED' },
 ];
 
 const DENSITY_PRESETS = [
-  { label: 'Dense (5×5)', val: 0.16 },
-  { label: 'Normal (4×4)', val: 0.24 },
-  { label: 'Spaced (3×3)', val: 0.33 },
-  { label: 'Sparse (2×2)', val: 0.45 },
+  { label: '6×6', val: 0.14 },
+  { label: '5×5', val: 0.18 },
+  { label: '4×4', val: 0.24 },
+  { label: '3×3', val: 0.33 },
+  { label: '2×2', val: 0.45 },
+];
+
+const TILED_TEXT_SIZES = [
+  { label: '14 pt', val: 14 },
+  { label: '18 pt', val: 18 },
+  { label: '22 pt', val: 22 },
+  { label: '28 pt', val: 28 },
+  { label: '36 pt', val: 36 },
 ];
 
 const STAMP_SIZE_PRESETS = [
-  { label: 'Small', val: 0.25 },
-  { label: 'Medium', val: 0.38 },
-  { label: 'Large', val: 0.55 },
-  { label: 'Max', val: 0.75 },
+  { label: 'Small (25%)', val: 0.25 },
+  { label: 'Medium (42%)', val: 0.42 },
+  { label: 'Large (60%)', val: 0.6 },
+  { label: 'Max (80%)', val: 0.8 },
 ];
 
 const OPACITY_PRESETS = [
-  { label: '20%', val: 0.2 },
-  { label: '35%', val: 0.35 },
-  { label: '50%', val: 0.5 },
-  { label: '70%', val: 0.7 },
+  { label: '15%', val: 0.15 },
+  { label: '25%', val: 0.25 },
+  { label: '40%', val: 0.4 },
+  { label: '60%', val: 0.6 },
+  { label: '80%', val: 0.8 },
 ];
 
 export function PdfWatermarkTool({
@@ -71,34 +93,50 @@ export function PdfWatermarkTool({
       stamp: {
         anchor,
         offsetNorm,
-        sizeNorm: value.stamp?.sizeNorm ?? 0.38,
+        sizeNorm: value.stamp?.sizeNorm ?? 0.42,
       },
     });
   };
 
   const currentColor = value.text?.color || '#DC2626';
+  const currentSpacing = value.tiled?.spacingNorm ?? { x: 0.24, y: 0.24 };
+  const gridInfo = tiledRepeatCount(currentSpacing);
+  const currentFontSize = value.text?.fontSizePt ?? 22;
+  const isStaggered = value.tiled?.staggered ?? true;
 
   return (
     <View style={styles.wrap}>
       {/* Mode Switches */}
       <View style={styles.row}>
-        <Seg label="Text" on={value.type === 'text'} onPress={() => onChange({ ...value, type: 'text' })} />
-        <Seg label="Image" on={value.type === 'image'} onPress={() => onChange({ ...value, type: 'image' })} />
-      </View>
-      <View style={styles.row}>
         <Seg
           label="Single Stamp"
           on={value.layout === 'stamp'}
-          onPress={() => onChange({ ...value, layout: 'stamp' })}
+          onPress={() =>
+            onChange({
+              ...value,
+              layout: 'stamp',
+              stamp: value.stamp ?? { anchor: 'center', offsetNorm: { x: 0.5, y: 0.5 }, sizeNorm: 0.42 },
+            })
+          }
         />
         <Seg
           label="Tiled Pattern"
           on={value.layout === 'tiled'}
-          onPress={() => onChange({ ...value, layout: 'tiled' })}
+          onPress={() =>
+            onChange({
+              ...value,
+              layout: 'tiled',
+              tiled: value.tiled ?? { spacingNorm: { x: 0.24, y: 0.24 }, staggered: true },
+            })
+          }
         />
       </View>
+      <View style={styles.row}>
+        <Seg label="Text Watermark" on={value.type === 'text'} onPress={() => onChange({ ...value, type: 'text' })} />
+        <Seg label="Image Watermark" on={value.type === 'image'} onPress={() => onChange({ ...value, type: 'image' })} />
+      </View>
 
-      {/* Text or Image Configuration */}
+      {/* Text Configuration */}
       {value.type === 'text' ? (
         <View style={styles.block}>
           <TextInput
@@ -106,7 +144,7 @@ export function PdfWatermarkTool({
             onChangeText={(content) =>
               onChange({
                 ...value,
-                text: { content, fontSizePt: value.text?.fontSizePt ?? 22, color: currentColor },
+                text: { content, fontSizePt: currentFontSize, color: currentColor },
               })
             }
             placeholder="Watermark text"
@@ -114,25 +152,26 @@ export function PdfWatermarkTool({
           />
           {/* Quick Word Presets */}
           <View style={styles.presetsRow}>
-            {WORD_PRESETS.map((word) => (
-              <Pressable
-                key={word}
-                onPress={() =>
-                  onChange({
-                    ...value,
-                    text: { content: word, fontSizePt: value.text?.fontSizePt ?? 22, color: currentColor },
-                  })
-                }
-                style={[styles.wordChip, value.text?.content === word && styles.wordChipActive]}>
-                <Text style={[styles.wordChipText, value.text?.content === word && styles.wordChipTextActive]}>
-                  {word}
-                </Text>
-              </Pressable>
-            ))}
+            {WORD_PRESETS.map((word) => {
+              const active = value.text?.content === word;
+              return (
+                <Pressable
+                  key={word}
+                  onPress={() =>
+                    onChange({
+                      ...value,
+                      text: { content: word, fontSizePt: currentFontSize, color: currentColor },
+                    })
+                  }
+                  style={[styles.wordChip, active && styles.wordChipActive]}>
+                  <Text style={[styles.wordChipText, active && styles.wordChipTextActive]}>{word}</Text>
+                </Pressable>
+              );
+            })}
           </View>
 
           {/* Color Presets */}
-          <Text style={styles.label}>Color</Text>
+          <Text style={styles.label}>Color Palette</Text>
           <View style={styles.colorRow}>
             {COLOR_PRESETS.map((c) => {
               const active = currentColor === c.hex;
@@ -144,7 +183,7 @@ export function PdfWatermarkTool({
                       ...value,
                       text: {
                         content: value.text?.content || 'WATERMARK',
-                        fontSizePt: value.text?.fontSizePt ?? 22,
+                        fontSizePt: currentFontSize,
                         color: c.hex,
                       },
                     })
@@ -163,10 +202,17 @@ export function PdfWatermarkTool({
         </Pressable>
       )}
 
-      {/* Single Stamp vs Tiled Pattern Settings */}
+      {/* Single Stamp Controls */}
       {value.layout === 'stamp' ? (
         <View style={styles.block}>
-          <Text style={styles.label}>Position</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.label}>Position & Placement</Text>
+            <Pressable
+              onPress={() => setAnchor('center')}
+              style={styles.headerActionBtn}>
+              <Text style={styles.headerActionText}>Center</Text>
+            </Pressable>
+          </View>
           <View style={styles.locationGrid}>
             {ANCHOR_ITEMS.map((item) => {
               const active = value.stamp?.anchor === item.id;
@@ -186,14 +232,14 @@ export function PdfWatermarkTool({
           <View style={styles.dragHintRow}>
             <View style={styles.dragDot} />
             <Text style={styles.dragHintText}>
-              Watermark is draggable — you can tap a position above or drag it freely on the page preview.
+              Draggable: Tap any position above to snap, or drag the stamp directly on the page preview.
             </Text>
           </View>
 
-          <Text style={styles.label}>Stamp Size ({Math.round((value.stamp?.sizeNorm ?? 0.38) * 100)}%)</Text>
+          <Text style={styles.label}>Stamp Size ({Math.round((value.stamp?.sizeNorm ?? 0.42) * 100)}%)</Text>
           <View style={styles.presetsRow}>
             {STAMP_SIZE_PRESETS.map((p) => {
-              const active = Math.abs((value.stamp?.sizeNorm ?? 0.38) - p.val) < 0.05;
+              const active = Math.abs((value.stamp?.sizeNorm ?? 0.42) - p.val) < 0.05;
               return (
                 <Pressable
                   key={p.label}
@@ -213,21 +259,61 @@ export function PdfWatermarkTool({
               );
             })}
           </View>
+          <View style={styles.row}>
+            <Seg
+              label="− Smaller Size"
+              on={false}
+              onPress={() => {
+                const cur = value.stamp?.sizeNorm ?? 0.42;
+                onChange({
+                  ...value,
+                  stamp: {
+                    anchor: value.stamp?.anchor ?? 'center',
+                    offsetNorm: value.stamp?.offsetNorm ?? { x: 0.5, y: 0.5 },
+                    sizeNorm: Math.max(0.15, Math.round((cur - 0.05) * 100) / 100),
+                  },
+                });
+              }}
+            />
+            <Seg
+              label="+ Larger Size"
+              on={false}
+              onPress={() => {
+                const cur = value.stamp?.sizeNorm ?? 0.42;
+                onChange({
+                  ...value,
+                  stamp: {
+                    anchor: value.stamp?.anchor ?? 'center',
+                    offsetNorm: value.stamp?.offsetNorm ?? { x: 0.5, y: 0.5 },
+                    sizeNorm: Math.min(0.9, Math.round((cur + 0.05) * 100) / 100),
+                  },
+                });
+              }}
+            />
+          </View>
         </View>
       ) : (
         /* Tiled Pattern Controls */
         <View style={styles.block}>
-          <Text style={styles.label}>Tile Density & Grid</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.label}>Grid Density & Spacing</Text>
+            <View style={styles.gridBadge}>
+              <Text style={styles.gridBadgeText}>{`${gridInfo.cols} × ${gridInfo.rows} grid`}</Text>
+            </View>
+          </View>
           <View style={styles.presetsRow}>
             {DENSITY_PRESETS.map((p) => {
-              const active = Math.abs((value.tiled?.spacingNorm?.x ?? 0.24) - p.val) < 0.04;
+              const active = Math.abs((value.tiled?.spacingNorm?.x ?? 0.24) - p.val) < 0.03;
               return (
                 <Pressable
                   key={p.label}
                   onPress={() =>
                     onChange({
                       ...value,
-                      tiled: { spacingNorm: { x: p.val, y: p.val } },
+                      tiled: {
+                        spacingNorm: { x: p.val, y: p.val },
+                        staggered: isStaggered,
+                      },
                     })
                   }
                   style={[styles.chip, active && styles.chipActive]}>
@@ -238,28 +324,130 @@ export function PdfWatermarkTool({
           </View>
           <View style={styles.row}>
             <Seg
-              label="− Denser"
+              label="− Denser Grid"
               on={false}
               onPress={() => {
                 const s = value.tiled?.spacingNorm ?? { x: 0.24, y: 0.24 };
                 onChange({
                   ...value,
-                  tiled: { spacingNorm: { x: Math.max(0.1, s.x - 0.04), y: Math.max(0.1, s.y - 0.04) } },
+                  tiled: {
+                    spacingNorm: {
+                      x: Math.max(0.1, Math.round((s.x - 0.03) * 100) / 100),
+                      y: Math.max(0.1, Math.round((s.y - 0.03) * 100) / 100),
+                    },
+                    staggered: isStaggered,
+                  },
                 });
               }}
             />
             <Seg
-              label="+ Looser"
+              label="+ Looser Grid"
               on={false}
               onPress={() => {
                 const s = value.tiled?.spacingNorm ?? { x: 0.24, y: 0.24 };
                 onChange({
                   ...value,
-                  tiled: { spacingNorm: { x: Math.min(0.5, s.x + 0.04), y: Math.min(0.5, s.y + 0.04) } },
+                  tiled: {
+                    spacingNorm: {
+                      x: Math.min(0.5, Math.round((s.x + 0.03) * 100) / 100),
+                      y: Math.min(0.5, Math.round((s.y + 0.03) * 100) / 100),
+                    },
+                    staggered: isStaggered,
+                  },
                 });
               }}
             />
           </View>
+
+          {/* Pattern Alignment Style */}
+          <Text style={styles.label}>Pattern Alignment</Text>
+          <View style={styles.row}>
+            <Seg
+              label="Staggered (Brick)"
+              on={isStaggered}
+              onPress={() =>
+                onChange({
+                  ...value,
+                  tiled: {
+                    spacingNorm: currentSpacing,
+                    staggered: true,
+                  },
+                })
+              }
+            />
+            <Seg
+              label="Straight Grid"
+              on={!isStaggered}
+              onPress={() =>
+                onChange({
+                  ...value,
+                  tiled: {
+                    spacingNorm: currentSpacing,
+                    staggered: false,
+                  },
+                })
+              }
+            />
+          </View>
+
+          {/* Tiled Font Size */}
+          {value.type === 'text' ? (
+            <>
+              <Text style={styles.label}>Tiled Text Size ({currentFontSize} pt)</Text>
+              <View style={styles.presetsRow}>
+                {TILED_TEXT_SIZES.map((ts) => {
+                  const active = currentFontSize === ts.val;
+                  return (
+                    <Pressable
+                      key={ts.label}
+                      onPress={() =>
+                        onChange({
+                          ...value,
+                          text: {
+                            content: value.text?.content || 'WATERMARK',
+                            color: currentColor,
+                            fontSizePt: ts.val,
+                          },
+                        })
+                      }
+                      style={[styles.chip, active && styles.chipActive]}>
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{ts.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={styles.row}>
+                <Seg
+                  label="− Smaller Text"
+                  on={false}
+                  onPress={() =>
+                    onChange({
+                      ...value,
+                      text: {
+                        content: value.text?.content || 'WATERMARK',
+                        color: currentColor,
+                        fontSizePt: Math.max(10, currentFontSize - 2),
+                      },
+                    })
+                  }
+                />
+                <Seg
+                  label="+ Larger Text"
+                  on={false}
+                  onPress={() =>
+                    onChange({
+                      ...value,
+                      text: {
+                        content: value.text?.content || 'WATERMARK',
+                        color: currentColor,
+                        fontSizePt: Math.min(48, currentFontSize + 2),
+                      },
+                    })
+                  }
+                />
+              </View>
+            </>
+          ) : null}
         </View>
       )}
 
@@ -267,7 +455,7 @@ export function PdfWatermarkTool({
       <Text style={styles.label}>Opacity ({Math.round(value.opacity * 100)}%)</Text>
       <View style={styles.presetsRow}>
         {OPACITY_PRESETS.map((p) => {
-          const active = Math.abs(value.opacity - p.val) < 0.06;
+          const active = Math.abs(value.opacity - p.val) < 0.04;
           return (
             <Pressable
               key={p.label}
@@ -277,6 +465,28 @@ export function PdfWatermarkTool({
             </Pressable>
           );
         })}
+      </View>
+      <View style={styles.row}>
+        <Seg
+          label="− 5% Opacity"
+          on={false}
+          onPress={() =>
+            onChange({
+              ...value,
+              opacity: Math.max(0.05, Math.round((value.opacity - 0.05) * 100) / 100),
+            })
+          }
+        />
+        <Seg
+          label="+ 5% Opacity"
+          on={false}
+          onPress={() =>
+            onChange({
+              ...value,
+              opacity: Math.min(0.95, Math.round((value.opacity + 0.05) * 100) / 100),
+            })
+          }
+        />
       </View>
 
       {/* Rotation */}
@@ -334,6 +544,33 @@ const styles = StyleSheet.create({
   wrap: { gap: 10 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   block: { gap: 8 },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerActionBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#E7F7F9',
+  },
+  headerActionText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Palette.accent,
+  },
+  gridBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#F3F4F6',
+  },
+  gridBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Palette.ink,
+  },
   label: { fontSize: 12, color: Palette.ink, fontWeight: '600' },
   input: {
     borderWidth: 1,
@@ -373,14 +610,15 @@ const styles = StyleSheet.create({
   },
   colorRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 6,
   },
   colorBtn: {
-    flex: 1,
+    width: '23%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 4,
     paddingVertical: 6,
     borderRadius: 6,
     borderWidth: 1,
@@ -474,7 +712,7 @@ const styles = StyleSheet.create({
   },
   chip: {
     flex: 1,
-    minWidth: '22%',
+    minWidth: '18%',
     paddingVertical: 6,
     paddingHorizontal: 6,
     borderRadius: 6,
@@ -507,3 +745,4 @@ const styles = StyleSheet.create({
   segText: { fontSize: 12, color: Palette.actionText },
   segTextOn: { color: Palette.accent, fontWeight: '600' },
 });
+

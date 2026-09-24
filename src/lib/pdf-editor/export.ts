@@ -66,7 +66,8 @@ async function drawWatermark(
   const rotation = wm.rotationDeg;
 
   if (wm.layout === 'tiled') {
-    const spacing = wm.tiled?.spacingNorm ?? { x: 0.22, y: 0.22 };
+    const spacing = wm.tiled?.spacingNorm ?? { x: 0.24, y: 0.24 };
+    const staggered = wm.tiled?.staggered ?? true;
     const { cols, rows } = tiledRepeatCount(spacing);
     const cellW = crop.w / cols;
     const cellH = crop.h / rows;
@@ -77,9 +78,11 @@ async function drawWatermark(
       const bytes = await readBytes(tile.tileUri);
       const img = await out.embedPng(bytes);
       for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const x = crop.x + c * cellW + cellW * 0.1;
+        const staggerX = staggered && r % 2 === 1 ? cellW * 0.5 : 0;
+        for (let c = -1; c <= cols; c++) {
+          const x = crop.x + c * cellW + staggerX + cellW * 0.1;
           const y = crop.y + (rows - 1 - r) * cellH + cellH * 0.1;
+          if (x + cellW * 0.8 < crop.x || x > crop.x + crop.w) continue;
           page.drawImage(img, {
             x,
             y,
@@ -93,14 +96,17 @@ async function drawWatermark(
       return;
     }
 
-    const font = await out.embedFont(StandardFonts.Helvetica);
+    const font = await out.embedFont(StandardFonts.HelveticaBold);
     const text = wm.text?.content || 'WATERMARK';
-    const color = hexToRgb(wm.text?.color || '#888888');
-    const size = Math.max(6, Math.min(cellW, cellH) * 0.18);
+    const color = hexToRgb(wm.text?.color || '#DC2626');
+    const userPt = wm.text?.fontSizePt ?? 22;
+    const size = Math.max(8, (userPt / 22) * Math.min(cellW, cellH) * 0.22);
     for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const x = crop.x + c * cellW + cellW * 0.1;
+      const staggerX = staggered && r % 2 === 1 ? cellW * 0.5 : 0;
+      for (let c = -1; c <= cols; c++) {
+        const x = crop.x + c * cellW + staggerX + cellW * 0.1;
         const y = crop.y + (rows - 1 - r) * cellH + cellH * 0.35;
+        if (x + cellW * 0.8 < crop.x || x > crop.x + crop.w) continue;
         page.drawText(text, {
           x,
           y,
@@ -117,7 +123,7 @@ async function drawWatermark(
 
   const stamp = wm.stamp ?? {
     offsetNorm: { x: 0.5, y: 0.5 },
-    sizeNorm: 0.28,
+    sizeNorm: 0.42,
     anchor: 'center' as const,
   };
   const rect = stampRectInCropSpace(crop, stamp);
@@ -136,13 +142,16 @@ async function drawWatermark(
     return;
   }
 
-  const font = await out.embedFont(StandardFonts.Helvetica);
-  page.drawText(wm.text?.content || 'WATERMARK', {
-    x: rect.x,
-    y: rect.y + rect.h * 0.3,
-    size: Math.max(8, rect.h * 0.25),
+  const font = await out.embedFont(StandardFonts.HelveticaBold);
+  const text = wm.text?.content || 'WATERMARK';
+  const color = hexToRgb(wm.text?.color || '#DC2626');
+  const size = Math.max(12, rect.h * 0.42);
+  page.drawText(text, {
+    x: rect.x + rect.w * 0.08,
+    y: rect.y + rect.h * 0.32,
+    size,
     font,
-    color: hexToRgb(wm.text?.color || '#888888'),
+    color,
     rotate: degrees(rotation),
     opacity,
   });

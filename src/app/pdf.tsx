@@ -270,7 +270,7 @@ export default function PdfEditorScreen() {
                 stamp: {
                   anchor: wm.stamp?.anchor ?? 'center',
                   offsetNorm,
-                  sizeNorm: wm.stamp?.sizeNorm ?? 0.28,
+                  sizeNorm: wm.stamp?.sizeNorm ?? 0.42,
                 },
               });
             }}

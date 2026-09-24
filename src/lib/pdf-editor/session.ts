@@ -82,7 +82,10 @@ export type PdfWatermark = {
     offsetNorm: { x: number; y: number };
     sizeNorm: number;
   };
-  tiled?: { spacingNorm: { x: number; y: number } };
+  tiled?: {
+    spacingNorm: { x: number; y: number };
+    staggered?: boolean;
+  };
 };
 
 export type PdfEditSession = {
@@ -201,14 +204,16 @@ export function stampRectInCropSpace(
   crop: PdfBoxPts,
   stamp: { offsetNorm: { x: number; y: number }; sizeNorm: number },
 ): { x: number; y: number; w: number; h: number } {
-  const size = Math.min(1, Math.max(0.02, stamp.sizeNorm));
+  const size = Math.min(0.95, Math.max(0.08, stamp.sizeNorm));
   const w = crop.w * size;
-  const h = crop.h * size;
+  const h = Math.max(20, w * 0.35);
   const ox = Math.min(1, Math.max(0, stamp.offsetNorm.x));
   const oy = Math.min(1, Math.max(0, stamp.offsetNorm.y));
-  const x = crop.x + ox * crop.w - w / 2;
-  const yTop = oy * crop.h;
-  const y = crop.y + (crop.h - yTop - h / 2);
+  const maxX = Math.max(0, crop.w - w);
+  const maxY = Math.max(0, crop.h - h);
+  const x = crop.x + ox * maxX;
+  const yTop = oy * maxY;
+  const y = crop.y + (crop.h - yTop - h);
   return { x, y, w, h };
 }
 
@@ -256,8 +261,8 @@ export function defaultWatermark(): PdfWatermark {
     stamp: {
       anchor: 'center',
       offsetNorm: { x: 0.5, y: 0.5 },
-      sizeNorm: 0.38,
+      sizeNorm: 0.42,
     },
-    tiled: { spacingNorm: { x: 0.22, y: 0.22 } },
+    tiled: { spacingNorm: { x: 0.24, y: 0.24 }, staggered: true },
   };
 }

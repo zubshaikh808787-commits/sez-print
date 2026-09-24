@@ -197,27 +197,23 @@ export function PdfPageViewer({
     height: cropH.value,
   }));
 
-  const stampW = Math.max(90, Math.min(activeStageW * 0.85, activeStageW * (watermark?.stamp?.sizeNorm ?? 0.38)));
-  const stampH = Math.max(36, stampW * 0.36);
+  const stampW = Math.max(110, Math.min(activeStageW * 0.9, activeStageW * (watermark?.stamp?.sizeNorm ?? 0.42)));
+  const stampH = Math.max(42, Math.round(stampW * 0.35));
 
   const stampWrapperStyle = useAnimatedStyle(() => {
-    if (cropEnabled) {
-      const centerX = cropX.value + stampNormX.value * cropW.value;
-      const centerY = cropY.value + stampNormY.value * cropH.value;
-      return {
-        left: centerX - stampW / 2,
-        top: centerY - stampH / 2,
-        width: stampW,
-        height: stampH,
-      };
-    }
-    const centerX = stampNormX.value * activeStageW;
-    const centerY = stampNormY.value * activeStageH;
+    const stageWidth = cropEnabled ? cropW.value : activeStageW;
+    const stageHeight = cropEnabled ? cropH.value : activeStageH;
+    const maxX = Math.max(0, stageWidth - stampW);
+    const maxY = Math.max(0, stageHeight - stampH);
+    const baseLeft = cropEnabled ? cropX.value : 0;
+    const baseTop = cropEnabled ? cropY.value : 0;
+    const tx = baseLeft + stampNormX.value * maxX;
+    const ty = baseTop + stampNormY.value * maxY;
     return {
-      left: centerX - stampW / 2,
-      top: centerY - stampH / 2,
-      width: stampW,
-      height: stampH,
+      transform: [
+        { translateX: tx },
+        { translateY: ty },
+      ],
     };
   });
 
@@ -394,16 +390,18 @@ export function PdfPageViewer({
         })
         .onUpdate((e) => {
           'worklet';
-          const targetW = cropEnabled ? Math.max(cropW.value, 30) : activeStageW;
-          const targetH = cropEnabled ? Math.max(cropH.value, 30) : activeStageH;
-          stampNormX.value = Math.min(1, Math.max(0, startStamp.value.x + e.translationX / targetW));
-          stampNormY.value = Math.min(1, Math.max(0, startStamp.value.y + e.translationY / targetH));
+          const stageWidth = cropEnabled ? cropW.value : activeStageW;
+          const stageHeight = cropEnabled ? cropH.value : activeStageH;
+          const maxX = Math.max(1, stageWidth - stampW);
+          const maxY = Math.max(1, stageHeight - stampH);
+          stampNormX.value = Math.min(1, Math.max(0, startStamp.value.x + e.translationX / maxX));
+          stampNormY.value = Math.min(1, Math.max(0, startStamp.value.y + e.translationY / maxY));
         })
         .onEnd(() => {
           'worklet';
           runOnJS(onStampOffset)({ x: stampNormX.value, y: stampNormY.value });
         }),
-    [activeStageH, activeStageW, cropEnabled, cropH, cropW, onStampOffset, stampNormX, stampNormY, startStamp],
+    [activeStageH, activeStageW, cropEnabled, cropH, cropW, onStampOffset, stampH, stampNormX, stampNormY, stampW, startStamp],
   );
 
   const tiles = watermark?.layout === 'tiled' ? tiledRepeatCount(watermark.tiled?.spacingNorm ?? { x: 0.22, y: 0.22 }) : null;
@@ -507,12 +505,17 @@ export function PdfPageViewer({
 
           {/* Tiled Watermark Pattern */}
           {watermark?.layout === 'tiled' && tiles
-            ? Array.from({ length: tiles.rows * tiles.cols }).map((_, i) => {
-                const c = i % tiles.cols;
-                const r = Math.floor(i / tiles.cols);
+            ? Array.from({ length: tiles.rows * (tiles.cols + 2) }).map((_, i) => {
+                const totalCols = tiles.cols + 2;
+                const c = (i % totalCols) - 1;
+                const r = Math.floor(i / totalCols);
                 const cellW = activeStageW / tiles.cols;
                 const cellH = activeStageH / tiles.rows;
                 const wmColor = watermark.text?.color || '#DC2626';
+                const staggered = watermark.tiled?.staggered ?? true;
+                const staggerX = staggered && r % 2 === 1 ? cellW * 0.5 : 0;
+                const userPt = watermark.text?.fontSizePt ?? 22;
+                const fontSize = Math.max(8, (userPt / 22) * Math.min(cellW, cellH) * 0.22);
                 return (
                   <View
                     key={i}
@@ -520,7 +523,7 @@ export function PdfPageViewer({
                     style={[
                       styles.tileCell,
                       {
-                        left: c * cellW,
+                        left: c * cellW + staggerX,
                         top: r * cellH,
                         width: cellW,
                         height: cellH,
@@ -532,7 +535,7 @@ export function PdfPageViewer({
                         {
                           color: wmColor,
                           opacity: watermark.opacity,
-                          fontSize: Math.max(9, Math.min(cellW, cellH) * 0.22),
+                          fontSize,
                           transform: [{ rotate: `${watermark.rotationDeg}deg` }],
                         },
                       ]}
@@ -547,37 +550,51 @@ export function PdfPageViewer({
           {/* Draggable Watermark Single Stamp (Prominent, cleanly visible) */}
           {watermark?.layout === 'stamp' ? (
             <Animated.View
-              pointerEvents={watermarkEnabled ? 'box-none' : 'none'}
-              style={[styles.stampWrapper, stampWrapperStyle]}>
+              pointerEvents={watermarkEnabled ? 'auto' : 'none'}
+              style={[
+                styles.stampWrapper,
+                {
+                  width: stampW,
+                  height: stampH,
+                },
+                stampWrapperStyle,
+              ]}>
               <GestureDetector gesture={stampPan}>
                 <View
                   style={[
                     styles.stampBox,
                     {
+                      width: stampW,
+                      height: stampH,
                       borderColor: watermark.text?.color || '#DC2626',
-                      opacity: Math.max(0.3, watermark.opacity),
+                      backgroundColor: 'rgba(255, 255, 255, 0.88)',
+                      opacity: Math.max(0.35, watermark.opacity),
                       transform: [{ rotate: `${watermark.rotationDeg}deg` }],
                     },
                   ]}>
+                  {watermarkEnabled ? (
+                    <View style={styles.dragBadge}>
+                      <Text style={styles.dragBadgeText}>DRAG</Text>
+                    </View>
+                  ) : null}
                   {watermark.type === 'text' ? (
                     <Text
                       style={[
                         styles.stampText,
                         {
                           color: watermark.text?.color || '#DC2626',
-                          fontSize: Math.max(13, Math.round(stampH * 0.44)),
+                          fontSize: Math.max(14, Math.round(stampH * 0.42)),
                         },
                       ]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit>
+                      numberOfLines={1}>
                       {watermark.text?.content || 'WATERMARK'}
                     </Text>
                   ) : watermark.image?.sourceUri ? (
                     <RNImage
                       source={{ uri: watermark.image.sourceUri }}
                       style={{
-                        width: stampW - 12,
-                        height: stampH - 8,
+                        width: stampW - 16,
+                        height: stampH - 12,
                       }}
                       resizeMode="contain"
                     />
@@ -642,20 +659,37 @@ const styles = StyleSheet.create({
   },
   stampWrapper: {
     position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
+    top: 0,
+    left: 0,
+    zIndex: 25,
   },
   stampBox: {
-    width: '100%',
-    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2.5,
-    borderRadius: 6,
+    borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  dragBadge: {
+    position: 'absolute',
+    top: -9,
+    right: 8,
+    backgroundColor: Palette.accent,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  dragBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   stampText: {
     fontWeight: '900',
