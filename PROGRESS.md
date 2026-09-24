@@ -295,7 +295,7 @@ Each completed sub-task is logged with the following structure:
 
 ## Editor Feature: Multi-Select ("Multiple" Mode) — Konva Editor
 
-*Status: Implementation in progress (rewrite underway). Spec: `ARCHITECTURE_REDESIGN_PLAN.md` → "Editor Feature Track: Multi-Select".*
+*Status: Complete (2026-09-24). Spec: `ARCHITECTURE_REDESIGN_PLAN.md` → "Editor Feature Track: Multi-Select". Follow-on: Element Menu Properties (pending).*
 
 ### Multi-Select: Current State (recorded 2026-09-23)
 - **Scope:** `src/app/edit.tsx`, `src/components/editor/konva-canvas.tsx`, `src/components/editor/konva-transformer.tsx`, `src/lib/editor/selection.ts`, `src/lib/editor/resize-policy.ts`, `src/components/editor/multi-select-property-panel.tsx`.
@@ -309,8 +309,13 @@ Each completed sub-task is logged with the following structure:
   - `src/lib/editor/__tests__/resize-member-by-scale.test.ts`: 7/7 PASS.
   - `src/lib/editor/__tests__/multi-transform-verify.test.ts`: 4/4 PASS (shared move delta live = commit; origins stationary on east→south; group member = solo `resizeMemberByScale`; group stops at `minMm`).
   - `npx tsc --noEmit`: not run as part of this entry.
-- **Outstanding Verification (on-device, not yet done):** live equals commit with no release jump; group stops together at both caps with mixed types; square-locked QR inside a one-axis group resize; ruler and chrome follow union bounds; no selection blink or unintended drag on touch-down add; mode-off clears selection and primary promotion; property panel and align actions as one undo step.
-- **Notes & Next Step:** Finish the rewrite, then run the on-device matrix above and log results here before ticking the checklist items.
+- **On-device (accepted 2026-09-24):** Multi-select marked complete. Group drag/resize and canvas selection behaviour accepted on device.
+- **Notes & Next Step:** Element Menu Properties is a separate pending editor task. Phase 3 is retired (stock size fixed at creation); next numbered phase is Phase 4.
+
+---
+
+## Editor Feature: Element Menu Properties — marked pending 2026-09-24
+- **Status:** Pending. Inspector / element-menu property controls (including shared fields on a multi-select as one undo step). Split out of Multi-Select so the canvas feature can close. Independent of retired Phase 3; does not block Phase 4.
 
 ---
 
@@ -373,4 +378,26 @@ Each completed sub-task is logged with the following structure:
   - `#29`: minify-off is real; “all five die together” is a prediction (TD-404 least at risk).
   - `#31`: our modules are Android-only; Luck/Caysn/Ninestar vendor iOS artifacts exist in-repo.
 - **Next Step:** Unchanged hardware order (Tez logcat → Josh gap → TD-404 caliper). Optional: construct `〇Ooo.〇o0〇o0` without waiting on Q1.
+
+---
+
+## Phase 3 Retirement Follow-up: Remove Editor Label Size-Change
+
+- **Date Completed:** 2026-09-24
+- **What Was Done:** Removed the in-editor stock-size picker from `src/app/edit.tsx` (toolbar “Tap to customize size” + Label Size modal). Size remains a read-only readout in the sub-toolbar. `LabelSizeEditor` is unchanged and still used by label creation (`src/app/new-label-setup.tsx`). `scaleDocumentToSize` was **not** deleted; a comment records that the editor size-change UI no longer calls it. Unused `scaleDocumentToSize` import dropped from `src/lib/print-sizes.ts`. Element-resize paths (`resize-policy.ts`, `resizeMemberByScale`, `boundBoxMm`, multi-select shared-scale) were not touched.
+- **Callers of `scaleDocumentToSize` after this pass:** `src/app/new-label-setup.tsx` (clone/2ups at a chosen creation size), `src/app/edit.tsx` (`cloneFromId` init when creating a new doc from a clone), `src/lib/editor/__tests__/template-resizing.test.ts`. No `changeLabelSize` / `setStockSize` action exists in `src/stores/label-store.ts`.
+- **Flagged, not removed:** Editor **Label Clone / 2ups Label** still navigates to `/new-label-setup` with `cloneFromId` and lets the user pick a size for a **new** document (then scales). More-menu **New** goes to creation setup only. More-menu **Label Settings** can change *default* width/height for future labels, not the open document.
+- **Verification & Quality Gate Results:** `npx tsc --noEmit`. Manual editor check: size is not tappable; no size modal. Creation size flow left intact.
+- **Docs (2026-09-24, same day):** Checklist Phase 3 marked retired (Tasks 3.1–3.4 struck; follow-up ticked). Plan Phase 3 status, roadmap, blueprint, benchmark row 4, and execution protocol updated to match. This log is the implementation record; the plan holds the decision.
+
+---
+
+## Print PDF Editor (P0–P6)
+
+- **Date Completed:** 2026-09-23
+- **What Was Done:** Standalone PDF editor at `/pdf-editor`, launched from the home **Print PDF** tile (`src/app/(tabs)/index.tsx`). Import, grayscale preview, fixed-mm crop window, current-page rotate/sharpness, stamp/tiled watermark, `pdf-lib` export. `modules/pdf-raster` rasters one page at a time (Android PdfRenderer + iOS PDFKit). Thermal `/pdf` is unused from home. **P7 print is deferred** — no printer/system-print wiring.
+- **How It Was Done:** Session in `src/stores/pdf-edit-store.ts`; crop export sets **MediaBox = CropBox** to the same rect; sharpness 0 skips raster; watermark stamp norms are post-crop; image tiles are downscaled from source before repeat.
+- **Verification & Quality Gate Results:** `npx tsx src/lib/pdf-editor/__tests__/session.test.ts`; `npx tsc --noEmit`.
+- **Notes & Next Step:** Native raster requires a rebuild of the dev client. P7 remains out of scope.
+
 

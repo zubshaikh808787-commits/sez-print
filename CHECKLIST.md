@@ -33,21 +33,30 @@
 ---
 
 ## Editor Feature: Multi-Select ("Multiple" Mode) — Konva Editor
-> **Status: Implementation in progress (rewrite underway).** Locked model: one shared scale factor applied through the single-element `resizeMemberByScale`; member origins never move during resize; the shared scale is capped so the whole group stops when any member hits its minimum size (or the canvas edge). Spec: `ARCHITECTURE_REDESIGN_PLAN.md` → "Editor Feature Track: Multi-Select".
+> **Status: Complete.** Locked model: one shared scale factor applied through the single-element `resizeMemberByScale`; member origins never move during resize; the shared scale is capped so the whole group stops when any member hits its minimum size (or the canvas edge). Spec: `ARCHITECTURE_REDESIGN_PLAN.md` → "Editor Feature Track: Multi-Select". Next editor track is **Element Menu Properties** (below).
 
 - [x] Selection reducers: tap add/remove, mode toggle, union bounds, group align (`src/lib/editor/selection.ts`; `selection.test.ts` 11/11)
 - [x] Shared-scale resize primitives: `resizeMemberByScale`, `sharedScaleLimits`, `capSharedScale` (`src/lib/editor/resize-policy.ts`; `resize-member-by-scale.test.ts` 7/7, `multi-transform-verify.test.ts` 4/4)
-- [ ] Group drag and resize wired end-to-end in `konva-transformer.tsx` / `konva-canvas.tsx` / `src/app/edit.tsx` (rewrite underway)
-- [ ] Multi-select property panel (`src/components/editor/multi-select-property-panel.tsx`) applies to all members as one undo step
-- [ ] On-device verification: live equals commit (no release jump); group stops together at min-size and canvas-edge caps; square-locked QR inside a group; ruler/chrome follow union bounds; no selection blink on add; `npx tsc --noEmit` clean
+- [x] Group drag and resize wired end-to-end in `konva-transformer.tsx` / `konva-canvas.tsx` / `src/app/edit.tsx`
+- [x] On-device verification: live equals commit (no release jump); group stops together at min-size and canvas-edge caps; square-locked QR inside a group; ruler/chrome follow union bounds; no selection blink on add
 
 ---
 
-## Phase 3: Constraint-Based Layout & Responsive Anchor Architecture
-- [ ] **Task 3.1:** Extend `LabelElement` Schema in `src/lib/label-document.ts`
-- [ ] **Task 3.2:** Implement Layout Constraint Solver in `src/lib/layout-constraints.ts`
-- [ ] **Task 3.3:** Integrate Constraint Resolution into Label Size Switching
-- [ ] **Task 3.4:** Add Constraint UI Controls to Editor Property Panels
+## Editor Feature: Element Menu Properties
+> **Status: Pending.** Inspector / element-menu property editing (including applying shared fields to a multi-select as one undo step). Not part of the completed Multi-Select canvas work. Independent of retired Phase 3.
+
+- [ ] **Element Menu Properties:** Element inspector and menu property controls in the Konva editor (`src/app/edit.tsx`, property panels under `src/components/editor/`)
+
+---
+
+## Phase 3: Constraint-Based Layout & Responsive Anchor Architecture — Retired
+> **Status: Retired (2026-09-24).** Label stock size is fixed at creation. Phase 3 existed to make *in-editor* stock-size changes non-destructive (anchors, constraint solver, size-switch wiring, constraint UI). That size-change path is gone, so Tasks 3.1–3.4 are cancelled, not deferred. Spec history: `ARCHITECTURE_REDESIGN_PLAN.md` → Phase 3. Next numbered phase is **Phase 4**. Independent editor track: **Element Menu Properties**.
+
+- [x] ~~**Task 3.1:** Extend `LabelElement` Schema in `src/lib/label-document.ts`~~ — **Retired**
+- [x] ~~**Task 3.2:** Implement Layout Constraint Solver in `src/lib/layout-constraints.ts`~~ — **Retired**
+- [x] ~~**Task 3.3:** Integrate Constraint Resolution into Label Size Switching~~ — **Retired**
+- [x] ~~**Task 3.4:** Add Constraint UI Controls to Editor Property Panels~~ — **Retired**
+- [x] **Follow-up:** Remove in-editor label size-change (`src/app/edit.tsx` toolbar + Label Size modal). Creation-flow size picker (`LabelSizeEditor` in `new-label-setup.tsx`) kept. `scaleDocumentToSize` kept for clone/2ups creation.
 
 ---
 
@@ -88,3 +97,16 @@
 - [ ] **Task 7.1:** Build Preflight Inspection Rules in `src/lib/preflight/preflight-engine.ts`
 - [ ] **Task 7.2:** Build Thermal Density Analyzer in `src/printing/raster/thermal-density.ts`
 - [ ] **Task 7.3:** Build Preflight Review UI Modal in `src/components/preflight/preflight-modal.tsx`
+
+---
+
+## Print PDF Editor (standalone — no printer)
+- [x] **P0:** Dashboard tile retarget + `pdf-editor` route and tool chrome (`src/app/(tabs)/index.tsx`, `src/app/pdf-editor.tsx`)
+- [x] **P1:** Import / grayscale viewer / page nav / session store + `pdf-lib` + `modules/pdf-raster`
+- [x] **P2:** Output-size chips as fixed-mm crop window; reset crop on size change; This/All/Range
+- [x] **P3:** Rotate 0/90/180/270 on the current page
+- [x] **P4:** Sharpness 0–100 unsharp on export raster; 0 keeps vector
+- [x] **P5:** Text/image × stamp/tiled watermark; tile downscale; same scope as crop
+- [x] **P6:** Export via `pdf-lib` + share sheet (`MediaBox = CropBox` on sharpness-0)
+- [ ] **P7 (deferred):** Thermal / system print — not in this editor
+

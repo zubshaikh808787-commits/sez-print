@@ -15,14 +15,12 @@ Modern industrial-grade label software relies on a strict mathematical foundatio
 graph TD
   subgraph DataModel["1. Vector Data Model"]
       JSON["LabelDocument JSON: Physical mm Coordinates"]
-      Constraints["Responsive Anchor & Constraint Rules"]
   end
 
-  subgraph EditorCanvas["2. Interactive UI Canvas - Phase 1 & 3 (Konva editor; Skia is print-only per Task 1.4)"]
+  subgraph EditorCanvas["2. Interactive UI Canvas - Phase 1 (Konva editor; Skia is print-only per Task 1.4). Phase 3 constraint layout retired."]
       EditorKonva["Konva Editor Canvas: RN SVG/Views"]
       ReanimatedWorklets["Worklet Transforms: Zero Bridge Overhead"]
       SingleAxisHandles["Two 28px Teal Handles + Dashed Selection Box"]
-      ConstraintSolver["Live Constraint Engine: 60/120 fps"]
   end
 
   subgraph OpticalEngine["3. Barcode & Optical Symbology - Phase 2"]
@@ -45,12 +43,10 @@ graph TD
       ThermalSmoothing["Thermal Energy Density Smoothing"]
   end
 
-  JSON --> Constraints
-  Constraints --> EditorKonva
-  Constraints --> HeadlessSkia
+  JSON --> EditorKonva
+  JSON --> HeadlessSkia
   EditorKonva --> ReanimatedWorklets
   ReanimatedWorklets --> SingleAxisHandles
-  Constraints --> ConstraintSolver
 
   JSON --> Snapping
   Snapping --> QuietZones
@@ -79,7 +75,7 @@ To establish unyielding software robustness, every subsystem is evaluated agains
 | **1. Editor Rendering & Gesture FPS** | React Native SVG/Views in `konva-canvas.tsx`. 35–50 fps during active gestures; layout drops when dragging complex items. | Konva editor (`konva-canvas.tsx`) with gesture geometry driven by Reanimated shared values on the UI thread (the original "100% GPU Skia editor" target was superseded by Task 1.4; Skia is print-only). Solid 60/120 fps with under 8ms frame time on mid-range Android devices. | +25 to 70 fps improvement, zero layout recalculation overhead during active gesture. | Reanimated frame-drop profiler: 0 dropped frames over a 300-frame continuous drag session. |
 | **2. Drag / Drop Precision** | Handled in `konva-transformer.tsx` with risk of float rounding jumps and DOM remount flashes. | Scale-aware Reanimated worklets; sub-millimeter 4-decimal precision (`0.0001mm`); zero magnetic snapping; stable single list. | Eliminates pointer slippage, frame flashing, and repulsive jump zones. | Automated synthetic drag test: touch point delta equals committed coordinate delta within ±0.005mm. |
 | **3. Resize UX & Handles** | React Native View elements scaled via matrix transforms; handles rendered as separate View/SVG nodes. | Two circular teal (`#54C8C8`, 28px) handles (↔ width, ↕ height) whose positions are derived from the same shared values that size the element in `konva-transformer.tsx`; 44×44pt invisible touch targets. (Originally specified as native Skia vector handles — superseded by Task 1.4.) | Single coordinate space; zero desynchronization between selection handles and element content. | Visual parity test matching reference UI + touch target accuracy verification on mobile. |
-| **4. Template Resizing Symmetry** | Linear multiplier (sx, sy). Aspect ratio shift squashes text vertically and distorts borders. | Constraint-based layout: perimeter border locking, dynamic module width recalculation for barcodes, text re-wrap reflow. | No clipped text, no deformed borders, preserved aspect ratios on key elements. | Template resize suite: converting 50×50mm to 50×25mm maintains border width ±0% and causes zero text truncation. |
+| **4. Template Resizing Symmetry** | `scaleDocumentToSize` (Task 1.3) still used when creating a clone/2ups at a different size. In-editor stock-size change is **removed** (Phase 3 retired). | Stock size is chosen at label creation and stays fixed. Clone/2ups may still scale via `scaleDocumentToSize`. No constraint solver. | Users no longer break layout by changing size mid-edit. Clone-at-new-size remains a creation-time rescale. | Editor has no size picker on an existing label. Creation flow still picks size. Tests in `template-resizing.test.ts` cover `scaleDocumentToSize`. |
 | **5. Barcode Module Precision** | Continuous floating-point SVG rectangles (`bar.width * px`). Fractional widths cause dot jitter on 1-bit thermal printhead. | Discrete integer module snapping (X-dimension in {1, 2, 3, ...} dots). Enforced 10x quiet zones. | Eliminates thermal dot jitter and optical scanner reading failures. | Optical scan verification: ≥ 99.9% first-pass decode rate with Honeywell/Zebra 1D/2D laser scanners. |
 | **6. 2D Code Symbology** | Pseudo-random noise matrix (`pseudoMatrix`) used to fake PDF417 and DataMatrix barcodes. | Full ISO/IEC 15438 (PDF417) and ISO/IEC 16022 (DataMatrix) algorithmic encoding with Reed-Solomon error correction. | Compliant barcodes readable by any standard scanner vs. completely unreadable placeholder noise. | Automated decode test using ZXing/ML-Kit reading generated buffers; 100% data fidelity. |
 | **7. Print Dispatch Latency** | Offscreen React Native DOM capture via `<ViewShot>`: 250–600ms per label. | Headless in-memory Skia direct rasterization: under 15ms per label directly to monochrome byte buffer. | **15 to 40x faster** print job generation; zero UI thread blocking. | Benchmark script: 100 labels rasterized in under 1.5s total CPU time. |
@@ -91,12 +87,12 @@ To establish unyielding software robustness, every subsystem is evaluated agains
 
 ## Phased Implementation Roadmap (Balanced Equal Weight)
 
-The architecture redesign is partitioned into **7 distinct, equal-weight phases**. Each phase is scoped to represent approximately equal engineering complexity, cognitive load, and verification effort.
+The architecture redesign was partitioned into **7 distinct, equal-weight phases**. **Phase 3 is retired (2026-09-24)** — stock size is fixed at creation; constraint layout is not implemented. Remaining numbered work is Phases 4–7 (plus the independent **Element Menu Properties** editor track).
 
 ```
-Phase 1: Interactive Editor Canvas & Resizing Engine (Konva editor; Skia print-only per Task 1.4)
-Phase 2: Integer-Module Optical Barcode & 2D Symbology Engine
-Phase 3: Constraint-Based Layout & Responsive Anchor Architecture
+Phase 1: Interactive Editor Canvas & Resizing Engine (Konva editor; Skia print-only per Task 1.4) — complete
+Phase 2: Integer-Module Optical Barcode & 2D Symbology Engine — complete
+Phase 3: Constraint-Based Layout & Responsive Anchor Architecture — RETIRED
 Phase 4: Headless In-Memory Skia Direct Rasterizer (Print Pipeline)
 Phase 5: Streaming Multi-Page Batch & Data Binding Pipeline
 Phase 6: Hardware Calibration, Printhead Margins & Universal Driver Layer
@@ -170,10 +166,10 @@ Phase 7: Print Preflight Engine & Thermal Density Optimization
 
 ### Editor Feature Track: Multi-Select ("Multiple" Mode) — Konva Editor
 
-> **Status: Implementation in progress (rewrite underway).** This is not a numbered phase; it is an editor feature built on the Konva editor that Task 1.4 kept. Recent commits: `720aab6` "multi select fixed", `f4a21ca` "multiple selection blink fix".
+> **Status: Complete (2026-09-24).** This is not a numbered phase; it is an editor feature built on the Konva editor that Task 1.4 kept. Recent commits: `720aab6` "multi select fixed", `f4a21ca` "multiple selection blink fix". Follow-on editor track: **Element Menu Properties** (checklist). Phase 3 (constraint layout) is retired and is not the next step.
 
 #### 1. Scope
-- A "Multiple" toggle in the editor switches tap-to-select from replace to add/remove. The selected members can be moved, resized and aligned as one group, and edited together through a shared property panel.
+- A "Multiple" toggle in the editor switches tap-to-select from replace to add/remove. The selected members can be moved, resized and aligned as one group. Shared inspector / element-menu property editing is a follow-on track (**Element Menu Properties** in `CHECKLIST.md`).
 - **Files:** `src/app/edit.tsx` (mode state, group start snapshots, shared-scale limits, commit), `src/components/editor/konva-canvas.tsx`, `src/components/editor/konva-transformer.tsx` (group drag and resize worklets, `groupScaleXSv` / `groupScaleYSv` / `groupScaleMinSv` / `groupScaleMaxSv`), `src/lib/editor/selection.ts` (`reduceTapSelect`, `reduceMultipleModeToggle`, `unionBounds`, `alignGroupBounds`), `src/lib/editor/resize-policy.ts` (`resizeMemberByScale`, `sharedScaleLimits`, `capSharedScale`), `src/components/editor/multi-select-property-panel.tsx`.
 
 #### 2. Locked Technical Model
@@ -182,17 +178,9 @@ These three rules are fixed. Later changes to multi-select must not break them.
 2. **No origin movement during resize.** Every member's `left` / `top` stays at its gesture-start value, both live and on commit. Only `width` / `height` change. This is the same pinned-origin rule as single-element resize: there is no group-centre pivot and no member is repositioned.
 3. **Shared capped ratio.** `sharedScaleLimits` takes, across all members, the highest minimum scale (the scale at which some member reaches its `minMm`) and the lowest maximum scale (the scale at which some member reaches the canvas edge). The live scale is clamped to that range, so the whole group stops together once any one member hits its limit — no member keeps shrinking or growing past another's clamp. Members whose resize policy has no behaviour for the dragged handle (for example, auto-height text on the south handle) are excluded from the cap and left unchanged.
 
-#### 3. Outstanding Verification
+#### 3. Verification
 - **Automated (passing as of 2026-09-23):** `src/lib/editor/__tests__/selection.test.ts` (11/11), `resize-member-by-scale.test.ts` (7/7), `multi-transform-verify.test.ts` (4/4).
-- **Not yet verified (on-device):**
-  - Live preview equals committed result for group resize on east and south handles, with no jump on release.
-  - The group stops together at the minimum-size cap and at the canvas-edge cap, with mixed element types (text, barcode, QR, shape, image).
-  - Square-locked members (QR) inside a group whose drag is on one axis only.
-  - Ruler highlight and selection chrome follow the union bounds during group drag and resize.
-  - Touch-down add-only behaviour: adding a member does not start an unintended drag, and there is no selection blink (the regression fixed in `f4a21ca`).
-  - Toggling Multiple mode off clears the selection. Removing the primary member promotes another member to primary.
-  - Group align actions and `multi-select-property-panel.tsx` edits apply to every member and undo as a single history step.
-  - `npx tsc --noEmit` clean on the final rewrite.
+- **On-device (accepted 2026-09-24):** group drag/resize live equals commit; group stops together at min-size and canvas-edge caps; square-locked QR in a group; ruler/chrome follow union bounds; no selection blink on add. Shared element-menu / inspector property editing is **out of this track** — see checklist **Element Menu Properties**.
 
 ---
 
@@ -251,6 +239,8 @@ These three rules are fixed. Later changes to multi-select must not break them.
 
 ### Phase 3: Constraint-Based Layout & Responsive Anchor Architecture
 
+> **Status: Retired (2026-09-24).** Decision: label stock size is fixed when the label is created. The only product reason for a constraint solver was to make *changing* that size later non-destructive. That in-editor size-change UI was removed (`src/app/edit.tsx` — toolbar “Tap to customize size” + Label Size modal). **Tasks 3.1–3.4 are cancelled, not deferred.** Do not add `ElementConstraints`, `layout-constraints.ts`, size-switch wiring, or constraint property-panel UI. `scaleDocumentToSize` remains for clone/2ups **creation** only. Size selection at `/new-label-setup` is unchanged. Original spec below is history.
+
 #### 1. Architectural Scope & Weight
 - **Scope:** Upgrade the `LabelDocument` data model and layout engine from purely absolute coordinates (`left`, `top`, `width`, `height`) to a responsive, constraint-driven system with anchors, margin locks, and dynamic flow rules.
 - **Weight:** Core architectural refactoring of document schema, serialization, and layout solver.
@@ -288,18 +278,19 @@ These three rules are fixed. Later changes to multi-select must not break them.
 - Professional label applications allow enterprise users to design a single template and print it across different roll widths (e.g. 2-inch vs 3-inch vs 4-inch printers). Absolute positioning makes template reuse painful. Constraint resolution provides automatic responsive adaptation.
 
 #### 4. Actionable Step-by-Step Tasks
-- [ ] **Task 3.1:** Extend `LabelElement` Schema in `src/lib/label-document.ts`:
+- [x] ~~**Task 3.1:** Extend `LabelElement` Schema in `src/lib/label-document.ts`~~ — **Retired.**
 - Add `constraints?: ElementConstraints` to `LabelElementBase`.
 - Update template serialization and validation schemas in `src/lib/template-schema.ts`.
-- [ ] **Task 3.2:** Implement Layout Constraint Solver in `src/lib/layout-constraints.ts`:
+- [x] ~~**Task 3.2:** Implement Layout Constraint Solver in `src/lib/layout-constraints.ts`~~ — **Retired.**
 - Build `resolveDocumentConstraints(doc: LabelDocument, targetWidthMm: number, targetHeightMm: number): LabelDocument`.
 - Resolve horizontal anchors (`left`, `center`, `right`, `stretch`) and vertical anchors (`top`, `center`, `bottom`, `stretch`).
 - Calculate margin locks and aspect ratio preservation rules.
-- [ ] **Task 3.3:** Integrate Constraint Resolution into Label Size Switching:
+- [x] ~~**Task 3.3:** Integrate Constraint Resolution into Label Size Switching~~ — **Retired.**
 - Wire `resolveDocumentConstraints` into `src/lib/element-sizing.ts` and `src/stores/label-store.ts` when changing label stock dimensions.
-- [ ] **Task 3.4:** Add Constraint UI Controls to Editor Property Panels:
+- [x] ~~**Task 3.4:** Add Constraint UI Controls to Editor Property Panels~~ — **Retired.**
 - Add Anchor Selector widget to `position-controls.tsx` (9-point anchor grid: Top-Left, Top-Center, Top-Right, etc.).
 - Add "Lock Aspect Ratio" and "Pin to Margins" toggles.
+- [x] **Follow-up (implemented 2026-09-24):** Remove in-editor label size-change. Creation-flow size picker kept. `scaleDocumentToSize` not deleted.
 
 #### 5. Robustness Verification & Quality Gates
 - **Automated Test:** Create unit tests with 5 standard templates (Shipping Label, Retail Price Tag, Cable Flag, Jewelry Tag, Inventory Asset). Scale each template across 3 different physical sizes; assert zero element clipping and exact preservation of pinned margins within ±0.05mm.
@@ -596,7 +587,7 @@ These three rules are fixed. Later changes to multi-select must not break them.
 
 To maintain stability and production quality, the implementation must adhere to this strict execution discipline:
 
-1. **Sequential Execution:** Work on **exactly one phase at a time** in numerical order (Phase 1 through Phase 7).
+1. **Sequential Execution:** Work on **exactly one numbered phase at a time**. Phase 3 is retired — skip it. Remaining order is Phase 4 → 5 → 6 → 7. Independent editor tracks (e.g. Element Menu Properties) are not numbered phases.
 2. **Quality Gates Sign-Off:** Each phase concludes with automated test execution, performance profiling, and physical calibration/print verification.
 3. **Progress Tracking:** Upon completing each phase, record all measured benchmarks, test outcomes, and code changes in `PROGRESS.md`.
 4. **Human Review Gate:** Pause and obtain human review before advancing to the subsequent phase.

@@ -689,7 +689,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       </View>
       <ViewShot
         ref={ref}
-        collapsable={false}
         options={{ format: 'png', quality: 1 }}
         style={[styles.elementLayer, { width: w, height: h }]}>
         <GestureDetector gesture={deselectGesture}>

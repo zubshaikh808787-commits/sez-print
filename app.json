@@ -67,7 +67,14 @@
             "enableMinifyInReleaseBuilds": false,
             "enableShrinkResourcesInReleaseBuilds": false,
             "usesCleartextTraffic": true,
-            "reactNativeArchitectures": ["arm64-v8a"]
+            "reactNativeArchitectures": ["arm64-v8a"],
+            "packagingOptions": {
+              "pickFirst": [
+                "**/libPrinterNative.so",
+                "lib/**/libPrinterNative.so",
+                "**/libc++_shared.so"
+              ]
+            }
           }
         }
       ],

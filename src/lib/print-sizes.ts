@@ -1,4 +1,4 @@
-import { fitDocumentCenteredOnPage, scaleDocumentToSize } from '@/lib/element-sizing';
+import { fitDocumentCenteredOnPage } from '@/lib/element-sizing';
 import {
   CABLE_FLAG_DIECUT,
   cableFlagPrintDocument,

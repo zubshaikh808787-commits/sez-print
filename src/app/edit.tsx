@@ -136,7 +136,6 @@ import {
   VerticalRuler,
   type LiveRulerBounds,
 } from '@/components/canvas-rulers';
-import { LabelSizeEditor } from '@/components/label-size-editor';
 import { LabelSettingsMenu } from '@/components/editor/more-menu';
 import { LinePropertyPanel } from '@/components/editor/line-property-panel';
 import { QrcodePropertyPanel } from '@/components/editor/qrcode-property-panel';
@@ -593,11 +592,9 @@ export default function EditScreen() {
           ...el,
           id: generateId(),
         }));
-        // Clone target size can differ from the source (2ups/duplicate-at-new-size
-        // flow). Rescale through the same proportional logic as the in-editor
-        // resize control — a verbatim copy only clamped to the new bounds leaves
-        // stale mm geometry (position, font size, stroke width) that clips at
-        // the new label's edges instead of resizing to fit it.
+        // Clone target size can differ from the source (2ups / duplicate-at-new-size
+        // creation flow). Proportional rescale so a verbatim copy is not left with
+        // stale mm geometry that clips at the new label's edges.
         elements =
           source.widthMm === widthMm && source.heightMm === heightMm
             ? cloned
@@ -778,7 +775,6 @@ export default function EditScreen() {
     pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
   }));
 
-  const [sizeModalVisible, setSizeModalVisible] = useState(false);
   const [gridSpacingPopoverVisible, setGridSpacingPopoverVisible] = useState(false);
   const [padZoom, setPadZoom] = useState(1);
   const padPanRef = useRef({ x: 0, y: 0 });
@@ -4202,43 +4198,6 @@ export default function EditScreen() {
         </View>
       </Modal>
 
-      <Modal
-        visible={sizeModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSizeModalVisible(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}>
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.sizeModalScroll}
-            bounces={false}
-            showsVerticalScrollIndicator={false}>
-            <View style={[styles.modalCard, styles.sizeModalCard]}>
-              <View style={styles.openModalHeader}>
-                <Text style={styles.modalHeading}>Label Size</Text>
-              </View>
-              {sizeModalVisible ? (
-                <LabelSizeEditor
-                  widthMm={doc.widthMm}
-                  heightMm={doc.heightMm}
-                  onChange={applyLabelSize}
-                />
-              ) : null}
-              <View style={styles.openModalFooter}>
-                <Pressable
-                  style={({ pressed }) => [styles.openModalCloseBtn, pressed && styles.pressed]}
-                  onPress={() => setSizeModalVisible(false)}>
-                  <Text style={styles.openModalDoneText}>Done</Text>
-                </Pressable>
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
-
       <View
         ref={overlayViewRef}
         pointerEvents="none"
@@ -4835,12 +4794,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
-  sizeModalScroll: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 24,
-  },
   modalCard: {
     width: '100%',
     maxWidth: 290,
@@ -4857,9 +4810,6 @@ const styles = StyleSheet.create({
   openModalCard: {
     maxWidth: 320,
     maxHeight: 480,
-  },
-  sizeModalCard: {
-    maxWidth: 340,
   },
   openModalHeader: {
     paddingTop: 18,

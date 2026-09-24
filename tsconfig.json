@@ -20,6 +20,9 @@
       ],
       "dev-printer": [
         "./modules/dev-printer/src/index.ts"
+      ],
+      "pdf-raster": [
+        "./modules/pdf-raster/src/index.ts"
       ]
     }
   },

@@ -190,7 +190,8 @@ export function elementOccluderRectsPx(
   if (!(pxPerMM > 0)) return [];
   return visibleGridElements(elements, excludeIds).map((el) => {
     const rotation = 'rotation' in el ? (el.rotation ?? 0) : 0;
-    return rotatedAabbPx(el.left, el.top, el.width, el.height, rotation, pxPerMM);
+    const height = el.height ?? 0;
+    return rotatedAabbPx(el.left, el.top, el.width, height, rotation, pxPerMM);
   });
 }
 
@@ -204,7 +205,8 @@ export function elementOccluderSignature(
   const body = visibleGridElements(elements, excludeIds)
     .map((el) => {
       const rotation = 'rotation' in el ? (el.rotation ?? 0) : 0;
-      return `${el.id}:${el.left.toFixed(2)},${el.top.toFixed(2)},${el.width.toFixed(2)},${el.height.toFixed(2)},${rotation}`;
+      const height = el.height ?? 0;
+      return `${el.id}:${el.left.toFixed(2)},${el.top.toFixed(2)},${el.width.toFixed(2)},${height.toFixed(2)},${rotation}`;
     })
     .join('|');
   return excludeIds && excludeIds.length > 0 ? `${excludeIds.join(',')}|${body}` : body;

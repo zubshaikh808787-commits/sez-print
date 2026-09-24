@@ -225,7 +225,21 @@ export default function DataFileScreen() {
 
       if (fileType === 'PDF') {
         addPdfFile({ name: file.name, uri: file.uri, sizeBytes: file.size ?? 0 });
-        Alert.alert('File Imported', `"${file.name}" was imported successfully.`);
+        Alert.alert(
+          'File Imported',
+          `"${file.name}" was imported successfully.`,
+          [
+            { text: 'OK' },
+            {
+              text: 'Edit PDF',
+              onPress: () =>
+                router.push({
+                  pathname: '/pdf',
+                  params: { docName: file.name, docUri: file.uri },
+                }),
+            },
+          ],
+        );
         return;
       }
 
@@ -454,16 +468,35 @@ export default function DataFileScreen() {
                       router.back();
                       return;
                     }
-                    if (item.excel) setActiveExcelFile(item.excel.id);
-                    router.push({
-                      pathname: '/print',
-                      params: {
-                        docName: item.name,
-                        docUri: item.uri,
-                        docType: item.excel ? 'Excel' : item.type,
-                        excelFileId: item.excel?.id,
-                      },
-                    });
+                    if (item.excel) {
+                      setActiveExcelFile(item.excel.id);
+                      router.push({
+                        pathname: '/print',
+                        params: {
+                          docName: item.name,
+                          docUri: item.uri,
+                          docType: 'Excel',
+                          excelFileId: item.excel.id,
+                        },
+                      });
+                    } else if (item.type === 'PDF') {
+                      router.push({
+                        pathname: '/pdf',
+                        params: {
+                          docName: item.name,
+                          docUri: item.uri,
+                        },
+                      });
+                    } else {
+                      router.push({
+                        pathname: '/print',
+                        params: {
+                          docName: item.name,
+                          docUri: item.uri,
+                          docType: item.type,
+                        },
+                      });
+                    }
                   }}>
                   <Text style={styles.actionPrintText}>{returnToLabelSettings ? 'Use' : 'Print'}</Text>
                 </Pressable>

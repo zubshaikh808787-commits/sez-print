@@ -9,15 +9,35 @@ function withAndroidPackaging(config) {
   config = withAppBuildGradle(config, (configProps) => {
     let buildGradle = configProps.modResults.contents;
     if (!buildGradle.includes('libPrinterNative.so')) {
-      buildGradle = buildGradle.replace(
-        /android\s*\{/,
-        `android {
+      if (buildGradle.includes('jniLibs {')) {
+        buildGradle = buildGradle.replace(
+          /jniLibs\s*\{/,
+          `jniLibs {
+            pickFirsts += ['**/libPrinterNative.so', 'lib/**/libPrinterNative.so']
+`,
+        );
+      }
+      if (!buildGradle.includes("pickFirst '**/libPrinterNative.so'")) {
+        buildGradle = buildGradle.replace(
+          /packagingOptions\s*\{/,
+          `packagingOptions {
+        pickFirst '**/libPrinterNative.so'
+        pickFirst 'lib/**/libPrinterNative.so'
+        pickFirst '**/libc++_shared.so'
+`,
+        );
+      }
+      if (!buildGradle.includes('libPrinterNative.so')) {
+        buildGradle = buildGradle.replace(
+          /android\s*\{/,
+          `android {
     packagingOptions {
         pickFirst '**/libPrinterNative.so'
         pickFirst 'lib/**/libPrinterNative.so'
         pickFirst '**/libc++_shared.so'
-    }`
-      );
+    }`,
+        );
+      }
       configProps.modResults.contents = buildGradle;
     }
     return configProps;

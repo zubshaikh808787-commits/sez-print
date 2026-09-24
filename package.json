@@ -53,6 +53,8 @@
     "jpeg-js": "^0.4.4",
     "labelx-printer": "file:./modules/labelx-printer",
     "patch-package": "^8.0.1",
+    "pdf-lib": "^1.17.1",
+    "pdf-raster": "file:./modules/pdf-raster",
     "postinstall-postinstall": "^2.1.0",
     "qrcode": "^1.5.4",
     "react": "19.1.0",
@@ -115,7 +117,8 @@
           "td404-printer",
           "josh-printer",
           "tez-printer",
-          "dev-printer"
+          "dev-printer",
+          "pdf-raster"
         ],
         "listUnknownPackages": false
       }

@@ -600,7 +600,15 @@ function scaleBorderElement(
   };
 }
 
-/** Scale and reposition layers when the label size changes (no silent crop). */
+/**
+ * Scale and reposition layers when a document is created at a different stock
+ * size than its source (no silent crop).
+ *
+ * The in-editor size-change UI was removed (stock size is fixed at creation).
+ * This helper is no longer invoked from the editor toolbar. Live callers are
+ * clone/2ups creation (`new-label-setup.tsx`, `edit.tsx` `cloneFromId` init)
+ * and unit tests. Do not delete until those paths are retired.
+ */
 export function scaleDocumentToSize(
   doc: LabelDocument,
   widthMm: number,

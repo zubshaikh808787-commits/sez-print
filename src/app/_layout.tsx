@@ -78,6 +78,8 @@ function AppRoot() {
         <Stack.Screen name="ocr" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="asr" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="pdf" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="pdf-editor" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="pdf-thermal" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="data-file" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="language-switch" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="font-library" options={{ animation: 'slide_from_right' }} />

@@ -201,8 +201,8 @@ export default function NewLabelSetupScreen() {
       if (source) {
         const cloned = JSON.parse(JSON.stringify(source.elements)) as LabelElement[];
         // Each ups panel is one label at `size` mm. A source cloned at a
-        // different size needs the same proportional rescale as the in-editor
-        // resize control, or geometry stays stale and clips at the new bounds.
+        // different size needs proportional rescale, or geometry stays stale
+        // and clips at the new bounds.
         seedElements =
           source.widthMm === size.widthMm && source.heightMm === size.heightMm
             ? cloned
