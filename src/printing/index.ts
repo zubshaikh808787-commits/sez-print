@@ -137,5 +137,14 @@ export {
   type DetectedLabelShape,
   type ContourDetectOptions,
 } from '@/printing/contour-detection';
+export {
+  rasterizeDocumentToBitmap,
+  rasterizeDocumentToBitmapTimed,
+  createPhase4FrozenDocument,
+  wrapPrintText,
+  type RasterizeOptions,
+  type RasterBitmap,
+  type RasterizeTiming,
+} from '@/printing/raster/skia-rasterizer';
 
 

@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import Constants from 'expo-constants';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -93,6 +94,13 @@ import {
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
 const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent', 'Black mark'] as const;
+
+function resolveGitSha(): string {
+  const fromEnv = process.env.EXPO_PUBLIC_GIT_SHA?.trim();
+  if (fromEnv) return fromEnv;
+  const extra = Constants.expoConfig?.extra as { gitSha?: string } | undefined;
+  return extra?.gitSha ?? 'unknown';
+}
 
 function buildScanDocument(
   scanType: string,
@@ -759,11 +767,11 @@ export default function PrintScreen() {
         // while the expensive ViewShot capture runs concurrently.
         timer.start('capture+verify');
         const captureTarget = printCaptureLayout(widthMm, heightMm, jobDpi).content;
+        let captureResolvedAt = 0;
         const capturePacked = async () => {
-          // All native printer modules (TD-404, Josh LPAPI, Tez PrintSDK, Dev AutoReplyPrint)
-          // accept raw PNG base64 and perform hardware-accelerated 1-bit packing natively.
-          // Skipping the pure-JS PNG decode→re-encode saves ~2–3s per label on mobile.
-          return captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
+          const pngBase64 = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
+          captureResolvedAt = Date.now();
+          return pngBase64;
         };
         const [connectionResult, base64] = await Promise.all([
           manager.ensureConnected().catch((err) => {
@@ -957,6 +965,17 @@ export default function PrintScreen() {
               console.info(
                 `[print] page ${page + 1} total: ${Date.now() - pageStart} ms | SDK LabelCommand native fast path (TD-404)`,
               );
+              const nativeTiming = manager.getLastTd404PngLabelTiming();
+              logPrintTrace('PIPELINE', {
+                path: 'viewshot',
+                capture_ms: captureResolvedAt > 0 ? captureResolvedAt - pageStart : null,
+                decode_ms: nativeTiming?.decodeMs ?? null,
+                encode_ms: nativeTiming?.encodeMs ?? null,
+                transport_write_ms: nativeTiming?.writeMs ?? null,
+                total_ms: Date.now() - pageStart,
+                timestamp: new Date().toISOString(),
+                git_sha: resolveGitSha(),
+              });
             }
           } catch (err) {
             console.warn('[print] Native SDK fast print failed, falling back to JS:', err);

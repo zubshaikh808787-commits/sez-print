@@ -96,6 +96,11 @@ class Td404PrinterModule : Module() {
       adapter != null && adapter.isEnabled
     }
 
+    /** Baseline perf logs — tag PIPELINE for `adb logcat -s PIPELINE`. */
+    Function("logPipelineTrace") { message: String ->
+      android.util.Log.i("PIPELINE", message)
+    }
+
     /** Always-available paired list (even when not discoverable / already connected in system BT). */
     AsyncFunction("getBondedDevices") { promise: Promise ->
       val context = appContext.reactContext

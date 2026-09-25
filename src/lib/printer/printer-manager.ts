@@ -240,6 +240,12 @@ class PrinterManager {
   private connectInFlightDeviceId: string | null = null;
   /** Last print timing entries for diagnostics. */
   private lastPrintTiming: PrintTimingEntry[] | null = null;
+  /** Last TD-404 native PNG label timings (decode/encode/write ms). */
+  private lastTd404PngLabelTiming: {
+    decodeMs?: number;
+    encodeMs?: number;
+    writeMs?: number;
+  } | null = null;
   /** Last error message for diagnostics. */
   private lastErrorMessage: string | null = null;
   /** Retry count for the last print job. */
@@ -2775,6 +2781,15 @@ class PrinterManager {
     this.lastPrintTiming = entries;
   }
 
+  /** Native decode/encode/write ms from the most recent TD-404 printPngLabel call. */
+  getLastTd404PngLabelTiming(): {
+    decodeMs?: number;
+    encodeMs?: number;
+    writeMs?: number;
+  } | null {
+    return this.lastTd404PngLabelTiming;
+  }
+
   /**
    * Attempt to reconnect to the last known device.
    * Useful when navigating back to the print screen.
@@ -3048,11 +3063,17 @@ class PrinterManager {
           dither: options.dither ?? false,
         });
         if (!result) {
+          this.lastTd404PngLabelTiming = null;
           // Module present but method missing at runtime (old binary) — signal fallback.
           const err = new Error('NATIVE_PNG_UNAVAILABLE');
           (err as Error & { code?: string }).code = 'NATIVE_PNG_UNAVAILABLE';
           throw err;
         }
+        this.lastTd404PngLabelTiming = {
+          decodeMs: result.decodeMs,
+          encodeMs: result.encodeMs,
+          writeMs: result.writeMs,
+        };
         console.info(
           '[printer] SDK fast print done in',
           Date.now() - t0,

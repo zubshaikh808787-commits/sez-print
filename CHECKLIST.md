@@ -61,9 +61,16 @@
 ---
 
 ## Phase 4: Headless In-Memory Skia Direct Rasterizer (Print Pipeline)
-- [ ] **Task 4.1:** Build Headless Skia Surface Engine in `src/printing/raster/skia-surface.ts`
-- [ ] **Task 4.2:** Implement High-Speed 1-Bit Monochrome Bit-Packer
-- [ ] **Task 4.3:** Integrate Direct Rasterizer into `src/app/print.tsx`
+> Spec: [`PHASE_4_PLAN.md`](./PHASE_4_PLAN.md). **GATE-A is not signed.** Do not start 4.3 / 4.5 / 4.7.
+
+- [ ] **Task 4.0:** ViewShot TD-404 baseline → `PERF_BASELINE.md` (hardware; parallel with Stage A)
+- [x] **Task 4.1:** Headless visitors in `src/printing/raster/skia-rasterizer.ts` (host integer-dot surface; Skia `MakeOffscreen` not available in Node)
+- [x] **Task 4.2:** 1-bit packer in `src/printing/raster/bit-packer.ts`
+- [ ] **Task 4.3:** `printMonoLabel` + flag — **blocked on GATE-A**
+- [ ] **Task 4.4:** Isolated speed under 15 ms **on device** (host median recorded; GATE-A still needs a phone)
+- [x] **Task 4.4b:** Isolated buffer scan-decode (Code128 + QR on frozen fixture)
+- [ ] **Task 4.6:** Hermes heap loop **on device**
+- [ ] **Task 4.5 / 4.7:** Stage B — blocked on GATE-A
 
 --- 
 

@@ -400,4 +400,15 @@ Each completed sub-task is logged with the following structure:
 - **Verification & Quality Gate Results:** `npx tsx src/lib/pdf-editor/__tests__/session.test.ts`; `npx tsc --noEmit`.
 - **Notes & Next Step:** Native raster requires a rebuild of the dev client. P7 remains out of scope.
 
+---
+
+## Phase 4 Stage A (host) — 4.1 / 4.2 / 4.4b
+
+- **Date:** 2026-09-24
+- **What Was Done:** Integer-dot rasterizer `rasterizeDocumentToBitmap` in `src/printing/raster/skia-rasterizer.ts`, packer in `bit-packer.ts`, frozen 50×30 fixture, host gate script `src/printing/raster/__tests__/stage-a-gates.ts`. Visitors for text, barcode (`dotX`/`dotWidth` at job DPI 304), QR (`snap2DMatrixToHardwareDots`), border, line, shape. `table` / `time` / `arctext` / `degrees` / `clipart` / `signature` / `image` throw. No `printMonoLabel`. GATE-A **not signed**.
+- **Deviation:** Offscreen backend is a software dot buffer (`skia-surface.ts` probe: `MakeOffscreen` false in Node). Text wrap uses `computeWrappedLines`, not Skia Paragraph. Text ink is block glyphs, not Paragraph blobs.
+- **Host results:** wrap 2 lines; buffer 600×360, 75 bytes/row, 27000 B; ZXing Code128 `BASELINE50X30`; QR `https://sez.print/baseline`; rasterize+pack n=50 median ~0.6 ms (laptop, **not** GATE-A 15 ms); Node heap delta after 100 reused rasterizes recorded but **not** Hermes. `adb devices` empty — Task 4.0 not run; no `PERF_BASELINE.md`.
+- **Verification:** `npx tsx --tsconfig tsconfig.json src/printing/raster/__tests__/stage-a-gates.ts`
+- **Next Step:** On-device 4.4 + 4.6, then human GATE-A sign-off. Task 4.0 when TD-404 + phone are available.
+
 
