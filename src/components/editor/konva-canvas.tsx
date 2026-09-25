@@ -256,8 +256,6 @@ const GridLivePlate = memo(function GridLivePlate({
 });
 
 const GridStaticPlate = memo(function GridStaticPlate({
-  id,
-  activeSelectedIdSv,
   leftPx,
   topPx,
   widthPx,
@@ -265,8 +263,6 @@ const GridStaticPlate = memo(function GridStaticPlate({
   color,
   rotationDeg,
 }: {
-  id: string;
-  activeSelectedIdSv?: SharedValue<string>;
   leftPx: number;
   topPx: number;
   widthPx: number;
@@ -274,26 +270,19 @@ const GridStaticPlate = memo(function GridStaticPlate({
   color: string;
   rotationDeg: number;
 }) {
-  const style = useAnimatedStyle(() => ({
-    opacity: activeSelectedIdSv && activeSelectedIdSv.value === id ? 0 : 1,
-  }));
-
   return (
-    <Animated.View
+    <View
       pointerEvents="none"
       collapsable={false}
-      style={[
-        {
-          position: 'absolute',
-          left: leftPx,
-          top: topPx,
-          width: widthPx,
-          height: heightPx,
-          backgroundColor: color,
-          transform: [{ rotate: `${rotationDeg}deg` }],
-        },
-        style,
-      ]}
+      style={{
+        position: 'absolute',
+        left: leftPx,
+        top: topPx,
+        width: widthPx,
+        height: heightPx,
+        backgroundColor: color,
+        transform: [{ rotate: `${rotationDeg}deg` }],
+      }}
     />
   );
 });
@@ -664,8 +653,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
                 return (
                   <GridStaticPlate
                     key={el.id}
-                    id={el.id}
-                    activeSelectedIdSv={activeSelectedIdSv}
                     leftPx={el.left * pxPerMM}
                     topPx={el.top * pxPerMM}
                     widthPx={Math.max(1, size.width * pxPerMM)}
