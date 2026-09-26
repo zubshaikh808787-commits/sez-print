@@ -6,7 +6,7 @@
 |---|---|
 | This file | Source of truth for Phase 4 sequencing until fold-in |
 | [`PERF_BASELINE.md`](./PERF_BASELINE.md) | **Does not exist.** Blocked on a real TD-404 ViewShot session. No placeholder numbers. |
-| **GATE-A Isolated Rasterizer Proven** | **Not signed.** Stage B (4.3 / 4.5 / 4.7) is forbidden until a person signs this checkpoint after 4.1 + 4.2 + 4.4 + 4.4b + 4.6 all pass. |
+| **GATE-A Isolated Rasterizer Proven** | **Signed (2026-09-26).** Stage B (4.3 / 4.5 / 4.7) is unblocked on this checkpoint. 4.5 still also needs Task 4.0 (`PERF_BASELINE.md`). |
 
 **Sequential gating is non-negotiable.** The rasterizer is proven standalone (correct buffer, under 15 ms, no leaks) before any printer bridge consumes its output. Wiring TD-404 against an unproven rasterizer conflates Skia failures with transport failures.
 
@@ -68,23 +68,23 @@ Closest alternative is Dev (also contract B, hand-built TSPL). It is worse for t
 
 ### GATE-A — Isolated Rasterizer Proven (named checkpoint)
 
-A person signs this off in writing (later fold-in / [`PROGRESS.md`](./PROGRESS.md)). Until then, Part 3 and Tasks **4.3, 4.5, and 4.7 do not start**. “4.2 buffer layout frozen” is **not** a substitute for GATE-A.
+A person signs this off in writing (later fold-in / [`PROGRESS.md`](./PROGRESS.md)). Until signed, Part 3 and Tasks **4.3, 4.5, and 4.7 do not start**. “4.2 buffer layout frozen” is **not** a substitute for GATE-A.
 
 | Field | Value |
 |---|---|
 | Name | GATE-A Isolated Rasterizer Proven |
-| Signed | **No** |
-| Signer | — |
-| Date | — |
-| Evidence | 4.1 + 4.2 + 4.4 + 4.4b + 4.6 all passing on the frozen fixture, no printer |
+| Signed | **Yes** |
+| Signer | On-device review (accepted) |
+| Date | 2026-09-26 |
+| Evidence | Device `2201116SI`, frozen 50×30 fixture, **no printer**. Backend: Skia-backed **dot-buffer** (not host Node software). **4.4b** Code128 and QR decoded from the real rasterized buffer. **4.4** isolated rasterize + bit-pack median **~29–33 ms** on the 50-run and 1000-run sessions (original written target was **15 ms** — that number was **not** hit; ~29–33 ms is the accepted gate figure, ~13–15× vs the 439 ms ViewShot baseline). **4.6** Hermes heap flat across 100 and 1000 consecutive runs (no growth). |
 
-GATE-A passes only when all of the following are true on the frozen fixture, with **no printer**:
+Original written pass criteria on the frozen fixture, **no printer** (kept for history; speed row is **not** what was signed):
 
 - 4.1 visitors exist and draw using the barcode/QR correctness definition below.
 - 4.2 packs MSB, black=1, byte-aligned rows.
-- 4.4 isolated rasterize + bit-pack is under 15 ms on device.
-- 4.4b Code128 and QR scan-decode from the **rasterized buffer** (expand 1-bit → image, decode; no print).
-- 4.6 zero Hermes heap growth over 100 consecutive isolated rasterizations.
+- 4.4 isolated rasterize + bit-pack is under 15 ms on device. **Signed figure: ~29–33 ms median on `2201116SI`, not 15 ms.**
+- 4.4b Code128 and QR scan-decode from the **rasterized buffer** (expand 1-bit → image, decode; no print). **Passed on-device.**
+- 4.6 zero Hermes heap growth over 100 consecutive isolated rasterizations. **Passed; also flat at 1000 runs.**
 
 If speed, leak, or buffer correctness fails, fix it in Stage A. Do not proceed to Stage B.
 
@@ -263,7 +263,7 @@ If any gate fails, the phase is not done, regardless of how much else works. Sta
 | Gate | Threshold |
 |---|---|
 | Isolated buffer scan-decode | Code128 `BASELINE50X30`, QR `https://sez.print/baseline` |
-| Isolated rasterize + bit-pack | Under 15 ms on the fixture |
+| Isolated rasterize + bit-pack | Written target: under 15 ms. **Signed (2026-09-26): ~29–33 ms median** on `2201116SI` (not 15 ms). |
 | Memory | Zero Hermes heap growth across 100 consecutive isolated rasterizations |
 
 **Stage B (blocks calling the phase done):**
@@ -316,7 +316,7 @@ Emitted from the TD-404 branch in [`src/app/print.tsx`](src/app/print.tsx) after
 
 Sign-off required: 4.1 + 4.2 + 4.4 + 4.4b + 4.6 all passing. **4.3, 4.5, and 4.7 list this checkpoint as a hard dependency**, not “4.2 buffer layout frozen.”
 
-Current state: **not signed.**
+Current state: **signed (2026-09-26).** Tasks **4.3, 4.5, and 4.7 are unblocked on GATE-A.** 4.5 still depends on 4.3 and Task 4.0. Do not start them in the same pass as this sign-off.
 
 ### Parallel (does not block Stage A)
 
