@@ -2,6 +2,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -26,6 +27,7 @@ import { IosAlertInput, IosAlertModal } from '@/components/ui/ios-alert-modal';
 import { editorBridge } from '@/constants/editor-bridge';
 import { DRAWING_COLORS } from '@/components/editor/types';
 import { generateId, parseOrientation, type LabelDocument, type LabelOrientation, type PaperType } from '@/lib/label-document';
+import { clampLabelMm } from '@/lib/label-geometry';
 import {
   backgroundSummary,
   borderSummary,
@@ -34,6 +36,8 @@ import {
   patchLabelDocument,
   resolveLabelSettings,
 } from '@/lib/label-settings';
+import { stockSizePromptCopy, type StockSizeHandling } from '@/lib/stock-size';
+import { isRatTail143Document } from '@/constants/rat-tail-143';
 import { useDataStore } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 
@@ -53,6 +57,8 @@ export default function LabelSettingsScreen() {
   const [nameModalVisible, setNameModalVisible] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
+  const [draftWidthMm, setDraftWidthMm] = useState(50);
+  const [draftHeightMm, setDraftHeightMm] = useState(30);
 
   const loadDoc = useCallback(() => {
     if (!labelId) return null;
@@ -76,7 +82,7 @@ export default function LabelSettingsScreen() {
         editorBridge.dataSourceFileId = null;
         setActiveExcelFile(fileId);
         if (doc) {
-          const next = patchLabelDocument(doc, { settings: { dataSourceFileId: fileId } });
+          const next = patchLabelDocument(doc, { settings: { dataSourceFileId: fileId } }, excelFiles);
           setDoc(next);
           upsertDocument(next);
           editorBridge.labelSettingsDoc = next;
@@ -109,12 +115,12 @@ export default function LabelSettingsScreen() {
                 drawingColorIndex: settingsNow.defaultDrawingColorIndex,
               },
             ];
-        const next = patchLabelDocument(doc, { elements: nextElements });
+        const next = patchLabelDocument(doc, { elements: nextElements }, excelFiles);
         setDoc(next);
         upsertDocument(next);
         editorBridge.labelSettingsDoc = next;
       }
-    }, [doc, loadDoc, setActiveExcelFile, upsertDocument]),
+    }, [doc, excelFiles, loadDoc, setActiveExcelFile, upsertDocument]),
   );
 
   const settings = useMemo(() => (doc ? resolveLabelSettings(doc) : null), [doc]);
@@ -122,12 +128,12 @@ export default function LabelSettingsScreen() {
   const commit = useCallback(
     (patch: Parameters<typeof patchLabelDocument>[1]) => {
       if (!doc) return;
-      const next = patchLabelDocument(doc, patch);
+      const next = patchLabelDocument(doc, patch, excelFiles);
       setDoc(next);
       upsertDocument(next);
       editorBridge.labelSettingsDoc = next;
     },
-    [doc, upsertDocument],
+    [doc, excelFiles, upsertDocument],
   );
 
   const patchSettings = useCallback(
@@ -176,13 +182,23 @@ export default function LabelSettingsScreen() {
         <SettingsValueRow
           label="Label Width"
           value={`${doc.widthMm.toFixed(2)} mm`}
-          onPress={() => setSizeModalVisible(true)}
+          onPress={() => {
+            if (isRatTail143Document(doc)) return;
+            setDraftWidthMm(doc.widthMm);
+            setDraftHeightMm(doc.heightMm);
+            setSizeModalVisible(true);
+          }}
           showDivider
         />
         <SettingsValueRow
           label="Label Height"
           value={`${doc.heightMm.toFixed(2)} mm`}
-          onPress={() => setSizeModalVisible(true)}
+          onPress={() => {
+            if (isRatTail143Document(doc)) return;
+            setDraftWidthMm(doc.widthMm);
+            setDraftHeightMm(doc.heightMm);
+            setSizeModalVisible(true);
+          }}
           showDivider
         />
         <SettingsValueRow
@@ -434,12 +450,42 @@ export default function LabelSettingsScreen() {
           style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Label Size</Text>
-            <LabelSizeEditor
-              widthMm={doc.widthMm}
-              heightMm={doc.heightMm}
-              onChange={(widthMm, heightMm) => commit({ widthMm, heightMm })}
-            />
-            <Pressable style={styles.modalDone} onPress={() => setSizeModalVisible(false)}>
+            {sizeModalVisible ? (
+              <LabelSizeEditor
+                widthMm={draftWidthMm}
+                heightMm={draftHeightMm}
+                onChange={(widthMm, heightMm) => {
+                  setDraftWidthMm(widthMm);
+                  setDraftHeightMm(heightMm);
+                }}
+              />
+            ) : null}
+            <Pressable
+              style={styles.modalDone}
+              onPress={() => {
+                const size = clampLabelMm(draftWidthMm, draftHeightMm);
+                setSizeModalVisible(false);
+                if (!doc) return;
+                if (
+                  Math.abs(doc.widthMm - size.widthMm) < 0.001 &&
+                  Math.abs(doc.heightMm - size.heightMm) < 0.001
+                ) {
+                  return;
+                }
+                const copy = stockSizePromptCopy(Boolean(doc.bulk));
+                const apply = (sizeHandling: StockSizeHandling) => {
+                  commit({
+                    widthMm: size.widthMm,
+                    heightMm: size.heightMm,
+                    sizeHandling,
+                  });
+                };
+                Alert.alert(copy.title, copy.message, [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Keep as-is', onPress: () => apply('keep') },
+                  { text: 'Scale proportionally', onPress: () => apply('scale') },
+                ]);
+              }}>
               <Text style={styles.modalDoneText}>Done</Text>
             </Pressable>
           </View>

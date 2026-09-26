@@ -11,7 +11,13 @@ import {
   type LabelOrientation,
   type PaperType,
 } from '@/lib/label-document';
-import { fitBarcodeDefaults, fitQrcodeDefaults, fitTextDefaults } from '@/lib/element-sizing';
+import {
+  fitBarcodeDefaults,
+  fitQrcodeDefaults,
+  fitTextDefaults,
+  repositionDocumentToSize,
+  scaleDocumentToSize,
+} from '@/lib/element-sizing';
 import type { ExcelSheet } from '@/stores/data-store';
 
 export type BulkSlotKind = 'text' | 'barcode' | 'qrcode';
@@ -434,4 +440,112 @@ export function syncBulkFromProjectedElements(
   }
 
   return { ...bulk, rowContentOverrides: contentOverrides, slotTemplates };
+}
+
+export type BulkStockSizeMode = 'scale' | 'keep';
+
+function mapGeometryRecord(
+  record: Record<string, BulkGeometry>,
+  mapGeo: (geo: BulkGeometry) => BulkGeometry,
+): Record<string, BulkGeometry> {
+  const next: Record<string, BulkGeometry> = {};
+  for (const [id, geo] of Object.entries(record)) {
+    next[id] = mapGeo(geo);
+  }
+  return next;
+}
+
+function scaleSlotElements(
+  elements: LabelElement[],
+  oldWidthMm: number,
+  oldHeightMm: number,
+  widthMm: number,
+  heightMm: number,
+): LabelElement[] {
+  const dummy = createLabelDocument({
+    name: 'bulk-resize',
+    widthMm: oldWidthMm,
+    heightMm: oldHeightMm,
+    elements,
+  });
+  return scaleDocumentToSize(dummy, widthMm, heightMm).elements;
+}
+
+/**
+ * One stock size for the whole Excel set. Updates shared geometry, templates,
+ * and every row override, then reprojects the active row.
+ */
+export function resizeBulkDocumentToSize(
+  doc: LabelDocument,
+  widthMm: number,
+  heightMm: number,
+  mode: BulkStockSizeMode,
+  files: { id: string; sheets: ExcelSheet[] }[],
+): LabelDocument {
+  if (!doc.bulk) {
+    return mode === 'scale'
+      ? scaleDocumentToSize(doc, widthMm, heightMm)
+      : repositionDocumentToSize(doc, widthMm, heightMm);
+  }
+
+  const bulk = doc.bulk;
+  const oldW = doc.widthMm;
+  const oldH = doc.heightMm;
+  const sx = widthMm / Math.max(oldW, 0.01);
+  const sy = heightMm / Math.max(oldH, 0.01);
+
+  let nextBulk: BulkLabelSet;
+
+  if (mode === 'keep') {
+    const mapGeo = (geo: BulkGeometry): BulkGeometry => ({
+      left: geo.left * sx,
+      top: geo.top * sy,
+      width: geo.width,
+      height: geo.height,
+    });
+    const sharedGeometry = mapGeometryRecord(bulk.sharedGeometry, mapGeo);
+    const slotTemplates = { ...bulk.slotTemplates };
+    for (const slot of bulk.slots) {
+      const template = slotTemplates[slot.id];
+      const geo = sharedGeometry[slot.id];
+      if (template && geo) slotTemplates[slot.id] = applyGeometry(template, geo);
+    }
+    const rowGeometryOverrides: BulkLabelSet['rowGeometryOverrides'] = {};
+    for (const [rowKey, rowMap] of Object.entries(bulk.rowGeometryOverrides)) {
+      rowGeometryOverrides[rowKey] = mapGeometryRecord(rowMap, mapGeo);
+    }
+    nextBulk = { ...bulk, sharedGeometry, slotTemplates, rowGeometryOverrides };
+  } else {
+    const sharedEls = bulk.slots
+      .map((slot) => {
+        const template = bulk.slotTemplates[slot.id];
+        const geo = bulk.sharedGeometry[slot.id];
+        if (!template || !geo) return null;
+        return applyGeometry(template, geo);
+      })
+      .filter((el): el is LabelElement => el != null);
+    const scaledShared = scaleSlotElements(sharedEls, oldW, oldH, widthMm, heightMm);
+    const slotTemplates: Record<string, LabelElement> = { ...bulk.slotTemplates };
+    const sharedGeometry: Record<string, BulkGeometry> = { ...bulk.sharedGeometry };
+    for (const el of scaledShared) {
+      slotTemplates[el.id] = el;
+      sharedGeometry[el.id] = geometryOfElement(el);
+    }
+
+    const rowGeometryOverrides: BulkLabelSet['rowGeometryOverrides'] = {};
+    for (const [rowKey, rowMap] of Object.entries(bulk.rowGeometryOverrides)) {
+      const nextRow: Record<string, BulkGeometry> = {};
+      for (const [slotId, geo] of Object.entries(rowMap)) {
+        const template = bulk.slotTemplates[slotId];
+        if (!template) continue;
+        const scaled = scaleSlotElements([applyGeometry(template, geo)], oldW, oldH, widthMm, heightMm);
+        const el = scaled[0];
+        if (el) nextRow[slotId] = geometryOfElement(el);
+      }
+      if (Object.keys(nextRow).length > 0) rowGeometryOverrides[rowKey] = nextRow;
+    }
+    nextBulk = { ...bulk, sharedGeometry, slotTemplates, rowGeometryOverrides };
+  }
+
+  return hydrateBulkDocument({ ...doc, widthMm, heightMm, bulk: nextBulk }, files);
 }

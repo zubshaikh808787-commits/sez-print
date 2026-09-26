@@ -8,6 +8,7 @@ import {
   createBulkLabelDocument,
   geometryFromElements,
   projectBulkDocument,
+  resizeBulkDocumentToSize,
   slotEncodePayload,
   syncBulkFromProjectedElements,
   type BulkColumnMapping,
@@ -195,6 +196,59 @@ test('content edits stay on the current row via overrides', () => {
   assert.equal(t0.text, 'Renamed');
   assert.ok(name1 && name1.type === 'text');
   assert.equal(name1.text, 'Gadget');
+});
+
+test('keep-as-is resize updates shared geometry and row overrides; row switch keeps the new size', () => {
+  const doc = created();
+  const sharedBefore = doc.bulk!.sharedGeometry['col:0'];
+  const bulk = applyGeometryToThisLabel(doc.bulk!, 1, {
+    'col:0': { left: 8, top: 10, width: 18, height: 6 },
+  });
+  const resized = resizeBulkDocumentToSize({ ...doc, bulk }, 100, 80, 'keep', [
+    { id: 'xls_test', sheets: [sheet] },
+  ]);
+  assert.equal(resized.widthMm, 100);
+  assert.equal(resized.heightMm, 80);
+  const shared = resized.bulk!.sharedGeometry['col:0'];
+  assert.equal(shared.left, sharedBefore.left * 2);
+  assert.equal(shared.top, sharedBefore.top * 2);
+  assert.equal(shared.width, sharedBefore.width);
+  assert.equal(shared.height, sharedBefore.height);
+  const override = resized.bulk!.rowGeometryOverrides['1']['col:0'];
+  assert.equal(override.left, 16);
+  assert.equal(override.top, 20);
+  assert.equal(override.width, 18);
+  const row1 = projectBulkDocument(resized, sheet, 1);
+  assert.equal(row1.widthMm, 100);
+  const text = row1.elements.find((el) => el.id === 'col:0');
+  assert.ok(text);
+  assert.equal(text.left, 16);
+  assert.equal(text.top, 20);
+  assert.equal(text.width, 18);
+});
+
+test('scale resize writes new shared and override boxes so a row switch does not restore old millimetres', () => {
+  const doc = created();
+  const bulk = applyGeometryToThisLabel(doc.bulk!, 1, {
+    'col:0': { left: 10, top: 8, width: 20, height: 6 },
+  });
+  const resized = resizeBulkDocumentToSize({ ...doc, bulk }, 100, 80, 'scale', [
+    { id: 'xls_test', sheets: [sheet] },
+  ]);
+  assert.equal(resized.widthMm, 100);
+  const shared = resized.bulk!.sharedGeometry['col:0'];
+  assert.ok(shared.width > doc.bulk!.sharedGeometry['col:0'].width);
+  const override = resized.bulk!.rowGeometryOverrides['1']['col:0'];
+  assert.equal(override.left, 20);
+  const row0 = projectBulkDocument(resized, sheet, 0);
+  const row1 = projectBulkDocument(resized, sheet, 1);
+  assert.equal(row0.widthMm, 100);
+  assert.equal(row1.widthMm, 100);
+  const t0 = row0.elements.find((el) => el.id === 'col:0');
+  const t1 = row1.elements.find((el) => el.id === 'col:0');
+  assert.ok(t0 && t1);
+  assert.equal(t0.left, shared.left);
+  assert.equal(t1.left, override.left);
 });
 
 function resolved(

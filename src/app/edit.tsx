@@ -141,6 +141,7 @@ import {
   type LiveRulerBounds,
 } from '@/components/canvas-rulers';
 import { LabelSettingsMenu } from '@/components/editor/more-menu';
+import { LabelSizeEditor } from '@/components/label-size-editor';
 import { LinePropertyPanel } from '@/components/editor/line-property-panel';
 import { QrcodePropertyPanel } from '@/components/editor/qrcode-property-panel';
 import { ShapePropertyPanel } from '@/components/editor/shape-property-panel';
@@ -221,6 +222,7 @@ import { PdfPageNav } from '@/components/pdf-editor/pdf-page-nav';
 import { pickExcelWorkbook } from '@/lib/excel-import';
 import { useDataStore } from '@/stores/data-store';
 import { CANVAS_BOTTOM_CHIP_CLEARANCE_PX, STAGE_PADDING_PX, clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
+import { applyDocumentStockSize, stockSizePromptCopy, type StockSizeHandling } from '@/lib/stock-size';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
 import {
@@ -697,6 +699,9 @@ export default function EditScreen() {
   const [borderOptionsOpen, setBorderOptionsOpen] = useState(false);
   const [showSignatureBoard, setShowSignatureBoard] = useState(false);
   const [showOpenModal, setShowOpenModal] = useState(false);
+  const [sizeModalVisible, setSizeModalVisible] = useState(false);
+  const [draftWidthMm, setDraftWidthMm] = useState(50);
+  const [draftHeightMm, setDraftHeightMm] = useState(30);
   const [saveAsVisible, setSaveAsVisible] = useState(false);
   const [saveAsName, setSaveAsName] = useState('');
   const [bulkScopeApplyAll, setBulkScopeApplyAll] = useState(true);
@@ -2830,16 +2835,38 @@ export default function EditScreen() {
     router.push({ pathname: '/print', params: { labelId: docRef.current.id } });
   }, [saveDocument]);
 
-  const applyLabelSize = useCallback((widthMm: number, heightMm: number) => {
-    if (isRatTail143Document(docRef.current) || docRef.current.bulk) return;
-    setDoc((prev) => {
-      if (Math.abs(prev.widthMm - widthMm) < 0.001 && Math.abs(prev.heightMm - heightMm) < 0.001) {
-        return prev;
+  const applyLabelSize = useCallback(
+    (widthMm: number, heightMm: number, mode: StockSizeHandling) => {
+      if (isRatTail143Document(docRef.current)) return;
+      const files = useDataStore.getState().excelFiles;
+      const next = applyDocumentStockSize(docRef.current, widthMm, heightMm, mode, files);
+      docRef.current = next;
+      setDoc(next);
+      upsertDocument(syncUpsActivePanel(next));
+      setSavedToStore(true);
+      setDirty(false);
+      historyRef.current.clear();
+      bumpHistory();
+    },
+    [bumpHistory, upsertDocument],
+  );
+
+  const confirmStockSizeChange = useCallback(
+    (widthMm: number, heightMm: number) => {
+      const current = docRef.current;
+      if (isRatTail143Document(current)) return;
+      if (Math.abs(current.widthMm - widthMm) < 0.001 && Math.abs(current.heightMm - heightMm) < 0.001) {
+        return;
       }
-      return scaleDocumentToSize(prev, widthMm, heightMm);
-    });
-    setDirty(true);
-  }, []);
+      const copy = stockSizePromptCopy(Boolean(current.bulk));
+      Alert.alert(copy.title, copy.message, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep as-is', onPress: () => applyLabelSize(widthMm, heightMm, 'keep') },
+        { text: 'Scale proportionally', onPress: () => applyLabelSize(widthMm, heightMm, 'scale') },
+      ]);
+    },
+    [applyLabelSize],
+  );
 
   const placeIngestedImageOnCanvas = useCallback(
     async (uri: string, width?: number, height?: number) => {
@@ -2961,7 +2988,7 @@ export default function EditScreen() {
   useFocusEffect(
     useCallback(() => {
       const stored = useLabelStore.getState().getDocument(docRef.current.id);
-      if (stored && stored.updatedAt > docRef.current.updatedAt) {
+      if (stored && stored.updatedAt > docRef.current.updatedAt && !dirtyRef.current) {
         let normalized = { ...stored, elements: normalizeDocumentElements(stored) };
         if (isJewelryDieCutDocument(normalized)) {
           normalized = canonicalizeJewelryDieCutDocument(normalized);
@@ -3984,7 +4011,9 @@ export default function EditScreen() {
           <View style={styles.subToolbarRow}>
             <Pressable
               onPress={() => {
-                if (isRatTail143Document(doc) || doc.bulk) return;
+                if (isRatTail143Document(doc)) return;
+                setDraftWidthMm(doc.widthMm);
+                setDraftHeightMm(doc.heightMm);
                 setSizeModalVisible(true);
               }}
               style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
@@ -3998,7 +4027,7 @@ export default function EditScreen() {
                 {isRatTail143Document(doc)
                   ? 'Prints 14.3 × 101.6 mm wrap stock · content locked on the paddle'
                   : doc.bulk
-                    ? 'Size is shared by every label in this Excel set'
+                    ? 'Tap to change size for every label in this Excel set'
                     : 'Tap to customize size'}
               </Text>
             </Pressable>
@@ -4391,6 +4420,50 @@ export default function EditScreen() {
         onClose={() => setGridSpacingPopoverVisible(false)}
         onSpacingChange={(mm) => patchEditor({ editorGridSpacingMm: mm })}
       />
+
+      <Modal
+        visible={sizeModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSizeModalVisible(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.sizeModalScroll}
+            bounces={false}
+            showsVerticalScrollIndicator={false}>
+            <View style={[styles.modalCard, styles.sizeModalCard]}>
+              <View style={styles.sizeModalHeader}>
+                <Text style={styles.modalHeading}>Customize Label Size</Text>
+              </View>
+              {sizeModalVisible ? (
+                <LabelSizeEditor
+                  widthMm={draftWidthMm}
+                  heightMm={draftHeightMm}
+                  onChange={(w, h) => {
+                    setDraftWidthMm(w);
+                    setDraftHeightMm(h);
+                  }}
+                />
+              ) : null}
+              <View style={styles.sizeModalFooter}>
+                <Pressable
+                  style={({ pressed }) => [styles.sizeModalFooterBtn, pressed && styles.pressed]}
+                  onPress={() => {
+                    const size = clampLabelMm(draftWidthMm, draftHeightMm);
+                    setSizeModalVisible(false);
+                    confirmStockSizeChange(size.widthMm, size.heightMm);
+                  }}>
+                  <Text style={styles.sizeModalDoneText}>Done</Text>
+                </Pressable>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <Modal
         visible={showOpenModal}
@@ -5062,6 +5135,38 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     justifyContent: 'center',
     paddingHorizontal: 24,
+  },
+  sizeModalScroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: 24,
+  },
+  sizeModalCard: {
+    maxWidth: 340,
+    overflow: 'hidden',
+  },
+  sizeModalHeader: {
+    paddingTop: 18,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#D1D1D6',
+  },
+  sizeModalFooter: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#D1D1D6',
+    alignItems: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  sizeModalFooterBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  sizeModalDoneText: {
+    color: '#007AFF',
+    fontSize: 17,
+    fontWeight: '600',
   },
   modalCard: {
     width: '100%',

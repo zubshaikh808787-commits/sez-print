@@ -601,14 +601,12 @@ function scaleBorderElement(
 }
 
 /**
- * Scale and reposition layers when a document is created at a different stock
- * size than its source (no silent crop).
- *
- * The in-editor size-change UI was removed (stock size is fixed at creation).
- * This helper is no longer invoked from the editor toolbar. Live callers are
- * clone/2ups creation (`new-label-setup.tsx`, `edit.tsx` `cloneFromId` init)
- * and unit tests. Do not delete until those paths are retired.
+ * Scale and reposition layers for a new stock size (clone/2ups creation, and
+ * the editor “Scale proportionally” size-change path). Internals are the
+ * source of truth for text reflow, QR square-lock, barcode floors, and
+ * full-bleed border pinning — do not wrap with a second position pass.
  */
+
 export function scaleDocumentToSize(
   doc: LabelDocument,
   widthMm: number,
@@ -649,6 +647,39 @@ export function scaleDocumentToSize(
   return {
     ...nextDoc,
     elements,
+    ups: { ...doc.ups, panels },
+  };
+}
+
+/**
+ * Keep every element's width/height (and all other fields) unchanged.
+ * Only `left` / `top` move with the relative-origin formula:
+ *   new_left = (old_left / old_label_width) × new_label_width
+ * Does not clamp and does not re-pin borders.
+ */
+export function repositionDocumentToSize(
+  doc: LabelDocument,
+  widthMm: number,
+  heightMm: number,
+): LabelDocument {
+  const sx = widthMm / Math.max(doc.widthMm, 0.01);
+  const sy = heightMm / Math.max(doc.heightMm, 0.01);
+  const moveElements = (source: LabelElement[]): LabelElement[] =>
+    source.map((el) => ({
+      ...el,
+      left: el.left * sx,
+      top: el.top * sy,
+    }));
+
+  const elements = moveElements(doc.elements);
+  const nextDoc: LabelDocument = { ...doc, widthMm, heightMm, elements };
+  if (!doc.ups) return nextDoc;
+
+  const panels = doc.ups.panels.map((panel, i) =>
+    i === doc.ups!.activeIndex ? elements : moveElements(panel),
+  );
+  return {
+    ...nextDoc,
     ups: { ...doc.ups, panels },
   };
 }

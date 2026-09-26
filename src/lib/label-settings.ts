@@ -6,7 +6,8 @@ import {
   type LabelOrientation,
   type PaperType,
 } from '@/lib/label-document';
-import { scaleDocumentToSize } from '@/lib/element-sizing';
+import { applyDocumentStockSize, type StockSizeHandling } from '@/lib/stock-size';
+import type { ExcelSheet } from '@/stores/data-store';
 import {
   CABLE_FLAG_DIECUT,
   CABLE_FLAG_PREVIEW_SINGLE,
@@ -123,6 +124,7 @@ export type LabelDocumentPatch = {
   name?: string;
   widthMm?: number;
   heightMm?: number;
+  sizeHandling?: StockSizeHandling;
   orientation?: LabelOrientation;
   paperType?: PaperType;
   background?: LabelDocument['background'];
@@ -131,10 +133,15 @@ export type LabelDocumentPatch = {
 };
 
 /** Apply label-settings patches and keep derived fields (ups mirror, flag stock) in sync. */
-export function patchLabelDocument(doc: LabelDocument, patch: LabelDocumentPatch): LabelDocument {
+export function patchLabelDocument(
+  doc: LabelDocument,
+  patch: LabelDocumentPatch,
+  excelFiles: { id: string; sheets: ExcelSheet[] }[] = [],
+): LabelDocument {
+  const { widthMm: nextW, heightMm: nextH, sizeHandling, ...rest } = patch;
   let next: LabelDocument = {
     ...doc,
-    ...patch,
+    ...rest,
     settings: patch.settings
       ? { ...resolveLabelSettings(doc), ...patch.settings }
       : resolveLabelSettings(doc),
@@ -142,11 +149,11 @@ export function patchLabelDocument(doc: LabelDocument, patch: LabelDocumentPatch
   };
 
   if (
-    patch.widthMm != null &&
-    patch.heightMm != null &&
-    (Math.abs(doc.widthMm - patch.widthMm) > 0.001 || Math.abs(doc.heightMm - patch.heightMm) > 0.001)
+    nextW != null &&
+    nextH != null &&
+    (Math.abs(doc.widthMm - nextW) > 0.001 || Math.abs(doc.heightMm - nextH) > 0.001)
   ) {
-    next = scaleDocumentToSize(next, patch.widthMm, patch.heightMm);
+    next = applyDocumentStockSize(next, nextW, nextH, sizeHandling ?? 'scale', excelFiles);
     next.settings = resolveLabelSettings(next);
     next.updatedAt = Date.now();
   }
