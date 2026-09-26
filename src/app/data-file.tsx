@@ -427,7 +427,7 @@ export default function DataFileScreen() {
             <Text style={styles.emptyText}>No data file was found</Text>
             {activeTab === 'Excel' ? (
               <Text style={styles.emptyHint}>
-                Import an Excel workbook (.xlsx / .xls) to print labels — same flow as Print Excel
+                Import an Excel workbook (.xlsx / .xls) or CSV to use as label data.
               </Text>
             ) : null}
           </View>

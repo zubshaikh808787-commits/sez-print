@@ -218,6 +218,7 @@ import {
   type LabelElement,
 } from '@/lib/label-document';
 import { PdfPageNav } from '@/components/pdf-editor/pdf-page-nav';
+import { pickExcelWorkbook } from '@/lib/excel-import';
 import { useDataStore } from '@/stores/data-store';
 import { CANVAS_BOTTOM_CHIP_CLEARANCE_PX, STAGE_PADDING_PX, clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
@@ -3304,6 +3305,42 @@ export default function EditScreen() {
     [addElement, openAddedElementPanel, publishSnapGuides, windowPointToArtboardMm],
   );
 
+  const importExcelFromCanvas = async () => {
+    try {
+      const picked = await pickExcelWorkbook();
+      if (!picked.ok) {
+        if (picked.reason === 'cancelled') return;
+        Alert.alert(
+          picked.reason === 'invalid' ? 'Invalid File' : 'Empty File',
+          picked.reason === 'invalid'
+            ? 'Please choose an Excel workbook (.xlsx / .xls) or CSV file.'
+            : 'No data rows were found in this file.',
+        );
+        return;
+      }
+      const entry = useDataStore.getState().addExcelFile({
+        name: picked.name,
+        uri: picked.uri,
+        sheets: picked.sheets,
+        activeSheetIndex: 0,
+      });
+      const size = clampLabelMm(docRef.current.widthMm, docRef.current.heightMm);
+      router.push({
+        pathname: '/excel-bulk-setup',
+        params: {
+          excelFileId: entry.id,
+          widthMm: String(size.widthMm),
+          heightMm: String(size.heightMm),
+        },
+      });
+    } catch (error) {
+      Alert.alert(
+        'Error',
+        error instanceof Error ? error.message : 'Unable to pick or parse the document.',
+      );
+    }
+  };
+
   const handleToolPress = (label: string) => {
     setShowLabelMenu(false);
     switch (label) {
@@ -3369,7 +3406,7 @@ export default function EditScreen() {
         break;
       }
       case 'Excel':
-        router.push({ pathname: '/data-file', params: { type: 'Excel' } });
+        void importExcelFromCanvas();
         break;
       case 'Scan':
         router.push({ pathname: '/scan', params: { from: 'edit' } });

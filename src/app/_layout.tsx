@@ -81,6 +81,7 @@ function AppRoot() {
         <Stack.Screen name="pdf-editor" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="pdf-thermal" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="data-file" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="excel-print" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="excel-bulk-setup" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="language-switch" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="font-library" options={{ animation: 'slide_from_right' }} />

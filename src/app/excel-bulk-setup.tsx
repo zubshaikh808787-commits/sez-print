@@ -31,19 +31,38 @@ function kindLabel(kind: BulkSlotKind): string {
   return 'Text';
 }
 
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function paramMm(value: string | string[] | undefined, fallback: number): number {
+  const raw = firstParam(value);
+  if (!raw) return fallback;
+  const parsed = parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export default function ExcelBulkSetupScreen() {
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ excelFileId?: string }>();
+  const params = useLocalSearchParams<{
+    excelFileId?: string | string[];
+    widthMm?: string | string[];
+    heightMm?: string | string[];
+  }>();
+  const excelFileId = firstParam(params.excelFileId);
   const excelFiles = useDataStore((s) => s.excelFiles);
   const setActiveSheetIndex = useDataStore((s) => s.setActiveSheetIndex);
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
   const defaults = useSettingsStore((s) => s.defaults);
 
-  const file = excelFiles.find((f) => f.id === params.excelFileId) ?? null;
+  const file = excelFiles.find((f) => f.id === excelFileId) ?? null;
   const [sheetIndex, setSheetIndex] = useState(file?.activeSheetIndex ?? 0);
   const sheet = file ? file.sheets[sheetIndex] ?? file.sheets[0] ?? null : null;
 
-  const labelSize = clampLabelMm(defaults.labelWidth, defaults.labelHeight);
+  const labelSize = clampLabelMm(
+    paramMm(params.widthMm, defaults.labelWidth),
+    paramMm(params.heightMm, defaults.labelHeight),
+  );
 
   const [mappings, setMappings] = useState<BulkColumnMapping[]>(() =>
     (sheet?.columns ?? []).map((_, columnIndex) => ({
@@ -149,7 +168,8 @@ export default function ExcelBulkSetupScreen() {
           {file.name}
         </Text>
         <Text style={styles.meta}>
-          {sheet.rows.length} rows · {sheet.columns.length} columns
+          {sheet.rows.length} rows · {sheet.columns.length} columns · {labelSize.widthMm} ×{' '}
+          {labelSize.heightMm} mm
         </Text>
 
         {file.sheets.length > 1 ? (

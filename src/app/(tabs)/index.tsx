@@ -338,7 +338,7 @@ export default function HomeScreen() {
                 style={styles.menuThird}
                 iconComponent={<DocBadgeIcon badge="EXCEL" size={32} color="#7E8B98" />}
                 label="Print Excel"
-                href="/data-file?type=Excel"
+                href="/excel-print"
               />
               <Tile
                 style={styles.menuThird}
