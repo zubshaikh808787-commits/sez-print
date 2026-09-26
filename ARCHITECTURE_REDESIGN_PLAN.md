@@ -298,6 +298,23 @@ These three rules are fixed. Later changes to multi-select must not break them.
 
 ---
 
+### In-editor stock size (simple model, 2026-09-26)
+
+> **Not a reversal of Phase 3.** Tasks 3.1–3.4 stay cancelled. This is a separate, smaller product path: users can change stock size again, without anchors, constraints, a solver, or stretch-to-fill. Do not add `ElementConstraints`, `layout-constraints.ts`, or constraint UI in the name of this feature.
+
+**Behaviors (both always in play when size changes):**
+
+- **Size handling — prompted at the moment of resize:** **Scale proportionally** calls `scaleDocumentToSize` as it exists (text reflow, QR square-lock, barcode floors, border pin to `(0,0,W,H)` with uniform stroke scale). **Keep as-is** calls `repositionDocumentToSize` only: `left`/`top` move with `(old / old_stock) × new_stock`; `width`/`height` and other fields are untouched; no clamp; borders are not re-pinned.
+- **Position handling — not optional:** relative origins as above. Scale already includes that formula inside `scaleDocumentToSize`; keep is the formula alone.
+
+**Surfaces:** editor sub-toolbar size readout (`src/app/edit.tsx`, `LabelSizeEditor` draft then Scale/Keep). Excel bulk: one prompt, then `sharedGeometry`, `slotTemplates`, and every `rowGeometryOverrides` row (`resizeBulkDocumentToSize`). Label Settings uses the same prompt (`sizeHandling` on `patchLabelDocument`). Rat-tail 14.3×101.6 wrap stays blocked. Clone/2-up creation stays always-scale.
+
+**Print PDF excluded.** [`src/app/pdf.tsx`](src/app/pdf.tsx) / [`src/stores/pdf-edit-store.ts`](src/stores/pdf-edit-store.ts) are a raster crop session (`outputSize`), not `LabelDocument` elements. Mapping Scale/Keep onto that crop is a possible future task, not this one.
+
+**Wiring:** [`src/lib/stock-size.ts`](src/lib/stock-size.ts) `applyDocumentStockSize`; keep helper in [`src/lib/element-sizing.ts`](src/lib/element-sizing.ts); bulk in [`src/lib/bulk-labels.ts`](src/lib/bulk-labels.ts). Tests: `src/lib/editor/__tests__/stock-size.test.ts`, bulk resize cases in `src/lib/__tests__/bulk-labels.test.ts`, existing `template-resizing.test.ts` for scale/border pin.
+
+---
+
 ### Phase 4: Headless In-Memory Skia Direct Rasterizer (Print Pipeline)
 
 #### 1. Architectural Scope & Weight

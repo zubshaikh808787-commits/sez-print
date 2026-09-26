@@ -60,6 +60,18 @@
 
 ---
 
+## In-editor stock size (simple model) — 2026-09-26
+> **Not Phase 3.** Anchors / constraint solver stay retired. Verified against current source (not the plan’s intent). Print PDF was not in this work.
+
+- [x] **R1:** Editor size modal restored (`sizeModalVisible` + `LabelSizeEditor` in `src/app/edit.tsx`). Draft only on keystroke; **Done** then Scale vs Keep. Bulk sets are tappable (shared size). Rat-tail still blocked.
+- [x] **R2:** `repositionDocumentToSize` in `src/lib/element-sizing.ts` — position formula only, no clamp, no border pin, inactive `ups` panels included.
+- [x] **R3:** Scale → `scaleDocumentToSize` (body unchanged; comment only). Keep → R2. Undo history cleared after apply. **Extra vs original R3:** apply also `upsertDocument`s immediately and stamps `updatedAt`, so the Scale/Keep `Alert` cannot save the old size over the new one (found after first land).
+- [x] **R4:** `resizeBulkDocumentToSize` updates `sharedGeometry`, `slotTemplates`, and every `rowGeometryOverrides` entry, then reprojects. Unit tests cover keep + scale and `projectBulkDocument` on another row. UI prompt copy is once-for-the-set.
+- [x] **R5:** Label Settings size modal drafts, then Scale vs Keep via `sizeHandling`. The pre-existing silent always-scale on that screen is gone. (`patchLabelDocument` still defaults omitted `sizeHandling` to `'scale'`; the settings UI always passes the choice.)
+- [x] **R6:** Keep-position + ups tests in `stock-size.test.ts`; scale border pin still in `template-resizing.test.ts`; bulk override survival in `bulk-labels.test.ts`.
+
+---
+
 ## Phase 4: Headless In-Memory Skia Direct Rasterizer (Print Pipeline)
 > Spec: [`PHASE_4_PLAN.md`](./PHASE_4_PLAN.md). **GATE-A is not signed.** Do not start 4.3 / 4.5 / 4.7.
 

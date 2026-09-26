@@ -411,4 +411,18 @@ Each completed sub-task is logged with the following structure:
 - **Verification:** `npx tsx --tsconfig tsconfig.json src/printing/raster/__tests__/stage-a-gates.ts`
 - **Next Step:** On-device 4.4 + 4.6, then human GATE-A sign-off. Task 4.0 when TD-404 + phone are available.
 
+---
+
+## In-editor stock size (simple model)
+
+- **Date Completed:** 2026-09-26
+- **What Was Done:** Reconnected in-editor stock-size change without restoring Phase 3. Editor sub-toolbar opens `LabelSizeEditor` as a draft; **Done** asks Scale proportionally vs Keep as-is. Scale uses `scaleDocumentToSize` unchanged. Keep uses new `repositionDocumentToSize` (`left`/`top` only; no clamp; borders not re-pinned). `applyDocumentStockSize` in `src/lib/stock-size.ts` is the shared apply path. Excel bulk: `resizeBulkDocumentToSize` rewrites `sharedGeometry`, `slotTemplates`, and all `rowGeometryOverrides`, then `hydrateBulkDocument`. Label Settings uses the same prompt (`sizeHandling`) instead of silently scaling. Rat-tail still cannot change size. Print PDF was not modified.
+- **Label Settings (verified current vs historical):**
+  - **Current:** Width/Height open a draft modal; **Done** asks Scale vs Keep and `commit`s `{ widthMm, heightMm, sizeHandling }`. `patchLabelDocument` strips those millimetres out of the object spread (`const { widthMm: nextW, heightMm: nextH, sizeHandling, ...rest } = patch` in `src/lib/label-settings.ts` ~141) and calls `applyDocumentStockSize(next, nextW, nextH, …)` while `next` still has the **old** `doc.widthMm` / `doc.heightMm`. Scale and Keep therefore compute real `sx`/`sy` (`widthMm / doc.widthMm` in `scaleDocumentToSize` ~615 and the same ratio in `repositionDocumentToSize` ~665).
+  - **Historical, already fixed in that rewrite — not a live bug:** Before R5, the same function did `next = { ...doc, ...patch }` **including** the new `widthMm`/`heightMm`, then `scaleDocumentToSize(next, patch.widthMm, patch.heightMm)`. `sx` is `target / doc.widthMm` (`element-sizing.ts` ~615), so both sides were already the new size → `sx`/`sy` = 1. Stock millimetres updated; element `left`/`top`/`width`/`height` did not. That path was Label Settings only (the only caller that passed `widthMm`/`heightMm`). It is gone; no separate fix task.
+  - `sizeHandling ?? 'scale'` remains only if some future caller omits `sizeHandling`; the settings UI always passes it.
+- **Follow-up after first land (same feature):** Confirming Scale/Keep via `Alert.alert` put the app inactive, which saved the *old* size; focus then reloaded it. Apply now stamps `updatedAt`, `upsertDocument`s immediately, and skips store-reload while `dirtyRef` is set.
+- **Verification:** `npx tsx --tsconfig tsconfig.json src/lib/editor/__tests__/stock-size.test.ts`; `src/lib/editor/__tests__/template-resizing.test.ts`; `src/lib/__tests__/bulk-labels.test.ts` (keep/scale + row `projectBulkDocument`). No Skia tests. Source check: no `ElementConstraints` / `layout-constraints.ts`; `pdf.tsx` / `pdf-edit-store.ts` have no stock-size imports.
+- **Out of scope:** Print PDF Scale/Keep (open if ever needed). Phase 3 anchors/solver. `scaleDocumentToSize` internals.
+
 
