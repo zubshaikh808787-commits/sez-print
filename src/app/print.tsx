@@ -50,6 +50,7 @@ import {
   refitRatTail143Document,
 } from '@/constants/rat-tail-143';
 import { dataPageCount, resolveDocumentData } from '@/lib/data-binding';
+import { projectBulkDocument, resolveBulkSheet } from '@/lib/bulk-labels';
 import {
   composeUpsDocument,
   createLabelDocument,
@@ -520,6 +521,7 @@ export default function PrintScreen() {
 
   const pageCount = useMemo(() => {
     if (isPdfJob) return Math.max(1, pdfPages.length);
+    if (baseDocument?.bulk) return Math.max(1, baseDocument.bulk.rowCount);
     if (isExcelJob && excelSheet) return Math.max(1, excelSheet.rows.length);
     if (baseDocument && excelSheet && printingSettings.autoPages) {
       return dataPageCount(baseDocument, excelSheet);
@@ -529,6 +531,11 @@ export default function PrintScreen() {
 
   const buildPageDocument = useCallback(
     (page: number): LabelDocument | null => {
+      if (baseDocument?.bulk) {
+        const sheet = resolveBulkSheet(excelFiles, baseDocument.bulk);
+        if (sheet) return projectBulkDocument(baseDocument, sheet, page);
+        return baseDocument;
+      }
       if (isExcelJob && excelSheet) {
         return buildExcelRowDocument(
           excelSheet,
@@ -543,7 +550,16 @@ export default function PrintScreen() {
       }
       return baseDocument;
     },
-    [isExcelJob, excelSheet, params.docName, defaults.labelWidth, defaults.labelHeight, baseDocument, pageCount],
+    [
+      isExcelJob,
+      excelSheet,
+      excelFiles,
+      params.docName,
+      defaults.labelWidth,
+      defaults.labelHeight,
+      baseDocument,
+      pageCount,
+    ],
   );
 
   const previewDocument = useMemo(
@@ -1219,7 +1235,7 @@ export default function PrintScreen() {
                 />
               </Pressable>
               <Text style={styles.pageNavText}>
-                Row {pageIndex + 1} / {pageCount}
+                {baseDocument?.bulk ? 'Label' : 'Row'} {pageIndex + 1} / {pageCount}
               </Text>
               <Pressable
                 hitSlop={12}

@@ -2,6 +2,7 @@ package expo.modules.pdfraster
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -48,12 +49,14 @@ class PdfRasterModule : Module() {
 
           val page = renderer.openPage(pageIndex)
           try {
-            val scale = (if (dpi > 0) dpi else 150.0) / 72.0
+            val scale = (if (dpi > 0) dpi else 300.0) / 72.0
             val w = Math.max(1, Math.round(page.width * scale).toInt())
             val h = Math.max(1, Math.round(page.height * scale).toInt())
             val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(Color.WHITE)
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            val matrix = Matrix()
+            matrix.setScale(w.toFloat() / page.width.toFloat(), h.toFloat() / page.height.toFloat())
+            page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
 
             val outFile = File(context.cacheDir, "pdf_page_${pageIndex}_${dpi.toInt()}_${System.currentTimeMillis()}.png")
             FileOutputStream(outFile).use { stream ->

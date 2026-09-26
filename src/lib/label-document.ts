@@ -15,6 +15,7 @@ import {
 import type { SignatureStroke } from '@/components/editor/signature-drawing-board';
 import type { BorderStyleId } from '@/constants/border-library';
 import type { MediaGeometry } from '@/lib/media-geometry';
+import type { BulkLabelSet } from '@/lib/bulk-labels';
 import type { LabelSettings } from '@/lib/label-settings';
 import { computeTextElementHeightMm, measureTextWidthMm } from '@/lib/text-metrics';
 
@@ -171,6 +172,8 @@ export type LabelDocument = {
   templateCategory?: string;
   /** Present when this label is an N-up series edited panel-by-panel. */
   ups?: LabelUpsConfig;
+  /** Excel bulk set: one saved label, many rows projected onto the canvas. */
+  bulk?: BulkLabelSet;
   /** Per-label print/layout options (mirror mode, offsets, gap, etc.). */
   settings?: LabelSettings;
 };

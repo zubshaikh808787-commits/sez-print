@@ -1,16 +1,10 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx';
 
+import { worksheetToStringGrid } from '@/lib/excel-cells';
 import type { ExcelSheet } from '@/stores/data-store';
 
-function sheetToRows(worksheet: XLSX.WorkSheet): string[][] {
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
-    header: 1,
-    raw: false,
-    defval: '',
-  });
-  return rows.map((row) => row.map((cell) => String(cell ?? '')));
-}
+export { excelCellToString, worksheetToStringGrid } from '@/lib/excel-cells';
 
 /** Parse an .xlsx/.xls/.csv file from a local URI into sheets with header columns. */
 export async function parseExcelFile(uri: string, fileName: string): Promise<ExcelSheet[]> {
@@ -29,7 +23,7 @@ export async function parseExcelFile(uri: string, fileName: string): Promise<Exc
   }
 
   return workbook.SheetNames.map((name) => {
-    const allRows = sheetToRows(workbook.Sheets[name]);
+    const allRows = worksheetToStringGrid(workbook.Sheets[name]);
     const columns = (allRows[0] ?? []).map((c, i) => (c.trim() ? c.trim() : `Column ${i + 1}`));
     return {
       name,

@@ -1,6 +1,6 @@
 import { renderPdfPage, type RasteredPdfPage } from 'pdf-raster';
 
-export const PREVIEW_DPI = 150;
+export const PREVIEW_DPI = 300;
 export const EXPORT_DPI = 300;
 
 const cache = new Map<string, RasteredPdfPage>();

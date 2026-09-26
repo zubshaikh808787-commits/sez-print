@@ -6,6 +6,8 @@
  */
 
 import { renderPdfPages, type RenderedPdfPage, type RenderPdfResult } from 'td404-printer';
+import { renderPdfPage } from 'pdf-raster';
+import * as FileSystem from 'expo-file-system/legacy';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
 import {
   encodeConnectedPrinterJob,
@@ -121,6 +123,31 @@ export async function loadAndRenderPdf(
 
   if (result && result.pages && result.pages.length > 0) {
     return result;
+  }
+
+  try {
+    const first = await renderPdfPage(uri, 0, dpi);
+    const count = Math.min(first.pageCount, 50);
+    const pages: RenderedPdfPage[] = [];
+    for (let i = 0; i < count; i++) {
+      const page = i === 0 ? first : await renderPdfPage(uri, i, dpi);
+      const base64 = await FileSystem.readAsStringAsync(page.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      pages.push({
+        pageIndex: i,
+        widthPx: page.widthPx,
+        heightPx: page.heightPx,
+        widthMm: (page.widthPt * 25.4) / 72,
+        heightMm: (page.heightPt * 25.4) / 72,
+        base64,
+      });
+    }
+    if (pages.length > 0) {
+      return { pageCount: first.pageCount, pages };
+    }
+  } catch (rasterErr) {
+    console.warn('[pdf-printer] pdf-raster fallback failed:', rasterErr);
   }
 
   // 2. Embedded raster label stream extraction fallback

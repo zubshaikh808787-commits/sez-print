@@ -190,6 +190,16 @@ import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { androidRipple, cardShadow, Palette, Type } from '@/constants/ui';
 import {
+  applyGeometryToAllLabels,
+  applyGeometryToThisLabel,
+  geometryFromElements,
+  hydrateBulkDocument,
+  isBulkSlotId,
+  projectBulkDocument,
+  resolveBulkSheet,
+  syncBulkFromProjectedElements,
+} from '@/lib/bulk-labels';
+import {
   applyUpsBatchMirror,
   createLabelDocument,
   elementSizeMm,
@@ -203,6 +213,8 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
+import { PdfPageNav } from '@/components/pdf-editor/pdf-page-nav';
+import { useDataStore } from '@/stores/data-store';
 import { CANVAS_BOTTOM_CHIP_CLEARANCE_PX, STAGE_PADDING_PX, clampLabelMm, fitEditorPadBoard } from '@/lib/label-geometry';
 import { sortLayers } from '@/lib/template-schema';
 import { useTranslation } from '@/lib/i18n';
@@ -557,7 +569,8 @@ export default function EditScreen() {
       const existing = useLabelStore.getState().getDocument(params.labelId);
       if (existing) {
         const copy = JSON.parse(JSON.stringify(existing)) as LabelDocument;
-        const normalized = { ...copy, elements: normalizeDocumentElements(copy) };
+        const hydrated = hydrateBulkDocument(copy, useDataStore.getState().excelFiles);
+        const normalized = { ...hydrated, elements: normalizeDocumentElements(hydrated) };
         if (isJewelryDieCutDocument(normalized)) {
           return canonicalizeJewelryDieCutDocument(normalized);
         }
@@ -680,6 +693,10 @@ export default function EditScreen() {
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [saveAsVisible, setSaveAsVisible] = useState(false);
   const [saveAsName, setSaveAsName] = useState('');
+  const [bulkScopeApplyAll, setBulkScopeApplyAll] = useState(true);
+  const bulkApplyAllRef = useRef(true);
+  bulkApplyAllRef.current = bulkScopeApplyAll;
+  const bulkGestureSnapshotRef = useRef<LabelElement[] | null>(null);
   const [pickerRows, setPickerRows] = useState(2);
   const [pickerColumns, setPickerColumns] = useState(3);
   const { width: windowWidth } = useWindowDimensions();
@@ -1268,6 +1285,15 @@ export default function EditScreen() {
             next = applyUpsBatchMirror(next);
           }
         }
+        if (next.bulk) {
+          const sheet = resolveBulkSheet(useDataStore.getState().excelFiles, next.bulk);
+          if (sheet) {
+            next = {
+              ...next,
+              bulk: syncBulkFromProjectedElements(next.bulk, sheet, next.elements),
+            };
+          }
+        }
         return next;
       });
       setDirty(true);
@@ -1275,10 +1301,43 @@ export default function EditScreen() {
     [pushHistory],
   );
 
+  const commitBulkSlotGeometry = useCallback((slotIds: string[]) => {
+    if (slotIds.length === 0) return;
+    setDoc((prev) => {
+      if (!prev.bulk) return prev;
+      const geo = geometryFromElements(prev.elements, slotIds);
+      if (Object.keys(geo).length === 0) return prev;
+      const nextBulk = bulkApplyAllRef.current
+        ? applyGeometryToAllLabels(prev.bulk, geo)
+        : applyGeometryToThisLabel(prev.bulk, prev.bulk.activeRowIndex, geo);
+      return { ...prev, bulk: nextBulk };
+    });
+  }, []);
+
   const goToUpsPanel = useCallback((nextIndex: number) => {
     setDoc((prev) => {
       if (!prev.ups || nextIndex === prev.ups.activeIndex) return prev;
       return switchUpsPanel(prev, nextIndex);
+    });
+    setSelectedIds([]);
+    setPrimaryId(null);
+    setPanelOpen(false);
+    historyRef.current.clear();
+    bumpHistory();
+    setTextEditId(null);
+    setDirty(true);
+  }, [bumpHistory]);
+
+  const goToBulkRow = useCallback((nextIndex: number) => {
+    setDoc((prev) => {
+      if (!prev.bulk || nextIndex === prev.bulk.activeRowIndex) return prev;
+      const sheet = resolveBulkSheet(useDataStore.getState().excelFiles, prev.bulk);
+      if (!sheet) return prev;
+      const synced: LabelDocument = {
+        ...prev,
+        bulk: syncBulkFromProjectedElements(prev.bulk, sheet, prev.elements),
+      };
+      return projectBulkDocument(synced, sheet, nextIndex);
     });
     setSelectedIds([]);
     setPrimaryId(null);
@@ -1327,6 +1386,8 @@ export default function EditScreen() {
 
   const patchElement = useCallback(
     (id: string, updates: Record<string, unknown>) => {
+      const geoKeys = ['left', 'top', 'width', 'height'];
+      const isGeo = geoKeys.some((key) => key in updates) && isBulkSlotId(id) && Boolean(docRef.current.bulk);
       historyRef.current.begin(docRef.current.elements);
       setElements((elements) =>
         elements.map((el) => {
@@ -1338,8 +1399,9 @@ export default function EditScreen() {
         }),
       );
       scheduleHistoryCommit();
+      if (isGeo) commitBulkSlotGeometry([id]);
     },
-    [setElements, scheduleHistoryCommit],
+    [setElements, scheduleHistoryCommit, commitBulkSlotGeometry],
   );
 
   const patchSelected = useCallback(
@@ -2161,6 +2223,13 @@ export default function EditScreen() {
       historyRef.current.begin(docRef.current.elements);
       publishSnapGuides([]);
       transformKindRef.current = kind;
+      if (docRef.current.bulk) {
+        bulkGestureSnapshotRef.current = JSON.parse(
+          JSON.stringify(docRef.current.elements),
+        ) as LabelElement[];
+      } else {
+        bulkGestureSnapshotRef.current = null;
+      }
 
       if (!selectedIdsRef.current.includes(id)) {
         handleSelect(id);
@@ -2251,6 +2320,7 @@ export default function EditScreen() {
         dragStartPositionsRef.current = null;
         resizeStartSnapshotsRef.current = null;
         transformKindRef.current = null;
+        bulkGestureSnapshotRef.current = null;
         clearGroupPreview();
         return;
       }
@@ -2270,6 +2340,28 @@ export default function EditScreen() {
       transformKindRef.current = null;
       const ids = selectedIdsRef.current;
       const canvas = { widthMm: docRef.current.widthMm, heightMm: docRef.current.heightMm };
+
+      const offerBulkScope = (memberIds: string[]) => {
+        const snap = bulkGestureSnapshotRef.current;
+        bulkGestureSnapshotRef.current = null;
+        if (kind !== 'move' && kind !== 'resize') return;
+        if (!snap) return;
+        const slotIds = memberIds.filter(isBulkSlotId);
+        if (!slotIds.length) return;
+        const origin = snap.find((el) => el.id === payload.id);
+        if (origin) {
+          const originHeight =
+            'height' in origin && typeof origin.height === 'number' ? origin.height : clean.heightMm;
+          const unchanged =
+            Math.abs(origin.left - clean.leftMm) <= 0.02 &&
+            Math.abs(origin.top - clean.topMm) <= 0.02 &&
+            (kind === 'move' ||
+              (Math.abs(origin.width - clean.widthMm) <= 0.02 &&
+                Math.abs(originHeight - clean.heightMm) <= 0.02));
+          if (unchanged && (!ids.length || ids.length === 1)) return;
+        }
+        commitBulkSlotGeometry(slotIds);
+      };
 
       const applyAutoFitFont = (el: LabelElement): LabelElement => {
         if (!defaults.autoFitFont || (el.type !== 'text' && el.type !== 'degrees')) return el;
@@ -2362,6 +2454,7 @@ export default function EditScreen() {
           recordHistory,
         );
         clearGroupPreview();
+        offerBulkScope(ids);
         return;
       }
 
@@ -2396,6 +2489,7 @@ export default function EditScreen() {
           recordHistory,
         );
         clearGroupPreview();
+        offerBulkScope(ids);
         return;
       }
 
@@ -2461,9 +2555,11 @@ export default function EditScreen() {
         recordHistory,
       );
       clearGroupPreview();
+      offerBulkScope(ids.includes(payload.id) ? ids : [payload.id]);
     },
     [
       setElements,
+      commitBulkSlotGeometry,
       bumpHistory,
       publishSnapGuides,
       clearGroupPreview,
@@ -2675,7 +2771,10 @@ export default function EditScreen() {
   }, [saveAsName, upsertDocument]);
 
   const openDocument = useCallback((docToOpen: LabelDocument) => {
-    const copy = JSON.parse(JSON.stringify(docToOpen)) as LabelDocument;
+    const copy = hydrateBulkDocument(
+      JSON.parse(JSON.stringify(docToOpen)) as LabelDocument,
+      useDataStore.getState().excelFiles,
+    );
     setDoc(copy);
     setSavedToStore(true);
     setDirty(false);
@@ -2716,7 +2815,7 @@ export default function EditScreen() {
   }, [saveDocument]);
 
   const applyLabelSize = useCallback((widthMm: number, heightMm: number) => {
-    if (isRatTail143Document(docRef.current)) return;
+    if (isRatTail143Document(docRef.current) || docRef.current.bulk) return;
     setDoc((prev) => {
       if (Math.abs(prev.widthMm - widthMm) < 0.001 && Math.abs(prev.heightMm - heightMm) < 0.001) {
         return prev;
@@ -3788,7 +3887,7 @@ export default function EditScreen() {
           <View style={styles.subToolbarRow}>
             <Pressable
               onPress={() => {
-                if (isRatTail143Document(doc)) return;
+                if (isRatTail143Document(doc) || doc.bulk) return;
                 setSizeModalVisible(true);
               }}
               style={({ pressed }) => [styles.subToolbar, pressed && styles.pressed]}>
@@ -3796,11 +3895,14 @@ export default function EditScreen() {
                 {doc.widthMm.toFixed(1)} × {doc.heightMm.toFixed(1)} mm · {doc.paperType}
                 {doc.orientation ? ` · ${doc.orientation}°` : ''}
                 {doc.ups ? ` · ${doc.ups.columns}ups` : ''}
+                {doc.bulk ? ` · ${doc.bulk.rowCount} labels` : ''}
               </Text>
               <Text style={styles.sizeHint}>
                 {isRatTail143Document(doc)
                   ? 'Prints 14.3 × 101.6 mm wrap stock · content locked on the paddle'
-                  : 'Tap to customize size'}
+                  : doc.bulk
+                    ? 'Size is shared by every label in this Excel set'
+                    : 'Tap to customize size'}
               </Text>
             </Pressable>
 
@@ -3882,6 +3984,45 @@ export default function EditScreen() {
             </Animated.View>
           </View>
         </View>
+
+        {doc.bulk && doc.bulk.rowCount > 1 ? (
+          <View style={styles.bulkNav}>
+            <PdfPageNav
+              index={doc.bulk.activeRowIndex}
+              total={doc.bulk.rowCount}
+              onPrev={() => goToBulkRow(doc.bulk!.activeRowIndex - 1)}
+              onNext={() => goToBulkRow(doc.bulk!.activeRowIndex + 1)}
+            />
+            <View style={styles.bulkScopeSwitch}>
+              <Pressable
+                onPress={() => setBulkScopeApplyAll(false)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !bulkScopeApplyAll }}
+                style={({ pressed }) => [
+                  styles.bulkScopeSeg,
+                  !bulkScopeApplyAll && styles.bulkScopeSegOn,
+                  pressed && styles.pressed,
+                ]}>
+                <Text style={[styles.bulkScopeSegText, !bulkScopeApplyAll && styles.bulkScopeSegTextOn]}>
+                  This
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setBulkScopeApplyAll(true)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: bulkScopeApplyAll }}
+                style={({ pressed }) => [
+                  styles.bulkScopeSeg,
+                  bulkScopeApplyAll && styles.bulkScopeSegOn,
+                  pressed && styles.pressed,
+                ]}>
+                <Text style={[styles.bulkScopeSegText, bulkScopeApplyAll && styles.bulkScopeSegTextOn]}>
+                  All labels
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
 
         {doc.ups && doc.ups.columns > 1 ? (
           doc.ups.columns >= 3 ? (
@@ -4492,6 +4633,37 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 6,
+  },
+  bulkNav: {
+    alignSelf: 'center',
+    marginTop: 8,
+    marginBottom: 2,
+    alignItems: 'center',
+    gap: 6,
+  },
+  bulkScopeSwitch: {
+    flexDirection: 'row',
+    backgroundColor: '#E6EBF0',
+    borderRadius: 16,
+    padding: 3,
+  },
+  bulkScopeSeg: {
+    minWidth: 88,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 13,
+    alignItems: 'center',
+  },
+  bulkScopeSegOn: {
+    backgroundColor: Palette.header,
+  },
+  bulkScopeSegText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Palette.ink,
+  },
+  bulkScopeSegTextOn: {
+    color: '#FFFFFF',
   },
   upsPagerBtn: {
     width: 28,

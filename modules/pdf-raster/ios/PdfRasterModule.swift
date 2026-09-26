@@ -24,15 +24,19 @@ public class PdfRasterModule: Module {
       }
 
       let pageRect = page.bounds(for: .mediaBox)
-      let scale = (dpi > 0 ? dpi : 150) / 72.0
+      let scale = (dpi > 0 ? dpi : 300) / 72.0
       let w = max(1, Int((pageRect.width * scale).rounded()))
       let h = max(1, Int((pageRect.height * scale).rounded()))
       let size = CGSize(width: w, height: h)
 
-      let renderer = UIGraphicsImageRenderer(size: size)
+      let format = UIGraphicsImageRendererFormat()
+      format.scale = 1
+      format.opaque = true
+      let renderer = UIGraphicsImageRenderer(size: size, format: format)
       let image = renderer.image { ctx in
         UIColor.white.setFill()
         ctx.fill(CGRect(origin: .zero, size: size))
+        ctx.cgContext.interpolationQuality = .high
         ctx.cgContext.saveGState()
         ctx.cgContext.translateBy(x: 0, y: CGFloat(h))
         ctx.cgContext.scaleBy(x: scale, y: -scale)

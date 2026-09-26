@@ -11,6 +11,7 @@ import {
 import { EXPORT_DPI, rasterPdfPageCached } from '@/lib/pdf-editor/raster';
 import {
   cropWindowPts,
+  mmToPt,
   resolveScopeIndices,
   shouldRasterizePage,
   stampRectInCropSpace,
@@ -36,6 +37,26 @@ async function readBytes(uri: string): Promise<Uint8Array> {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+function containInBox(srcW: number, srcH: number, dstW: number, dstH: number) {
+  const scale = Math.min(dstW / Math.max(srcW, 1), dstH / Math.max(srcH, 1));
+  const w = srcW * scale;
+  const h = srcH * scale;
+  return {
+    x: (dstW - w) / 2,
+    y: (dstH - h) / 2,
+    w,
+    h,
+    scale,
+  };
+}
+
+function outputPagePts(session: PdfEditSession): { w: number; h: number } {
+  return {
+    w: Math.max(10, mmToPt(session.outputSize.widthMm)),
+    h: Math.max(10, mmToPt(session.outputSize.heightMm)),
+  };
 }
 
 function cropBoxForPage(session: PdfEditSession, pageIndex: number): PdfBoxPts {
@@ -248,12 +269,17 @@ export async function exportEditedPdf(
     const raster = shouldRasterizePage(sharpness);
     usedRaster.push(raster);
 
+    const hasCrop =
+      session.crop != null &&
+      resolveScopeIndices(session.crop.scope, session.pageCount, session.currentPageIndex).includes(i);
+    const target = hasCrop ? { w: box.w, h: box.h } : outputPagePts(session);
+
     if (raster) {
       const rendered = await rasterPdfPageCached(session.sourceUri, i, EXPORT_DPI);
       const pngBytes = await readBytes(rendered.uri);
       const decoded = decodePng(pngBytes);
       const rgba = new Uint8Array(decoded.data.buffer, decoded.data.byteOffset, decoded.data.byteLength);
-      const cropped = box.fits
+      const cropped = hasCrop
         ? cropRgba(rgba, decoded.width, decoded.height, box, pageSize.w, pageSize.h)
         : { data: rgba, width: decoded.width, height: decoded.height };
       const rotated = rotateRgba(cropped.data, cropped.width, cropped.height, rotation);
@@ -266,14 +292,31 @@ export async function exportEditedPdf(
         depth: 8,
         channels: 4,
       });
-      const pageW = box.fits ? box.w : pageSize.w;
-      const pageH = box.fits ? box.h : pageSize.h;
-      const page = out.addPage([pageW, pageH]);
+      const page = out.addPage([target.w, target.h]);
       const img = await out.embedPng(encoded);
-      page.drawImage(img, { x: 0, y: 0, width: pageW, height: pageH });
+      const fit = containInBox(rotated.width, rotated.height, target.w, target.h);
+      page.drawImage(img, { x: fit.x, y: fit.y, width: fit.w, height: fit.h });
       if (session.watermark && wmPages.has(i)) {
-        const wmBox: PdfBoxPts = { x: 0, y: 0, w: pageW, h: pageH, fits: true };
-        await drawWatermark(out, page, wmBox, session.watermark, (pageW * 25.4) / 72);
+        const wmBox: PdfBoxPts = { x: 0, y: 0, w: target.w, h: target.h, fits: true };
+        await drawWatermark(out, page, wmBox, session.watermark, (target.w * 25.4) / 72);
+      }
+      continue;
+    }
+
+    if (!hasCrop) {
+      const embedded = await out.embedPage(srcDoc.getPage(i));
+      const page = out.addPage([target.w, target.h]);
+      const fit = containInBox(embedded.width, embedded.height, target.w, target.h);
+      page.drawPage(embedded, {
+        x: fit.x,
+        y: fit.y,
+        xScale: fit.scale,
+        yScale: fit.scale,
+      });
+      if (rotation) page.setRotation(degrees(rotation));
+      if (session.watermark && wmPages.has(i)) {
+        const wmBox: PdfBoxPts = { x: 0, y: 0, w: target.w, h: target.h, fits: true };
+        await drawWatermark(out, page, wmBox, session.watermark, (target.w * 25.4) / 72);
       }
       continue;
     }

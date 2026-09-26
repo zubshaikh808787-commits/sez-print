@@ -390,11 +390,15 @@ class Td404PrinterModule : Module() {
 
           for (i in 0 until renderCount) {
             val page = renderer.openPage(i)
-            val w = Math.max(1, Math.round(page.width * scale).toInt())
-            val h = Math.max(1, Math.round(page.height * scale).toInt())
+            val pageW = page.width
+            val pageH = page.height
+            val w = Math.max(1, Math.round(pageW * scale).toInt())
+            val h = Math.max(1, Math.round(pageH * scale).toInt())
             val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(Color.WHITE)
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+            val matrix = android.graphics.Matrix()
+            matrix.setScale(w.toFloat() / pageW.toFloat(), h.toFloat() / pageH.toFloat())
+            page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
             page.close()
 
             val stream = ByteArrayOutputStream()
@@ -407,8 +411,8 @@ class Td404PrinterModule : Module() {
                 "pageIndex" to i,
                 "widthPx" to w,
                 "heightPx" to h,
-                "widthMm" to (page.width * 25.4 / 72.0),
-                "heightMm" to (page.height * 25.4 / 72.0),
+                "widthMm" to (pageW * 25.4 / 72.0),
+                "heightMm" to (pageH * 25.4 / 72.0),
                 "base64" to base64,
               )
             )

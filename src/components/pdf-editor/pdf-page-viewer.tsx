@@ -83,6 +83,25 @@ export function PdfPageViewer({
     return { dispW, dispH, winW, winH, ox, oy, maxOx, maxOy, cropLeft, cropTop, scale };
   }, [originNorm.x, originNorm.y, outputSize.heightMm, outputSize.widthMm, pageMmH, pageMmW, sizeNorm]);
 
+  const fitFrame = useMemo(() => {
+    const maxW = 320;
+    const maxH = 340;
+    const frameScale = Math.min(maxW / Math.max(outputSize.widthMm, 1), maxH / Math.max(outputSize.heightMm, 1));
+    const stageW = outputSize.widthMm * frameScale;
+    const stageH = outputSize.heightMm * frameScale;
+    const contain = Math.min(stageW / Math.max(pageMmW, 1), stageH / Math.max(pageMmH, 1));
+    const imgW = pageMmW * contain;
+    const imgH = pageMmH * contain;
+    return {
+      stageW,
+      stageH,
+      imgW,
+      imgH,
+      imgX: (stageW - imgW) / 2,
+      imgY: (stageH - imgH) / 2,
+    };
+  }, [outputSize.heightMm, outputSize.widthMm, pageMmH, pageMmW]);
+
   const presentOnlyCrop = Boolean(isCropped && !cropEnabled);
 
   const cropLayout = useMemo(() => {
@@ -120,12 +139,28 @@ export function PdfPageViewer({
     pageMmH,
   ]);
 
-  const activeStageW = cropLayout ? cropLayout.stageW : layout.dispW;
-  const activeStageH = cropLayout ? cropLayout.stageH : layout.dispH;
-  const activeImgW = cropLayout ? cropLayout.imgW : layout.dispW;
-  const activeImgH = cropLayout ? cropLayout.imgH : layout.dispH;
-  const activeImgX = cropLayout ? cropLayout.imgX : 0;
-  const activeImgY = cropLayout ? cropLayout.imgY : 0;
+  const activeStageW = cropEnabled || presentOnlyCrop
+    ? cropLayout
+      ? cropLayout.stageW
+      : layout.dispW
+    : fitFrame.stageW;
+  const activeStageH = cropEnabled || presentOnlyCrop
+    ? cropLayout
+      ? cropLayout.stageH
+      : layout.dispH
+    : fitFrame.stageH;
+  const activeImgW = cropEnabled || presentOnlyCrop
+    ? cropLayout
+      ? cropLayout.imgW
+      : layout.dispW
+    : fitFrame.imgW;
+  const activeImgH = cropEnabled || presentOnlyCrop
+    ? cropLayout
+      ? cropLayout.imgH
+      : layout.dispH
+    : fitFrame.imgH;
+  const activeImgX = cropEnabled || presentOnlyCrop ? (cropLayout ? cropLayout.imgX : 0) : fitFrame.imgX;
+  const activeImgY = cropEnabled || presentOnlyCrop ? (cropLayout ? cropLayout.imgY : 0) : fitFrame.imgY;
 
   const swap = rotation === 90 || rotation === 270;
 
