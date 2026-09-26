@@ -1061,20 +1061,45 @@ export function ElementContentView({
     }
     case 'clipart': {
       const sticker = getClipartById(element.clipartId);
-      const size = Math.min(widthPx, heightPx);
+      const previewColor =
+        element.colorMode === 'B & W' || element.colorMode === 'Halftone'
+          ? '#111827'
+          : inkColor(element.drawingColorIndex);
+      const unit = Math.min(widthPx, heightPx);
+      const iconSize = element.tile ? Math.max(8, Math.round(unit / 5)) : unit;
+
+      const renderGlyph = (size: number) =>
+        sticker ? (
+          <ClipartIcon shapes={sticker.shapes} size={size} color={previewColor} />
+        ) : (
+          <Text style={{ fontSize: size * 0.7, color: previewColor }}>{element.glyph ?? '★'}</Text>
+        );
+
+      if (element.tile) {
+        const cols = Math.max(1, Math.ceil(widthPx / iconSize));
+        const rows = Math.max(1, Math.ceil(heightPx / iconSize));
+        const count = cols * rows;
+        return (
+          <View style={[styles.fill, styles.tileWrap]}>
+            {Array.from({ length: count }, (_, index) => (
+              <View
+                key={index}
+                style={{
+                  width: widthPx / cols,
+                  height: heightPx / rows,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                {renderGlyph(Math.min(widthPx / cols, heightPx / rows))}
+              </View>
+            ))}
+          </View>
+        );
+      }
+
       return (
         <View style={[styles.fill, styles.center]}>
-          {sticker ? (
-            <ClipartIcon
-              shapes={sticker.shapes}
-              size={size}
-              color={inkColor(element.drawingColorIndex)}
-            />
-          ) : (
-            <Text style={{ fontSize: size * 0.7, color: inkColor(element.drawingColorIndex) }}>
-              {element.glyph ?? '★'}
-            </Text>
-          )}
+          {renderGlyph(iconSize)}
         </View>
       );
     }
@@ -1122,6 +1147,11 @@ const styles = StyleSheet.create({
   center: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  tileWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignContent: 'flex-start',
   },
   antiBg: {
     backgroundColor: '#111827',

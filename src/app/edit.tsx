@@ -106,6 +106,10 @@ import { DegreesPropertyPanel } from '@/components/editor/degrees-property-panel
 import { ArcTextPropertyPanel } from '@/components/editor/arctext-property-panel';
 import { BarcodePropertyPanel } from '@/components/editor/barcode-property-panel';
 import { ImagePropertyPanel, type ImagePropertyTab } from '@/components/editor/image-property-panel';
+import {
+  ClipartPropertyPanel,
+  type ClipartPropertyTab,
+} from '@/components/editor/clipart-property-panel';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { ZoomableEditPad } from '@/components/editor/zoomable-edit-pad';
 import { EditingPad } from '@/components/editor/editing-pad';
@@ -377,6 +381,7 @@ const PANEL_ELEMENT_TYPES: readonly ElementType[] = [
   'arctext',
   'degrees',
   'image',
+  'clipart',
 ];
 
 function hasPropertyPanel(type: ElementType) {
@@ -834,6 +839,7 @@ export default function EditScreen() {
   const [arcTextTab, setArcTextTab] = useState<ArcTextPropertyTab>('Regular');
   const [degreesTab, setDegreesTab] = useState<PropertyTab>('Regular');
   const [imageTab, setImageTab] = useState<ImagePropertyTab>('Regular');
+  const [clipartTab, setClipartTab] = useState<ClipartPropertyTab>('Regular');
 
   const [textEditId, setTextEditId] = useState<string | null>(null);
   const [textEditDraft, setTextEditDraft] = useState('');
@@ -1750,18 +1756,26 @@ export default function EditScreen() {
         }
         case 'clipart': {
           const fit = fitClipartDefaults(maxW, maxH, elements);
+          const tiled =
+            defaults.tileImage &&
+            overrides.clipartId == null &&
+            overrides.tile == null &&
+            overrides.width == null;
           element = {
             id: base.id,
             type: 'clipart',
             clipartId: '',
             rotation: 0,
-            left: fit.left,
-            top: fit.top,
-            width: fit.width,
-            height: fit.height,
+            left: tiled ? 0 : fit.left,
+            top: tiled ? 0 : fit.top,
+            width: tiled ? maxW : fit.width,
+            height: tiled ? maxH : fit.height,
             lockMovement: false,
             needPrinting: true,
             drawingColorIndex: 0,
+            tile: tiled,
+            colorMode: defaults.colorMode,
+            grayThreshold: defaults.grayThreshold,
             ...overrides,
           };
           break;
@@ -1952,6 +1966,9 @@ export default function EditScreen() {
       case 'degrees':
         setDegreesTab('Regular');
         break;
+      case 'clipart':
+        setClipartTab('Regular');
+        break;
       default:
         break;
     }
@@ -2023,6 +2040,9 @@ export default function EditScreen() {
         } else if (element.type === 'image') {
           setImageTab('Regular');
           setPanelOpen(true);
+        } else if (element.type === 'clipart') {
+          setClipartTab('Regular');
+          setPanelOpen(true);
         } else {
           setPanelOpen(true);
         }
@@ -2054,11 +2074,6 @@ export default function EditScreen() {
       return;
     }
     if (element.type === 'border') {
-      return;
-    }
-    if (element.type === 'clipart') {
-      clipartReplaceIdRef.current = id;
-      router.push({ pathname: '/clipart', params: { from: 'edit' } });
       return;
     }
     resetTabToRegularForElement(element.type);
@@ -3062,10 +3077,18 @@ export default function EditScreen() {
             : undefined;
         if (existing) {
           patchElement(existing.id, { clipartId: clipart.id });
+          setClipartTab('Regular');
+          setPanelOpen(true);
+          topBarSelectionVisibleSv.value = 1;
+          bottomPanelVisibleSv.value = 1;
         } else {
           addElement('clipart', {
             clipartId: clipart.id,
           });
+          setClipartTab('Regular');
+          setPanelOpen(true);
+          topBarSelectionVisibleSv.value = 1;
+          bottomPanelVisibleSv.value = 1;
         }
       }
 
@@ -3197,6 +3220,10 @@ export default function EditScreen() {
         setDegreesTab('Regular');
         setPanelOpen(true);
         break;
+      case 'Clipart':
+        setClipartTab('Regular');
+        setPanelOpen(true);
+        break;
       default:
         break;
     }
@@ -3263,8 +3290,16 @@ export default function EditScreen() {
       if (ghost.type !== 'text' && ghost.type !== 'degrees' && ghost.type !== 'time') {
         overrides.height = ghost.heightMm;
       }
-      addElement(ghost.type, overrides);
-      openAddedElementPanel(ghost.label);
+      const el = addElement(ghost.type, overrides);
+      if (el?.type === 'clipart') {
+        clipartReplaceIdRef.current = el.id;
+        setClipartTab('Regular');
+        setPanelOpen(true);
+        topBarSelectionVisibleSv.value = 1;
+        bottomPanelVisibleSv.value = 1;
+      } else {
+        openAddedElementPanel(ghost.label);
+      }
     },
     [addElement, openAddedElementPanel, publishSnapGuides, windowPointToArtboardMm],
   );
@@ -3313,10 +3348,17 @@ export default function EditScreen() {
       case 'Image':
         void handlePickImage();
         break;
-      case 'Clipart':
-        clipartReplaceIdRef.current = null;
-        router.push({ pathname: '/clipart', params: { from: 'edit' } });
+      case 'Clipart': {
+        const added = addElement('clipart');
+        if (added) {
+          clipartReplaceIdRef.current = added.id;
+        }
+        setClipartTab('Regular');
+        setPanelOpen(true);
+        topBarSelectionVisibleSv.value = 1;
+        bottomPanelVisibleSv.value = 1;
         break;
+      }
       case 'Border': {
         const existingBorder = docRef.current.elements.find((el) => el.type === 'border');
         if (existingBorder) {
@@ -3815,6 +3857,24 @@ export default function EditScreen() {
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}
             onBusyChange={setImageIngesting}
+          />
+        );
+      case 'clipart':
+        return (
+          <ClipartPropertyPanel
+            activeTab={clipartTab}
+            onTabChange={setClipartTab}
+            state={targetEl}
+            patch={patchSelected}
+            labelWidthMm={labelBounds.widthMm}
+            labelHeightMm={labelBounds.heightMm}
+            elementHeightMm={selectedElementHeightMm}
+            onChooseClipart={() => {
+              if (targetEl.id) {
+                clipartReplaceIdRef.current = targetEl.id;
+              }
+              router.push({ pathname: '/clipart', params: { from: 'edit' } });
+            }}
           />
         );
       default:

@@ -64,6 +64,9 @@ export type ClipartElementState = {
   lockMovement: boolean;
   needPrinting: boolean;
   drawingColorIndex: number;
+  tile?: boolean;
+  colorMode?: 'Original' | 'B & W' | 'Halftone';
+  grayThreshold?: number;
 };
 
 export type BorderElementState = {
