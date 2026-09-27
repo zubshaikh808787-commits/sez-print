@@ -44,6 +44,9 @@ export type ImageElementState = {
   contentFit?: 'fill' | 'contain' | 'cover';
   colorMode?: 'Original' | 'B & W' | 'Halftone';
   grayThreshold?: number;
+  tile?: boolean;
+  contentType?: 'Local Image' | 'Data Source';
+  columnNameContent?: string;
   aspectRatioLocked?: boolean;
   originalAspect?: number;
   /** Full-resolution file for print. Canvas `uri` may be a downscaled working copy. */
@@ -92,6 +95,8 @@ export type SignatureElementState = {
   lockMovement: boolean;
   needPrinting: boolean;
   drawingColorIndex: number;
+  colorMode?: 'Original' | 'B & W' | 'Halftone';
+  grayThreshold?: number;
 };
 
 export type ElementType =

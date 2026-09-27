@@ -1547,7 +1547,6 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     const liveH = Math.max(1, animH.value);
     const liveLeft = originLeftSv.value + transX.value;
     const liveTop = originTopSv.value + transY.value;
-    const liveRot = animRot.value;
     const isPrimaryTouch = activeSelectedIdSv?.value === element.id;
     const zBoost = isPrimaryTouch ? 100 : selectedSv.value ? 50 : 0;
 
@@ -1557,11 +1556,16 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       top: liveTop,
       width: liveW,
       height: liveH,
-      transform: [{ rotate: `${liveRot}deg` }],
       opacity: (element.opacity ?? 1) * liftSv.value,
       zIndex: zBoost + (element.zIndex ?? 1),
     };
   });
+
+  const contentRotateStyle = useAnimatedStyle(() => ({
+    width: '100%',
+    height: '100%',
+    transform: [{ rotate: `${animRot.value}deg` }],
+  }));
 
   if (element.type === 'border' || element.needPrinting === false) {
     return (
@@ -1691,7 +1695,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
                 },
               }
             : {})}>
-          <View pointerEvents="none" style={styles.fillContainer}>
+          <Animated.View pointerEvents="none" style={contentRotateStyle}>
             <ElementContentView
               element={element}
               widthPx={baseWidthPx}
@@ -1701,7 +1705,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
               selectedTableCell={element.type === 'table' ? selectedTableCell : null}
               tableSelectionColor={tableSelectionColor}
             />
-          </View>
+          </Animated.View>
         </View>
       </GestureDetector>
 

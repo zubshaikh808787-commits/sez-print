@@ -27,6 +27,7 @@ export const PALETTE_DROP_LABELS: Record<string, ElementType> = {
   ArcText: 'arctext',
   Degrees: 'degrees',
   Counter: 'degrees',
+  Signature: 'signature',
 };
 
 export function paletteDropTypeForLabel(label: string): ElementType | null {

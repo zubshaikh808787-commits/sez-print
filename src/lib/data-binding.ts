@@ -1,6 +1,7 @@
 import { cloneDocument, type LabelDocument } from '@/lib/label-document';
 import { applySerialOffset } from '@/lib/serial-content';
 import type { ExcelSheet } from '@/stores/data-store';
+import { looksLikeImageUri } from '@/lib/editor/image-mono';
 
 function bindElementContent(
   element: LabelDocument['elements'][number],
@@ -17,6 +18,9 @@ function bindElementContent(
       const value = row[columnIndex] ?? '';
       if (element.type === 'text') {
         element.text = value;
+      } else if (element.type === 'image' && looksLikeImageUri(value)) {
+        element.uri = value;
+        element.printUri = value;
       } else if ('content' in element) {
         element.content = value;
       }

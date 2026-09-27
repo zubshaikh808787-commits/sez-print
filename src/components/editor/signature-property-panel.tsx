@@ -4,11 +4,12 @@ import { AppIcon } from '@/components/app-icon';
 import { PositionControls } from '@/components/editor/position-controls';
 import { DRAWING_COLORS, formatMm, normalizeRotation } from '@/components/editor/types';
 import { GrayThresholdSlider } from '@/components/editor/gray-threshold-slider';
-import type { ClipartElementState } from '@/lib/label-document';
+import type { SignatureElementState } from '@/lib/label-document';
+import { resolveEditorColorMode } from '@/lib/editor/image-mono';
 
 const ACCENT = '#48C3C7';
-const TABS = ['Regular', 'Position', 'Clipart', 'Effect'] as const;
-export type ClipartPropertyTab = (typeof TABS)[number];
+const TABS = ['Regular', 'Position', 'Image', 'Effect'] as const;
+export type SignaturePropertyTab = (typeof TABS)[number];
 
 const COLOR_MODES = ['Original', 'B & W', 'Halftone'] as const;
 type ColorMode = (typeof COLOR_MODES)[number];
@@ -40,6 +41,39 @@ function SegmentRow<T extends string>({
               onPress={() => onSelect(option)}
               style={[styles.segmentChip, active && styles.segmentChipActive]}>
               <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
+                {option}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function InlineSegmentRow<T extends string>({
+  label,
+  options,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  options: readonly T[];
+  selected: T;
+  onSelect: (value: T) => void;
+}) {
+  return (
+    <View style={styles.inlineRow}>
+      <Text style={styles.inlineLabel}>{label}</Text>
+      <View style={styles.inlineSegments}>
+        {options.map((option) => {
+          const active = option === selected;
+          return (
+            <Pressable
+              key={option}
+              onPress={() => onSelect(option)}
+              style={[styles.inlineChip, active && styles.segmentChipActive]}>
+              <Text style={[styles.inlineChipText, active && styles.segmentTextActive]} numberOfLines={1}>
                 {option}
               </Text>
             </Pressable>
@@ -133,63 +167,12 @@ function ColorRow({
   );
 }
 
-function PanelNote({ children }: { children: string }) {
-  return <Text style={styles.note}>{children}</Text>;
-}
-
-function ChooseClipartRow({ onPress }: { onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.chooseRow, pressed && styles.pressed]}>
-      <Text style={styles.rowLabel}>Clipart</Text>
-      <View style={styles.chooseRight}>
-        <Text style={styles.chooseLink} numberOfLines={1}>
-          Click to choose a new logo
-        </Text>
-        <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
-      </View>
-    </Pressable>
-  );
-}
-
-function InlineSegmentRow<T extends string>({
-  label,
-  options,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  options: readonly T[];
-  selected: T;
-  onSelect: (value: T) => void;
-}) {
-  return (
-    <View style={styles.inlineRow}>
-      <Text style={styles.inlineLabel}>{label}</Text>
-      <View style={styles.inlineSegments}>
-        {options.map((option) => {
-          const active = option === selected;
-          return (
-            <Pressable
-              key={option}
-              onPress={() => onSelect(option)}
-              style={[styles.inlineChip, active && styles.segmentChipActive]}>
-              <Text style={[styles.inlineChipText, active && styles.segmentTextActive]} numberOfLines={1}>
-                {option}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
 function DimensionSteppers({
   state,
   patch,
 }: {
-  state: ClipartElementState;
-  patch: (updates: Partial<ClipartElementState>) => void;
+  state: SignatureElementState;
+  patch: (updates: Partial<SignatureElementState>) => void;
 }) {
   return (
     <>
@@ -224,57 +207,34 @@ function DimensionSteppers({
   );
 }
 
-function useColorMode(state: ClipartElementState): ColorMode {
-  return state.colorMode === 'B & W' || state.colorMode === 'Halftone' ? state.colorMode : 'Original';
-}
-
-function applyTilePatch(
-  tile: boolean,
-  patch: (updates: Partial<ClipartElementState>) => void,
-  labelWidthMm: number,
-  labelHeightMm: number,
-) {
-  if (tile) {
-    patch({
-      tile: true,
-      left: 0,
-      top: 0,
-      width: labelWidthMm,
-      height: labelHeightMm,
-    });
-  } else {
-    patch({ tile: false });
-  }
-}
-
-function EffectTabBody({
+function ColorModeBlock({
   state,
   patch,
-  labelWidthMm,
-  labelHeightMm,
+  inline,
 }: {
-  state: ClipartElementState;
-  patch: (updates: Partial<ClipartElementState>) => void;
-  labelWidthMm: number;
-  labelHeightMm: number;
+  state: SignatureElementState;
+  patch: (updates: Partial<SignatureElementState>) => void;
+  inline?: boolean;
 }) {
-  const colorMode = useColorMode(state);
+  const colorMode = resolveEditorColorMode(state.colorMode) as ColorMode;
   const threshold = state.grayThreshold ?? 128;
-
   return (
     <>
-      <ToggleRow
-        label="Tile"
-        value={Boolean(state.tile)}
-        onValueChange={(tile) => applyTilePatch(tile, patch, labelWidthMm, labelHeightMm)}
-      />
-      <Divider />
-      <InlineSegmentRow
-        label="Color Mode"
-        options={COLOR_MODES}
-        selected={colorMode}
-        onSelect={(val) => patch({ colorMode: val })}
-      />
+      {inline ? (
+        <InlineSegmentRow
+          label="Color Mode"
+          options={COLOR_MODES}
+          selected={colorMode}
+          onSelect={(val) => patch({ colorMode: val })}
+        />
+      ) : (
+        <SegmentRow
+          label="Color Mode"
+          options={COLOR_MODES}
+          selected={colorMode}
+          onSelect={(val) => patch({ colorMode: val })}
+        />
+      )}
       {colorMode !== 'Original' ? (
         <>
           <Divider />
@@ -294,18 +254,18 @@ function EffectTabBody({
   );
 }
 
-export type ClipartPropertyPanelProps = {
-  activeTab: ClipartPropertyTab;
-  onTabChange: (tab: ClipartPropertyTab) => void;
-  state: ClipartElementState;
-  patch: (updates: Partial<ClipartElementState>) => void;
+export type SignaturePropertyPanelProps = {
+  activeTab: SignaturePropertyTab;
+  onTabChange: (tab: SignaturePropertyTab) => void;
+  state: SignatureElementState;
+  patch: (updates: Partial<SignatureElementState>) => void;
   labelWidthMm: number;
   labelHeightMm: number;
   elementHeightMm: number;
-  onChooseClipart: () => void;
+  onRedraw: () => void;
 };
 
-export function ClipartPropertyPanel({
+export function SignaturePropertyPanel({
   activeTab,
   onTabChange,
   state,
@@ -313,10 +273,8 @@ export function ClipartPropertyPanel({
   labelWidthMm,
   labelHeightMm,
   elementHeightMm,
-  onChooseClipart,
-}: ClipartPropertyPanelProps) {
-  const colorMode = useColorMode(state);
-
+  onRedraw,
+}: SignaturePropertyPanelProps) {
   return (
     <View style={styles.panel}>
       <ScrollView
@@ -338,20 +296,7 @@ export function ClipartPropertyPanel({
       <ScrollView style={styles.body} showsVerticalScrollIndicator={false} contentContainerStyle={styles.bodyContent}>
         {activeTab === 'Regular' && (
           <>
-            <ChooseClipartRow onPress={onChooseClipart} />
-            <Divider />
-            <ToggleRow
-              label="Tile"
-              value={Boolean(state.tile)}
-              onValueChange={(tile) => applyTilePatch(tile, patch, labelWidthMm, labelHeightMm)}
-            />
-            <Divider />
-            <SegmentRow
-              label="Color Mode"
-              options={COLOR_MODES}
-              selected={colorMode}
-              onSelect={(val) => patch({ colorMode: val })}
-            />
+            <ColorModeBlock state={state} patch={patch} inline />
             <Divider />
             <SegmentRow
               label="Rotation Angle"
@@ -378,9 +323,9 @@ export function ClipartPropertyPanel({
               selectedIndex={state.drawingColorIndex}
               onSelect={(drawingColorIndex) => patch({ drawingColorIndex })}
             />
-            <PanelNote>
+            <Text style={styles.note}>
               This color only acts on the preview effect, does not affect the printing effect.
-            </PanelNote>
+            </Text>
           </>
         )}
 
@@ -396,16 +341,17 @@ export function ClipartPropertyPanel({
           />
         )}
 
-        {activeTab === 'Clipart' && <ChooseClipartRow onPress={onChooseClipart} />}
-
-        {activeTab === 'Effect' && (
-          <EffectTabBody
-            state={state}
-            patch={patch}
-            labelWidthMm={labelWidthMm}
-            labelHeightMm={labelHeightMm}
-          />
+        {activeTab === 'Image' && (
+          <Pressable onPress={onRedraw} style={({ pressed }) => [styles.chooseRow, pressed && styles.pressed]}>
+            <Text style={styles.rowLabel}>Signature</Text>
+            <View style={styles.chooseRight}>
+              <Text style={styles.chooseLink}>Click to draw a new signature</Text>
+              <AppIcon name="chevron.right" tintColor="#B8C0C8" size={14} weight="semibold" />
+            </View>
+          </Pressable>
         )}
+
+        {activeTab === 'Effect' && <ColorModeBlock state={state} patch={patch} inline />}
       </ScrollView>
     </View>
   );

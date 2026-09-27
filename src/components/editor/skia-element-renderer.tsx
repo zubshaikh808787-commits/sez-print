@@ -1,10 +1,14 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import { type SharedValue, useDerivedValue } from 'react-native-reanimated';
 import {
+  AlphaType,
   Circle,
+  ColorType,
   DashPathEffect,
+  Fill,
   Group,
   Image,
+  ImageShader,
   Line,
   Paint,
   Path,
@@ -12,6 +16,7 @@ import {
   RoundedRect,
   Skia,
   Text,
+  TileMode,
   matchFont,
   rect,
   rrect,
@@ -41,6 +46,7 @@ import { generateQrMatrix } from '@/printing/renderer/qrcode';
 import { applySerialOffset, lineSpacingMultiplier } from '@/lib/serial-content';
 import { FONT_LIBRARY } from '@/constants/font-library';
 import { getClipartById } from '@/constants/clipart-library';
+import { applyMonoToRgba, resolveEditorColorMode } from '@/lib/editor/image-mono';
 import {
   ptToMm,
   type BorderElementState,
@@ -533,6 +539,10 @@ export const SkiaImageElement = memo(function SkiaImageElement({
   flipH = false,
   flipV = false,
   antiColor = false,
+  colorMode,
+  grayThreshold = 128,
+  tile = false,
+  contentFit = 'contain',
 }: {
   uri: string;
   widthPx: number;
@@ -540,31 +550,80 @@ export const SkiaImageElement = memo(function SkiaImageElement({
   flipH?: boolean;
   flipV?: boolean;
   antiColor?: boolean;
+  colorMode?: string;
+  grayThreshold?: number;
+  tile?: boolean;
+  contentFit?: 'fill' | 'contain' | 'cover';
 }) {
   const skiaImg = useImage(uri);
   const w = Math.max(1, widthPx);
   const h = Math.max(1, heightPx);
-
+  const mode = resolveEditorColorMode(colorMode);
+  const [processed, setProcessed] = useState(skiaImg);
+  useEffect(() => {
+    if (!skiaImg) {
+      setProcessed(null);
+      return;
+    }
+    if (mode === 'Original') {
+      setProcessed(skiaImg);
+      return;
+    }
+    const raster = skiaImg.makeNonTextureImage();
+    const width = raster.width();
+    const height = raster.height();
+    const pixels = raster.readPixels(0, 0, {
+      width,
+      height,
+      colorType: ColorType.RGBA_8888,
+      alphaType: AlphaType.Unpremul,
+    });
+    if (!pixels) {
+      setProcessed(skiaImg);
+      return;
+    }
+    const rgba = pixels instanceof Uint8Array ? new Uint8Array(pixels) : new Uint8Array(pixels as ArrayBuffer);
+    applyMonoToRgba(rgba, width, height, grayThreshold, mode);
+    const next = Skia.Image.MakeImage(
+      {
+        width,
+        height,
+        colorType: ColorType.RGBA_8888,
+        alphaType: AlphaType.Unpremul,
+      },
+      Skia.Data.fromBytes(rgba),
+      width * 4,
+    );
+    setProcessed(next ?? skiaImg);
+  }, [skiaImg, mode, grayThreshold, uri]);
   const transforms = useMemo(() => {
-    const list: any[] = [];
+    const list: { scaleX?: number; scaleY?: number; translateX?: number; translateY?: number }[] = [];
     if (flipH) list.push({ scaleX: -1 }, { translateX: -w });
     if (flipV) list.push({ scaleY: -1 }, { translateY: -h });
     return list;
   }, [flipH, flipV, w, h]);
+  const tileW = processed ? Math.max(8, processed.width()) : w;
+  const tileH = processed ? Math.max(8, processed.height()) : h;
+  const display = processed ?? skiaImg;
 
   return (
     <Group transform={transforms.length > 0 ? transforms : undefined}>
       {antiColor && <Rect x={0} y={0} width={w} height={h} color="#111827" />}
-      {skiaImg && (
-        <Image
-          image={skiaImg}
-          x={0}
-          y={0}
-          width={w}
-          height={h}
-          fit="contain"
-        />
-      )}
+      {display && !tile ? (
+        <Image image={display} x={0} y={0} width={w} height={h} fit={contentFit} />
+      ) : null}
+      {display && tile ? (
+        <Fill>
+          <ImageShader
+            image={display}
+            tx={TileMode.Repeat}
+            ty={TileMode.Repeat}
+            fit="none"
+            width={tileW}
+            height={tileH}
+          />
+        </Fill>
+      ) : null}
     </Group>
   );
 });
@@ -670,19 +729,20 @@ export const SkiaSignature = memo(function SkiaSignature({
   widthPx: number;
   heightPx: number;
 }) {
-  const color = inkColor(element.drawingColorIndex);
+  const mode = resolveEditorColorMode(element.colorMode);
+  const color = mode !== 'Original' ? DESIGN_INK : inkColor(element.drawingColorIndex);
   const path = useMemo(() => {
     const p = Skia.Path.Make();
     if (!element.strokes || element.strokes.length === 0) return p;
     for (const stroke of element.strokes) {
       if (stroke.points.length < 2) continue;
-      p.moveTo(stroke.points[0].x, stroke.points[0].y);
+      p.moveTo(stroke.points[0].x * widthPx, stroke.points[0].y * heightPx);
       for (let i = 1; i < stroke.points.length; i++) {
-        p.lineTo(stroke.points[i].x, stroke.points[i].y);
+        p.lineTo(stroke.points[i].x * widthPx, stroke.points[i].y * heightPx);
       }
     }
     return p;
-  }, [element.strokes]);
+  }, [element.strokes, widthPx, heightPx]);
 
   return <Path path={path} color={color} style="stroke" strokeWidth={2} strokeCap="round" strokeJoin="round" />;
 });
@@ -770,6 +830,10 @@ export const SkiaElementView = memo(function SkiaElementView({
           flipH={element.flipH}
           flipV={element.flipV}
           antiColor={element.antiColor}
+          colorMode={element.colorMode}
+          grayThreshold={element.grayThreshold ?? 128}
+          tile={Boolean(element.tile)}
+          contentFit={element.contentFit ?? 'contain'}
         />
       );
     case 'clipart':

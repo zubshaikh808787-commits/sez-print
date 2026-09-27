@@ -26,7 +26,7 @@ export type ImageCropResult = {
 
 export const editorBridge = {
   columnNameResult: null as string | null,
-  columnNameConsumer: null as 'qrcode' | 'arctext' | 'degrees' | 'text' | 'barcode' | null,
+  columnNameConsumer: null as 'qrcode' | 'arctext' | 'degrees' | 'text' | 'barcode' | 'image' | null,
   scanResult: null as ScanResult | null,
   ocrResult: null as OcrResult | null,
   asrResult: null as OcrResult | null,

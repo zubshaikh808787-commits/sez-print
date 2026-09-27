@@ -110,6 +110,10 @@ import {
   ClipartPropertyPanel,
   type ClipartPropertyTab,
 } from '@/components/editor/clipart-property-panel';
+import {
+  SignaturePropertyPanel,
+  type SignaturePropertyTab,
+} from '@/components/editor/signature-property-panel';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { ZoomableEditPad } from '@/components/editor/zoomable-edit-pad';
 import { EditingPad } from '@/components/editor/editing-pad';
@@ -283,7 +287,6 @@ const TOOL_ROWS: { icon: IconName; label: string }[][] = [
   ],
   [
     { icon: 'square.on.square', label: 'Label Clone' },
-    { icon: 'rectangle.split.2x1', label: '2ups Label' },
     { icon: 'square.dashed', label: 'Border' },
     { icon: 'signature', label: 'Signature' },
   ],
@@ -385,6 +388,7 @@ const PANEL_ELEMENT_TYPES: readonly ElementType[] = [
   'degrees',
   'image',
   'clipart',
+  'signature',
 ];
 
 function hasPropertyPanel(type: ElementType) {
@@ -525,6 +529,11 @@ function paletteDefaultSizeMm(
       const fit = fitShapeDefaults(canvas.widthMm, canvas.heightMm, elements);
       const circleSize = Math.min(fit.width, fit.height);
       return { widthMm: circleSize, heightMm: circleSize };
+    }
+    case 'signature': {
+      const fit = fitShapeDefaults(canvas.widthMm, canvas.heightMm, elements);
+      const size = Math.min(fit.width, fit.height);
+      return { widthMm: size, heightMm: size };
     }
     default: {
       const fit =
@@ -698,6 +707,7 @@ export default function EditScreen() {
   const [showTablePicker, setShowTablePicker] = useState(false);
   const [borderOptionsOpen, setBorderOptionsOpen] = useState(false);
   const [showSignatureBoard, setShowSignatureBoard] = useState(false);
+  const signatureBoardIntentRef = useRef<'create' | 'edit'>('create');
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [sizeModalVisible, setSizeModalVisible] = useState(false);
   const [draftWidthMm, setDraftWidthMm] = useState(50);
@@ -846,6 +856,7 @@ export default function EditScreen() {
   const [degreesTab, setDegreesTab] = useState<PropertyTab>('Regular');
   const [imageTab, setImageTab] = useState<ImagePropertyTab>('Regular');
   const [clipartTab, setClipartTab] = useState<ClipartPropertyTab>('Regular');
+  const [signatureTab, setSignatureTab] = useState<SignaturePropertyTab>('Regular');
 
   const [textEditId, setTextEditId] = useState<string | null>(null);
   const [textEditDraft, setTextEditDraft] = useState('');
@@ -1756,6 +1767,9 @@ export default function EditScreen() {
             needPrinting: true,
             antiColor: false,
             contentFit: tiled ? 'fill' : 'contain',
+            colorMode: 'B & W',
+            grayThreshold: 128,
+            contentType: 'Local Image',
             ...overrides,
           };
           break;
@@ -1817,6 +1831,8 @@ export default function EditScreen() {
             lockMovement: false,
             needPrinting: true,
             drawingColorIndex: 0,
+            colorMode: 'B & W',
+            grayThreshold: 128,
             ...overrides,
           };
           break;
@@ -1975,6 +1991,9 @@ export default function EditScreen() {
       case 'clipart':
         setClipartTab('Regular');
         break;
+      case 'signature':
+        setSignatureTab('Regular');
+        break;
       default:
         break;
     }
@@ -2041,9 +2060,7 @@ export default function EditScreen() {
 
       // e41f3aa: lightweight panel open — no tab resets or deferred transitions on touch-down.
       if (!multipleMode) {
-        if (element.type === 'signature') {
-          setShowSignatureBoard(true);
-        } else if (element.type === 'image') {
+        if (element.type === 'image') {
           setImageTab('Regular');
           setPanelOpen(true);
         } else if (element.type === 'clipart') {
@@ -2068,6 +2085,20 @@ export default function EditScreen() {
     ],
   );
 
+  const openPropertyPanelFor = useCallback((id: string) => {
+    const element = docRef.current.elements.find((el) => el.id === id);
+    if (!element) return;
+    topBarSelectionVisibleSv.value = 1;
+    bottomPanelVisibleSv.value = 1;
+    setSelectedIds([id]);
+    setPrimaryId(id);
+    if (element.type === 'border') {
+      return;
+    }
+    resetTabToRegularForElement(element.type);
+    setPanelOpen(true);
+  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, resetTabToRegularForElement]);
+
   const openPanelFor = useCallback((id: string) => {
     const element = docRef.current.elements.find((el) => el.id === id);
     if (!element) return;
@@ -2076,6 +2107,7 @@ export default function EditScreen() {
     setSelectedIds([id]);
     setPrimaryId(id);
     if (element.type === 'signature') {
+      signatureBoardIntentRef.current = 'edit';
       setShowSignatureBoard(true);
       return;
     }
@@ -3090,7 +3122,12 @@ export default function EditScreen() {
         if (consumer && tableCell) {
           patchTableCellAt(tableCell, { columnNameContent: value, contentType: 'Data Source' });
         } else if (consumer && selectedIdsRef.current.length === 1) {
-          patchElement(selectedIdsRef.current[0], { columnNameContent: value });
+          patchElement(
+            selectedIdsRef.current[0],
+            consumer === 'image'
+              ? { columnNameContent: value, contentType: 'Data Source' }
+              : { columnNameContent: value },
+          );
         }
       }
 
@@ -3190,7 +3227,8 @@ export default function EditScreen() {
       });
       return;
     }
-    if (!selectedElement || !('columnNameContent' in selectedElement)) return;
+    if (!selectedElement) return;
+    if (!('columnNameContent' in selectedElement) && selectedElement.type !== 'image') return;
     editorBridge.columnNameConsumer =
       selectedElement.type === 'text'
         ? 'text'
@@ -3200,10 +3238,15 @@ export default function EditScreen() {
         ? 'arctext'
         : selectedElement.type === 'degrees'
         ? 'degrees'
+        : selectedElement.type === 'image'
+        ? 'image'
         : 'qrcode';
     router.push({
       pathname: '/column-name',
-      params: { value: selectedElement.columnNameContent ?? '' },
+      params: {
+        value:
+          'columnNameContent' in selectedElement ? selectedElement.columnNameContent ?? '' : '',
+      },
     });
   }, [selectedElement]);
 
@@ -3250,6 +3293,10 @@ export default function EditScreen() {
         break;
       case 'Clipart':
         setClipartTab('Regular');
+        setPanelOpen(true);
+        break;
+      case 'Signature':
+        setSignatureTab('Regular');
         setPanelOpen(true);
         break;
       default:
@@ -3448,20 +3495,8 @@ export default function EditScreen() {
         saveDocument(false);
         router.push({ pathname: '/scan', params: { mode: 'labelClone' } });
         break;
-      case '2ups Label':
-        saveDocument(false);
-        router.push({
-          pathname: '/new-label-setup',
-          params: {
-            isTwoUps: 'true',
-            cloneFromId: docRef.current.id,
-            cloneName: docRef.current.name,
-            cloneWidth: String(docRef.current.widthMm),
-            cloneHeight: String(docRef.current.heightMm),
-          },
-        });
-        break;
       case 'Signature':
+        signatureBoardIntentRef.current = 'create';
         setShowSignatureBoard(true);
         break;
       default:
@@ -3470,13 +3505,25 @@ export default function EditScreen() {
   };
 
   const handleSignatureConfirm = (strokes: SignatureStroke[]) => {
+    const intent = signatureBoardIntentRef.current;
     const selectedSignature =
-      selectedElement && selectedElement.type === 'signature' ? selectedElement : null;
+      intent === 'edit'
+        ? (docRef.current.elements.find(
+            (el): el is Extract<LabelElement, { type: 'signature' }> =>
+              el.id === (primaryIdRef.current ?? selectedIdsRef.current[0]) && el.type === 'signature',
+          ) ?? null)
+        : null;
     if (selectedSignature) {
       patchElement(selectedSignature.id, { strokes });
     } else if (strokes.length > 0) {
-      const size = Math.min(doc.widthMm, doc.heightMm) * 0.6;
-      addElement('signature', { strokes, width: size, height: size });
+      const size = Math.min(docRef.current.widthMm, docRef.current.heightMm) * 0.6;
+      const added = addElement('signature', { strokes, width: size, height: size });
+      if (added) {
+        setSignatureTab('Regular');
+        setPanelOpen(true);
+        topBarSelectionVisibleSv.value = 1;
+        bottomPanelVisibleSv.value = 1;
+      }
     }
     setShowSignatureBoard(false);
   };
@@ -3596,7 +3643,7 @@ export default function EditScreen() {
           if (selectedIds.length > 1) {
             setPanelOpen(true);
           } else if (primaryElement) {
-            openPanelFor(primaryElement.id);
+            openPropertyPanelFor(primaryElement.id);
           }
         }}
         hitSlop={8}
@@ -3921,6 +3968,7 @@ export default function EditScreen() {
             labelHeightMm={labelBounds.heightMm}
             elementHeightMm={selectedElementHeightMm}
             onBusyChange={setImageIngesting}
+            onColumnNamePress={handleColumnNamePress}
           />
         );
       case 'clipart':
@@ -3938,6 +3986,22 @@ export default function EditScreen() {
                 clipartReplaceIdRef.current = targetEl.id;
               }
               router.push({ pathname: '/clipart', params: { from: 'edit' } });
+            }}
+          />
+        );
+      case 'signature':
+        return (
+          <SignaturePropertyPanel
+            activeTab={signatureTab}
+            onTabChange={setSignatureTab}
+            state={targetEl}
+            patch={patchSelected}
+            labelWidthMm={labelBounds.widthMm}
+            labelHeightMm={labelBounds.heightMm}
+            elementHeightMm={selectedElementHeightMm}
+            onRedraw={() => {
+              signatureBoardIntentRef.current = 'edit';
+              setShowSignatureBoard(true);
             }}
           />
         );
@@ -4389,7 +4453,9 @@ export default function EditScreen() {
       {showSignatureBoard && (
         <SignatureDrawingBoard
           initialStrokes={
-            selectedElement && selectedElement.type === 'signature'
+            signatureBoardIntentRef.current === 'edit' &&
+            selectedElement &&
+            selectedElement.type === 'signature'
               ? selectedElement.strokes
               : []
           }

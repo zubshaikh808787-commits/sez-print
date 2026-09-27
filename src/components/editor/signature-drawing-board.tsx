@@ -8,6 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 export type SignaturePoint = { x: number; y: number };
@@ -69,9 +70,10 @@ export function SignatureDrawingBoard({
   onConfirm,
   initialStrokes = [],
 }: SignatureDrawingBoardProps) {
+  const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
-  const modalWidth = Math.min(screenWidth * 0.88, 340);
-  const canvasSize = modalWidth - 32;
+  const modalWidth = Math.min(screenWidth - 24, screenWidth);
+  const canvasSize = Math.min(modalWidth - 32, 320);
 
   const canvasSizeRef = useRef({ width: canvasSize, height: canvasSize });
   canvasSizeRef.current = { width: canvasSize, height: canvasSize };
@@ -151,8 +153,16 @@ export function SignatureDrawingBoard({
     <View style={styles.overlay} pointerEvents="box-none">
       <Pressable style={styles.backdrop} onPress={onCancel} />
 
-      <View style={[styles.stack, { width: modalWidth }]}>
-        <View style={[styles.modal, { width: modalWidth }]}>
+      <View
+        style={[
+          styles.stack,
+          {
+            width: screenWidth,
+            paddingBottom: Math.max(12, insets.bottom),
+            paddingHorizontal: 12,
+          },
+        ]}>
+        <View style={styles.modal}>
           <View style={styles.headerRow}>
             <Pressable
               onPress={handleUndo}
@@ -245,15 +255,36 @@ type SignaturePreviewProps = {
   strokes: SignatureStroke[];
   width: number;
   height: number;
+  color?: string;
 };
 
-export function SignaturePreview({ strokes, width, height }: SignaturePreviewProps) {
+export function SignaturePreview({
+  strokes,
+  width,
+  height,
+  color = STROKE_COLOR,
+}: SignaturePreviewProps) {
   const pixelStrokes = useMemo(
     () => denormalizeStrokes(strokes, width, height),
     [height, strokes, width],
   );
 
-  if (pixelStrokes.length === 0) return null;
+  if (pixelStrokes.length === 0) {
+    return (
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            borderWidth: 1,
+            borderStyle: 'dashed',
+            borderColor: '#CBD5E1',
+            backgroundColor: 'rgba(248,250,252,0.6)',
+          },
+        ]}
+      />
+    );
+  }
 
   return (
     <Svg
@@ -267,7 +298,7 @@ export function SignaturePreview({ strokes, width, height }: SignaturePreviewPro
         <Path
           key={`preview-stroke-${index}`}
           d={pointsToPath(stroke.points)}
-          stroke={STROKE_COLOR}
+          stroke={color}
           strokeWidth={stroke.strokeWidth}
           fill="none"
           strokeLinecap="round"
@@ -282,7 +313,7 @@ const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     zIndex: 60,
   },
   backdrop: {
@@ -296,7 +327,8 @@ const styles = StyleSheet.create({
   },
   modal: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 10,
+    borderRadius: 16,
+    width: '100%',
     paddingTop: 14,
     paddingHorizontal: 16,
     paddingBottom: 16,

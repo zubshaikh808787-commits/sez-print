@@ -40,7 +40,6 @@ export const TOOL_ROWS: { icon: AppIconName; label: string }[][] = [
   ],
   [
     { icon: 'square.on.square', label: 'Label Clone' },
-    { icon: 'rectangle.split.2x1', label: '2ups Label' },
     { icon: 'square.dashed', label: 'Border' },
     { icon: 'signature', label: 'Signature' },
   ],

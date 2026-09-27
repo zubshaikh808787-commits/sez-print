@@ -245,16 +245,44 @@ export function thresholdGray(src: GrayBitmap, threshold = 128): RenderedBitmap 
   };
 }
 
+export function binarizeGray8(src: GrayBitmap, threshold = 128): GrayBitmap {
+  const t = Math.max(0, Math.min(255, threshold));
+  const gray = new Uint8Array(src.gray.length);
+  for (let i = 0; i < src.gray.length; i++) {
+    gray[i] = src.gray[i] < t ? 0 : 255;
+  }
+  return { width: src.width, height: src.height, gray };
+}
+
+/** Repeat src across destW×destH (photo tiling). */
+export function tileGray(src: GrayBitmap, destW: number, destH: number): GrayBitmap {
+  const w = Math.max(1, Math.round(destW));
+  const h = Math.max(1, Math.round(destH));
+  const tw = Math.max(1, src.width);
+  const th = Math.max(1, src.height);
+  const gray = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const sy = y % th;
+    const srcRow = sy * tw;
+    const destRow = y * w;
+    for (let x = 0; x < w; x++) {
+      gray[destRow + x] = src.gray[srcRow + (x % tw)];
+    }
+  }
+  return { width: w, height: h, gray };
+}
+
 /** Floyd–Steinberg. Do not use for barcodes, QR, or text. */
-export function ditherGray(src: GrayBitmap): GrayBitmap {
+export function ditherGray(src: GrayBitmap, threshold = 128): GrayBitmap {
   const { width, height } = src;
   const gray = Int16Array.from(src.gray);
   const out = new Uint8Array(width * height);
+  const t = Math.max(0, Math.min(255, threshold));
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
       const old = Math.max(0, Math.min(255, gray[i]));
-      const next = old < 128 ? 0 : 255;
+      const next = old < t ? 0 : 255;
       out[i] = next;
       const err = old - next;
       if (x + 1 < width) gray[i + 1] += (err * 7) / 16;

@@ -66,6 +66,7 @@ export type ImageElementData = {
   gray: GrayBitmap;
   fit: ImageFitMode;
   dither?: boolean;
+  threshold?: number;
 };
 
 export type BarcodeElementData = {

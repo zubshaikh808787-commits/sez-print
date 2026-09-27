@@ -7,11 +7,14 @@ import { router } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
 import { PositionControls } from '@/components/editor/position-controls';
 import { formatMm, normalizeRotation } from '@/components/editor/types';
+import { GrayThresholdSlider } from '@/components/editor/gray-threshold-slider';
 import type { ImageElementState } from '@/lib/label-document';
+import { resolveEditorColorMode } from '@/lib/editor/image-mono';
 
 const ACCENT = '#48C3C7';
-const TABS = ['Regular', 'Position', 'Rotate'] as const;
+const TABS = ['Regular', 'Position', 'Image', 'Effect'] as const;
 export type ImagePropertyTab = (typeof TABS)[number];
+const COLOR_MODES = ['Original', 'B & W', 'Halftone'] as const;
 
 function Divider() {
   return <View style={styles.divider} />;
@@ -117,6 +120,7 @@ export type ImagePropertyPanelProps = {
   labelHeightMm: number;
   elementHeightMm: number;
   onBusyChange?: (busy: boolean) => void;
+  onColumnNamePress?: () => void;
 };
 
 export function ImagePropertyPanel({
@@ -127,6 +131,7 @@ export function ImagePropertyPanel({
   labelWidthMm,
   labelHeightMm,
   elementHeightMm,
+  onColumnNamePress,
 }: ImagePropertyPanelProps) {
   const currentRotation = normalizeRotation(state.rotation ?? 0);
   const isAspectLocked = state.aspectRatioLocked ?? true;
@@ -241,6 +246,24 @@ export function ImagePropertyPanel({
     [state.height, isAspectLocked, currentAspect, patch],
   );
 
+  const colorMode = resolveEditorColorMode(state.colorMode);
+  const threshold = state.grayThreshold ?? 128;
+  const contentType = state.contentType === 'Data Source' ? 'Data Source' : 'Local Image';
+  const applyTile = (tile: boolean) => {
+    if (tile) {
+      patch({
+        tile: true,
+        left: 0,
+        top: 0,
+        width: labelWidthMm,
+        height: labelHeightMm,
+        contentFit: 'fill',
+      });
+    } else {
+      patch({ tile: false });
+    }
+  };
+
   return (
     <View style={styles.panel}>
       <ScrollView
@@ -265,7 +288,107 @@ export function ImagePropertyPanel({
         contentContainerStyle={styles.bodyContent}>
         {activeTab === 'Regular' && (
           <>
-            {/* Quick Actions: Preview, Crop, Replace, 90° Rotate */}
+            <SegmentRow
+              label="Content Type"
+              options={['Local Image', 'Data Source'] as const}
+              selected={contentType}
+              onSelect={(val) => patch({ contentType: val })}
+            />
+            {contentType === 'Data Source' ? (
+              <Pressable
+                onPress={onColumnNamePress}
+                style={({ pressed }) => [styles.chooseRow, pressed && styles.pressed]}>
+                <Text style={styles.rowLabel}>Column</Text>
+                <Text style={styles.chooseLink}>{state.columnNameContent || 'Select column'}</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={handleReplaceImage}
+                style={({ pressed }) => [styles.chooseRow, pressed && styles.pressed]}>
+                <Text style={styles.rowLabel}>Image</Text>
+                <Text style={styles.chooseLink}>Click to choose a new image</Text>
+              </Pressable>
+            )}
+            <ToggleRow
+              label="Tile"
+              value={Boolean(state.tile)}
+              onValueChange={applyTile}
+            />
+            <SegmentRow
+              label="Color Mode"
+              options={COLOR_MODES}
+              selected={colorMode}
+              onSelect={(val) => patch({ colorMode: val })}
+            />
+            {colorMode !== 'Original' ? (
+              <View style={styles.thresholdBlock}>
+                <View style={styles.thresholdHeader}>
+                  <Text style={styles.rowLabel}>Gray Threshold</Text>
+                  <Text style={styles.thresholdValue}>{threshold}</Text>
+                </View>
+                <GrayThresholdSlider
+                  value={threshold}
+                  onChange={(grayThreshold) => patch({ grayThreshold })}
+                />
+              </View>
+            ) : null}
+            <SegmentRow
+              label="Rotation Angle"
+              options={['0°', '90°', '180°', '270°'] as const}
+              selected={`${currentRotation}°`}
+              onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
+            />
+            <StepperRow
+              label="Left"
+              value={formatMm(state.left)}
+              onMinus={() => patch({ left: Math.max(0, state.left - 0.1) })}
+              onPlus={() => patch({ left: state.left + 0.1 })}
+            />
+            <StepperRow
+              label="Top"
+              value={formatMm(state.top)}
+              onMinus={() => patch({ top: Math.max(0, state.top - 0.1) })}
+              onPlus={() => patch({ top: state.top + 0.1 })}
+            />
+            <StepperRow
+              label="Width"
+              value={formatMm(state.width)}
+              onMinus={() => handleWidthChange(-0.5)}
+              onPlus={() => handleWidthChange(0.5)}
+            />
+            <StepperRow
+              label="Height"
+              value={formatMm(state.height)}
+              onMinus={() => handleHeightChange(-0.5)}
+              onPlus={() => handleHeightChange(0.5)}
+            />
+            <ToggleRow
+              label="Lock Movement"
+              value={state.lockMovement}
+              onValueChange={(lockMovement) => patch({ lockMovement })}
+            />
+            <ToggleRow
+              label="Need Printing"
+              value={state.needPrinting}
+              onValueChange={(needPrinting) => patch({ needPrinting })}
+            />
+          </>
+        )}
+
+        {activeTab === 'Position' && (
+          <PositionControls
+            left={state.left}
+            top={state.top}
+            width={state.width}
+            height={elementHeightMm}
+            labelWidthMm={labelWidthMm}
+            labelHeightMm={labelHeightMm}
+            onPatch={patch}
+          />
+        )}
+
+        {activeTab === 'Image' && (
+          <>
             <GraySection>
               <View style={styles.previewRow}>
                 {state.uri ? (
@@ -317,12 +440,7 @@ export function ImagePropertyPanel({
                   </View>
                 </View>
               </View>
-            </GraySection>
-
-            <SectionGap />
-
-            {/* Mirror / Flip Controls */}
-            <GraySection>
+              <Divider />
               <Text style={styles.rowLabel}>Mirror & Orientation</Text>
               <View style={[styles.segmentRow, { marginTop: 6 }]}>
                 <Pressable
@@ -340,12 +458,7 @@ export function ImagePropertyPanel({
                   </Text>
                 </Pressable>
               </View>
-            </GraySection>
-
-            <SectionGap />
-
-            {/* Fit Mode & Sizing Tools */}
-            <GraySection>
+              <Divider />
               <SegmentRow
                 label="Content Fit"
                 options={['fill', 'contain', 'cover'] as const}
@@ -366,12 +479,6 @@ export function ImagePropertyPanel({
                   <AppIcon name="arrow.left.and.right" tintColor={ACCENT} size={15} />
                   <Text style={styles.toolChipText}>Fit Width</Text>
                 </Pressable>
-                <Pressable
-                  onPress={handleCenter}
-                  style={({ pressed }) => [styles.toolChip, pressed && styles.pressed]}>
-                  <AppIcon name="align.horizontal.center" tintColor={ACCENT} size={15} />
-                  <Text style={styles.toolChipText}>Center</Text>
-                </Pressable>
               </View>
               <Divider />
               <ToggleRow
@@ -379,115 +486,39 @@ export function ImagePropertyPanel({
                 value={isAspectLocked}
                 onValueChange={(locked) => patch({ aspectRatioLocked: locked })}
               />
-              <Divider />
-              <StepperRow
-                label="Width"
-                value={formatMm(state.width)}
-                onMinus={() => handleWidthChange(-0.5)}
-                onPlus={() => handleWidthChange(0.5)}
-              />
-              <Divider />
-              <StepperRow
-                label="Height"
-                value={formatMm(state.height)}
-                onMinus={() => handleHeightChange(-0.5)}
-                onPlus={() => handleHeightChange(0.5)}
-              />
-            </GraySection>
-
-            <SectionGap />
-
-            {/* Color & Thermal Printing Mode */}
-            <GraySection>
-              <SegmentRow
-                label="Color Mode"
-                options={['Original', 'B & W'] as const}
-                selected={state.colorMode === 'B & W' ? 'B & W' : 'Original'}
-                onSelect={(val) => patch({ colorMode: val })}
-              />
-              {state.colorMode === 'B & W' ? (
-                <>
-                  <Divider />
-                  <StepperRow
-                    label="Gray Threshold"
-                    value={String(state.grayThreshold ?? 128)}
-                    onMinus={() => patch({ grayThreshold: Math.max(10, (state.grayThreshold ?? 128) - 10) })}
-                    onPlus={() => patch({ grayThreshold: Math.min(250, (state.grayThreshold ?? 128) + 10) })}
-                  />
-                </>
-              ) : null}
-              <Divider />
-              <ToggleRow
-                label="Invert Colors (Anti-Color)"
-                value={state.antiColor}
-                onValueChange={(antiColor) => patch({ antiColor })}
-              />
-            </GraySection>
-
-            <SectionGap />
-
-            {/* Lock Movement & Printing */}
-            <GraySection>
-              <ToggleRow
-                label="Lock Movement"
-                value={state.lockMovement}
-                onValueChange={(lockMovement) => patch({ lockMovement })}
-              />
-              <Divider />
-              <ToggleRow
-                label="Need Printing"
-                value={state.needPrinting}
-                onValueChange={(needPrinting) => patch({ needPrinting })}
-              />
             </GraySection>
           </>
         )}
 
-        {activeTab === 'Position' && (
-          <PositionControls
-            left={state.left}
-            top={state.top}
-            width={state.width}
-            height={elementHeightMm}
-            labelWidthMm={labelWidthMm}
-            labelHeightMm={labelHeightMm}
-            onPatch={patch}
-          />
-        )}
-
-        {activeTab === 'Rotate' && (
+        {activeTab === 'Effect' && (
           <GraySection>
             <SegmentRow
-              label={`Rotation Preset (${currentRotation}°)`}
-              options={['0°', '90°', '180°', '270°'] as const}
-              selected={`${currentRotation}°`}
-              onSelect={(value) => patch({ rotation: normalizeRotation(parseInt(value, 10)) })}
+              label="Color Mode"
+              options={COLOR_MODES}
+              selected={colorMode}
+              onSelect={(val) => patch({ colorMode: val })}
             />
+            {colorMode !== 'Original' ? (
+              <>
+                <Divider />
+                <View style={styles.thresholdBlock}>
+                  <View style={styles.thresholdHeader}>
+                    <Text style={styles.rowLabel}>Gray Threshold</Text>
+                    <Text style={styles.thresholdValue}>{threshold}</Text>
+                  </View>
+                  <GrayThresholdSlider
+                    value={threshold}
+                    onChange={(grayThreshold) => patch({ grayThreshold })}
+                  />
+                </View>
+              </>
+            ) : null}
             <Divider />
-            <StepperRow
-              label="Adjust Angle (+/- 5°)"
-              value={`${currentRotation}°`}
-              onMinus={() => {
-                patch({ rotation: normalizeRotation(currentRotation - 5) });
-              }}
-              onPlus={() => {
-                patch({ rotation: normalizeRotation(currentRotation + 5) });
-              }}
+            <ToggleRow
+              label="Invert Colors (Anti-Color)"
+              value={state.antiColor}
+              onValueChange={(antiColor) => patch({ antiColor })}
             />
-            <Divider />
-            <View style={styles.actionRow}>
-              <Pressable
-                onPress={() => patch({ rotation: 0 })}
-                style={({ pressed }) => [styles.actionButton, styles.replaceButton, pressed && styles.pressed]}>
-                <Text style={styles.replaceButtonText}>Reset to 0°</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleRotate90}
-                style={({ pressed }) => [styles.actionButton, styles.cropButton, pressed && styles.pressed]}>
-                <AppIcon name="arrow.clockwise" tintColor="#FFFFFF" size={15} />
-                <Text style={styles.cropButtonText}>Rotate +90°</Text>
-              </Pressable>
-            </View>
           </GraySection>
         )}
       </ScrollView>
@@ -731,8 +762,78 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    minHeight: 44,
   },
   pressed: {
     opacity: 0.75,
+  },
+  chooseRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  chooseLink: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: ACCENT,
+    flexShrink: 1,
+    textAlign: 'right',
+  },
+  thresholdBlock: {
+    paddingVertical: 8,
+  },
+  thresholdHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  thresholdValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2C3E50',
+  },
+  sliderBlock: {
+    position: 'relative',
+    height: 20,
+    justifyContent: 'center',
+  },
+  sliderTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E2E8F0',
+    position: 'relative',
+  },
+  sliderFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 2,
+    backgroundColor: ACCENT,
+  },
+  sliderThumb: {
+    position: 'absolute',
+    top: -8,
+    marginLeft: -10,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: ACCENT,
+  },
+  sliderTicks: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+  },
+  sliderTickHit: {
+    flex: 1,
   },
 });

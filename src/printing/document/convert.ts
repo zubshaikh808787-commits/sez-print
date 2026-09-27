@@ -34,6 +34,7 @@ import { encodeModeToSymbology } from '@/lib/barcode-code128';
 import { applySerialOffset } from '@/lib/serial-content';
 import { logPrintTrace } from '@/printing/trace';
 import { dotsPerMm as dotsPerMmForDpi } from '@/lib/printer/print-spec';
+import { binarizeGray8, tileGray } from '@/printing/raster/bitmap';
 
 export type ConvertOptions = {
   /**
@@ -284,9 +285,20 @@ async function convertImage(
   }
 
   const fit: ImageFitMode = el.contentFit === 'contain' ? 'fit' : el.contentFit === 'cover' ? 'fill' : 'stretch';
-  const dither = el.colorMode === 'Halftone';
+  const colorMode = el.colorMode === 'Original' || el.colorMode === 'Halftone' ? el.colorMode : 'B & W';
+  const threshold = el.grayThreshold ?? 128;
+  let processed = gray;
+  if (colorMode === 'B & W') {
+    processed = binarizeGray8(gray, threshold);
+  }
+  if (el.tile) {
+    const dw = Math.max(1, Math.round(el.width * ctx.dotsPerMm));
+    const dh = Math.max(1, Math.round(el.height * ctx.dotsPerMm));
+    processed = tileGray(processed, dw, dh);
+  }
+  const dither = colorMode === 'Halftone';
 
-  const data: ImageElementData = { gray, fit, dither };
+  const data: ImageElementData = { gray: processed, fit, dither, threshold };
   return { ...base, type: 'image', data };
 }
 

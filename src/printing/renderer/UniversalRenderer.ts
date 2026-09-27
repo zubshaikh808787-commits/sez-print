@@ -109,7 +109,7 @@ export function renderPrintDocument(
     if (el.type === 'image' && isImageData(el.data)) {
       let src = el.data.gray;
       if (el.data.dither || (config.ditherPhotos && el.data.fit !== 'original')) {
-        src = ditherGray(src);
+        src = ditherGray(src, el.data.threshold ?? 128);
       }
       blitGray(canvas, src, box.x0, box.y0, box.widthDots, box.heightDots, el.data.fit);
       continue;

@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, Platform } from 'react-native';
 import Svg, {
@@ -16,8 +15,14 @@ import QRCode from 'react-native-qrcode-svg';
 
 import { ClipartIcon } from '@/components/clipart-icon';
 import { SignaturePreview } from '@/components/editor/signature-drawing-board';
+import { MonoImagePreview } from '@/components/editor/mono-image-preview';
 import { BorderPreview } from '@/components/border-preview';
 import { formatDataSourceColumn } from '@/lib/editor/data-source-display';
+import {
+  looksLikeImageUri,
+  resolveEditorColorMode,
+} from '@/lib/editor/image-mono';
+import { useDataStore } from '@/stores/data-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { getClipartById } from '@/constants/clipart-library';
 import {
@@ -978,6 +983,49 @@ function ArcTextContent({
   );
 }
 
+function ImageContent({
+  element,
+  widthPx,
+  heightPx,
+  forPrint,
+}: {
+  element: Extract<LabelElement, { type: 'image' }>;
+  widthPx: number;
+  heightPx: number;
+  forPrint?: boolean;
+}) {
+  const excelFiles = useDataStore((s) => s.excelFiles);
+  const activeRow = useDataStore((s) => s.activeRowIndex);
+  let displayUri = forPrint ? element.printUri || element.uri : element.uri;
+  if (!forPrint && element.contentType === 'Data Source' && element.columnNameContent) {
+    for (const file of excelFiles) {
+      const sheet = file.sheets[file.activeSheetIndex] ?? file.sheets[0];
+      if (!sheet) continue;
+      const idx = sheet.columns.indexOf(element.columnNameContent);
+      if (idx < 0) continue;
+      const value = String(sheet.rows[activeRow]?.[idx] ?? '');
+      if (looksLikeImageUri(value)) {
+        displayUri = value;
+        break;
+      }
+    }
+  }
+  return (
+    <MonoImagePreview
+      uri={displayUri}
+      widthPx={widthPx}
+      heightPx={heightPx}
+      colorMode={element.colorMode}
+      grayThreshold={element.grayThreshold ?? 128}
+      tile={Boolean(element.tile)}
+      contentFit={element.contentFit ?? 'contain'}
+      flipH={element.flipH}
+      flipV={element.flipV}
+      antiColor={element.antiColor}
+    />
+  );
+}
+
 export function ElementContentView({
   element,
   widthPx,
@@ -1028,37 +1076,15 @@ export function ElementContentView({
       return (
         <ArcTextContent element={element} widthPx={widthPx} heightPx={heightPx} scale={scale} />
       );
-    case 'image': {
-      const transforms: ({ scaleX: number } | { scaleY: number })[] = [];
-      if (element.flipH) transforms.push({ scaleX: -1 });
-      if (element.flipV) transforms.push({ scaleY: -1 });
-      const fit = element.contentFit ?? 'fill';
-      const displayUri = forPrint ? element.printUri || element.uri : element.uri;
-      const decodeW = Math.max(
-        1,
-        Math.round(forPrint ? widthPx : element.workingWidthPx ?? widthPx),
-      );
-      const decodeH = Math.max(
-        1,
-        Math.round(forPrint ? heightPx : element.workingHeightPx ?? heightPx),
-      );
+    case 'image':
       return (
-        <View style={[styles.fill, element.antiColor && styles.antiBg]}>
-          <Image
-            source={{ uri: displayUri, width: decodeW, height: decodeH }}
-            style={[
-              styles.fill,
-              transforms.length > 0 ? { transform: transforms } : null,
-              element.colorMode === 'B & W' ? { tintColor: '#111827' } : null,
-            ]}
-            contentFit={fit}
-            cachePolicy="memory-disk"
-            recyclingKey={`${element.id}:${displayUri}`}
-            priority={forPrint ? 'high' : 'normal'}
-          />
-        </View>
+        <ImageContent
+          element={element}
+          widthPx={widthPx}
+          heightPx={heightPx}
+          forPrint={forPrint}
+        />
       );
-    }
     case 'clipart': {
       const sticker = getClipartById(element.clipartId);
       const previewColor =
@@ -1121,12 +1147,21 @@ export function ElementContentView({
         </View>
       );
     }
-    case 'signature':
+    case 'signature': {
+      const mode = resolveEditorColorMode(element.colorMode);
+      const color =
+        forPrint || mode !== 'Original' ? DESIGN_INK : inkColor(element.drawingColorIndex);
       return (
         <View style={styles.fill}>
-          <SignaturePreview strokes={element.strokes} width={widthPx} height={heightPx} />
+          <SignaturePreview
+            strokes={element.strokes}
+            width={widthPx}
+            height={heightPx}
+            color={color}
+          />
         </View>
       );
+    }
     default:
       return null;
   }

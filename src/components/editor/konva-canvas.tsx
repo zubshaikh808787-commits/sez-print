@@ -488,11 +488,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   const sortedElements = useMemo(() => sortLayers(doc.elements), [doc.elements]);
 
   const gridLiveElementId = selectedIds.length === 1 ? selectedIds[0] : null;
-  const gridLiveRotation = useMemo(() => {
-    if (!gridLiveElementId) return 0;
-    const anchor = sortedElements.find((el) => el.id === gridLiveElementId);
-    return anchor && 'rotation' in anchor ? (anchor.rotation ?? 0) : 0;
-  }, [gridLiveElementId, sortedElements]);
 
   const chrome = useMemo<ElementChrome>(
     () => ({
@@ -648,7 +643,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
           {showGrid
             ? sortedElements.map((el) => {
                 if (el.visible === false || el.id === gridLiveElementId) return null;
-                const rotation = 'rotation' in el ? (el.rotation ?? 0) : 0;
                 const size = elementSizeMm(el);
                 return (
                   <GridStaticPlate
@@ -658,7 +652,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
                     widthPx={Math.max(1, size.width * pxPerMM)}
                     heightPx={Math.max(1, size.height * pxPerMM)}
                     color={stickerFillColor}
-                    rotationDeg={rotation}
+                    rotationDeg={0}
                   />
                 );
               })
@@ -669,7 +663,7 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
               showGridSv={showGridSv}
               pxPerMM={pxPerMM}
               color={stickerFillColor}
-              rotationDeg={gridLiveRotation}
+              rotationDeg={0}
             />
           ) : null}
         </View>
