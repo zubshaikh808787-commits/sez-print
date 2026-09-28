@@ -7,7 +7,26 @@
 
 import { fillEllipse, fillRect, makeDotSurface, strokeRect, type DotSurface } from './dot-surface';
 
-export type RasterSurfaceBackend = 'skia' | 'dot-buffer';
+export type TextDrawRecord = {
+  text: string;
+  x: number;
+  y: number;
+  fontSizeDots: number;
+  family?: string;
+  bold?: boolean;
+  italic?: boolean;
+  backend: RasterSurfaceBackend;
+};
+
+let textDrawLog: TextDrawRecord[] = [];
+
+export function resetTextDrawLog(): void {
+  textDrawLog = [];
+}
+
+export function getTextDrawLog(): TextDrawRecord[] {
+  return textDrawLog.slice();
+}
 
 export type TextDrawStyle = {
   fontSizeDots: number;
@@ -26,6 +45,8 @@ export type RasterSurface = {
   fillEllipse: (cx: number, cy: number, rx: number, ry: number, gray: number) => void;
   drawTextLine: (text: string, x: number, y: number, style: TextDrawStyle) => void;
   measureTextWidth: (text: string, style: TextDrawStyle) => number;
+  /** Clockwise about (cx, cy), matching a React Native view rotate. No-op at multiples of 360. */
+  withRotation: (cx: number, cy: number, degrees: number, draw: () => void) => void;
   readGray: () => Uint8Array;
 };
 
@@ -70,6 +91,10 @@ type SkiaCanvas = {
   drawRect: (rect: unknown, paint: SkiaPaint) => void;
   drawOval: (rect: unknown, paint: SkiaPaint) => void;
   drawText: (text: string, x: number, y: number, paint: SkiaPaint, font: SkiaFont) => void;
+  save?: () => void;
+  restore?: () => void;
+  translate?: (x: number, y: number) => void;
+  rotate?: (degrees: number, px?: number, py?: number) => void;
 };
 
 type SkiaPaint = {
@@ -136,7 +161,7 @@ function makeSkiaRasterSurface(widthDots: number, heightDots: number, skiaMod: S
     let font = fontCache.get(key);
     if (!font) {
       font = matchFont({
-        fontFamily: style.family ?? 'sans-serif',
+        ...(style.family ? { fontFamily: style.family } : {}),
         fontSize: style.fontSizeDots,
         fontWeight: style.bold ? 'bold' : 'normal',
         fontStyle: style.italic ? 'italic' : 'normal',
@@ -179,13 +204,45 @@ function makeSkiaRasterSurface(widthDots: number, heightDots: number, skiaMod: S
       );
     },
     drawTextLine(text, x, y, style) {
+      textDrawLog.push({
+        text,
+        x,
+        y,
+        fontSizeDots: style.fontSizeDots,
+        family: style.family,
+        bold: style.bold,
+        italic: style.italic,
+        backend: 'skia',
+      });
       const font = fontFor(style);
       fillPaint.setColor(grayToColor(skiaMod, style.ink));
       fillPaint.setStyle(PaintStyle.Fill);
+      fillPaint.setAntiAlias(true);
       canvas.drawText(text, x, y + style.fontSizeDots, fillPaint, font);
+      fillPaint.setAntiAlias(false);
     },
     measureTextWidth(text, style) {
       return fontFor(style).measureText(text).width;
+    },
+    withRotation(cx, cy, degrees, draw) {
+      const turns = ((degrees % 360) + 360) % 360;
+      if (turns < 1e-4) {
+        draw();
+        return;
+      }
+      if (typeof canvas.save !== 'function' || typeof canvas.rotate !== 'function') {
+        draw();
+        return;
+      }
+      canvas.save();
+      canvas.translate?.(cx, cy);
+      canvas.rotate(degrees, 0, 0);
+      canvas.translate?.(-cx, -cy);
+      try {
+        draw();
+      } finally {
+        canvas.restore?.();
+      }
     },
     readGray() {
       surface.flush();
@@ -203,33 +260,118 @@ function makeSkiaRasterSurface(widthDots: number, heightDots: number, skiaMod: S
 }
 
 function makeDotRasterSurface(dot: DotSurface): RasterSurface {
+  let rot: { cx: number; cy: number; cos: number; sin: number } | null = null;
+
+  function mapPoint(x: number, y: number): { x: number; y: number } {
+    if (!rot) return { x, y };
+    const dx = x - rot.cx;
+    const dy = y - rot.cy;
+    return {
+      x: rot.cx + dx * rot.cos - dy * rot.sin,
+      y: rot.cy + dx * rot.sin + dy * rot.cos,
+    };
+  }
+
+  function putDot(x: number, y: number, gray: number): void {
+    const ix = Math.round(x);
+    const iy = Math.round(y);
+    if (ix < 0 || iy < 0 || ix >= dot.width || iy >= dot.height) return;
+    dot.gray[iy * dot.width + ix] = gray < 0 ? 0 : gray > 255 ? 255 : gray;
+  }
+
+  function paintRect(x: number, y: number, w: number, h: number, gray: number): void {
+    if (!rot) {
+      fillRect(dot, x, y, w, h, gray);
+      return;
+    }
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    const x1 = Math.ceil(x + w);
+    const y1 = Math.ceil(y + h);
+    for (let py = y0; py < y1; py++) {
+      for (let px = x0; px < x1; px++) {
+        const p = mapPoint(px + 0.5, py + 0.5);
+        putDot(p.x, p.y, gray);
+      }
+    }
+  }
+
+  function paintEllipse(cx: number, cy: number, rx: number, ry: number, gray: number): void {
+    if (!rot) {
+      fillEllipse(dot, cx, cy, rx, ry, gray);
+      return;
+    }
+    const x0 = Math.floor(cx - rx);
+    const y0 = Math.floor(cy - ry);
+    const x1 = Math.ceil(cx + rx);
+    const y1 = Math.ceil(cy + ry);
+    for (let py = y0; py < y1; py++) {
+      for (let px = x0; px < x1; px++) {
+        const nx = (px + 0.5 - cx) / Math.max(1, rx);
+        const ny = (py + 0.5 - cy) / Math.max(1, ry);
+        if (nx * nx + ny * ny > 1) continue;
+        const p = mapPoint(px + 0.5, py + 0.5);
+        putDot(p.x, p.y, gray);
+      }
+    }
+  }
+
   return {
     backend: 'dot-buffer',
     width: dot.width,
     height: dot.height,
-    fillRect(x, y, w, h, gray) {
-      fillRect(dot, x, y, w, h, gray);
-    },
+    fillRect: paintRect,
     strokeRect(x, y, w, h, stroke, gray) {
-      strokeRect(dot, x, y, w, h, stroke, gray);
+      if (!rot) {
+        strokeRect(dot, x, y, w, h, stroke, gray);
+        return;
+      }
+      const t = Math.max(1, Math.round(stroke));
+      paintRect(x, y, w, t, gray);
+      paintRect(x, y + h - t, w, t, gray);
+      paintRect(x, y, t, h, gray);
+      paintRect(x + w - t, y, t, h, gray);
     },
-    fillEllipse(cx, cy, rx, ry, gray) {
-      fillEllipse(dot, cx, cy, rx, ry, gray);
-    },
+    fillEllipse: paintEllipse,
     drawTextLine(text, x, y, style) {
+      textDrawLog.push({
+        text,
+        x,
+        y,
+        fontSizeDots: style.fontSizeDots,
+        family: style.family,
+        bold: style.bold,
+        italic: style.italic,
+        backend: 'dot-buffer',
+      });
       const cellW = Math.max(1, Math.round(style.fontSizeDots * 0.55));
       const cellH = Math.max(1, style.fontSizeDots);
-      let cx = x;
+      let cursor = x;
       for (const ch of text) {
         if (ch !== ' ') {
-          fillRect(dot, cx, y, Math.max(1, cellW - 1), Math.max(1, cellH - 1), style.ink);
+          paintRect(cursor, y, Math.max(1, cellW - 1), Math.max(1, cellH - 1), style.ink);
         }
-        cx += cellW;
+        cursor += cellW;
       }
     },
     measureTextWidth(text, style) {
       const cellW = Math.max(1, Math.round(style.fontSizeDots * 0.55));
       return text.length * cellW;
+    },
+    withRotation(cx, cy, degrees, draw) {
+      const turns = ((degrees % 360) + 360) % 360;
+      if (turns < 1e-4) {
+        draw();
+        return;
+      }
+      const rad = (degrees * Math.PI) / 180;
+      const prev = rot;
+      rot = { cx, cy, cos: Math.cos(rad), sin: Math.sin(rad) };
+      try {
+        draw();
+      } finally {
+        rot = prev;
+      }
     },
     readGray() {
       return dot.gray;

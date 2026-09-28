@@ -364,6 +364,18 @@ export default function CalibrationPrintScreen() {
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.two }]}>
         <Pressable
+          onPress={() => router.push('/ground-truth-parity')}
+          style={({ pressed }) => [styles.gateABtn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Ground-truth PNG vs headless (dry-run, no printer)</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/calibration-dots')}
+          style={({ pressed }) => [styles.gateABtn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Calibration dot payload (dry-run, no printer)</Text>
+        </Pressable>
+
+        <Pressable
           onPress={() => router.push('/stage-a-gates')}
           style={({ pressed }) => [styles.gateABtn, pressed && styles.pressed]}>
           <Text style={styles.printBtnText}>Run GATE-A Device Benchmark (4.4 + 4.6)</Text>

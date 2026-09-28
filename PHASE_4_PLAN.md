@@ -191,15 +191,17 @@ export function rasterizeDocumentToBitmap(
 - SVG still draws `bar.x * widthPx` / `bar.width * widthPx` with `preserveAspectRatio="none"`. `dotX` / `dotWidth` are unused.
 - `snap2DMatrixToHardwareDots` is not called from `QrcodeContent`; 2D codes are module-index SVG paths stretched with `preserveAspectRatio="meet"`.
 
-Stage A does **not** wait on fixing the editor. Phase 4 print output is defined as the **integer-dot snap at job DPI**, not a pixel match to ViewShot.
+Stage A does **not** wait on fixing the editor. **Print “correct” (post GATE-A parity pass) means the packed 1-bit buffer matches the editor / flag-off thresholded bitmap** (same 600×360 grid, threshold 160), not merely that Code128/QR scan-decode. 4.4b decode remains a regression check.
 
-**Correct 1D (Stage A 4.4b):** `snap1DBarcodeModules(rawModules, widthMm, jobDpi, false)` — same `includeQuietZone: false` as the live element (tight box), but `jobDpi` is **304** on the TD-404 fixture, never 203. Paint `bar.dotX` / `bar.dotWidth` in printer dots. Expanding the packed buffer to an image and decoding with the existing independent decoder / ZXing path must yield `BASELINE50X30`.
+Headless 1D now uses the same snap as [`BarcodeContent`](src/components/editor/element-renderer.tsx) (`snap1DBarcodeModules(..., 203, false)`) then stretch-then-round `bar.x * boxW` into job-DPI dots. Headless QR uses SVG `meet` integer cells. `barcode-snapping.ts` is unchanged so the editor still snaps at 203 and stretches in SVG.
 
-**Correct 2D (Stage A 4.4b):** existing encoder matrix + `snap2DMatrixToHardwareDots` at job DPI. Decode of the expanded buffer must yield `https://sez.print/baseline`.
+**Correct 1D (Stage A 4.4b, decode only):** Expanding the packed buffer must still yield `BASELINE50X30`. Module widths after stretch-then-round are checked for scannability (run-width ratio), not only decode.
 
-Re-deriving module sizes inside the rasterizer is out of scope. Aligning `element-renderer.tsx` to `dotX`/`dotWidth` is a separate editor follow-up, not GATE-A and not Stage B.
+**Correct 2D (Stage A 4.4b, decode only):** Decode of the expanded buffer must yield `https://sez.print/baseline`.
 
-A bit-identical diff against ViewShot is **not** a Stage A gate. Physical golden (4.7) is Stage B only.
+Re-deriving module sizes inside snapping is out of scope. Aligning `element-renderer.tsx` to `dotX`/`dotWidth` is a separate editor follow-up.
+
+A bit-identical diff against a physical printer scan is still **not** a Stage A gate. Pixel parity vs editor-geometry reference is the acceptance test for redraw fixes. Physical golden (4.7) is Stage B only.
 
 ### Bit pack (Task 4.2)
 
@@ -214,7 +216,10 @@ Logical buffer before TSPL invert:
 
 - 4.4b: QR and Code128 scan-decode from the expanded buffer.
 - Text: both wrapped lines of the frozen string; line-break indices match the Paragraph fixture.
-- Border: closed rectangle, stroke ≥ 1 dot, inset 1 mm (12 dots at 12 dots/mm) in the buffer.
+- Border: editor-padded frame (BorderPreview inset `max(2, round(dpm×2))`), not a flush element-box stroke.
+- Pixel parity vs editor-geometry reference is required for redraw fixes; scan-decode is not sufficient.
+
+**Backend:** GATE-A speed was signed on **dot-buffer** with block text. Live default remains Skia when `MakeOffscreen` works. Host cannot run Skia offscreen; do not change the default until on-device real-text timings for both backends are reviewed. If Skia `drawMs` dominates rasterize, cached glyph bitmaps are a later option (not implemented).
 
 ---
 
@@ -299,6 +304,10 @@ Emitted from the TD-404 branch in [`src/app/print.tsx`](src/app/print.tsx) after
 | `height_dots` | packed height |
 | `bytes_per_row` | `width_dots / 8` |
 | `gate_15ms` | `pass` or `fail` from `rasterize_ms + bitpack_ms < 15` (headless only; viewshot logs `n/a`) |
+| `connection_ms` | `ensureConnected` |
+| `doc_prep_ms` | page document + size assert + unsupported-type abort (headless) |
+| `native_call_ms` | `printMonoLabel` wall including socket write |
+| `unaccounted_ms` | `total_ms` minus the timed stages; headless `capture+verify` is connection-only (historically 162–275 ms) |
 
 ---
 

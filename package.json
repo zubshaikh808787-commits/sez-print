@@ -102,6 +102,7 @@
     "print:phase3": "npx --yes tsx --tsconfig tsconfig.json scripts/print-phase3-demo.ts",
     "print:phase4": "npx --yes tsx --tsconfig tsconfig.json scripts/print-phase4-demo.ts",
     "test:phase4-stage-a": "npx --yes tsx --tsconfig tsconfig.json src/printing/raster/__tests__/stage-a-gates.ts",
+    "test:phase4-parity": "npx --yes tsx --tsconfig tsconfig.json src/printing/raster/__tests__/parity-diff-run.ts",
     "gate-a:device": "bash ./scripts/run-gate-a-device.sh",
     "dot-buffer-1k:device": "bash ./scripts/run-dot-buffer-1k-device.sh",
     "print:phase5": "npx --yes tsx --tsconfig tsconfig.json scripts/print-phase5-demo.ts",

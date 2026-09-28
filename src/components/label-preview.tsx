@@ -176,12 +176,16 @@ function LabelElements({
         let heightPx: number;
         let contentScale = scale;
         if (printDpi != null && dpm != null) {
+          // Style sizes are DIP. Android View.getWidth() is physical pixels
+          // (DIP × density). The capture view is sized at dots/density so the
+          // snapshot is 1 physical pixel per printer dot — no later scale.
+          const density = PixelRatio.get() || 1;
           const box = rectMmToDots(element.left, element.top, size.width, size.height, printDpi);
-          leftPx = box.x0;
-          topPx = box.y0;
-          widthPx = Math.max(1, box.widthDots);
-          heightPx = Math.max(1, box.heightDots);
-          contentScale = dpm;
+          leftPx = box.x0 / density;
+          topPx = box.y0 / density;
+          widthPx = Math.max(1 / density, box.widthDots / density);
+          heightPx = Math.max(1 / density, box.heightDots / density);
+          contentScale = dpm / density;
         } else {
           widthPx = Math.max(1, size.width * scale);
           heightPx = Math.max(1, size.height * scale);

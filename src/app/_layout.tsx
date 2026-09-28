@@ -112,6 +112,8 @@ function AppRoot() {
         <Stack.Screen name="phase8-shape-detect" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="phase9-robustness" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="stage-a-gates" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="ground-truth-parity" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="calibration-dots" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="dot-buffer-1k" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="new-label-setup" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen

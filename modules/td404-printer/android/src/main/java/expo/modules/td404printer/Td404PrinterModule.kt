@@ -329,10 +329,13 @@ class Td404PrinterModule : Module() {
      * writeDataImmediately(..., isReadReceive=false).
      */
     AsyncFunction("printPngLabel") { options: Map<String, Any?>, promise: Promise ->
-      val sock = socket
-      if (sock == null || !sock.isConnected) {
-        promise.reject("NOT_CONNECTED", "No TD-404 printer connected.", null)
-        return@AsyncFunction
+      val dryRun = optionsDryRun(options)
+      if (!dryRun) {
+        val sock = socket
+        if (sock == null || !sock.isConnected) {
+          promise.reject("NOT_CONNECTED", "No TD-404 printer connected.", null)
+          return@AsyncFunction
+        }
       }
       ioExecutor.execute {
         try {
@@ -340,6 +343,40 @@ class Td404PrinterModule : Module() {
           promise.resolve(result)
         } catch (e: Exception) {
           android.util.Log.e("Td404Printer", "printPngLabel failed: ${e.message}", e)
+          if (e is IOException) {
+            closeSocket()
+            sendEvent(
+              "onConnectionChanged",
+              mapOf("connected" to false, "sdkId" to "td404"),
+            )
+          }
+          promise.reject("PRINT_FAILED", e.message, e)
+        }
+      }
+    }
+
+    /**
+     * Stage B: already-packed 1-bit buffer → TSPL BITMAP → SPP.
+     * No BitmapFactory, scale, threshold, or dither. Invert logical black=1 once for TSPL black=0.
+     */
+    AsyncFunction("printMonoLabel") { monoBytes: ByteArray, options: Map<String, Any?>, promise: Promise ->
+      val dryRun = optionsDryRun(options)
+      if (!dryRun) {
+        val sock = socket
+        if (sock == null || !sock.isConnected) {
+          promise.reject("NOT_CONNECTED", "No TD-404 printer connected.", null)
+          return@AsyncFunction
+        }
+      }
+      ioExecutor.execute {
+        try {
+          val result = printMonoLabelNative(monoBytes, options)
+          promise.resolve(result)
+        } catch (e: IllegalArgumentException) {
+          android.util.Log.e("Td404Printer", "printMonoLabel rejected: ${e.message}", e)
+          promise.reject("MONO_INVALID", e.message, e)
+        } catch (e: Exception) {
+          android.util.Log.e("Td404Printer", "printMonoLabel failed: ${e.message}", e)
           if (e is IOException) {
             closeSocket()
             sendEvent(
@@ -540,35 +577,14 @@ class Td404PrinterModule : Module() {
     }
     val tRotate = System.currentTimeMillis()
 
-    // 304 DPI heads are 12 dots/mm. 54 mm × 12 = 648 (byte-aligned). Using
-    // dpi/25.4 (54 × 304/25.4 = 646) then packing up to 648 clips after SIZE.
-    val dpm = if (dpi == 304.0) 12.0 else if (dpi == 203.0) 8.0 else dpi / 25.4
+    // Same table as dotsPerMm(): 304 → 12, 203 → 8. No dpi/25.4.
+    val dpm = td404DotsPerMm(dpi)
     val sizeDotsW = Math.max(1, Math.round(widthMm * dpm).toInt())
     val sizeDotsH = Math.max(1, Math.round(heightMm * dpm).toInt())
     // TSPL BITMAP is bytes×8. Never pack UP past SIZE-in-dots.
     val packedW = Math.max(8, (sizeDotsW / 8) * 8)
     val packedH = sizeDotsH
-    // If incoming capture is density-inflated (e.g. ViewShot rendered at screen
-    // density 2.625x / 3x) or differently sized, scale to target packed dots
-    // rather than blindly cropping. If difference is within 8 dots, it is just byte-alignment;
-    // preserve exact pixels to prevent bilinear blur on crisp lines and dithers.
-    val srcW = bitmap.width
-    val srcH = bitmap.height
-    if (srcW != packedW || srcH != packedH) {
-      val diffW = Math.abs(srcW - packedW)
-      val diffH = Math.abs(srcH - packedH)
-      if (diffW > 8 || diffH > 8) {
-        android.util.Log.w(
-          "Td404Printer",
-          "PRINT-TRACE BITMAP_FIT src=${srcW}x${srcH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} (scaling to packed dots)",
-        )
-        val scaled = Bitmap.createScaledBitmap(bitmap, packedW, packedH, true)
-        if (scaled !== bitmap) {
-          bitmap.recycle()
-          bitmap = scaled
-        }
-      }
-    }
+    bitmap = fitTd404Bitmap(bitmap, packedW, packedH)
 
     val sizeCmd = "SIZE ${formatMm(widthMm)} mm,${formatMm(heightMm)} mm\r\n"
 
@@ -695,31 +711,260 @@ class Td404PrinterModule : Module() {
     System.arraycopy(rawBmp, 0, job, headerBytes.size, rawBmp.size)
     System.arraycopy(footerBytes, 0, job, headerBytes.size + rawBmp.size, footerBytes.size)
     val tEncode = System.currentTimeMillis()
+    val dryRun = optionsDryRun(options)
+    logJobIdentity(options, dryRun)
 
-    val totalSent = writeBytesToSocketSync(job)
-    val tWrite = System.currentTimeMillis()
-
-    android.util.Log.i(
-      "Td404Printer",
-      "PRINT-TRACE SDK png=${srcW}x${srcH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} " +
-        "dpm=$dpm dpi=$dpi SIZE=${formatMm(widthMm)}x${formatMm(heightMm)}mm " +
-        "BITMAP=${bytesPerRow}x${contentH} DIRECTION=$direction job=${job.size}B copies=$copies " +
-        "decode=${tDecode - t0}ms rotate=${tRotate - tDecode}ms encode=${tEncode - tRotate}ms write=${tWrite - tEncode}ms",
-    )
+    var totalSent = 0
+    var writeMs = 0L
+    if (dryRun) {
+      android.util.Log.i(
+        "Td404Printer",
+        "PRINT-TRACE DRY-RUN SDK png=${srcW}x${srcH} packed=${packedW}x${packedH} " +
+          "BITMAP=${bytesPerRow}x${contentH} job=${job.size}B (no socket write)",
+      )
+    } else {
+      val tWrite0 = System.currentTimeMillis()
+      totalSent = writeBytesToSocketSync(job)
+      writeMs = System.currentTimeMillis() - tWrite0
+      android.util.Log.i(
+        "Td404Printer",
+        "PRINT-TRACE SDK png=${srcW}x${srcH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} " +
+          "dpm=$dpm dpi=$dpi SIZE=${formatMm(widthMm)}x${formatMm(heightMm)}mm " +
+          "BITMAP=${bytesPerRow}x${contentH} DIRECTION=$direction job=${job.size}B copies=$copies " +
+          "decode=${tDecode - t0}ms rotate=${tRotate - tDecode}ms encode=${tEncode - tRotate}ms write=${writeMs}ms",
+      )
+    }
 
     if (!bitmap.isRecycled) bitmap.recycle()
 
-    return mapOf(
+    val result = mutableMapOf<String, Any?>(
       "bytesSent" to totalSent,
       "jobBytes" to job.size,
       "copies" to copies,
       "decodeMs" to (tDecode - t0),
       "encodeMs" to (tEncode - tRotate),
-      "writeMs" to (tWrite - tEncode),
+      "writeMs" to writeMs,
       "path" to "labelcommand-sdk",
+      "dryRun" to dryRun,
     )
+    if (dryRun) {
+      result["jobBase64"] = android.util.Base64.encodeToString(job, android.util.Base64.NO_WRAP)
+      result["wireBmpBase64"] = android.util.Base64.encodeToString(rawBmp, android.util.Base64.NO_WRAP)
+      result["bytesPerRow"] = bytesPerRow
+      result["heightDots"] = contentH
+      result["widthDots"] = packedW
+      result["gitSha"] = optionsGitSha(options)
+      result["buildTime"] = optionsBuildTime(options)
+    }
+    return result
   }
 
+  /**
+   * Packed 1-bit (logical black=1) → TSPL BITMAP wire (black=0). Header matches printPngLabelNative.
+   */
+  private fun printMonoLabelNative(monoBytes: ByteArray, options: Map<String, Any?>): Map<String, Any?> {
+    val widthMm = (options["widthMm"] as? Number)?.toDouble() ?: 50.0
+    val heightMm = (options["heightMm"] as? Number)?.toDouble() ?: 30.0
+    val gapMm = (options["gapMm"] as? Number)?.toDouble() ?: 2.0
+    val density = (options["density"] as? Number)?.toInt() ?: 10
+    val speed = (options["speed"] as? Number)?.toInt() ?: 3
+    val xDots = (options["xDots"] as? Number)?.toInt() ?: 0
+    val yDots = (options["yDots"] as? Number)?.toInt() ?: 0
+    val copies = ((options["copies"] as? Number)?.toInt() ?: 1).coerceAtLeast(1)
+    val media = (options["media"] as? String) ?: "gap"
+    val dpi = (options["dpi"] as? Number)?.toDouble() ?: 304.0
+    val direction = (options["direction"] as? Number)?.toInt() ?: 1
+    val widthDots = (options["widthDots"] as? Number)?.toInt()
+      ?: throw IllegalArgumentException("widthDots is required")
+    val heightDots = (options["heightDots"] as? Number)?.toInt()
+      ?: throw IllegalArgumentException("heightDots is required")
+    val bytesPerRow = (options["bytesPerRow"] as? Number)?.toInt()
+      ?: throw IllegalArgumentException("bytesPerRow is required")
+
+    if (xDots < 0 || yDots < 0) {
+      throw IllegalArgumentException(
+        "printMonoLabel cannot bake negative offsets (xDots=$xDots, yDots=$yDots). Use printPngLabel.",
+      )
+    }
+
+    val dpm = td404DotsPerMm(dpi)
+    val sizeDotsW = Math.max(1, Math.round(widthMm * dpm).toInt())
+    val sizeDotsH = Math.max(1, Math.round(heightMm * dpm).toInt())
+    val packedW = Math.max(8, (sizeDotsW / 8) * 8)
+    val packedH = sizeDotsH
+
+    if (bytesPerRow * 8 != packedW) {
+      throw IllegalArgumentException(
+        "TD-404 mono buffer bytesPerRow*8 (${bytesPerRow * 8}) != packedW ($packedW) for ${widthMm}x${heightMm}mm @ ${dpi.toInt()} dpi",
+      )
+    }
+    if (widthDots != packedW) {
+      throw IllegalArgumentException(
+        "TD-404 mono widthDots ($widthDots) != packedW ($packedW)",
+      )
+    }
+    if (heightDots != packedH) {
+      throw IllegalArgumentException(
+        "TD-404 mono heightDots ($heightDots) != packedH ($packedH)",
+      )
+    }
+    val expectedLen = bytesPerRow * heightDots
+    if (monoBytes.size != expectedLen) {
+      throw IllegalArgumentException(
+        "TD-404 mono buffer length ${monoBytes.size} != bytesPerRow*heightDots ($expectedLen)",
+      )
+    }
+
+    val wireBmp = ByteArray(expectedLen)
+    for (i in 0 until expectedLen) {
+      wireBmp[i] = (monoBytes[i].toInt() xor 0xFF).toByte()
+    }
+
+    val sizeCmd = "SIZE ${formatMm(widthMm)} mm,${formatMm(heightMm)} mm\r\n"
+    val gapCmd = when (media) {
+      "bline" -> "BLINE ${formatGap(gapMm)} mm,0 mm\r\n"
+      "continuous" -> "GAP 0.00 mm,0 mm\r\n"
+      else -> "GAP ${formatGap(gapMm)} mm,0 mm\r\n"
+    }
+    val header = "\r\n" +
+      sizeCmd +
+      gapCmd +
+      "SPEED $speed\r\n" +
+      "DENSITY $density\r\n" +
+      "DIRECTION $direction\r\n" +
+      "SET TEAR ON\r\n" +
+      "OFFSET 0 mm\r\n" +
+      "REFERENCE 0,0\r\n" +
+      "CLS\r\n" +
+      "BITMAP $xDots,$yDots,$bytesPerRow,$heightDots,0,"
+    val printCmd = if (copies <= 1) "PRINT 1\r\n" else "PRINT 1,$copies\r\n"
+    val footer = "\r\n$printCmd"
+
+    val headerBytes = header.toByteArray(Charsets.US_ASCII)
+    val footerBytes = footer.toByteArray(Charsets.US_ASCII)
+    val job = ByteArray(headerBytes.size + wireBmp.size + footerBytes.size)
+    System.arraycopy(headerBytes, 0, job, 0, headerBytes.size)
+    System.arraycopy(wireBmp, 0, job, headerBytes.size, wireBmp.size)
+    System.arraycopy(footerBytes, 0, job, headerBytes.size + wireBmp.size, footerBytes.size)
+
+    val dryRun = optionsDryRun(options)
+    logJobIdentity(options, dryRun)
+
+    var totalSent = 0
+    var writeMs = 0L
+    if (dryRun) {
+      android.util.Log.i(
+        "Td404Printer",
+        "PRINT-TRACE DRY-RUN MONO packed=${packedW}x${packedH} BITMAP=${bytesPerRow}x${heightDots} job=${job.size}B (no socket write)",
+      )
+    } else {
+      val tWrite0 = System.currentTimeMillis()
+      totalSent = writeBytesToSocketSync(job)
+      writeMs = System.currentTimeMillis() - tWrite0
+      android.util.Log.i(
+        "Td404Printer",
+        "PRINT-TRACE MONO packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} " +
+          "dpm=$dpm dpi=$dpi SIZE=${formatMm(widthMm)}x${formatMm(heightMm)}mm " +
+          "BITMAP=${bytesPerRow}x${heightDots} DIRECTION=$direction job=${job.size}B copies=$copies " +
+          "write=${writeMs}ms bytesSent=$totalSent",
+      )
+    }
+
+    val result = mutableMapOf<String, Any?>(
+      "bytesSent" to totalSent,
+      "jobBytes" to job.size,
+      "copies" to copies,
+      "writeMs" to writeMs,
+      "path" to "mono-bitmap",
+      "dryRun" to dryRun,
+    )
+    if (dryRun) {
+      result["jobBase64"] = android.util.Base64.encodeToString(job, android.util.Base64.NO_WRAP)
+      result["wireBmpBase64"] = android.util.Base64.encodeToString(wireBmp, android.util.Base64.NO_WRAP)
+      result["bytesPerRow"] = bytesPerRow
+      result["heightDots"] = heightDots
+      result["widthDots"] = packedW
+      result["gitSha"] = optionsGitSha(options)
+      result["buildTime"] = optionsBuildTime(options)
+    }
+    return result
+  }
+
+
+  /** 304 → 12 dots/mm, 203 → 8. Matches print-spec dotsPerMm. Other dpi values are rejected. */
+  private fun td404DotsPerMm(dpi: Double): Double {
+    if (dpi == 304.0) return 12.0
+    if (dpi == 203.0) return 8.0
+    throw IllegalArgumentException("TD-404 dpi $dpi is not 203 or 304")
+  }
+
+  /**
+   * Pack the capture only when it is already the packed size, or an integer
+   * supersample of it (box-average, no bilinear filter). Any other size fails.
+   */
+  private fun fitTd404Bitmap(bitmap: Bitmap, packedW: Int, packedH: Int): Bitmap {
+    val srcW = bitmap.width
+    val srcH = bitmap.height
+    if (srcW == packedW && srcH == packedH) return bitmap
+    if (packedW <= 0 || packedH <= 0 || srcW % packedW != 0 || srcH % packedH != 0) {
+      throw IllegalArgumentException(
+        "TD-404 bitmap ${srcW}x${srcH} is not packed ${packedW}x${packedH} and is not an integer supersample. Refusing to resize.",
+      )
+    }
+    val scaleX = srcW / packedW
+    val scaleY = srcH / packedH
+    if (scaleX != scaleY) {
+      throw IllegalArgumentException(
+        "TD-404 bitmap ${srcW}x${srcH} supersample is not square (${scaleX}x${scaleY}). Refusing to resize.",
+      )
+    }
+    val scale = scaleX
+    val src = IntArray(srcW * srcH)
+    bitmap.getPixels(src, 0, srcW, 0, 0, srcW, srcH)
+    val dst = IntArray(packedW * packedH)
+    val samples = scale * scale
+    for (y in 0 until packedH) {
+      for (x in 0 until packedW) {
+        var acc = 0
+        for (dy in 0 until scale) {
+          val row = (y * scale + dy) * srcW + x * scale
+          for (dx in 0 until scale) {
+            val c = src[row + dx]
+            val r = (c shr 16) and 0xFF
+            val g = (c shr 8) and 0xFF
+            val b = c and 0xFF
+            acc += (77 * r + 150 * g + 29 * b) shr 8
+          }
+        }
+        val lum = acc / samples
+        dst[y * packedW + x] = (0xFF shl 24) or (lum shl 16) or (lum shl 8) or lum
+      }
+    }
+    val out = Bitmap.createBitmap(packedW, packedH, Bitmap.Config.ARGB_8888)
+    out.setPixels(dst, 0, packedW, 0, 0, packedW, packedH)
+    if (out !== bitmap) bitmap.recycle()
+    android.util.Log.i(
+      "Td404Printer",
+      "PRINT-TRACE BITMAP_AVERAGE src=${srcW}x${srcH} packed=${packedW}x${packedH} scale=$scale",
+    )
+    return out
+  }
+
+  private fun optionsDryRun(options: Map<String, Any?>): Boolean =
+    (options["dryRun"] as? Boolean) == true
+
+  private fun optionsGitSha(options: Map<String, Any?>): String =
+    (options["gitSha"] as? String)?.ifBlank { null } ?: "unknown"
+
+  private fun optionsBuildTime(options: Map<String, Any?>): String =
+    (options["buildTime"] as? String)?.ifBlank { null } ?: "unknown"
+
+  private fun logJobIdentity(options: Map<String, Any?>, dryRun: Boolean) {
+    android.util.Log.i(
+      "Td404Printer",
+      "JOB-IDENTITY gitSha=${optionsGitSha(options)} buildTime=${optionsBuildTime(options)} dryRun=$dryRun",
+    )
+  }
 
   private fun formatGap(gapMm: Double): String = formatMm(gapMm)
 

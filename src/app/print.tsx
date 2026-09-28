@@ -1,5 +1,4 @@
 import { Image } from 'expo-image';
-import Constants from 'expo-constants';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon } from '@/components/app-icon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -61,11 +60,11 @@ import {
   type PaperType,
 } from '@/lib/label-document';
 import {
-  PRINT_CAPTURE_OPTIONS,
   encodeConnectedPrinterJob,
   formatPrintFailure,
   orientedPrintSize,
   printCaptureLayout,
+  printCaptureOptionsForSize,
   printJobSizeError,
   rasterizePngForPrint,
   rotatePngBase64,
@@ -75,7 +74,15 @@ import {
 } from '@/lib/printer/print-job';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
 import { joshEffectiveDpi } from '@/lib/printer/josh-print';
+import * as FileSystem from 'expo-file-system/legacy';
 import { logPrintTrace } from '@/printing';
+import { resolveBuildTime, resolveGitSha } from '@/lib/build-identity';
+import { printTd404MonoLabel, printTd404PngLabel } from 'td404-printer';
+import {
+  assertHeadlessRasterDocument,
+  rasterizeDocumentToBitmapTimed,
+} from '@/printing/raster/skia-rasterizer';
+import { TD404_HEADLESS_SKIA_PRINT } from '@/printing/raster/td404-headless-flag';
 import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
@@ -95,13 +102,6 @@ import {
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
 const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent', 'Black mark'] as const;
-
-function resolveGitSha(): string {
-  const fromEnv = process.env.EXPO_PUBLIC_GIT_SHA?.trim();
-  if (fromEnv) return fromEnv;
-  const extra = Constants.expoConfig?.extra as { gitSha?: string } | undefined;
-  return extra?.gitSha ?? 'unknown';
-}
 
 function buildScanDocument(
   scanType: string,
@@ -603,12 +603,23 @@ export default function PrintScreen() {
     return getPrinterManager().isJosh ? joshEffectiveDpi(raw) : raw;
   })();
 
-  /** Native printer-dot artboard for capture — SIZE-in-dots (1 px = 1 printer dot). */
+  /** Printer-dot artboard. The off-screen view is dots/density DIP so the snapshot is 1 px per dot. */
   const printCaptureSize = useMemo(() => {
     const doc = displayDocument ?? previewDocument;
     if (!doc) return { widthPx: 8, heightPx: 8 };
     return printCaptureLayout(doc.widthMm, doc.heightMm, jobDpi).content;
   }, [displayDocument, previewDocument, jobDpi]);
+  const printCaptureLayoutPx = useMemo(() => {
+    const density = PixelRatio.get() || 1;
+    return {
+      widthPx: printCaptureSize.widthPx / density,
+      heightPx: printCaptureSize.heightPx / density,
+    };
+  }, [printCaptureSize.widthPx, printCaptureSize.heightPx]);
+  const printCaptureShotOptions = useMemo(
+    () => printCaptureOptionsForSize(printCaptureSize.widthPx, printCaptureSize.heightPx),
+    [printCaptureSize.widthPx, printCaptureSize.heightPx],
+  );
 
   /** Live store ups config (compose strips it from the print document). */
   const upsSource = useMemo(() => {
@@ -778,58 +789,95 @@ export default function PrintScreen() {
           timer.end('pageWaitForPaint');
         }
 
-        // KEY OPTIMIZATION: Run connection verification IN PARALLEL with ViewShot capture.
-        // When connection is healthy (common case), ensureConnected() returns in <1ms
-        // while the expensive ViewShot capture runs concurrently.
+        const td404Headless =
+          manager.usesTd404CommandSet && __DEV__ && TD404_HEADLESS_SKIA_PRINT;
+
         timer.start('capture+verify');
         const captureTarget = printCaptureLayout(widthMm, heightMm, jobDpi).content;
         let captureResolvedAt = 0;
-        const capturePacked = async () => {
-          const pngBase64 = await captureRef(shotRef, PRINT_CAPTURE_OPTIONS);
-          captureResolvedAt = Date.now();
-          return pngBase64;
-        };
-        const [connectionResult, base64] = await Promise.all([
-          manager.ensureConnected().catch((err) => {
+        let base64 = '';
+        let rotatedBase64 = '';
+        let connectionMs = 0;
+        let captureMs = 0;
+        if (td404Headless) {
+          if (orientationDeg !== 0) {
+            throw new Error(
+              'TD-404 headless Skia print requires orientation 0; use the PNG path for rotated jobs.',
+            );
+          }
+          const tConn0 = Date.now();
+          const connectionResult = await manager.ensureConnected().catch((err) => {
             return { error: err };
-          }),
-          capturePacked().catch(async () => {
-            await waitForNextPaint();
-            return capturePacked();
-          }),
-        ]);
-        timer.end('capture+verify');
+          });
+          connectionMs = Date.now() - tConn0;
+          timer.end('capture+verify');
+          if (connectionResult && 'error' in connectionResult) {
+            throw connectionResult.error;
+          }
+        } else {
+          const tConn0 = Date.now();
+          const capturePacked = async () => {
+            const pngBase64 = await captureRef(shotRef, printCaptureShotOptions);
+            captureResolvedAt = Date.now();
+            return pngBase64;
+          };
+          const [connectionResult, captured] = await Promise.all([
+            manager.ensureConnected().catch((err) => {
+              return { error: err };
+            }).then((res) => {
+              connectionMs = Date.now() - tConn0;
+              return res;
+            }),
+            (async () => {
+              const tCap0 = Date.now();
+              try {
+                const png = await capturePacked().catch(async () => {
+                  await waitForNextPaint();
+                  return capturePacked();
+                });
+                captureMs = Date.now() - tCap0;
+                return png;
+              } catch (err) {
+                captureMs = Date.now() - tCap0;
+                throw err;
+              }
+            })(),
+          ]);
+          timer.end('capture+verify');
 
-        // Check if connection verification failed.
-        if (connectionResult && 'error' in connectionResult) {
-          throw connectionResult.error;
+          if (connectionResult && 'error' in connectionResult) {
+            throw connectionResult.error;
+          }
+
+          const tCapture1 = Date.now();
+          console.info('[print] ViewShot capture+verify:', tCapture1 - pageStart, 'ms |', Math.round((captured?.length ?? 0) / 1024), 'KB base64', `| connection_ms=${connectionMs} capture_ms=${captureMs}`);
+          if (!captured) {
+            throw new Error('Could not capture the label for printing.');
+          }
+          base64 = captured;
+
+          // Rotate once in JS, uniformly for every printer SDK. Native rotation is
+          // only correct on TD-404/Josh; Dev/Tez either ignore orientation or apply
+          // it incorrectly (see printer-manager.ts). Pre-rotating here and always
+          // telling native `orientation: 0` makes all four SDKs share one, tested,
+          // lossless rotation path (rotateGray — exact axis transpose, no skew).
+          rotatedBase64 = rotatePngBase64(base64, orientationDeg);
+
+          logPrintTrace('EDITOR_CAPTURE', {
+            userWidthMm: widthMm,
+            userHeightMm: heightMm,
+            paperWidthMm: paper.widthMm,
+            paperHeightMm: paper.heightMm,
+            captureTargetW: captureTarget.widthPx,
+            captureTargetH: captureTarget.heightPx,
+            pixelRatio: PixelRatio.get(),
+            pngBase64Chars: base64.length,
+            jobDpi,
+            connection_ms: connectionMs,
+            capture_ms: captureMs,
+            note: 'Packed BITMAP PNG is encoded to TSPL. ViewShot is ink only; millimetres come from PrintGeometry.',
+          });
         }
-
-        const tCapture1 = Date.now();
-        console.info('[print] ViewShot capture+verify:', tCapture1 - pageStart, 'ms |', Math.round((base64?.length ?? 0) / 1024), 'KB base64');
-        if (!base64) {
-          throw new Error('Could not capture the label for printing.');
-        }
-
-        // Rotate once in JS, uniformly for every printer SDK. Native rotation is
-        // only correct on TD-404/Josh; Dev/Tez either ignore orientation or apply
-        // it incorrectly (see printer-manager.ts). Pre-rotating here and always
-        // telling native `orientation: 0` makes all four SDKs share one, tested,
-        // lossless rotation path (rotateGray — exact axis transpose, no skew).
-        const rotatedBase64 = rotatePngBase64(base64, orientationDeg);
-
-        logPrintTrace('EDITOR_CAPTURE', {
-          userWidthMm: widthMm,
-          userHeightMm: heightMm,
-          paperWidthMm: paper.widthMm,
-          paperHeightMm: paper.heightMm,
-          captureTargetW: captureTarget.widthPx,
-          captureTargetH: captureTarget.heightPx,
-          pixelRatio: PixelRatio.get(),
-          pngBase64Chars: base64.length,
-          jobDpi,
-          note: 'Packed BITMAP PNG is encoded to TSPL. ViewShot is ink only; millimetres come from PrintGeometry.',
-        });
 
         const media =
           paperType === 'Receipt'
@@ -963,44 +1011,121 @@ export default function PrintScreen() {
           // Native TD-404 SPP fast path (Tejas / Rudra): direct Kotlin 1-bit packing (<15ms)
           timer.start('sdkFastPrint');
           try {
-            usedNative = await tryNativeSdkPngPrint({
-              pngBase64: rotatedBase64,
-              widthMm: paper.widthMm,
-              heightMm: paper.heightMm,
-              gapMm: gapLength,
-              copies,
-              density: printDensity,
-              speed: printSpeed,
-              vOffsetMm: vOffset,
-              hOffsetMm: hOffset,
-              media: wantsBline ? 'bline' : media,
-              orientation: 0,
-              dpi: jobDpi,
-            });
-            if (usedNative) {
-              console.info(
-                `[print] page ${page + 1} total: ${Date.now() - pageStart} ms | SDK LabelCommand native fast path (TD-404)`,
-              );
-              const nativeTiming = manager.getLastTd404PngLabelTiming();
-              logPrintTrace('PIPELINE', {
-                path: 'viewshot',
-                capture_ms: captureResolvedAt > 0 ? captureResolvedAt - pageStart : null,
-                decode_ms: nativeTiming?.decodeMs ?? null,
-                encode_ms: nativeTiming?.encodeMs ?? null,
-                transport_write_ms: nativeTiming?.writeMs ?? null,
-                total_ms: Date.now() - pageStart,
-                timestamp: new Date().toISOString(),
-                git_sha: resolveGitSha(),
+            if (__DEV__ && TD404_HEADLESS_SKIA_PRINT) {
+              const tPrep0 = Date.now();
+              const pageDoc = displayDocument ?? previewDocument;
+              if (!pageDoc) {
+                throw new Error('No label document to rasterize for TD-404 headless print.');
+              }
+              if (
+                Math.abs(pageDoc.widthMm - paper.widthMm) > 0.2 ||
+                Math.abs(pageDoc.heightMm - paper.heightMm) > 0.2
+              ) {
+                throw new Error(
+                  `Headless TD-404 page size mismatch: document ${pageDoc.widthMm}×${pageDoc.heightMm}mm vs paper ${paper.widthMm}×${paper.heightMm}mm. Refusing to change packed height.`,
+                );
+              }
+              assertHeadlessRasterDocument(pageDoc);
+              const docPrepMs = Date.now() - tPrep0;
+              const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, { threshold });
+              const bitmap = timed.result;
+              const tNative0 = Date.now();
+              usedNative = await manager.printMonoLabelFast({
+                monoBytes: bitmap.mono1bppBuffer,
+                widthDots: bitmap.widthDots,
+                heightDots: bitmap.heightDots,
+                bytesPerRow: bitmap.bytesPerRow,
+                widthMm: pageDoc.widthMm,
+                heightMm: pageDoc.heightMm,
+                gapMm: gapLength,
+                copies,
+                density: printDensity,
+                speed: printSpeed,
+                vOffsetMm: vOffset,
+                hOffsetMm: hOffset,
+                media: wantsBline ? 'bline' : media,
+                dpi: jobDpi,
               });
+              const nativeCallMs = Date.now() - tNative0;
+              if (!usedNative) {
+                throw new Error(
+                  'NATIVE_MONO_UNAVAILABLE: rebuild the Android binary so printMonoLabel is present.',
+                );
+              }
+              const monoTiming = manager.getLastTd404MonoLabelTiming();
+              const rasterizeMs = timed.rasterizeMs;
+              const bitpackMs = timed.bitpackMs;
+              const totalMs = Date.now() - pageStart;
+              const accounted =
+                connectionMs + docPrepMs + rasterizeMs + bitpackMs + nativeCallMs;
+              const unaccountedMs = Math.max(0, totalMs - accounted);
+              console.info(
+                `[print] page ${page + 1} total: ${totalMs} ms | TD-404 printMonoLabel writeMs=${monoTiming?.writeMs ?? '?'} bytesSent=${monoTiming?.bytesSent ?? '?'} connection_ms=${connectionMs} doc_prep_ms=${docPrepMs} native_call_ms=${nativeCallMs} unaccounted_ms=${unaccountedMs.toFixed(1)}`,
+              );
+              logPrintTrace('PIPELINE', {
+                path: 'headless_skia',
+                connection_ms: connectionMs,
+                doc_prep_ms: docPrepMs,
+                rasterize_ms: rasterizeMs,
+                bitpack_ms: bitpackMs,
+                native_call_ms: nativeCallMs,
+                unaccounted_ms: Number(unaccountedMs.toFixed(1)),
+                decode_ms: 0,
+                transport_write_ms: monoTiming?.writeMs ?? null,
+                total_ms: totalMs,
+                buffer_bytes: monoTiming?.jobBytes ?? null,
+                width_mm: pageDoc.widthMm,
+                height_mm: pageDoc.heightMm,
+                width_dots: bitmap.widthDots,
+                height_dots: bitmap.heightDots,
+                bytes_per_row: bitmap.bytesPerRow,
+                gate_15ms: rasterizeMs + bitpackMs < 15 ? 'pass' : 'fail',
+                note: 'unaccounted_ms is leftover inside capture+verify/sdkFastPrint (JS queue, ensureConnected beyond connection_ms, React). Headless capture+verify is connection only — historically 162-275ms.',
+              });
+            } else {
+              usedNative = await tryNativeSdkPngPrint({
+                pngBase64: rotatedBase64,
+                widthMm: paper.widthMm,
+                heightMm: paper.heightMm,
+                gapMm: gapLength,
+                copies,
+                density: printDensity,
+                speed: printSpeed,
+                vOffsetMm: vOffset,
+                hOffsetMm: hOffset,
+                media: wantsBline ? 'bline' : media,
+                orientation: 0,
+                dpi: jobDpi,
+              });
+              if (usedNative) {
+                console.info(
+                  `[print] page ${page + 1} total: ${Date.now() - pageStart} ms | SDK LabelCommand native fast path (TD-404)`,
+                );
+                const nativeTiming = manager.getLastTd404PngLabelTiming();
+                logPrintTrace('PIPELINE', {
+                  path: 'viewshot',
+                  connection_ms: connectionMs,
+                  capture_ms: captureResolvedAt > 0 ? captureResolvedAt - pageStart : captureMs,
+                  decode_ms: nativeTiming?.decodeMs ?? null,
+                  encode_ms: nativeTiming?.encodeMs ?? null,
+                  transport_write_ms: nativeTiming?.writeMs ?? null,
+                  total_ms: Date.now() - pageStart,
+                  timestamp: new Date().toISOString(),
+                  git_sha: resolveGitSha(),
+                });
+              }
             }
           } catch (err) {
+            if (__DEV__ && TD404_HEADLESS_SKIA_PRINT) {
+              throw err;
+            }
             console.warn('[print] Native SDK fast print failed, falling back to JS:', err);
             usedNative = false;
           }
           timer.end('sdkFastPrint');
         }
 
-        if (!manager.isLabelX && !manager.isJosh && !manager.isTez && !manager.isDev && !usedNative) {
+        if (!td404Headless && !manager.isLabelX && !manager.isJosh && !manager.isTez && !manager.isDev && !usedNative) {
           timer.start('rasterize');
           const bits = rasterizePngForPrint(rotatedBase64, {
             // `paper` mm is already orientation-swapped to match rotatedBase64's
@@ -1095,6 +1220,7 @@ export default function PrintScreen() {
     jewelryDieCutJob,
     cableFlagJob,
     ratTail143Job,
+    printCaptureShotOptions,
   ]);
 
   return (
@@ -1188,19 +1314,24 @@ export default function PrintScreen() {
 
           {/* Dedicated 1:1 Hardware Dot Print Artboard (captured at SIZE dots, then cropped to BITMAP) */}
           {(displayDocument ?? previewDocument) ? (
-            <View style={styles.printCaptureNative}>
+            <View
+              collapsable={false}
+              style={[
+                styles.printCaptureNative,
+                { width: printCaptureLayoutPx.widthPx, height: printCaptureLayoutPx.heightPx },
+              ]}>
               <ViewShot
                 ref={shotRef}
-                options={PRINT_CAPTURE_OPTIONS}
+                options={printCaptureShotOptions}
                 style={{
-                  width: printCaptureSize.widthPx,
-                  height: printCaptureSize.heightPx,
+                  width: printCaptureLayoutPx.widthPx,
+                  height: printCaptureLayoutPx.heightPx,
                   backgroundColor: '#FFFFFF',
                 }}>
                 <LabelPreview
                   document={(displayDocument ?? previewDocument)!}
-                  exactWidthPx={printCaptureSize.widthPx}
-                  exactHeightPx={printCaptureSize.heightPx}
+                  exactWidthPx={printCaptureLayoutPx.widthPx}
+                  exactHeightPx={printCaptureLayoutPx.heightPx}
                   printDpi={jobDpi}
                   showArtboardBorder={false}
                   hideNonPrinting
@@ -1474,6 +1605,59 @@ export default function PrintScreen() {
           </Text>
         </Pressable>
         {/* Print button — prints the active label at its selected/previewed dimensions */}
+        {__DEV__ ? (
+          <Pressable
+            disabled={printing}
+            hitSlop={6}
+            style={({ pressed }) => [styles.sizeBtn, pressed && styles.pressed]}
+            onPress={() => {
+              void (async () => {
+                try {
+                  const doc = displayDocument ?? previewDocument;
+                  if (!doc) return;
+                  const png = await captureRef(shotRef, printCaptureShotOptions);
+                  if (TD404_HEADLESS_SKIA_PRINT) {
+                    const timed = rasterizeDocumentToBitmapTimed(doc, jobDpi, { threshold: 160 });
+                    const result = await printTd404MonoLabel({
+                      monoBytes: timed.result.mono1bppBuffer,
+                      widthDots: timed.result.widthDots,
+                      heightDots: timed.result.heightDots,
+                      bytesPerRow: timed.result.bytesPerRow,
+                      widthMm: doc.widthMm,
+                      heightMm: doc.heightMm,
+                      dpi: jobDpi,
+                      dryRun: true,
+                      gitSha: resolveGitSha(),
+                      buildTime: resolveBuildTime(),
+                    });
+                    const text = `path=headless ${result?.widthDots}x${result?.heightDots} jobBase64Chars=${result?.jobBase64?.length ?? 0}\n${result?.jobBase64 ?? ''}`;
+                    await FileSystem.writeAsStringAsync(`${FileSystem.documentDirectory}tspl-dry-run.txt`, text);
+                    console.info('[TSPL-DRY-RUN]', text.slice(0, 240));
+                    Alert.alert('TSPL dry-run', `Headless ${result?.widthDots}×${result?.heightDots}, ${result?.jobBase64?.length ?? 0} base64 chars. Not printed.`);
+                  } else {
+                    const result = await printTd404PngLabel({
+                      pngBase64: png,
+                      widthMm: doc.widthMm,
+                      heightMm: doc.heightMm,
+                      dpi: jobDpi,
+                      threshold: 160,
+                      dryRun: true,
+                      gitSha: resolveGitSha(),
+                      buildTime: resolveBuildTime(),
+                    });
+                    const text = `path=png ${result?.widthDots}x${result?.heightDots} jobBase64Chars=${result?.jobBase64?.length ?? 0}\n${result?.jobBase64 ?? ''}`;
+                    await FileSystem.writeAsStringAsync(`${FileSystem.documentDirectory}tspl-dry-run.txt`, text);
+                    console.info('[TSPL-DRY-RUN]', text.slice(0, 240));
+                    Alert.alert('TSPL dry-run', `PNG ${result?.widthDots ?? '?'}×${result?.heightDots ?? '?'}, ${result?.jobBase64?.length ?? 0} base64 chars. Not printed.`);
+                  }
+                } catch (err) {
+                  Alert.alert('TSPL dry-run failed', err instanceof Error ? err.message : String(err));
+                }
+              })();
+            }}>
+            <Text style={styles.sizeBtnText}>Dump</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           disabled={printing}
           hitSlop={6}

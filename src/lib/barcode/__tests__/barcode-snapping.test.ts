@@ -89,4 +89,17 @@ assert.strictEqual(
 );
 console.log('ok 2D matrix module snapping to square integer dots verified');
 
+// Editor pin: BarcodeContent always calls snap at 203 with quiet zone off. Do not change this contract.
+const editorModules = encodeCode128('BASELINE50X30');
+assert(editorModules !== null);
+const editorSnap = snap1DBarcodeModules(editorModules, 28, 203, false);
+assert(editorSnap !== null);
+assert.strictEqual(editorSnap.quietZoneMm, 0, 'editor barcode has no internal quiet zone');
+assert.ok(editorSnap.bars.length > 0);
+const firstBarX = editorSnap.bars[0].x;
+const last = editorSnap.bars[editorSnap.bars.length - 1];
+assert.ok(firstBarX === 0 || firstBarX < 0.02, `editor first bar x=${firstBarX}`);
+assert.ok(last.x + last.width <= 1.0001);
+console.log('ok Editor snap contract (203 DPI, quiet zone off) unchanged');
+
 console.log('--- ALL Barcode Snapping Tests Passed Successfully ---');

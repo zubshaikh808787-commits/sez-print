@@ -14,15 +14,25 @@ import {
 } from '@/lib/barcode/barcode-snapping';
 import {
   createLabelDocument,
+  elementSizeMm,
   ptToMm,
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
-import { dotsPerMm, mmToDots } from '@/lib/printer/print-spec';
-import { generateQrMatrix } from '@/printing/renderer/qrcode';
-import { computeWrappedLines } from '@/lib/text-metrics';
+import { dotsPerMm, mmToDots, rectMmToDots } from '@/lib/printer/print-spec';
+import { sortLayers } from '@/lib/template-schema';
+import { computeWrappedLines, contractLineAdvances, layoutPrintText } from '@/lib/text-metrics';
+import { formatBarcodeHri } from '@/lib/barcode/hri';
+import { stretchThenRoundBars } from './barcode-stretch';
 import { packGrayToMono1bpp } from './bit-packer';
-import { makeOffscreenSurface, type RasterSurface, type RasterSurfaceBackend } from './skia-surface';
+import { drawPrintBorder } from './print-border';
+import { drawQrMeet } from './qr-meet';
+import {
+  makeOffscreenSurface,
+  resetTextDrawLog,
+  type RasterSurface,
+  type RasterSurfaceBackend,
+} from './skia-surface';
 
 export type RasterizeOptions = {
   threshold?: number;
@@ -32,6 +42,8 @@ export type RasterizeOptions = {
   target?: RasterBitmap;
   /** Pin backend for profiling. Default: Skia when MakeOffscreen works. */
   backend?: RasterSurfaceBackend;
+  /** Ground-truth only. Default 1. Packs/draws at N× then caller downscales. */
+  dotScale?: number;
 }
 
 export type RasterBitmap = {
@@ -49,6 +61,29 @@ const UNSUPPORTED: ReadonlySet<LabelElement['type']> = new Set([
   'clipart',
   'signature',
 ]);
+
+function isUnsupportedPrintType(type: LabelElement['type']): boolean {
+  return type === 'image' || UNSUPPORTED.has(type);
+}
+
+/**
+ * Headless TD-404 must abort if the document contains any Stage A-unsupported
+ * type — including needPrinting=false. Skipping those and drawing the rest
+ * would send a partial label.
+ */
+export function assertHeadlessRasterDocument(doc: LabelDocument): void {
+  const types = new Set<string>();
+  const ids: string[] = [];
+  for (const el of doc.elements) {
+    if (!isUnsupportedPrintType(el.type)) continue;
+    types.add(el.type);
+    ids.push(`${el.type}:${el.id}`);
+  }
+  if (types.size === 0) return;
+  throw new Error(
+    `Unsupported print element type: ${[...types].join(', ')} (${ids.join(', ')}). Headless TD-404 print aborted; no bytes were sent.`,
+  );
+}
 
 export function packedPageDots(widthMm: number, heightMm: number, dpi: number): {
   sizeDotsW: number;
@@ -97,6 +132,15 @@ export type RasterizeTiming = {
 };
 
 let encodeAccumMs = 0;
+let activeDotScale = 1;
+
+function dots(mm: number, dpi: number): number {
+  return mmToDots(mm, dpi) * activeDotScale;
+}
+
+function dpmScaled(dpi: number): number {
+  return dotsPerMm(dpi) * activeDotScale;
+}
 
 function timedEncode<T>(fn: () => T): T {
   const t = performance.now();
@@ -105,37 +149,60 @@ function timedEncode<T>(fn: () => T): T {
   return value;
 }
 
+type DotBox = { x0: number; y0: number; w: number; h: number };
+
+/** Same rectangle LabelPreview uses when printDpi is set. */
+function placementBox(el: LabelElement, dpi: number): DotBox {
+  const size = elementSizeMm(el);
+  const rect = rectMmToDots(el.left, el.top, size.width, size.height, dpi);
+  const s = activeDotScale;
+  return {
+    x0: rect.x0 * s,
+    y0: rect.y0 * s,
+    w: Math.max(1, rect.widthDots * s),
+    h: Math.max(1, rect.heightDots * s),
+  };
+}
+
 function drawDocumentToSurface(doc: LabelDocument, dpi: number, surface: RasterSurface): void {
-  const dpm = dotsPerMm(dpi);
-  const elements = [...doc.elements].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-  for (const el of elements) {
-    if (el.needPrinting === false) continue;
+  const dpm = dpmScaled(dpi);
+  for (const el of sortLayers(doc.elements)) {
+    if (el.needPrinting === false || el.visible === false) continue;
     if (UNSUPPORTED.has(el.type)) {
       throw new Error(`Unsupported print element type: ${el.type}`);
     }
-    switch (el.type) {
-      case 'text':
-        drawText(surface, el, dpi, dpm);
-        break;
-      case 'barcode':
-        drawBarcode(surface, el, dpi, dpm);
-        break;
-      case 'qrcode':
-        drawQr(surface, el, dpi);
-        break;
-      case 'border':
-        drawBorder(surface, el, dpi, dpm);
-        break;
-      case 'line':
-        drawLine(surface, el, dpi, dpm);
-        break;
-      case 'shape':
-        drawShape(surface, el, dpi, dpm);
-        break;
-      case 'image':
-        throw new Error('Unsupported print element type: image (decode not wired in Stage A host path)');
-      default:
-        throw new Error(`Unsupported print element type: ${(el as LabelElement).type}`);
+    const box = placementBox(el, dpi);
+    const draw = () => {
+      switch (el.type) {
+        case 'text':
+          drawText(surface, el, dpi, dpm, box);
+          break;
+        case 'barcode':
+          drawBarcode(surface, el, dpi, dpm, box);
+          break;
+        case 'qrcode':
+          drawQr(surface, el, dpi, box);
+          break;
+        case 'border':
+          drawBorder(surface, el, dpi, dpm);
+          break;
+        case 'line':
+          drawLine(surface, el, dpm, box);
+          break;
+        case 'shape':
+          drawShape(surface, el, dpm, box);
+          break;
+        case 'image':
+          throw new Error('Unsupported print element type: image (decode not wired in Stage A host path)');
+        default:
+          throw new Error(`Unsupported print element type: ${(el as LabelElement).type}`);
+      }
+    };
+    const rotation = el.rotation ?? 0;
+    if (rotation % 360 !== 0) {
+      surface.withRotation(box.x0 + box.w / 2, box.y0 + box.h / 2, rotation, draw);
+    } else {
+      draw();
     }
   }
 }
@@ -145,33 +212,7 @@ export function rasterizeDocumentToBitmap(
   dpi: number,
   options: RasterizeOptions = {},
 ): RasterBitmap {
-  const { packedW, packedH } = packedPageDots(doc.widthMm, doc.heightMm, dpi);
-  const surface = makeOffscreenSurface(packedW, packedH, options.backend);
-  const threshold = options.threshold ?? 160;
-
-  drawDocumentToSurface(doc, dpi, surface);
-
-  const gray = surface.readGray();
-  const packed = packGrayToMono1bpp(
-    gray,
-    packedW,
-    packedH,
-    threshold,
-    options.target?.mono1bppBuffer,
-  );
-  if (options.target) {
-    options.target.widthDots = packedW;
-    options.target.heightDots = packedH;
-    options.target.bytesPerRow = packed.bytesPerRow;
-    options.target.mono1bppBuffer = packed.mono1bppBuffer;
-    return options.target;
-  }
-  return {
-    widthDots: packedW,
-    heightDots: packedH,
-    bytesPerRow: packed.bytesPerRow,
-    mono1bppBuffer: packed.mono1bppBuffer,
-  };
+  return rasterizeDocumentToBitmapTimed(doc, dpi, options).result;
 }
 
 /** Task 4.4 — split rasterize vs bit-pack timing on device. */
@@ -182,10 +223,14 @@ export function rasterizeDocumentToBitmapTimed(
 ): RasterizeTiming {
   const { packedW, packedH } = packedPageDots(doc.widthMm, doc.heightMm, dpi);
   const threshold = options.threshold ?? 160;
+  activeDotScale = Math.max(1, Math.round(options.dotScale ?? 1));
+  resetTextDrawLog();
+  const surfW = packedW * activeDotScale;
+  const surfH = packedH * activeDotScale;
 
   encodeAccumMs = 0;
   const tAlloc0 = performance.now();
-  const surface = makeOffscreenSurface(packedW, packedH, options.backend);
+  const surface = makeOffscreenSurface(surfW, surfH, options.backend);
   const allocMs = performance.now() - tAlloc0;
 
   const tDraw0 = performance.now();
@@ -201,8 +246,8 @@ export function rasterizeDocumentToBitmapTimed(
   const tPack0 = performance.now();
   const packed = packGrayToMono1bpp(
     gray,
-    packedW,
-    packedH,
+    surfW,
+    surfH,
     threshold,
     options.target?.mono1bppBuffer,
   );
@@ -210,15 +255,15 @@ export function rasterizeDocumentToBitmapTimed(
 
   const result: RasterBitmap = options.target
     ? (() => {
-        options.target!.widthDots = packedW;
-        options.target!.heightDots = packedH;
+        options.target!.widthDots = surfW;
+        options.target!.heightDots = surfH;
         options.target!.bytesPerRow = packed.bytesPerRow;
         options.target!.mono1bppBuffer = packed.mono1bppBuffer;
         return options.target!;
       })()
     : {
-        widthDots: packedW,
-        heightDots: packedH,
+        widthDots: packedW * activeDotScale,
+        heightDots: packedH * activeDotScale,
         bytesPerRow: packed.bytesPerRow,
         mono1bppBuffer: packed.mono1bppBuffer,
       };
@@ -241,23 +286,29 @@ function inkValue(antiColor?: boolean): number {
   return antiColor ? 255 : 0;
 }
 
+/** Same lookup as element-renderer resolveFontFamily. Lazy so host Stage A does not load react-native. */
 function resolveFontFamily(name?: string): string | undefined {
   if (!name || name === 'Default' || name === 'Barcode') return undefined;
-  // Stage A host path avoids FONT_LIBRARY (pulls react-native). Device uses matchFont fallback.
-  return undefined;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { FONT_LIBRARY } = require('@/constants/font-library') as {
+      FONT_LIBRARY: { name: string; id: string; family?: string }[];
+    };
+    const byName = FONT_LIBRARY.find((f) => f.name === name || f.id === name);
+    return byName?.family;
+  } catch {
+    return undefined;
+  }
 }
 
 function drawText(
   surface: RasterSurface,
   el: Extract<LabelElement, { type: 'text' }>,
-  dpi: number,
+  _dpi: number,
   dpm: number,
+  box: DotBox,
 ): void {
-  const x0 = mmToDots(el.left, dpi);
-  const y0 = mmToDots(el.top, dpi);
-  const boxW = Math.max(1, mmToDots(el.left + el.width, dpi) - x0);
-  const heightMm = typeof el.height === 'number' && el.height > 0 ? el.height : 8;
-  const boxH = Math.max(1, mmToDots(el.top + heightMm, dpi) - y0);
+  const { x0, y0, w: boxW, h: boxH } = box;
   if (el.antiColor) {
     surface.fillRect(x0, y0, boxW, boxH, 0);
   }
@@ -265,42 +316,47 @@ function drawText(
     el.contentType === 'Data Source' && el.columnNameContent
       ? `{${el.columnNameContent}}`
       : el.text;
-  const lines = wrapPrintText({
+  const layout = layoutPrintText({
     text: raw,
     fontSize: el.fontSize,
-    width: el.width,
+    widthMm: el.width,
     autoWrapping: el.autoWrapping,
+    lineSpacing: el.lineSpacing,
     charSpacing: el.charSpacing,
     bold: el.bold,
     verticalDisplay: el.verticalDisplay,
   });
   const fontH = Math.max(1, Math.round(ptToMm(el.fontSize) * dpm));
-  const lineH = Math.max(fontH, Math.round(fontH * 1.25));
+  const lineH = Math.max(1, Math.round(layout.lineHeightMm * dpm));
   const ink = inkValue(el.antiColor);
-  const textStyle = {
-    fontSizeDots: fontH,
-    bold: el.bold,
-    italic: el.italic,
-    family: resolveFontFamily(el.fontFamily) ?? 'sans-serif',
-    ink,
-  };
-  let ty = y0;
-  for (const line of lines) {
-    if (ty >= y0 + boxH) break;
-    let tx = x0;
-    const lineW = Math.round(surface.measureTextWidth(line, textStyle));
-    if (el.align === 'center') tx = x0 + Math.max(0, Math.floor((boxW - lineW) / 2));
-    else if (el.align === 'right') tx = x0 + Math.max(0, boxW - lineW);
-    surface.drawTextLine(line, tx, ty, textStyle);
-    ty += lineH;
+  const blockH = Math.max(lineH, layout.lines.length * lineH);
+  let ty = y0 + Math.floor((boxH - blockH) / 2);
+  for (let i = 0; i < layout.lines.length; i++) {
+    const line = layout.lines[i];
+    const next = ty + lineH;
+    if (next > y0 && ty < y0 + boxH && line.length > 0) {
+      const lineW = Math.max(1, Math.round(layout.widthsMm[i] * dpm));
+      let tx = x0;
+      if (el.align === 'center') tx = x0 + Math.floor((boxW - lineW) / 2);
+      else if (el.align === 'right') tx = x0 + Math.max(0, boxW - lineW);
+      const advances = contractLineAdvances(line, el.bold ?? false, lineW);
+      let cx = tx;
+      for (let c = 0; c < line.length; c++) {
+        const w = advances[c] ?? 0;
+        if (line[c] !== ' ' && w > 0) surface.fillRect(cx, ty, w, fontH, ink);
+        cx += w;
+      }
+    }
+    ty = next;
   }
 }
 
 function drawBarcode(
   surface: RasterSurface,
   el: Extract<LabelElement, { type: 'barcode' }>,
-  dpi: number,
+  _dpi: number,
   dpm: number,
+  box: DotBox,
 ): void {
   const content =
     el.contentType === 'Data Source' && el.columnNameContent
@@ -308,12 +364,10 @@ function drawBarcode(
       : el.content || '0123456789';
   const rawModules = timedEncode(() => barcodeModulesForMode(el.encodeMode, content));
   if (!rawModules) throw new Error(`Invalid barcode content for mode ${el.encodeMode}`);
-  const snapped = snap1DBarcodeModules(rawModules, el.width, dpi as HardwareDpi, false);
+  // Same snap inputs as BarcodeContent (203 DPI, no quiet zone). Stretch fills the print box.
+  const snapped = snap1DBarcodeModules(rawModules, el.width, 203, false);
   if (!snapped) throw new Error('Barcode snap failed');
-  const x0 = mmToDots(el.left, dpi);
-  const y0 = mmToDots(el.top, dpi);
-  const boxW = Math.max(1, mmToDots(el.left + el.width, dpi) - x0);
-  const boxH = Math.max(1, mmToDots(el.top + el.height, dpi) - y0);
+  const { x0, y0, w: boxW, h: boxH } = box;
   const ink = inkValue(el.antiColor);
   if (el.antiColor) surface.fillRect(x0, y0, boxW, boxH, 0);
   const fontH = Math.max(8, Math.round(ptToMm(el.fontSize) * dpm));
@@ -321,19 +375,26 @@ function drawBarcode(
   const labelH = showLabel ? Math.max(8, Math.round(fontH * 1.2)) : 0;
   const barsH = Math.max(2, boxH - labelH);
   const barsY = el.textFlag === 'Top' ? y0 + labelH : y0;
-  const originX = x0 + Math.round(snapped.offsetXMm * dpm);
-  for (const bar of snapped.bars) {
-    surface.fillRect(originX + bar.dotX, barsY, bar.dotWidth, barsH, ink);
+  const rounded = stretchThenRoundBars(snapped.bars, x0, boxW);
+  for (const bar of rounded) {
+    surface.fillRect(bar.x0, barsY, bar.width, barsH, ink);
   }
   if (showLabel) {
+    const hri = formatBarcodeHri(el.encodeMode, content);
     const labelY = el.textFlag === 'Top' ? y0 : y0 + barsH;
-    surface.drawTextLine(content, x0, labelY, {
+    const textStyle = {
       fontSizeDots: fontH,
       bold: el.bold,
       italic: el.italic,
-      family: resolveFontFamily(el.fontFamily) ?? 'sans-serif',
+      family: resolveFontFamily(el.fontFamily),
       ink,
-    });
+    };
+    let tx = x0;
+    const lineW = Math.round(surface.measureTextWidth(hri, textStyle));
+    if (el.align === 'center') tx = x0 + Math.max(0, Math.floor((boxW - lineW) / 2));
+    else if (el.align === 'right') tx = x0 + Math.max(0, boxW - lineW);
+    const textY = labelY + Math.floor((labelH - fontH) / 2);
+    surface.drawTextLine(hri, tx, textY, textStyle);
   }
 }
 
@@ -341,6 +402,7 @@ function drawQr(
   surface: RasterSurface,
   el: Extract<LabelElement, { type: 'qrcode' }>,
   dpi: number,
+  box: DotBox,
 ): void {
   const content =
     el.contentType === 'Data Source' && el.columnNameContent
@@ -348,37 +410,23 @@ function drawQr(
       : el.content || 'https://example.com';
   const qz = Math.max(0, parseInt(String(el.zoneSize), 10) || 0);
   const ink = inkValue(el.antiColor);
-  const x0 = mmToDots(el.left, dpi);
-  const y0 = mmToDots(el.top, dpi);
-  const boxW = Math.max(1, mmToDots(el.left + el.width, dpi) - x0);
-  const boxH = Math.max(1, mmToDots(el.top + el.height, dpi) - y0);
-  if (!el.antiColor) surface.fillRect(x0, y0, boxW, boxH, 255);
-  else surface.fillRect(x0, y0, boxW, boxH, 0);
+  const { x0, y0, w: boxW, h: boxH } = box;
+  if (el.antiColor) surface.fillRect(x0, y0, boxW, boxH, 0);
 
   if (el.encodeMode === 'QRCode' || !el.encodeMode) {
-    const matrix = timedEncode(() =>
-      generateQrMatrix(content, (el.errorLevel as 'L' | 'M' | 'Q' | 'H') || 'M'),
+    timedEncode(() =>
+      drawQrMeet(
+        surface,
+        content,
+        (el.errorLevel as 'L' | 'M' | 'Q' | 'H') || 'M',
+        qz,
+        x0,
+        y0,
+        boxW,
+        boxH,
+        ink,
+      ),
     );
-    if (!matrix) throw new Error('QR encode failed');
-    const snap = snap2DMatrixToHardwareDots(
-      matrix.size,
-      matrix.size,
-      el.width,
-      el.height,
-      dpi as HardwareDpi,
-      qz,
-    );
-    const ox = x0 + mmToDots(snap.offsetXMm, dpi);
-    const oy = y0 + mmToDots(snap.offsetYMm, dpi);
-    const cell = snap.dotSize;
-    const origin = qz * cell;
-    for (let r = 0; r < matrix.size; r++) {
-      for (let c = 0; c < matrix.size; c++) {
-        if (matrix.data[r * matrix.size + c]) {
-          surface.fillRect(ox + origin + c * cell, oy + origin + r * cell, cell, cell, ink);
-        }
-      }
-    }
     return;
   }
 
@@ -393,8 +441,8 @@ function drawQr(
       dpi as HardwareDpi,
       Math.max(1, qz),
     );
-    const ox = x0 + mmToDots(snap.offsetXMm, dpi);
-    const oy = y0 + mmToDots(snap.offsetYMm, dpi);
+    const ox = x0 + dots(snap.offsetXMm, dpi);
+    const oy = y0 + dots(snap.offsetYMm, dpi);
     const qzDots = Math.max(1, qz) * snap.dotSize;
     for (let r = 0; r < dm.rows; r++) {
       for (let c = 0; c < dm.cols; c++) {
@@ -423,8 +471,8 @@ function drawQr(
       dpi as HardwareDpi,
       Math.max(2, qz),
     );
-    const ox = x0 + mmToDots(snap.offsetXMm, dpi);
-    const oy = y0 + mmToDots(snap.offsetYMm, dpi);
+    const ox = x0 + dots(snap.offsetXMm, dpi);
+    const oy = y0 + dots(snap.offsetYMm, dpi);
     const qzM = Math.max(2, qz);
     for (let r = 0; r < pdf.rows; r++) {
       for (let c = 0; c < pdf.cols; c++) {
@@ -449,26 +497,18 @@ function drawBorder(
   surface: RasterSurface,
   el: Extract<LabelElement, { type: 'border' }>,
   dpi: number,
-  dpm: number,
+  _dpm: number,
 ): void {
-  const stroke = Math.max(1, Math.round(el.lineWidth * dpm));
-  const x0 = mmToDots(el.left, dpi);
-  const y0 = mmToDots(el.top, dpi);
-  const w = Math.max(stroke * 2, mmToDots(el.left + el.width, dpi) - x0);
-  const h = Math.max(stroke * 2, mmToDots(el.top + el.height, dpi) - y0);
-  surface.strokeRect(x0, y0, w, h, stroke, 0);
+  drawPrintBorder(surface, el, dpi, activeDotScale);
 }
 
 function drawLine(
   surface: RasterSurface,
   el: Extract<LabelElement, { type: 'line' }>,
-  dpi: number,
   dpm: number,
+  box: DotBox,
 ): void {
-  const x0 = mmToDots(el.left, dpi);
-  const y0 = mmToDots(el.top, dpi);
-  const w = Math.max(1, mmToDots(el.left + el.width, dpi) - x0);
-  const h = Math.max(1, mmToDots(el.top + el.height, dpi) - y0);
+  const { x0, y0, w, h } = box;
   const vertical = h >= w * 2;
   const stroke = Math.max(1, Math.round((vertical ? el.width : el.height) * dpm));
   if (vertical) {
@@ -481,13 +521,10 @@ function drawLine(
 function drawShape(
   surface: RasterSurface,
   el: Extract<LabelElement, { type: 'shape' }>,
-  dpi: number,
   dpm: number,
+  box: DotBox,
 ): void {
-  const x0 = mmToDots(el.left, dpi);
-  const y0 = mmToDots(el.top, dpi);
-  const w = Math.max(1, mmToDots(el.left + el.width, dpi) - x0);
-  const h = Math.max(1, mmToDots(el.top + el.height, dpi) - y0);
+  const { x0, y0, w, h } = box;
   const stroke = Math.max(1, Math.round(el.lineWidth * dpm));
   if (el.figureShape === 'oval' || el.figureShape === 'circle') {
     const rx = el.figureShape === 'circle' ? Math.min(w, h) / 2 : w / 2;

@@ -42,6 +42,7 @@ import {
   formatLiveTime,
 } from '@/components/editor/types';
 import { barcodeBarsForMode } from '@/lib/barcode-code128';
+import { formatBarcodeHri } from '@/lib/barcode/hri';
 import { generateQrMatrix } from '@/printing/renderer/qrcode';
 import { applySerialOffset, lineSpacingMultiplier } from '@/lib/serial-content';
 import { FONT_LIBRARY } from '@/constants/font-library';
@@ -71,15 +72,6 @@ export function resolveFontFamily(name?: string): string | undefined {
 
 export function fontSizePx(fontSizePt: number, scale: number): number {
   return Math.max(1, ptToMm(fontSizePt) * scale);
-}
-
-function formatBarcodeHri(mode: string, content: string): string {
-  if (mode !== 'UPC-A') return content;
-  const digits = content.replace(/\D/g, '');
-  if (digits.length === 12) {
-    return `${digits[0]} ${digits.slice(1, 6)} ${digits.slice(6, 11)} ${digits[11]}`;
-  }
-  return content;
 }
 
 /**

@@ -29,6 +29,7 @@ import {
   getAmbiguousModelCandidates,
 } from '@/lib/printer/printer-heuristics';
 import { encodeTscTextSample } from '@/lib/printer/tsc';
+import { assertTd404MonoBuffer } from '@/printing/raster/td404-mono-validate';
 import { usePrinterStore, normalizePrinterMac } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { type SeznikPrinterModelId, SEZNIK_PRINTER_MODELS } from '@/constants/printer-models';
@@ -245,6 +246,12 @@ class PrinterManager {
     decodeMs?: number;
     encodeMs?: number;
     writeMs?: number;
+  } | null = null;
+  /** Last TD-404 native mono BITMAP timings (write ms + bytes). */
+  private lastTd404MonoLabelTiming: {
+    writeMs?: number;
+    bytesSent?: number;
+    jobBytes?: number;
   } | null = null;
   /** Last error message for diagnostics. */
   private lastErrorMessage: string | null = null;
@@ -2790,6 +2797,14 @@ class PrinterManager {
     return this.lastTd404PngLabelTiming;
   }
 
+  getLastTd404MonoLabelTiming(): {
+    writeMs?: number;
+    bytesSent?: number;
+    jobBytes?: number;
+  } | null {
+    return this.lastTd404MonoLabelTiming;
+  }
+
   /**
    * Attempt to reconnect to the last known device.
    * Useful when navigating back to the print screen.
@@ -3104,6 +3119,131 @@ class PrinterManager {
       const msg = error instanceof Error ? error.message : String(error);
       if (code === 'NATIVE_PNG_UNAVAILABLE' || msg.includes('NATIVE_PNG_UNAVAILABLE')) {
         console.warn('[printer] Native printPngLabel missing — falling back to JS raster path');
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Stage B: packed 1-bit buffer → printMonoLabel. Does not call printPngLabel.
+   * Returns false when the native method is missing (old binary). Throws on write failure.
+   */
+  async printMonoLabelFast(options: {
+    monoBytes: Uint8Array;
+    widthDots: number;
+    heightDots: number;
+    bytesPerRow: number;
+    widthMm: number;
+    heightMm: number;
+    gapMm: number;
+    copies?: number;
+    density?: number | null;
+    speed?: number | null;
+    vOffsetMm?: number;
+    hOffsetMm?: number;
+    media?: 'gap' | 'bline' | 'continuous';
+    dpi?: number;
+  }): Promise<boolean> {
+    if (this.activeTransport !== 'td404-spp' || !this.usesTd404CommandSet) {
+      return false;
+    }
+    const td404 = this.getTd404();
+    if (!td404 || typeof td404.printTd404MonoLabel !== 'function') {
+      return false;
+    }
+
+    this.printQueueDepth++;
+    const run = this.printChain.then(async () => {
+      const store = usePrinterStore.getState();
+      store.setStatus('printing');
+      this.connectionState = 'printing';
+      try {
+        await this.ensureConnected();
+        const dpi = options.dpi ?? this.getPrintDpi();
+        const profile = this.getActivePrinterProfile();
+        const spec = createPrintSpec({
+          widthMm: options.widthMm,
+          heightMm: options.heightMm,
+          dpi,
+          profile,
+          mediaType: options.media ?? 'gap',
+          gapMm: options.gapMm,
+          calibration: {
+            horizontalOffsetMm: options.hOffsetMm ?? 0,
+            verticalOffsetMm: options.vOffsetMm ?? 0,
+          },
+        });
+        assertTd404MonoBuffer({
+          monoBytes: options.monoBytes,
+          widthDots: options.widthDots,
+          heightDots: options.heightDots,
+          bytesPerRow: options.bytesPerRow,
+          widthMm: spec.widthMm,
+          heightMm: spec.heightMm,
+          dpi: spec.dpi,
+        });
+        const t0 = Date.now();
+        const result = await td404.printTd404MonoLabel({
+          monoBytes: options.monoBytes,
+          widthDots: options.widthDots,
+          heightDots: options.heightDots,
+          bytesPerRow: options.bytesPerRow,
+          widthMm: spec.widthMm,
+          heightMm: spec.heightMm,
+          gapMm: spec.gapMm,
+          density: options.density ?? 10,
+          speed: options.speed ?? 3,
+          xDots: spec.xOffsetDots,
+          yDots: spec.yOffsetDots,
+          copies: Math.max(1, Math.round(options.copies ?? 1)),
+          media: options.media ?? 'gap',
+          dpi: spec.dpi,
+          direction: 1,
+        });
+        if (!result) {
+          this.lastTd404MonoLabelTiming = null;
+          const err = new Error('NATIVE_MONO_UNAVAILABLE');
+          (err as Error & { code?: string }).code = 'NATIVE_MONO_UNAVAILABLE';
+          throw err;
+        }
+        this.lastTd404MonoLabelTiming = {
+          writeMs: result.writeMs,
+          bytesSent: result.bytesSent,
+          jobBytes: result.jobBytes,
+        };
+        console.info(
+          '[printer] TD-404 mono print done in',
+          Date.now() - t0,
+          'ms | writeMs=',
+          result.writeMs,
+          'bytesSent=',
+          result.bytesSent,
+        );
+      } finally {
+        const currentStore = usePrinterStore.getState();
+        if (currentStore.status === 'printing') {
+          currentStore.setStatus(this.isConnected ? 'connected' : 'disconnected');
+        }
+        this.connectionState = this.isConnected ? 'connected' : 'disconnected';
+      }
+    });
+    this.printChain = run.then(
+      () => {
+        this.decrementPrintQueue();
+      },
+      () => {
+        this.decrementPrintQueue();
+      },
+    );
+    try {
+      await run;
+      return true;
+    } catch (error) {
+      const code = error instanceof Error ? (error as Error & { code?: string }).code : null;
+      const msg = error instanceof Error ? error.message : String(error);
+      if (code === 'NATIVE_MONO_UNAVAILABLE' || msg.includes('NATIVE_MONO_UNAVAILABLE')) {
+        console.warn('[printer] Native printMonoLabel missing — not falling back to PNG');
         return false;
       }
       throw error;

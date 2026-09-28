@@ -416,3 +416,59 @@ export function computeTextElementHeightMm({
   const perLineMm = ptToMm(fontSize) * 1.25 * mult;
   return Math.max(2.4, perLineMm * Math.max(1, lines.length));
 }
+
+export type PrintTextLayout = {
+  lines: string[];
+  /** Width of each line from the same charWidthEm measure used to wrap. */
+  widthsMm: number[];
+  /** One line, in mm: font size × line-spacing multiplier. */
+  lineHeightMm: number;
+};
+
+/**
+ * Wrap and measure a print/editor text run with one function.
+ * Editor preview and the headless rasterizer both align from `widthsMm`.
+ */
+export function layoutPrintText({
+  text,
+  fontSize,
+  widthMm,
+  autoWrapping = 'Word',
+  lineSpacing = '1.0',
+  charSpacing = 0,
+  bold = false,
+  verticalDisplay = false,
+}: ComputeTextElementHeightParams): PrintTextLayout {
+  'worklet';
+  const lines = computeWrappedLines({
+    text,
+    fontSize,
+    widthMm,
+    autoWrapping,
+    charSpacing,
+    bold,
+    verticalDisplay,
+  });
+  return {
+    lines,
+    widthsMm: lines.map((line) => measureTextWidthMm(line, fontSize, charSpacing, bold)),
+    lineHeightMm: ptToMm(fontSize) * lineSpacingMultiplier(lineSpacing),
+  };
+}
+
+/** Split `targetDots` across characters in proportion to charWidthEm. Sum equals targetDots. */
+export function contractLineAdvances(text: string, bold: boolean, targetDots: number): number[] {
+  const chars = [...text];
+  if (chars.length === 0 || targetDots <= 0) return chars.map(() => 0);
+  const weights = chars.map((ch) => Math.max(0.01, charWidthEm(ch, bold)));
+  const sum = weights.reduce((acc, w) => acc + w, 0);
+  const raw = weights.map((w) => (w / sum) * targetDots);
+  const floors = raw.map((v) => Math.floor(v));
+  let rem = targetDots - floors.reduce((acc, v) => acc + v, 0);
+  const order = raw
+    .map((v, i) => ({ i, frac: v - floors[i] }))
+    .sort((a, b) => b.frac - a.frac);
+  const out = floors.slice();
+  for (let k = 0; k < rem; k++) out[order[k % order.length].i] += 1;
+  return out;
+}

@@ -1,0 +1,69 @@
+{
+  "width": 600,
+  "height": 360,
+  "threshold": 160,
+  "full": {
+    "region": "full",
+    "pixels": 216000,
+    "differing": 0,
+    "percent": 0
+  },
+  "regions": [
+    {
+      "region": "text",
+      "pixels": 50688,
+      "differing": 0,
+      "percent": 0
+    },
+    {
+      "region": "bars",
+      "pixels": 34608,
+      "differing": 0,
+      "percent": 0
+    },
+    {
+      "region": "digits",
+      "pixels": 13776,
+      "differing": 0,
+      "percent": 0
+    },
+    {
+      "region": "qr",
+      "pixels": 24336,
+      "differing": 0,
+      "percent": 0
+    },
+    {
+      "region": "border",
+      "pixels": 193536,
+      "differing": 0,
+      "percent": 0
+    }
+  ],
+  "confirmed": {
+    "barGeometry": false,
+    "missingDigits": false,
+    "borderStyle": false,
+    "textPlacement": false
+  },
+  "barcodeRunWidthRatio": {
+    "minRun": 1,
+    "maxRun": 6,
+    "ratio": 6,
+    "runCount": 49
+  },
+  "skiaProbe": false,
+  "backendMs": {
+    "skia": {
+      "error": "Skia.Surface.MakeOffscreen is not a function"
+    },
+    "dotBuffer": {
+      "backend": "dot-buffer",
+      "rasterizeMs": 0.8882510000000252,
+      "drawMs": 0.3149180000000342,
+      "packMs": 0.8375000000000341,
+      "readbackMs": 0.00037500000001955414,
+      "encodeMs": 0.5454989999999498
+    }
+  }
+}

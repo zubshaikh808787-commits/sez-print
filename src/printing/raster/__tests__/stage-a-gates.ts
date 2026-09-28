@@ -8,9 +8,13 @@ import { DEFAULT_ELEMENT_STATE } from '@/components/editor/types';
 import type { LabelElement } from '@/lib/label-document';
 import { probeSkiaOffscreen } from '@/printing/raster/skia-surface';
 import { decodeStageAFrozenBuffer } from '@/printing/raster/stage-a-decode';
+import { barcodeRunWidthRatio } from '@/printing/raster/barcode-stretch';
+import { rasterizeEditorParityReference, frozenFixtureRegions } from '@/printing/raster/editor-parity-reference';
+import { diffHeadlessVsReference, unpackedHeadlessGray } from '@/printing/raster/parity-diff';
 import {
   createPhase4FrozenDocument,
   rasterizeDocumentToBitmap,
+  rasterizeDocumentToBitmapTimed,
   wrapPrintText,
 } from '@/printing/raster/skia-rasterizer';
 
@@ -62,6 +66,28 @@ assert.ok(decoded.pass, `4.4b failed: ${JSON.stringify(decoded)}`);
 console.log('4.4b Code128:', decoded.code128);
 console.log('4.4b QR:', decoded.qr);
 
+const headlessGray = unpackedHeadlessGray(bits);
+const reference = rasterizeEditorParityReference(FIXTURE, DPI);
+const parity = diffHeadlessVsReference(headlessGray, reference.gray, bits.widthDots, bits.heightDots, DPI, 160);
+console.log('parity full %', parity.full.percent.toFixed(3), 'confirmed', parity.confirmed);
+assert.ok(parity.full.percent < 0.5, `editor parity failed: ${parity.full.percent}% differing`);
+assert.equal(parity.confirmed.barGeometry, false);
+assert.equal(parity.confirmed.missingDigits, false);
+assert.equal(parity.confirmed.borderStyle, false);
+assert.equal(parity.confirmed.textPlacement, false);
+
+const bars = frozenFixtureRegions(DPI).bars;
+const jitter = barcodeRunWidthRatio(
+  headlessGray,
+  bits.widthDots,
+  bars.y + Math.floor(bars.h / 2),
+  bars.x,
+  bars.x + bars.w,
+);
+console.log('barcode run-width ratio', jitter);
+assert.ok(jitter.runCount > 10, 'expected barcode runs');
+assert.ok(jitter.ratio <= 6, `stretch-then-round module jitter too high: ${jitter.ratio}`);
+
 const times: number[] = [];
 for (let i = 0; i < 50; i++) {
   const start = process.hrtime.bigint();
@@ -85,6 +111,25 @@ const after = process.memoryUsage().heapUsed;
 const delta = after - before;
 console.log(`4.6 Node heapUsed before=${before} after=${after} delta=${delta}`);
 console.log('4.6 GATE Hermes zero-growth: NOT MEASURED (no Hermes in this session)');
+
+const backendSamples = { skia: [] as number[], dot: [] as number[] };
+for (let i = 0; i < 20; i++) {
+  const dotT = rasterizeDocumentToBitmapTimed(FIXTURE, DPI, { threshold: 160, backend: 'dot-buffer' });
+  backendSamples.dot.push(dotT.rasterizeMs + dotT.bitpackMs);
+  try {
+    const skiaT = rasterizeDocumentToBitmapTimed(FIXTURE, DPI, { threshold: 160, backend: 'skia' });
+    backendSamples.skia.push(skiaT.rasterizeMs + skiaT.bitpackMs);
+  } catch {
+    // Host has no MakeOffscreen.
+  }
+}
+backendSamples.dot.sort((a, b) => a - b);
+console.log(
+  `backend real-text host n=20 dot-buffer median=${backendSamples.dot[10].toFixed(3)}ms skia samples=${backendSamples.skia.length} (MakeOffscreen unavailable on host; default backend unchanged)`,
+);
+console.log(
+  'glyph-cache proposal: only if on-device Skia drawMs is the majority of rasterizeMs. Host dot-buffer draw is not the bottleneck.',
+);
 
 const bad = createPhase4FrozenDocument();
 bad.elements.push({

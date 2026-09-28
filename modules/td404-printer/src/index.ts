@@ -19,6 +19,30 @@ export type Td404PngLabelResult = {
   encodeMs?: number;
   writeMs?: number;
   path?: string;
+  dryRun?: boolean;
+  jobBase64?: string;
+  wireBmpBase64?: string;
+  bytesPerRow?: number;
+  heightDots?: number;
+  widthDots?: number;
+  gitSha?: string;
+  buildTime?: string;
+};
+
+export type Td404MonoLabelResult = {
+  bytesSent: number;
+  jobBytes?: number;
+  copies?: number;
+  writeMs?: number;
+  path?: string;
+  dryRun?: boolean;
+  jobBase64?: string;
+  wireBmpBase64?: string;
+  bytesPerRow?: number;
+  heightDots?: number;
+  widthDots?: number;
+  gitSha?: string;
+  buildTime?: string;
 };
 
 type NativeTd404 = {
@@ -37,6 +61,10 @@ type NativeTd404 = {
   printBase64(base64: string): Promise<{ bytesSent: number }>;
   printRaw?(bytes: Uint8Array): Promise<{ bytesSent: number }>;
   printPngLabel?(options: Record<string, unknown>): Promise<Td404PngLabelResult>;
+  printMonoLabel?(
+    monoBytes: Uint8Array,
+    options: Record<string, unknown>,
+  ): Promise<Td404MonoLabelResult>;
   renderPdfPages?(
     uri: string,
     options?: Record<string, unknown>,
@@ -226,6 +254,10 @@ export type Td404PngLabelOptions = {
   threshold?: number;
   /** Whether to use Floyd-Steinberg error diffusion dithering for photos / halftones. */
   dither?: boolean;
+  /** Dev-only: build TSPL job and return bytes without a socket write. Default off. */
+  dryRun?: boolean;
+  gitSha?: string;
+  buildTime?: string;
 };
 
 /**
@@ -237,7 +269,7 @@ export async function printTd404PngLabel(
 ): Promise<Td404PngLabelResult | null> {
   const mod = getNative();
   if (!mod || typeof mod.printPngLabel !== 'function') return null;
-  if (!mod.isConnected()) {
+  if (!options.dryRun && !mod.isConnected()) {
     throw new Error('No TD-404 printer connected.');
   }
   return mod.printPngLabel({
@@ -256,6 +288,97 @@ export async function printTd404PngLabel(
     direction: options.direction ?? 1,
     threshold: options.threshold ?? 160,
     dither: options.dither ?? false,
+    dryRun: options.dryRun === true,
+    gitSha: options.gitSha ?? 'unknown',
+    buildTime: options.buildTime ?? 'unknown',
+  });
+}
+
+export type Td404MonoLabelOptions = {
+  monoBytes: Uint8Array;
+  widthDots: number;
+  heightDots: number;
+  bytesPerRow: number;
+  widthMm: number;
+  heightMm: number;
+  gapMm?: number;
+  density?: number | null;
+  speed?: number | null;
+  xDots?: number;
+  yDots?: number;
+  copies?: number;
+  media?: 'gap' | 'bline' | 'continuous';
+  dpi?: number;
+  direction?: 0 | 1;
+  dryRun?: boolean;
+  gitSha?: string;
+  buildTime?: string;
+};
+
+function packedPageDotsMm(widthMm: number, heightMm: number, dpi: number) {
+  const dpm = dpi === 304 ? 12 : dpi === 203 ? 8 : Number.NaN;
+  if (!Number.isFinite(dpm)) {
+    throw new Error(`TD-404 dpi ${dpi} is not 203 or 304`);
+  }
+  const sizeDotsW = Math.max(1, Math.round(widthMm * dpm));
+  const sizeDotsH = Math.max(1, Math.round(heightMm * dpm));
+  const packedW = Math.max(8, Math.floor(sizeDotsW / 8) * 8);
+  return { packedW, packedH: sizeDotsH };
+}
+
+function assertTd404MonoBufferLocal(options: Td404MonoLabelOptions, dpi: number): void {
+  const { packedW, packedH } = packedPageDotsMm(options.widthMm, options.heightMm, dpi);
+  if (options.bytesPerRow * 8 !== packedW) {
+    throw new Error(
+      `TD-404 mono buffer bytesPerRow*8 (${options.bytesPerRow * 8}) != packedW (${packedW}) for ${options.widthMm}x${options.heightMm}mm @ ${dpi} dpi`,
+    );
+  }
+  if (options.widthDots !== packedW) {
+    throw new Error(`TD-404 mono widthDots (${options.widthDots}) != packedW (${packedW})`);
+  }
+  if (options.heightDots !== packedH) {
+    throw new Error(`TD-404 mono heightDots (${options.heightDots}) != packedH (${packedH})`);
+  }
+  const expectedLen = options.bytesPerRow * options.heightDots;
+  if (options.monoBytes.length !== expectedLen) {
+    throw new Error(
+      `TD-404 mono buffer length ${options.monoBytes.length} != bytesPerRow*heightDots (${expectedLen})`,
+    );
+  }
+}
+
+/**
+ * Native path: packed 1-bit buffer → TSPL BITMAP → SPP (no PNG decode).
+ * Returns null when the native module / method is unavailable.
+ */
+export async function printTd404MonoLabel(
+  options: Td404MonoLabelOptions,
+): Promise<Td404MonoLabelResult | null> {
+  const dpi = options.dpi ?? 304;
+  assertTd404MonoBufferLocal(options, dpi);
+  const mod = getNative();
+  if (!mod || typeof mod.printMonoLabel !== 'function') return null;
+  if (!options.dryRun && !mod.isConnected()) {
+    throw new Error('No TD-404 printer connected.');
+  }
+  return mod.printMonoLabel(options.monoBytes, {
+    widthDots: options.widthDots,
+    heightDots: options.heightDots,
+    bytesPerRow: options.bytesPerRow,
+    widthMm: options.widthMm,
+    heightMm: options.heightMm,
+    gapMm: options.gapMm ?? 2,
+    density: options.density ?? 10,
+    speed: options.speed ?? 3,
+    xDots: options.xDots ?? 0,
+    yDots: options.yDots ?? 0,
+    copies: options.copies ?? 1,
+    media: options.media ?? 'gap',
+    dpi,
+    direction: options.direction ?? 1,
+    dryRun: options.dryRun === true,
+    gitSha: options.gitSha ?? 'unknown',
+    buildTime: options.buildTime ?? 'unknown',
   });
 }
 
