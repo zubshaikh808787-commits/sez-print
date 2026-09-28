@@ -376,6 +376,12 @@ export default function CalibrationPrintScreen() {
         </Pressable>
 
         <Pressable
+          onPress={() => router.push('/location-dots')}
+          style={({ pressed }) => [styles.gateABtn, pressed && styles.pressed]}>
+          <Text style={styles.printBtnText}>Location and border payload (dry-run, no printer)</Text>
+        </Pressable>
+
+        <Pressable
           onPress={() => router.push('/stage-a-gates')}
           style={({ pressed }) => [styles.gateABtn, pressed && styles.pressed]}>
           <Text style={styles.printBtnText}>Run GATE-A Device Benchmark (4.4 + 4.6)</Text>
