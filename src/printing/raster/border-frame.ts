@@ -123,14 +123,19 @@ export function inwardFrameBandsInBox(
   dpi: number,
   lineWidthMm: number | undefined,
   styleId: BorderStyleId,
+  insets?: { left: number; right: number; top: number; bottom: number },
 ): FrameBand[] {
   const inset = borderInsetDots(dpi);
+  const left = insets?.left ?? inset;
+  const right = insets?.right ?? inset;
+  const top = insets?.top ?? inset;
+  const bottom = insets?.bottom ?? inset;
   const fallback = borderStrokeFallbackMm(styleId);
   const stroke = borderStrokeDots(lineWidthMm, dpi, fallback);
-  const ix = inset;
-  const iy = inset;
-  const iw = Math.max(1, boxWidthDots - inset * 2);
-  const ih = Math.max(1, boxHeightDots - inset * 2);
+  const ix = left;
+  const iy = top;
+  const iw = Math.max(1, boxWidthDots - left - right);
+  const ih = Math.max(1, boxHeightDots - top - bottom);
 
   if (styleId === 'dashed' || styleId === 'dotted') {
     return dashedFrameBands(ix, iy, iw, ih, stroke, styleId === 'dotted');
@@ -184,14 +189,19 @@ export function drawInwardFrameInBox(
   styleId: BorderStyleId,
   originX = 0,
   originY = 0,
+  insets?: { left: number; right: number; top: number; bottom: number },
 ): void {
   const inset = borderInsetDots(dpi);
+  const left = insets?.left ?? inset;
+  const right = insets?.right ?? inset;
+  const top = insets?.top ?? inset;
+  const bottom = insets?.bottom ?? inset;
   const fallback = borderStrokeFallbackMm(styleId);
   const stroke = borderStrokeDots(lineWidthMm, dpi, fallback);
-  const ix = originX + inset;
-  const iy = originY + inset;
-  const iw = Math.max(1, boxWidthDots - inset * 2);
-  const ih = Math.max(1, boxHeightDots - inset * 2);
+  const ix = originX + left;
+  const iy = originY + top;
+  const iw = Math.max(1, boxWidthDots - left - right);
+  const ih = Math.max(1, boxHeightDots - top - bottom);
 
   if (styleId === 'double' || styleId === 'label-frame') {
     if (target.strokeRect) {
@@ -219,7 +229,7 @@ export function drawInwardFrameInBox(
     return;
   }
 
-  const bands = inwardFrameBandsInBox(boxWidthDots, boxHeightDots, dpi, lineWidthMm, styleId);
+  const bands = inwardFrameBandsInBox(boxWidthDots, boxHeightDots, dpi, lineWidthMm, styleId, insets);
   for (const band of bands) {
     target.fillRect(originX + band.left, originY + band.top, band.width, band.height, 0);
   }

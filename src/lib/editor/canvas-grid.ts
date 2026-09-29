@@ -47,8 +47,12 @@ export function gridSpacingPx(spacingMm: number, pxPerMM: number): number {
   return clampGridSpacingMm(spacingMm) * pxPerMM;
 }
 
-export function shouldRenderCanvasGrid(spacingMm: number, pxPerMM: number): boolean {
-  return gridSpacingPx(spacingMm, pxPerMM) >= GRID_MIN_SPACING_PX;
+export function shouldRenderCanvasGrid(
+  spacingMm: number,
+  pxPerMM: number,
+  minSpacingPx = GRID_MIN_SPACING_PX,
+): boolean {
+  return gridSpacingPx(spacingMm, pxPerMM) >= minSpacingPx;
 }
 
 /** Uniform mm-spaced grid lines in pixel coordinates. */
@@ -57,13 +61,14 @@ export function buildCanvasGridLines(opts: {
   heightPx: number;
   pxPerMM: number;
   spacingMm: number;
+  minSpacingPx?: number;
 }): CanvasGridLines | null {
   const { widthPx, heightPx, pxPerMM } = opts;
   const spacingMm = clampGridSpacingMm(opts.spacingMm);
   if (!(widthPx > 0 && heightPx > 0 && pxPerMM > 0)) {
     return null;
   }
-  if (!shouldRenderCanvasGrid(spacingMm, pxPerMM)) {
+  if (!shouldRenderCanvasGrid(spacingMm, pxPerMM, opts.minSpacingPx)) {
     return null;
   }
 
@@ -182,6 +187,17 @@ function visibleGridElements(elements: LabelElement[], excludeIds?: readonly str
   return elements.filter((el) => el.visible !== false && !excluded?.has(el.id));
 }
 
+/** Skip non-printing layers and the page-frame border so grid shows inside the label. */
+export function printGridOccluderRectsPx(
+  elements: LabelElement[],
+  pxPerMM: number,
+): GridOccluderRectPx[] {
+  return elementOccluderRectsPx(
+    elements.filter((el) => el.needPrinting !== false && el.type !== 'border'),
+    pxPerMM,
+  );
+}
+
 export function elementOccluderRectsPx(
   elements: LabelElement[],
   pxPerMM: number,
@@ -223,6 +239,7 @@ export function buildOccludedCanvasGridLines(opts: {
   heightPx: number;
   pxPerMM: number;
   spacingMm: number;
+  minSpacingPx?: number;
   occluders?: GridOccluderRectPx[];
 }): OccludedCanvasGridLines | null {
   const base = buildCanvasGridLines(opts);
