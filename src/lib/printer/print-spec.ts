@@ -299,13 +299,17 @@ export type CreatePrintSpecOptions = {
 };
 
 /**
- * Compute the printhead X offset (in dots) to center a label on the printhead.
- * In TSPL command language, the printer firmware uses the SIZE command and
- * hardware sensor calibration (GAP / BLINE / REFERENCE 0,0) to establish
- * the label's origin at the top-left of the media.
- * Injecting an artificial printhead offset shifts the image off the physical label.
- * Hardware offset is 0; fine-tuning is controlled by user calibration offsets.
+ * TD-404 gap origin sits this far above the die-cut.
+ * Measured on paper: equal 2 mm top and bottom in the bitmap print as 1 mm and 3 mm.
  */
+export const TD404_FEED_ORIGIN_MM = 1;
+
+export function td404FeedOriginDots(profileId: string, dpi: number): number {
+  if (profileId !== 'td404-304' && profileId !== 'td404-203') return 0;
+  return mmToDots(TD404_FEED_ORIGIN_MM, dpi);
+}
+
+/** Hardware X offset is 0. Fine-tuning is the user calibration, plus the TD-404 feed origin on Y. */
 export function computePrintheadCenteringOffset(
   _labelWidthDots: number,
   _profile: PrinterProfile,
@@ -332,7 +336,7 @@ export function createPrintSpec(options: CreatePrintSpecOptions): PrintSpec {
   const rasterWidthDots = layout.bitmapDotsW;
   const bytesPerRow = layout.bytesPerRow;
 
-  // SIZE origin is the label top-left. BITMAP x/y are user calibration only.
+  // SIZE origin is the label top-left. BITMAP x is user calibration only.
   // Do not shift for pack-down leftover (those 0–7 columns are cropped on the right).
   const forceLeft = options.calibration?.forceLeftAligned === true;
   const centeringProfile = forceLeft ? { ...profile, alignment: 'left' as PrinterAlignment } : profile;
@@ -343,7 +347,9 @@ export function createPrintSpec(options: CreatePrintSpecOptions): PrintSpec {
 
   // Allow negative calibration — TD404/Dev bake negatives into the bitmap.
   const xOffsetDots = centeringOffsetDots + calibXOffsetDots;
-  const yOffsetDots = calibYOffsetDots;
+  // A 2 mm top/bottom inset prints as 1 mm top and 3 mm bottom: the bitmap
+  // starts 1 mm above the die-cut. BITMAP y slides the page down onto the label.
+  const yOffsetDots = td404FeedOriginDots(profile.id, dpi) + calibYOffsetDots;
 
   return {
     widthMm: effectiveWidthMm,
