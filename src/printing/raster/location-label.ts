@@ -707,8 +707,8 @@ function finishBorder(
   const clipped = margins.some((m) => m === 0) || strokes.some((s) => s + 1 < expectedStroke);
   const marginSpread = Math.max(...margins) - Math.min(...margins);
   const cropExplainsRight = crop > 0 && marginL - marginR === crop && marginT === marginB;
-  const expectedOuterX1 = rect.x1 - pad;
-  const expectedOuterY1 = rect.y1 - pad;
+  const expectedOuterX1 = Math.min(rect.x1, width) - pad;
+  const expectedOuterY1 = Math.min(rect.y1, height) - pad;
   return {
     id: c.id,
     widthMm: c.widthMm,
@@ -735,7 +735,7 @@ function finishBorder(
     outerY1: edge.maxY,
     dOuterX0: edge.minX - (rect.x0 + pad),
     dOuterY0: edge.minY - (rect.y0 + pad),
-    dOuterX1: exclusiveEnd(edge.maxX) - Math.min(expectedOuterX1, width),
+    dOuterX1: exclusiveEnd(edge.maxX) - expectedOuterX1,
     dOuterY1: exclusiveEnd(edge.maxY) - expectedOuterY1,
     editor: EDITOR_DENSITIES.map((density) => {
       const insetDots = editorInsetDots(dpm, density);

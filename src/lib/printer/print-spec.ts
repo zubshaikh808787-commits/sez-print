@@ -172,27 +172,6 @@ export function tsplPackedWidthDots(contentDots: number): number {
 }
 
 /**
- * TD-404 gap origin is 1 mm left of the die-cut. Padding the bitmap by this
- * amount (and widening SIZE to match) puts canvas millimetres on the sticker
- * without cropping the right edge.
- */
-export const TD404_DIECUT_ORIGIN_X_MM = 1;
-
-/** Label width to send as TSPL SIZE so a left pad is not clipped. */
-export function td404RegisteredWidthMm(
-  widthMm: number,
-  dpi: number,
-  padMm = TD404_DIECUT_ORIGIN_X_MM,
-): number {
-  const dpm = dotsPerMm(dpi);
-  const content = Math.max(1, Math.round(widthMm * dpm));
-  const pad = Math.max(0, Math.round(padMm * dpm));
-  if (pad <= 0) return widthMm;
-  const aligned = Math.ceil((content + pad) / 8) * 8;
-  return aligned / dpm;
-}
-
-/**
  * One layout for preview capture and TSPL BITMAP.
  *
  * Capture at SIZE-in-dots (1 px = 1 printer dot, same mm scale as the editor).

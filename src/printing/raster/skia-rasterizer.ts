@@ -25,7 +25,6 @@ import { computeWrappedLines, layoutPrintText } from '@/lib/text-metrics';
 import { formatBarcodeHri } from '@/lib/barcode/hri';
 import { stretchThenRoundBars } from './barcode-stretch';
 import { packGrayToMono1bpp } from './bit-packer';
-import { cropGrayKeepLeft, padGray } from './bitmap';
 import { drawPrintBorder } from './print-border';
 import { drawQrMeet } from './qr-meet';
 import {
@@ -39,13 +38,6 @@ export type RasterizeOptions = {
   threshold?: number;
   /** Photographic content only. Fixture path leaves this false. */
   dither?: boolean;
-  /** Pin the label frame to SIZE with a 2 mm inset on every side. */
-  lockBorderToPage?: boolean;
-  /**
-   * White columns added on the left. The bitmap grows by the same amount
-   * (byte-aligned) so the right edge of the canvas is not cropped.
-   */
-  registrationPadXMm?: number;
   /** Reuse a previous result buffer (Task 4.6). Must match packed page size. */
   target?: RasterBitmap;
   /** Pin backend for profiling. Default: Skia when MakeOffscreen works. */
@@ -186,9 +178,11 @@ function drawDocumentToSurface(
   doc: LabelDocument,
   dpi: number,
   surface: RasterSurface,
-  lockBorderToPage?: boolean,
+  bitmapWidthDots: number,
+  bitmapHeightDots: number,
 ): void {
   const dpm = dpmScaled(dpi);
+  const circular = doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse';
   for (const el of sortLayers(doc.elements)) {
     if (el.needPrinting === false || el.visible === false) continue;
     if (UNSUPPORTED.has(el.type)) {
@@ -207,13 +201,11 @@ function drawDocumentToSurface(
           drawQr(surface, el, dpi, box);
           break;
         case 'border':
-          drawPrintBorder(
-            surface,
-            el,
-            dpi,
-            activeDotScale,
-            lockBorderToPage ? { pageWidthMm: doc.widthMm, pageHeightMm: doc.heightMm } : undefined,
-          );
+          drawPrintBorder(surface, el, dpi, activeDotScale, {
+            circular,
+            bitmapWidthDots,
+            bitmapHeightDots,
+          });
           break;
         case 'line':
           drawLine(surface, el, dpm, box);
@@ -250,13 +242,12 @@ export function rasterizeDocumentToBitmapTimed(
   dpi: number,
   options: RasterizeOptions = {},
 ): RasterizeTiming {
-  const { sizeDotsW, packedW, packedH } = packedPageDots(doc.widthMm, doc.heightMm, dpi);
+  const { packedW, packedH } = packedPageDots(doc.widthMm, doc.heightMm, dpi);
   const threshold = options.threshold ?? 160;
   activeDotScale = Math.max(1, Math.round(options.dotScale ?? 1));
   resetTextDrawLog();
-  const surfW = sizeDotsW * activeDotScale;
+  const surfW = packedW * activeDotScale;
   const surfH = packedH * activeDotScale;
-  const packedSurfW = packedW * activeDotScale;
 
   encodeAccumMs = 0;
   const tAlloc0 = performance.now();
@@ -264,30 +255,19 @@ export function rasterizeDocumentToBitmapTimed(
   const allocMs = performance.now() - tAlloc0;
 
   const tDraw0 = performance.now();
-  drawDocumentToSurface(doc, dpi, surface, options.lockBorderToPage);
+  drawDocumentToSurface(doc, dpi, surface, packedW, packedH);
   const drawWallMs = performance.now() - tDraw0;
   const encodeMs = encodeAccumMs;
   const drawMs = Math.max(0, drawWallMs - encodeMs);
 
   const tRead0 = performance.now();
-  let grayBmp = { width: surfW, height: surfH, gray: surface.readGray() };
-  const padX = Math.max(0, mmToDots(options.registrationPadXMm ?? 0, dpi) * activeDotScale);
-  let outW = packedSurfW;
-  if (padX > 0) {
-    const rawW = grayBmp.width + padX;
-    const aligned = Math.ceil(rawW / 8) * 8;
-    grayBmp = padGray(grayBmp, padX, aligned - rawW);
-    outW = grayBmp.width;
-  } else if (grayBmp.width !== packedSurfW || grayBmp.height !== surfH) {
-    grayBmp = cropGrayKeepLeft(grayBmp, packedSurfW, surfH);
-  }
-  const gray = grayBmp.gray;
+  const gray = surface.readGray();
   const readbackMs = performance.now() - tRead0;
 
   const tPack0 = performance.now();
   const packed = packGrayToMono1bpp(
     gray,
-    outW,
+    surfW,
     surfH,
     threshold,
     options.target?.mono1bppBuffer,
@@ -296,14 +276,14 @@ export function rasterizeDocumentToBitmapTimed(
 
   const result: RasterBitmap = options.target
     ? (() => {
-        options.target!.widthDots = outW;
+        options.target!.widthDots = surfW;
         options.target!.heightDots = surfH;
         options.target!.bytesPerRow = packed.bytesPerRow;
         options.target!.mono1bppBuffer = packed.mono1bppBuffer;
         return options.target!;
       })()
     : {
-        widthDots: outW,
+        widthDots: packedW * activeDotScale,
         heightDots: packedH * activeDotScale,
         bytesPerRow: packed.bytesPerRow,
         mono1bppBuffer: packed.mono1bppBuffer,

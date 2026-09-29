@@ -78,7 +78,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { logPrintTrace } from '@/printing';
 import { resolveBuildTime, resolveGitSha } from '@/lib/build-identity';
 import { printTd404MonoLabel, printTd404PngLabel } from 'td404-printer';
-import { TD404_DIECUT_ORIGIN_X_MM, td404RegisteredWidthMm } from '@/lib/printer/print-spec';
 import {
   assertHeadlessRasterDocument,
   canHeadlessRasterPrint,
@@ -1033,20 +1032,15 @@ export default function PrintScreen() {
               assertHeadlessRasterDocument(pageDoc);
               await ensurePrintTypefaces();
               const docPrepMs = Date.now() - tPrep0;
-              const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, {
-                threshold,
-                lockBorderToPage: true,
-                registrationPadXMm: TD404_DIECUT_ORIGIN_X_MM,
-              });
+              const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, { threshold });
               const bitmap = timed.result;
-              const printWidthMm = td404RegisteredWidthMm(pageDoc.widthMm, jobDpi);
               const tNative0 = Date.now();
               usedNative = await manager.printMonoLabelFast({
                 monoBytes: bitmap.mono1bppBuffer,
                 widthDots: bitmap.widthDots,
                 heightDots: bitmap.heightDots,
                 bytesPerRow: bitmap.bytesPerRow,
-                widthMm: printWidthMm,
+                widthMm: pageDoc.widthMm,
                 heightMm: pageDoc.heightMm,
                 gapMm: gapLength,
                 copies,
@@ -1688,17 +1682,13 @@ export default function PrintScreen() {
                   if (!doc) return;
                   const png = await captureRef(shotRef, printCaptureShotOptions);
                   if (TD404_HEADLESS_SKIA_PRINT) {
-                    const timed = rasterizeDocumentToBitmapTimed(doc, jobDpi, {
-                      threshold: 160,
-                      lockBorderToPage: true,
-                      registrationPadXMm: TD404_DIECUT_ORIGIN_X_MM,
-                    });
+                    const timed = rasterizeDocumentToBitmapTimed(doc, jobDpi, { threshold: 160 });
                     const result = await printTd404MonoLabel({
                       monoBytes: timed.result.mono1bppBuffer,
                       widthDots: timed.result.widthDots,
                       heightDots: timed.result.heightDots,
                       bytesPerRow: timed.result.bytesPerRow,
-                      widthMm: td404RegisteredWidthMm(doc.widthMm, jobDpi),
+                      widthMm: doc.widthMm,
                       heightMm: doc.heightMm,
                       dpi: jobDpi,
                       dryRun: true,

@@ -182,10 +182,7 @@ function LabelElements({
           // (DIP × density). The capture view is sized at dots/density so the
           // snapshot is 1 physical pixel per printer dot — no later scale.
           const density = PixelRatio.get() || 1;
-          const box =
-            element.type === 'border'
-              ? rectMmToDots(0, 0, document.widthMm, document.heightMm, printDpi)
-              : rectMmToDots(element.left, element.top, size.width, size.height, printDpi);
+          const box = rectMmToDots(element.left, element.top, size.width, size.height, printDpi);
           leftPx = box.x0 / density;
           topPx = box.y0 / density;
           widthPx = Math.max(1 / density, box.widthDots / density);
