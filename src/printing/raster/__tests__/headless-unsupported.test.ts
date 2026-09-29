@@ -4,7 +4,7 @@ import test from 'node:test';
 import { DEFAULT_ELEMENT_STATE } from '@/components/editor/types';
 import type { LabelDocument, LabelElement } from '@/lib/label-document';
 import { createPhase4FrozenDocument } from '@/printing/raster/skia-rasterizer';
-import { assertHeadlessRasterDocument } from '@/printing/raster/skia-rasterizer';
+import { assertHeadlessRasterDocument, canHeadlessRasterPrint } from '@/printing/raster/skia-rasterizer';
 
 function timeEl(id: string, needPrinting: boolean): LabelElement {
   return {
@@ -21,12 +21,15 @@ function timeEl(id: string, needPrinting: boolean): LabelElement {
 }
 
 test('frozen fixture is headless-printable', () => {
-  assert.doesNotThrow(() => assertHeadlessRasterDocument(createPhase4FrozenDocument()));
+  const doc = createPhase4FrozenDocument();
+  assert.doesNotThrow(() => assertHeadlessRasterDocument(doc));
+  assert.equal(canHeadlessRasterPrint(doc), true);
 });
 
 test('printable time aborts before any buffer is produced', () => {
   const doc = createPhase4FrozenDocument();
   (doc as LabelDocument).elements.push(timeEl('clock', true));
+  assert.equal(canHeadlessRasterPrint(doc), false);
   assert.throws(
     () => assertHeadlessRasterDocument(doc),
     /Unsupported print element type: time/,

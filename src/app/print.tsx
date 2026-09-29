@@ -80,9 +80,11 @@ import { resolveBuildTime, resolveGitSha } from '@/lib/build-identity';
 import { printTd404MonoLabel, printTd404PngLabel } from 'td404-printer';
 import {
   assertHeadlessRasterDocument,
+  canHeadlessRasterPrint,
   rasterizeDocumentToBitmapTimed,
 } from '@/printing/raster/skia-rasterizer';
 import { TD404_HEADLESS_SKIA_PRINT } from '@/printing/raster/td404-headless-flag';
+import { ensurePrintTypefaces } from '@/printing/raster/print-typeface';
 import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
@@ -603,12 +605,13 @@ export default function PrintScreen() {
     return getPrinterManager().isJosh ? joshEffectiveDpi(raw) : raw;
   })();
 
-  /** Printer-dot artboard. The off-screen view is dots/density DIP so the snapshot is 1 px per dot. */
+  /** Printer-dot artboard. TD-404 captures packed BITMAP dots; others use SIZE dots. */
   const printCaptureSize = useMemo(() => {
     const doc = displayDocument ?? previewDocument;
     if (!doc) return { widthPx: 8, heightPx: 8 };
-    return printCaptureLayout(doc.widthMm, doc.heightMm, jobDpi).content;
-  }, [displayDocument, previewDocument, jobDpi]);
+    const layout = printCaptureLayout(doc.widthMm, doc.heightMm, jobDpi);
+    return printerSdkId === 'td404' ? layout.canvas : layout.content;
+  }, [displayDocument, previewDocument, jobDpi, printerSdkId]);
   const printCaptureLayoutPx = useMemo(() => {
     const density = PixelRatio.get() || 1;
     return {
@@ -620,6 +623,7 @@ export default function PrintScreen() {
     () => printCaptureOptionsForSize(printCaptureSize.widthPx, printCaptureSize.heightPx),
     [printCaptureSize.widthPx, printCaptureSize.heightPx],
   );
+  const captureLayoutPx = useRef<{ w: number; h: number } | null>(null);
 
   /** Live store ups config (compose strips it from the print document). */
   const upsSource = useMemo(() => {
@@ -789,8 +793,24 @@ export default function PrintScreen() {
           timer.end('pageWaitForPaint');
         }
 
-        const td404Headless =
-          manager.usesTd404CommandSet && __DEV__ && TD404_HEADLESS_SKIA_PRINT;
+        // Negative TD-404 calibration used to bake into PNG pixels and clip the
+        // left/top edge off the bitmap (missing border verticals). Clamp at 0.
+        const td404HOffset = Math.max(0, hOffset);
+        const td404VOffset = Math.max(0, vOffset);
+        if (manager.usesTd404CommandSet && (td404HOffset !== hOffset || td404VOffset !== vOffset)) {
+          console.warn(
+            `[print] TD-404 clamped negative calibration h ${hOffset}→${td404HOffset}mm v ${vOffset}→${td404VOffset}mm`,
+          );
+        }
+
+        const pageDoc = displayDocument ?? previewDocument;
+        const td404HeadlessMono =
+          manager.usesTd404CommandSet &&
+          orientationDeg === 0 &&
+          pageDoc != null &&
+          canHeadlessRasterPrint(pageDoc) &&
+          Math.abs(pageDoc.widthMm - paper.widthMm) <= 0.2 &&
+          Math.abs(pageDoc.heightMm - paper.heightMm) <= 0.2;
 
         timer.start('capture+verify');
         const captureTarget = printCaptureLayout(widthMm, heightMm, jobDpi).content;
@@ -799,12 +819,7 @@ export default function PrintScreen() {
         let rotatedBase64 = '';
         let connectionMs = 0;
         let captureMs = 0;
-        if (td404Headless) {
-          if (orientationDeg !== 0) {
-            throw new Error(
-              'TD-404 headless Skia print requires orientation 0; use the PNG path for rotated jobs.',
-            );
-          }
+        if (td404HeadlessMono) {
           const tConn0 = Date.now();
           const connectionResult = await manager.ensureConnected().catch((err) => {
             return { error: err };
@@ -1008,24 +1023,14 @@ export default function PrintScreen() {
           }
           timer.end('sdkFastPrint');
         } else if (manager.usesTd404CommandSet) {
-          // Native TD-404 SPP fast path (Tejas / Rudra): direct Kotlin 1-bit packing (<15ms)
+          // Native TD-404: headless Skia mono when every layer is rasterizable (dot-perfect
+          // positioning); ViewShot PNG only for photos/signatures/tables/etc.
           timer.start('sdkFastPrint');
           try {
-            if (__DEV__ && TD404_HEADLESS_SKIA_PRINT) {
+            if (td404HeadlessMono && pageDoc) {
               const tPrep0 = Date.now();
-              const pageDoc = displayDocument ?? previewDocument;
-              if (!pageDoc) {
-                throw new Error('No label document to rasterize for TD-404 headless print.');
-              }
-              if (
-                Math.abs(pageDoc.widthMm - paper.widthMm) > 0.2 ||
-                Math.abs(pageDoc.heightMm - paper.heightMm) > 0.2
-              ) {
-                throw new Error(
-                  `Headless TD-404 page size mismatch: document ${pageDoc.widthMm}×${pageDoc.heightMm}mm vs paper ${paper.widthMm}×${paper.heightMm}mm. Refusing to change packed height.`,
-                );
-              }
               assertHeadlessRasterDocument(pageDoc);
+              await ensurePrintTypefaces();
               const docPrepMs = Date.now() - tPrep0;
               const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, { threshold });
               const bitmap = timed.result;
@@ -1041,8 +1046,8 @@ export default function PrintScreen() {
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: vOffset,
-                hOffsetMm: hOffset,
+                vOffsetMm: td404VOffset,
+                hOffsetMm: td404HOffset,
                 media: wantsBline ? 'bline' : media,
                 dpi: jobDpi,
               });
@@ -1060,7 +1065,7 @@ export default function PrintScreen() {
                 connectionMs + docPrepMs + rasterizeMs + bitpackMs + nativeCallMs;
               const unaccountedMs = Math.max(0, totalMs - accounted);
               console.info(
-                `[print] page ${page + 1} total: ${totalMs} ms | TD-404 printMonoLabel writeMs=${monoTiming?.writeMs ?? '?'} bytesSent=${monoTiming?.bytesSent ?? '?'} connection_ms=${connectionMs} doc_prep_ms=${docPrepMs} native_call_ms=${nativeCallMs} unaccounted_ms=${unaccountedMs.toFixed(1)}`,
+                `[print] page ${page + 1} total: ${totalMs} ms | TD-404 printMonoLabel (headless) writeMs=${monoTiming?.writeMs ?? '?'} bytesSent=${monoTiming?.bytesSent ?? '?'} connection_ms=${connectionMs} doc_prep_ms=${docPrepMs} native_call_ms=${nativeCallMs} unaccounted_ms=${unaccountedMs.toFixed(1)}`,
               );
               logPrintTrace('PIPELINE', {
                 path: 'headless_skia',
@@ -1080,7 +1085,7 @@ export default function PrintScreen() {
                 height_dots: bitmap.heightDots,
                 bytes_per_row: bitmap.bytesPerRow,
                 gate_15ms: rasterizeMs + bitpackMs < 15 ? 'pass' : 'fail',
-                note: 'unaccounted_ms is leftover inside capture+verify/sdkFastPrint (JS queue, ensureConnected beyond connection_ms, React). Headless capture+verify is connection only — historically 162-275ms.',
+                note: 'Production headless mono — canvas mm maps 1:1 to packed BITMAP dots (same as calibration/location harness).',
               });
             } else {
               usedNative = await tryNativeSdkPngPrint({
@@ -1091,17 +1096,19 @@ export default function PrintScreen() {
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: vOffset,
-                hOffsetMm: hOffset,
+                vOffsetMm: td404VOffset,
+                hOffsetMm: td404HOffset,
                 media: wantsBline ? 'bline' : media,
                 orientation: 0,
                 dpi: jobDpi,
               });
               if (usedNative) {
                 console.info(
-                  `[print] page ${page + 1} total: ${Date.now() - pageStart} ms | SDK LabelCommand native fast path (TD-404)`,
+                  `[print] page ${page + 1} total: ${Date.now() - pageStart} ms | SDK LabelCommand native fast path (TD-404 ViewShot)`,
                 );
                 const nativeTiming = manager.getLastTd404PngLabelTiming();
+                const stored = usePrinterStore.getState().printCalibration[calibrationKey];
+                const layoutPx = captureLayoutPx.current;
                 logPrintTrace('PIPELINE', {
                   path: 'viewshot',
                   connection_ms: connectionMs,
@@ -1112,20 +1119,71 @@ export default function PrintScreen() {
                   total_ms: Date.now() - pageStart,
                   timestamp: new Date().toISOString(),
                   git_sha: resolveGitSha(),
+                  native_rev: nativeTiming?.nativeRev ?? null,
+                  capture_request_px: `${printCaptureSize.widthPx}x${printCaptureSize.heightPx}`,
+                  view_layout_px: layoutPx ? `${layoutPx.w}x${layoutPx.h}` : null,
+                  cal_stored: stored ? `h ${stored.hOffsetMm}mm v ${stored.vOffsetMm}mm` : 'none',
+                  cal_used: `h ${hOffset}mm v ${vOffset}mm`,
+                  ref_requested:
+                    nativeTiming?.requestedX != null
+                      ? `${nativeTiming.requestedX},${nativeTiming.requestedY}`
+                      : null,
+                  ref_sent: nativeTiming?.reference ?? null,
+                  bitmap_xy:
+                    nativeTiming?.bitmapX != null
+                      ? `${nativeTiming.bitmapX},${nativeTiming.bitmapY}`
+                      : null,
+                  png_px:
+                    nativeTiming?.pngWidth != null
+                      ? `${nativeTiming.pngWidth}x${nativeTiming.pngHeight}`
+                      : null,
+                  fit: nativeTiming?.fit ?? null,
+                  ink_margins:
+                    nativeTiming?.marginL != null
+                      ? `L${nativeTiming.marginL} R${nativeTiming.marginR} T${nativeTiming.marginT} B${nativeTiming.marginB}`
+                      : null,
+                  note: 'ViewShot fallback for unsupported layers (image, table, signature, …).',
                 });
               }
             }
           } catch (err) {
-            if (__DEV__ && TD404_HEADLESS_SKIA_PRINT) {
-              throw err;
+            if (td404HeadlessMono) {
+              console.warn('[print] TD-404 headless mono failed, falling back to ViewShot:', err);
+              if (!rotatedBase64) {
+                await waitForNextPaint();
+                const captured = await captureRef(shotRef, printCaptureShotOptions);
+                if (!captured) {
+                  throw err instanceof Error ? err : new Error(String(err));
+                }
+                base64 = captured;
+                rotatedBase64 = rotatePngBase64(base64, orientationDeg);
+              }
+              usedNative = await tryNativeSdkPngPrint({
+                pngBase64: rotatedBase64,
+                widthMm: paper.widthMm,
+                heightMm: paper.heightMm,
+                gapMm: gapLength,
+                copies,
+                density: printDensity,
+                speed: printSpeed,
+                vOffsetMm: td404VOffset,
+                hOffsetMm: td404HOffset,
+                media: wantsBline ? 'bline' : media,
+                orientation: 0,
+                dpi: jobDpi,
+              }).catch(() => false);
+              if (!usedNative) {
+                throw err instanceof Error ? err : new Error(String(err));
+              }
+            } else {
+              console.warn('[print] Native SDK fast print failed, falling back to JS:', err);
+              usedNative = false;
             }
-            console.warn('[print] Native SDK fast print failed, falling back to JS:', err);
-            usedNative = false;
           }
           timer.end('sdkFastPrint');
         }
 
-        if (!td404Headless && !manager.isLabelX && !manager.isJosh && !manager.isTez && !manager.isDev && !usedNative) {
+        if (!td404HeadlessMono && !manager.isLabelX && !manager.isJosh && !manager.isTez && !manager.isDev && !usedNative) {
           timer.start('rasterize');
           const bits = rasterizePngForPrint(rotatedBase64, {
             // `paper` mm is already orientation-swapped to match rotatedBase64's
@@ -1221,6 +1279,9 @@ export default function PrintScreen() {
     cableFlagJob,
     ratTail143Job,
     printCaptureShotOptions,
+    printCaptureSize.widthPx,
+    printCaptureSize.heightPx,
+    calibrationKey,
   ]);
 
   return (
@@ -1316,6 +1377,10 @@ export default function PrintScreen() {
           {(displayDocument ?? previewDocument) ? (
             <View
               collapsable={false}
+              onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout;
+                captureLayoutPx.current = { w: width, h: height };
+              }}
               style={[
                 styles.printCaptureNative,
                 { width: printCaptureLayoutPx.widthPx, height: printCaptureLayoutPx.heightPx },

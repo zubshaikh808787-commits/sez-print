@@ -27,6 +27,19 @@ export type Td404PngLabelResult = {
   widthDots?: number;
   gitSha?: string;
   buildTime?: string;
+  nativeRev?: string;
+  reference?: string;
+  bitmapX?: number;
+  bitmapY?: number;
+  requestedX?: number;
+  requestedY?: number;
+  pngWidth?: number;
+  pngHeight?: number;
+  fit?: string;
+  marginL?: number;
+  marginR?: number;
+  marginT?: number;
+  marginB?: number;
 };
 
 export type Td404MonoLabelResult = {

@@ -246,6 +246,19 @@ class PrinterManager {
     decodeMs?: number;
     encodeMs?: number;
     writeMs?: number;
+    nativeRev?: string;
+    reference?: string;
+    bitmapX?: number;
+    bitmapY?: number;
+    requestedX?: number;
+    requestedY?: number;
+    pngWidth?: number;
+    pngHeight?: number;
+    fit?: string;
+    marginL?: number;
+    marginR?: number;
+    marginT?: number;
+    marginB?: number;
   } | null = null;
   /** Last TD-404 native mono BITMAP timings (write ms + bytes). */
   private lastTd404MonoLabelTiming: {
@@ -2793,6 +2806,19 @@ class PrinterManager {
     decodeMs?: number;
     encodeMs?: number;
     writeMs?: number;
+    nativeRev?: string;
+    reference?: string;
+    bitmapX?: number;
+    bitmapY?: number;
+    requestedX?: number;
+    requestedY?: number;
+    pngWidth?: number;
+    pngHeight?: number;
+    fit?: string;
+    marginL?: number;
+    marginR?: number;
+    marginT?: number;
+    marginB?: number;
   } | null {
     return this.lastTd404PngLabelTiming;
   }
@@ -3088,6 +3114,19 @@ class PrinterManager {
           decodeMs: result.decodeMs,
           encodeMs: result.encodeMs,
           writeMs: result.writeMs,
+          nativeRev: result.nativeRev,
+          reference: result.reference,
+          bitmapX: result.bitmapX,
+          bitmapY: result.bitmapY,
+          requestedX: result.requestedX,
+          requestedY: result.requestedY,
+          pngWidth: result.pngWidth,
+          pngHeight: result.pngHeight,
+          fit: result.fit,
+          marginL: result.marginL,
+          marginR: result.marginR,
+          marginT: result.marginT,
+          marginB: result.marginB,
         };
         console.info(
           '[printer] SDK fast print done in',

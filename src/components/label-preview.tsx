@@ -174,6 +174,8 @@ function LabelElements({
         let topPx: number;
         let widthPx: number;
         let heightPx: number;
+        let widthDots: number | undefined;
+        let heightDots: number | undefined;
         let contentScale = scale;
         if (printDpi != null && dpm != null) {
           // Style sizes are DIP. Android View.getWidth() is physical pixels
@@ -185,6 +187,8 @@ function LabelElements({
           topPx = box.y0 / density;
           widthPx = Math.max(1 / density, box.widthDots / density);
           heightPx = Math.max(1 / density, box.heightDots / density);
+          widthDots = box.widthDots;
+          heightDots = box.heightDots;
           contentScale = dpm / density;
         } else {
           widthPx = Math.max(1, size.width * scale);
@@ -203,9 +207,11 @@ function LabelElements({
               height: heightPx,
               // Borders/shapes draw stroke inside the box — don't clip half the ink.
               overflow:
-                element.type === 'border' || element.type === 'shape' || element.type === 'line'
-                  ? 'visible'
-                  : 'hidden',
+                printDpi != null
+                  ? 'hidden'
+                  : element.type === 'border' || element.type === 'shape' || element.type === 'line'
+                    ? 'visible'
+                    : 'hidden',
               opacity: element.opacity ?? 1,
               // Paint order is `sortLayers` array order — the same thing the editor
               // canvas uses. Applying the raw numeric zIndex here overrode that, so a
@@ -217,8 +223,11 @@ function LabelElements({
               element={element}
               widthPx={widthPx}
               heightPx={heightPx}
+              widthDots={widthDots}
+              heightDots={heightDots}
               scale={contentScale}
               forPrint={printDpi != null}
+              printDpi={printDpi}
               mediaShape={document.mediaShape}
             />
           </View>

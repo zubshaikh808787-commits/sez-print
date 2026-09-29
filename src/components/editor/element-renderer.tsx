@@ -97,9 +97,14 @@ type ContentProps = {
   element: LabelElement;
   widthPx: number;
   heightPx: number;
+  /** Exact printer-dot box from rectMmToDots — avoids DIP round-trip drift on print. */
+  widthDots?: number;
+  heightDots?: number;
   scale: number;
   /** Print capture: decode at printer-dot size so import photos match template sharpness. */
   forPrint?: boolean;
+  /** Printer dpi for whole-dot border bands during ViewShot capture. */
+  printDpi?: number;
   /** Host label media — circular borders draw as rings. */
   mediaShape?: string | null;
   selectedTableCell?: { row: number; col: number } | null;
@@ -1021,8 +1026,11 @@ export function ElementContentView({
   element,
   widthPx,
   heightPx,
+  widthDots,
+  heightDots,
   scale,
   forPrint,
+  printDpi,
   mediaShape,
   selectedTableCell,
   tableSelectionColor,
@@ -1122,6 +1130,24 @@ export function ElementContentView({
     }
     case 'border': {
       const circular = mediaShape === 'circle' || mediaShape === 'ellipse';
+      if (forPrint && printDpi != null) {
+        return (
+          <View style={[styles.fill, { overflow: 'hidden' }]}>
+            <BorderPreview
+              styleId={element.borderStyle}
+              scale={scale}
+              lineWidthMm={element.lineWidth || 0.55}
+              circular={circular}
+              widthPx={widthPx}
+              heightPx={heightPx}
+              widthDots={widthDots}
+              heightDots={heightDots}
+              forPrint
+              printDpi={printDpi}
+            />
+          </View>
+        );
+      }
       const insetPx = Math.max(2, Math.round(scale * 2));
       const innerW = Math.max(1, widthPx - insetPx * 2);
       const innerH = Math.max(1, heightPx - insetPx * 2);

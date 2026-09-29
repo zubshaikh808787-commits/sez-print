@@ -66,6 +66,7 @@ type SkiaModule = {
     Paint: () => SkiaPaint;
     Color: (c: string | number) => unknown;
     XYWHRect: (x: number, y: number, w: number, h: number) => unknown;
+    Font: (typeface: unknown, size?: number) => SkiaFont;
   };
   matchFont: (style: {
     fontFamily?: string;
@@ -166,6 +167,17 @@ function makeSkiaRasterSurface(widthDots: number, heightDots: number, skiaMod: S
         fontWeight: style.bold ? 'bold' : 'normal',
         fontStyle: style.italic ? 'italic' : 'normal',
       });
+      try {
+        const { printTypeface } = require('./print-typeface') as {
+          printTypeface: (family?: string, bold?: boolean) => { dispose?: () => void } | null;
+        };
+        const face = printTypeface(style.family, style.bold);
+        if (face) {
+          font = Skia.Font(face, style.fontSizeDots);
+        }
+      } catch {
+        // Keep matchFont when the embedded face is not loaded yet.
+      }
       fontCache.set(key, font);
     }
     return font;
@@ -178,16 +190,22 @@ function makeSkiaRasterSurface(widthDots: number, heightDots: number, skiaMod: S
     fillRect(x, y, w, h, gray) {
       fillPaint.setColor(grayToColor(skiaMod, gray));
       fillPaint.setStyle(PaintStyle.Fill);
-      canvas.drawRect(Skia.XYWHRect(x, y, w, h), fillPaint);
+      fillPaint.setAntiAlias(false);
+      const rx = Math.round(x);
+      const ry = Math.round(y);
+      const rw = Math.max(1, Math.round(w));
+      const rh = Math.max(1, Math.round(h));
+      canvas.drawRect(Skia.XYWHRect(rx, ry, rw, rh), fillPaint);
     },
     strokeRect(x, y, w, h, stroke, gray) {
       const t = Math.max(1, Math.round(stroke));
       fillPaint.setColor(grayToColor(skiaMod, gray));
       fillPaint.setStyle(PaintStyle.Fill);
+      fillPaint.setAntiAlias(false);
       const rx = Math.round(x);
       const ry = Math.round(y);
-      const rw = Math.round(w);
-      const rh = Math.round(h);
+      const rw = Math.max(t, Math.round(w));
+      const rh = Math.max(t, Math.round(h));
       canvas.drawRect(Skia.XYWHRect(rx, ry, rw, t), fillPaint);
       canvas.drawRect(Skia.XYWHRect(rx, ry + rh - t, rw, t), fillPaint);
       canvas.drawRect(Skia.XYWHRect(rx, ry, t, rh), fillPaint);

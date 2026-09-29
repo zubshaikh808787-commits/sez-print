@@ -41,6 +41,8 @@ import java.util.concurrent.TimeUnit
  * (same profile as SppBluetoothPort in labelprinter.aar).
  */
 class Td404PrinterModule : Module() {
+  /** Bump when the TSPL packer changes so a stale installed binary is visible in logcat. */
+  private val nativeRev = "td404-border-fix-2"
   private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
   private val ioExecutor = Executors.newCachedThreadPool()
   private val connectTimeoutMs = 8_000L
@@ -564,6 +566,8 @@ class Td404PrinterModule : Module() {
     val raw = android.util.Base64.decode(pngBase64, android.util.Base64.DEFAULT)
     var bitmap = BitmapFactory.decodeByteArray(raw, 0, raw.size)
       ?: throw IllegalArgumentException("Could not decode PNG for print.")
+    val pngW = bitmap.width
+    val pngH = bitmap.height
     val tDecode = System.currentTimeMillis()
 
     val deg = ((orientation % 360) + 360) % 360
@@ -585,25 +589,23 @@ class Td404PrinterModule : Module() {
     val packedW = Math.max(8, (sizeDotsW / 8) * 8)
     val packedH = sizeDotsH
     bitmap = fitTd404Bitmap(bitmap, packedW, packedH)
+    val fitMode = when {
+      pngW == packedW && pngH == packedH -> "identity"
+      pngW > packedW && pngW - packedW in 1..7 && pngH == packedH -> "crop"
+      pngW % packedW == 0 && pngH % packedH == 0 -> "average"
+      else -> "other"
+    }
 
     val sizeCmd = "SIZE ${formatMm(widthMm)} mm,${formatMm(heightMm)} mm\r\n"
 
-    // TSPL BITMAP x,y must be >= 0. Bake any negative (or mixed) offset into pixels.
-    var bitmapX = xDots
-    var bitmapY = yDots
+    // Negative BITMAP x/y clips when baked into pixels. Clamp to 0 so left/top ink
+    // (e.g. border verticals) is never cropped off the bitmap.
+    var bitmapX = xDots.coerceAtLeast(0)
+    var bitmapY = yDots.coerceAtLeast(0)
     if (xDots < 0 || yDots < 0) {
-      val shifted = Bitmap.createBitmap(packedW, packedH, Bitmap.Config.ARGB_8888)
-      shifted.eraseColor(Color.WHITE)
-      Canvas(shifted).drawBitmap(bitmap, xDots.toFloat(), yDots.toFloat(), null)
-      if (shifted !== bitmap) {
-        bitmap.recycle()
-        bitmap = shifted
-      }
-      bitmapX = 0
-      bitmapY = 0
-      android.util.Log.i(
+      android.util.Log.w(
         "Td404Printer",
-        "PRINT-TRACE OFFSET_BAKED raw=${xDots},${yDots} → BITMAP 0,0",
+        "PRINT-TRACE OFFSET_CLAMP raw=${xDots},${yDots} → BITMAP ${bitmapX},${bitmapY} (negative offsets do not bake)",
       )
     }
 
@@ -713,13 +715,20 @@ class Td404PrinterModule : Module() {
     val tEncode = System.currentTimeMillis()
     val dryRun = optionsDryRun(options)
     logJobIdentity(options, dryRun)
+    val headerLine = header.replace("\r\n", " | ").trim()
+    val ink = wireInkMargins(rawBmp, bytesPerRow, packedW, contentH)
+    android.util.Log.i("Td404Printer", "PRINT-HEADER native_rev=$nativeRev $headerLine")
+    android.util.Log.i(
+      "Td404Printer",
+      "PRINT-INK native_rev=$nativeRev png=${pngW}x${pngH} fit=$fitMode packed=${packedW}x${contentH} $ink",
+    )
 
     var totalSent = 0
     var writeMs = 0L
     if (dryRun) {
       android.util.Log.i(
         "Td404Printer",
-        "PRINT-TRACE DRY-RUN SDK png=${srcW}x${srcH} packed=${packedW}x${packedH} " +
+        "PRINT-TRACE DRY-RUN SDK png=${pngW}x${pngH} packed=${packedW}x${packedH} " +
           "BITMAP=${bytesPerRow}x${contentH} job=${job.size}B (no socket write)",
       )
     } else {
@@ -728,7 +737,7 @@ class Td404PrinterModule : Module() {
       writeMs = System.currentTimeMillis() - tWrite0
       android.util.Log.i(
         "Td404Printer",
-        "PRINT-TRACE SDK png=${srcW}x${srcH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} " +
+        "PRINT-TRACE SDK png=${pngW}x${pngH} packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} " +
           "dpm=$dpm dpi=$dpi SIZE=${formatMm(widthMm)}x${formatMm(heightMm)}mm " +
           "BITMAP=${bytesPerRow}x${contentH} DIRECTION=$direction job=${job.size}B copies=$copies " +
           "decode=${tDecode - t0}ms rotate=${tRotate - tDecode}ms encode=${tEncode - tRotate}ms write=${writeMs}ms",
@@ -746,6 +755,19 @@ class Td404PrinterModule : Module() {
       "writeMs" to writeMs,
       "path" to "labelcommand-sdk",
       "dryRun" to dryRun,
+      "nativeRev" to nativeRev,
+      "reference" to "0,0",
+      "bitmapX" to bitmapX,
+      "bitmapY" to bitmapY,
+      "requestedX" to xDots,
+      "requestedY" to yDots,
+      "pngWidth" to pngW,
+      "pngHeight" to pngH,
+      "fit" to fitMode,
+      "marginL" to ink.marginL,
+      "marginR" to ink.marginR,
+      "marginT" to ink.marginT,
+      "marginB" to ink.marginB,
     )
     if (dryRun) {
       result["jobBase64"] = android.util.Base64.encodeToString(job, android.util.Base64.NO_WRAP)
@@ -781,12 +803,6 @@ class Td404PrinterModule : Module() {
     val bytesPerRow = (options["bytesPerRow"] as? Number)?.toInt()
       ?: throw IllegalArgumentException("bytesPerRow is required")
 
-    if (xDots < 0 || yDots < 0) {
-      throw IllegalArgumentException(
-        "printMonoLabel cannot bake negative offsets (xDots=$xDots, yDots=$yDots). Use printPngLabel.",
-      )
-    }
-
     val dpm = td404DotsPerMm(dpi)
     val sizeDotsW = Math.max(1, Math.round(widthMm * dpm).toInt())
     val sizeDotsH = Math.max(1, Math.round(heightMm * dpm).toInt())
@@ -815,10 +831,24 @@ class Td404PrinterModule : Module() {
       )
     }
 
+    val bitmapX = xDots.coerceAtLeast(0)
+    val bitmapY = yDots.coerceAtLeast(0)
+    if (xDots < 0 || yDots < 0) {
+      android.util.Log.w(
+        "Td404Printer",
+        "PRINT-TRACE MONO_OFFSET_CLAMP raw=${xDots},${yDots} → BITMAP ${bitmapX},${bitmapY}",
+      )
+    }
+
     val wireBmp = ByteArray(expectedLen)
     for (i in 0 until expectedLen) {
       wireBmp[i] = (monoBytes[i].toInt() xor 0xFF).toByte()
     }
+    val ink = wireInkMargins(wireBmp, bytesPerRow, packedW, heightDots)
+    android.util.Log.i(
+      "Td404Printer",
+      "PRINT-INK MONO native_rev=$nativeRev packed=${packedW}x${heightDots} BITMAP=${bitmapX},${bitmapY} $ink",
+    )
 
     val sizeCmd = "SIZE ${formatMm(widthMm)} mm,${formatMm(heightMm)} mm\r\n"
     val gapCmd = when (media) {
@@ -836,7 +866,7 @@ class Td404PrinterModule : Module() {
       "OFFSET 0 mm\r\n" +
       "REFERENCE 0,0\r\n" +
       "CLS\r\n" +
-      "BITMAP $xDots,$yDots,$bytesPerRow,$heightDots,0,"
+      "BITMAP $bitmapX,$bitmapY,$bytesPerRow,$heightDots,0,"
     val printCmd = if (copies <= 1) "PRINT 1\r\n" else "PRINT 1,$copies\r\n"
     val footer = "\r\n$printCmd"
 
@@ -891,6 +921,39 @@ class Td404PrinterModule : Module() {
   }
 
 
+  /** TSPL wire: bit 1 is white, bit 0 is black. Margins are dots from the packed bitmap edge. */
+  private class WireInk(
+    val marginL: Int,
+    val marginR: Int,
+    val marginT: Int,
+    val marginB: Int,
+  ) {
+    override fun toString(): String = "L$marginL R$marginR T$marginT B$marginB"
+  }
+
+  private fun wireInkMargins(raw: ByteArray, bytesPerRow: Int, width: Int, height: Int): WireInk {
+    var minX = width
+    var minY = height
+    var maxX = -1
+    var maxY = -1
+    for (y in 0 until height) {
+      val row = y * bytesPerRow
+      for (x in 0 until width) {
+        val b = raw[row + (x shr 3)].toInt() and 0xFF
+        val bit = 7 - (x and 7)
+        val white = ((b shr bit) and 1) == 1
+        if (!white) {
+          if (x < minX) minX = x
+          if (y < minY) minY = y
+          if (x > maxX) maxX = x
+          if (y > maxY) maxY = y
+        }
+      }
+    }
+    if (maxX < 0) return WireInk(width, width, height, height)
+    return WireInk(minX, width - 1 - maxX, minY, height - 1 - maxY)
+  }
+
   /** 304 → 12 dots/mm, 203 → 8. Matches print-spec dotsPerMm. Other dpi values are rejected. */
   private fun td404DotsPerMm(dpi: Double): Double {
     if (dpi == 304.0) return 12.0
@@ -906,6 +969,20 @@ class Td404PrinterModule : Module() {
     val srcW = bitmap.width
     val srcH = bitmap.height
     if (srcW == packedW && srcH == packedH) return bitmap
+    // SIZE-in-dots capture can be up to 7 columns wider than packed BITMAP width.
+    // Crop from the top-left (same as JS prepareEditorGrayForPrint) — never scale.
+    val cropW = srcW - packedW
+    if (srcH == packedH && cropW in 1..7) {
+      val cropped = Bitmap.createBitmap(bitmap, 0, 0, packedW, packedH)
+      if (cropped !== bitmap) {
+        bitmap.recycle()
+      }
+      android.util.Log.i(
+        "Td404Printer",
+        "PRINT-TRACE BITMAP_CROP src=${srcW}x${srcH} packed=${packedW}x${packedH} cropRight=$cropW",
+      )
+      return cropped
+    }
     if (packedW <= 0 || packedH <= 0 || srcW % packedW != 0 || srcH % packedH != 0) {
       throw IllegalArgumentException(
         "TD-404 bitmap ${srcW}x${srcH} is not packed ${packedW}x${packedH} and is not an integer supersample. Refusing to resize.",
@@ -962,7 +1039,7 @@ class Td404PrinterModule : Module() {
   private fun logJobIdentity(options: Map<String, Any?>, dryRun: Boolean) {
     android.util.Log.i(
       "Td404Printer",
-      "JOB-IDENTITY gitSha=${optionsGitSha(options)} buildTime=${optionsBuildTime(options)} dryRun=$dryRun",
+      "JOB-IDENTITY native_rev=$nativeRev gitSha=${optionsGitSha(options)} buildTime=${optionsBuildTime(options)} dryRun=$dryRun",
     )
   }
 

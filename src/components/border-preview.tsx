@@ -3,12 +3,23 @@
  *
  * Stroke widths are in *screen/print pixels* (mm × scale), not fixed CSS px,
  * so preview and ViewShot stay aligned on circle and rectangle labels.
+ *
+ * Print capture (`forPrint`) draws inward frame bands in whole printer dots —
+ * the same geometry as headless `drawPrintBorder` — so SVG centered strokes
+ * cannot bleed to bitmap column 0.
  */
-import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { useState } from 'react';
 import Svg, { Ellipse, Rect } from 'react-native-svg';
 
 import type { BorderStyleId } from '@/constants/border-library';
+import {
+  bandsToLayoutPx,
+  borderInsetDots,
+  borderStrokeDots,
+  borderStrokeFallbackMm,
+  inwardFrameBandsInBox,
+} from '@/printing/raster/border-frame';
 
 export type BorderPreviewProps = {
   styleId: BorderStyleId;
@@ -20,11 +31,117 @@ export type BorderPreviewProps = {
   circular?: boolean;
   widthPx?: number;
   heightPx?: number;
+  /** Authoritative dot box from rectMmToDots (print capture only). */
+  widthDots?: number;
+  heightDots?: number;
+  /** ViewShot capture at printer dpi — use inward bands, not centered SVG strokes. */
+  forPrint?: boolean;
+  printDpi?: number;
 };
 
 function strokePxFrom(lineWidthMm: number | undefined, scale: number, fallbackMm: number) {
   const mm = lineWidthMm != null && lineWidthMm > 0 ? lineWidthMm : fallbackMm;
   return Math.max(1, Math.round(mm * Math.max(scale, 1)));
+}
+
+function PrintFrameBands({
+  widthPx,
+  heightPx,
+  widthDots: widthDotsProp,
+  heightDots: heightDotsProp,
+  printDpi,
+  styleId,
+  lineWidthMm,
+}: {
+  widthPx: number;
+  heightPx: number;
+  widthDots?: number;
+  heightDots?: number;
+  printDpi: number;
+  styleId: BorderStyleId;
+  lineWidthMm?: number;
+}) {
+  const density = PixelRatio.get() || 1;
+  const widthDots = widthDotsProp ?? Math.max(1, Math.round(widthPx * density));
+  const heightDots = heightDotsProp ?? Math.max(1, Math.round(heightPx * density));
+  const bands = inwardFrameBandsInBox(widthDots, heightDots, printDpi, lineWidthMm, styleId);
+  const layoutBands = bandsToLayoutPx(bands, density);
+  return (
+    <View style={styles.fill}>
+      {layoutBands.map((band, index) => (
+        <View
+          key={index}
+          style={{
+            position: 'absolute',
+            left: band.left,
+            top: band.top,
+            width: band.width,
+            height: band.height,
+            backgroundColor: '#111827',
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+function PrintCircularRing({
+  widthPx,
+  heightPx,
+  printDpi,
+  styleId,
+  lineWidthMm,
+  dashed,
+  dotted,
+  double,
+}: {
+  widthPx: number;
+  heightPx: number;
+  printDpi: number;
+  styleId: BorderStyleId;
+  lineWidthMm?: number;
+  dashed?: boolean;
+  dotted?: boolean;
+  double?: boolean;
+}) {
+  const density = PixelRatio.get() || 1;
+  const insetDots = borderInsetDots(printDpi);
+  const strokeDots = borderStrokeDots(lineWidthMm, printDpi, borderStrokeFallbackMm(styleId));
+  const inset = insetDots / density;
+  const stroke = strokeDots / density;
+  const w = Math.max(1, widthPx);
+  const h = Math.max(1, heightPx);
+  const cx = w / 2;
+  const cy = h / 2;
+  const rx = Math.max(stroke / 2, w / 2 - inset - stroke / 2);
+  const ry = Math.max(stroke / 2, h / 2 - inset - stroke / 2);
+  return (
+    <Svg width={w} height={h}>
+      <Ellipse
+        cx={cx}
+        cy={cy}
+        rx={rx}
+        ry={ry}
+        stroke="#111827"
+        strokeWidth={stroke}
+        fill="none"
+        strokeDasharray={
+          dashed ? `${stroke * 3},${stroke * 2}` : dotted ? `${stroke},${stroke * 1.5}` : undefined
+        }
+      />
+      {double ? (
+        <Ellipse
+          cx={cx}
+          cy={cy}
+          rx={Math.max(stroke / 2, rx - stroke * 2)}
+          ry={Math.max(stroke / 2, ry - stroke * 2)}
+          stroke="#111827"
+          strokeWidth={Math.max(1 / density, Math.round(strokeDots * 0.55) / density)}
+          fill="none"
+        />
+      ) : null}
+    </Svg>
+  );
 }
 
 /** Solid / dashed / dotted / double frames that must stay inside the label. */
@@ -114,6 +231,10 @@ export function BorderPreview({
   circular = false,
   widthPx,
   heightPx,
+  widthDots,
+  heightDots,
+  forPrint = false,
+  printDpi,
 }: BorderPreviewProps) {
   const [layout, setLayout] = useState({ w: widthPx ?? 0, h: heightPx ?? 0 });
   const onLayout = (e: LayoutChangeEvent) => {
@@ -125,6 +246,46 @@ export function BorderPreview({
   };
   const w = widthPx ?? layout.w;
   const h = heightPx ?? layout.h;
+  const printDpiResolved = forPrint && printDpi != null ? printDpi : null;
+
+  const printRing = (opts: {
+    dashed?: boolean;
+    dotted?: boolean;
+    double?: boolean;
+  }) => {
+    if (w < 1 || h < 1 || printDpiResolved == null) {
+      return <View style={styles.fill} onLayout={onLayout} />;
+    }
+    if (circular) {
+      return (
+        <View style={styles.fill} onLayout={onLayout}>
+          <PrintCircularRing
+            widthPx={w}
+            heightPx={h}
+            printDpi={printDpiResolved}
+            styleId={styleId}
+            lineWidthMm={lineWidthMm}
+            dashed={opts.dashed}
+            dotted={opts.dotted}
+            double={opts.double}
+          />
+        </View>
+      );
+    }
+    return (
+      <View style={styles.fill} onLayout={onLayout}>
+        <PrintFrameBands
+          widthPx={w}
+          heightPx={h}
+          widthDots={widthDots}
+          heightDots={heightDots}
+          printDpi={printDpiResolved}
+          styleId={styleId}
+          lineWidthMm={lineWidthMm}
+        />
+      </View>
+    );
+  };
 
   const ring = (opts: {
     strokeFallbackMm: number;
@@ -152,19 +313,20 @@ export function BorderPreview({
 
   switch (styleId) {
     case 'solid-thin':
-      return ring({ strokeFallbackMm: 0.35 });
+      return printDpiResolved != null ? printRing({}) : ring({ strokeFallbackMm: 0.35 });
     case 'solid-medium':
-      return ring({ strokeFallbackMm: 0.55 });
+      return printDpiResolved != null ? printRing({}) : ring({ strokeFallbackMm: 0.55 });
     case 'solid-thick':
-      return ring({ strokeFallbackMm: 0.9 });
+      return printDpiResolved != null ? printRing({}) : ring({ strokeFallbackMm: 0.9 });
     case 'dashed':
-      return ring({ strokeFallbackMm: 0.5, dashed: true });
+      return printDpiResolved != null ? printRing({ dashed: true }) : ring({ strokeFallbackMm: 0.5, dashed: true });
     case 'dotted':
-      return ring({ strokeFallbackMm: 0.5, dotted: true });
+      return printDpiResolved != null ? printRing({ dotted: true }) : ring({ strokeFallbackMm: 0.5, dotted: true });
     case 'double':
-      return ring({ strokeFallbackMm: 0.55, double: true });
+      return printDpiResolved != null ? printRing({ double: true }) : ring({ strokeFallbackMm: 0.55, double: true });
     case 'rounded':
     case 'pill-shape': {
+      if (printDpiResolved != null) return printRing({});
       if (circular || w < 1 || h < 1) return ring({ strokeFallbackMm: 0.55 });
       const strokePx = strokePxFrom(lineWidthMm, scale, 0.55);
       const inset = strokePx / 2;
@@ -190,6 +352,7 @@ export function BorderPreview({
       );
     }
     case 'label-frame': {
+      if (printDpiResolved != null) return printRing({ double: true });
       if (circular) return ring({ strokeFallbackMm: 0.5, double: true });
       const strokePx = strokePxFrom(lineWidthMm, scale, 0.5);
       return (
@@ -201,6 +364,7 @@ export function BorderPreview({
       );
     }
     case 'corner-brackets': {
+      if (printDpiResolved != null) return printRing({});
       const arm = Math.max(8, Math.round(scale * 2.2));
       const thick = strokePxFrom(lineWidthMm, scale, 0.7);
       return (
@@ -213,6 +377,7 @@ export function BorderPreview({
       );
     }
     case 'crosshair': {
+      if (printDpiResolved != null) return printRing({});
       const arm = Math.max(8, Math.round(scale * 2));
       const thick = strokePxFrom(lineWidthMm, scale, 0.45);
       return (
@@ -225,7 +390,7 @@ export function BorderPreview({
       );
     }
     default:
-      return ring({ strokeFallbackMm: 0.55 });
+      return printDpiResolved != null ? printRing({}) : ring({ strokeFallbackMm: 0.55 });
   }
 }
 

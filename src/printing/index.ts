@@ -138,6 +138,8 @@ export {
   type ContourDetectOptions,
 } from '@/printing/contour-detection';
 export {
+  assertHeadlessRasterDocument,
+  canHeadlessRasterPrint,
   rasterizeDocumentToBitmap,
   rasterizeDocumentToBitmapTimed,
   createPhase4FrozenDocument,

@@ -21,7 +21,7 @@ import {
 } from '@/lib/label-document';
 import { dotsPerMm, mmToDots, rectMmToDots } from '@/lib/printer/print-spec';
 import { sortLayers } from '@/lib/template-schema';
-import { computeWrappedLines, contractLineAdvances, layoutPrintText } from '@/lib/text-metrics';
+import { computeWrappedLines, layoutPrintText } from '@/lib/text-metrics';
 import { formatBarcodeHri } from '@/lib/barcode/hri';
 import { stretchThenRoundBars } from './barcode-stretch';
 import { packGrayToMono1bpp } from './bit-packer';
@@ -66,12 +66,7 @@ function isUnsupportedPrintType(type: LabelElement['type']): boolean {
   return type === 'image' || UNSUPPORTED.has(type);
 }
 
-/**
- * Headless TD-404 must abort if the document contains any Stage A-unsupported
- * type — including needPrinting=false. Skipping those and drawing the rest
- * would send a partial label.
- */
-export function assertHeadlessRasterDocument(doc: LabelDocument): void {
+function collectUnsupportedHeadlessElements(doc: LabelDocument): { types: Set<string>; ids: string[] } {
   const types = new Set<string>();
   const ids: string[] = [];
   for (const el of doc.elements) {
@@ -79,6 +74,21 @@ export function assertHeadlessRasterDocument(doc: LabelDocument): void {
     types.add(el.type);
     ids.push(`${el.type}:${el.id}`);
   }
+  return { types, ids };
+}
+
+/** True when every layer can be drawn by the headless Skia/dot raster (no ViewShot needed). */
+export function canHeadlessRasterPrint(doc: LabelDocument): boolean {
+  return collectUnsupportedHeadlessElements(doc).types.size === 0;
+}
+
+/**
+ * Headless TD-404 must abort if the document contains any Stage A-unsupported
+ * type — including needPrinting=false. Skipping those and drawing the rest
+ * would send a partial label.
+ */
+export function assertHeadlessRasterDocument(doc: LabelDocument): void {
+  const { types, ids } = collectUnsupportedHeadlessElements(doc);
   if (types.size === 0) return;
   throw new Error(
     `Unsupported print element type: ${[...types].join(', ')} (${ids.join(', ')}). Headless TD-404 print aborted; no bytes were sent.`,
@@ -286,11 +296,9 @@ function inkValue(antiColor?: boolean): number {
   return antiColor ? 255 : 0;
 }
 
-/** Same lookup as element-renderer resolveFontFamily. Lazy so host Stage A does not load react-native. */
 function resolveFontFamily(name?: string): string | undefined {
   if (!name || name === 'Default' || name === 'Barcode') return undefined;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { FONT_LIBRARY } = require('@/constants/font-library') as {
       FONT_LIBRARY: { name: string; id: string; family?: string }[];
     };
@@ -330,22 +338,23 @@ function drawText(
   const lineH = Math.max(1, Math.round(layout.lineHeightMm * dpm));
   const ink = inkValue(el.antiColor);
   const blockH = Math.max(lineH, layout.lines.length * lineH);
+  const textStyle = {
+    fontSizeDots: fontH,
+    bold: el.bold,
+    italic: el.italic,
+    family: resolveFontFamily(el.fontFamily),
+    ink,
+  };
   let ty = y0 + Math.floor((boxH - blockH) / 2);
   for (let i = 0; i < layout.lines.length; i++) {
     const line = layout.lines[i];
     const next = ty + lineH;
     if (next > y0 && ty < y0 + boxH && line.length > 0) {
-      const lineW = Math.max(1, Math.round(layout.widthsMm[i] * dpm));
+      const lineW = Math.round(surface.measureTextWidth(line, textStyle));
       let tx = x0;
       if (el.align === 'center') tx = x0 + Math.floor((boxW - lineW) / 2);
       else if (el.align === 'right') tx = x0 + Math.max(0, boxW - lineW);
-      const advances = contractLineAdvances(line, el.bold ?? false, lineW);
-      let cx = tx;
-      for (let c = 0; c < line.length; c++) {
-        const w = advances[c] ?? 0;
-        if (line[c] !== ' ' && w > 0) surface.fillRect(cx, ty, w, fontH, ink);
-        cx += w;
-      }
+      surface.drawTextLine(line, tx, ty, textStyle);
     }
     ty = next;
   }
@@ -389,11 +398,11 @@ function drawBarcode(
       family: resolveFontFamily(el.fontFamily),
       ink,
     };
-    let tx = x0;
     const lineW = Math.round(surface.measureTextWidth(hri, textStyle));
+    let tx = x0;
     if (el.align === 'center') tx = x0 + Math.max(0, Math.floor((boxW - lineW) / 2));
     else if (el.align === 'right') tx = x0 + Math.max(0, boxW - lineW);
-    const textY = labelY + Math.floor((labelH - fontH) / 2);
+    const textY = labelY + Math.max(0, Math.floor((labelH - fontH) / 2));
     surface.drawTextLine(hri, tx, textY, textStyle);
   }
 }
