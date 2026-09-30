@@ -39,3 +39,8 @@ export function printTypeface(family?: string, bold?: boolean): SkTypeface | nul
   if (bold && typefaces.has('Inter_600SemiBold')) return typefaces.get('Inter_600SemiBold') ?? null;
   return typefaces.get('Inter_400Regular') ?? null;
 }
+
+/** Monochrome emoji fallback for characters missing from the primary print face. */
+export function printEmojiTypeface(): SkTypeface | null {
+  return typefaces.get('NotoEmoji_400Regular') ?? null;
+}

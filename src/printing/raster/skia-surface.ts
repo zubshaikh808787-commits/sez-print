@@ -5,6 +5,12 @@
  * Host/CI: software dot-buffer fallback when Skia is unavailable in Node.
  */
 
+import {
+  measurePrintTextWidth,
+  normalizePrintText,
+  printFontGlyphProbe,
+  segmentPrintText,
+} from './print-text';
 import { fillEllipse, fillRect, makeDotSurface, strokeRect, type DotSurface } from './dot-surface';
 
 export type TextDrawRecord = {
@@ -107,6 +113,7 @@ type SkiaPaint = {
 
 type SkiaFont = {
   measureText: (text: string) => { width: number };
+  getGlyphIDs?: (str: string, numCodePoints?: number) => number[];
 };
 
 type SkiaImage = {
@@ -156,6 +163,7 @@ function makeSkiaRasterSurface(widthDots: number, heightDots: number, skiaMod: S
   strokePaint.setStyle(PaintStyle.Stroke);
 
   const fontCache = new Map<string, SkiaFont>();
+  const emojiFontCache = new Map<number, SkiaFont>();
 
   function fontFor(style: TextDrawStyle): SkiaFont {
     const key = `${style.family ?? 'sans-serif'}|${style.fontSizeDots}|${style.bold ? 1 : 0}|${style.italic ? 1 : 0}`;
@@ -181,6 +189,43 @@ function makeSkiaRasterSurface(widthDots: number, heightDots: number, skiaMod: S
       fontCache.set(key, font);
     }
     return font;
+  }
+
+  function emojiFontFor(style: TextDrawStyle): SkiaFont | null {
+    const size = style.fontSizeDots;
+    const cached = emojiFontCache.get(size);
+    if (cached) return cached;
+    try {
+      const { printEmojiTypeface } = require('./print-typeface') as {
+        printEmojiTypeface: () => unknown | null;
+      };
+      const face = printEmojiTypeface();
+      if (face) {
+        const font = Skia.Font(face, size);
+        emojiFontCache.set(size, font);
+        return font;
+      }
+    } catch {
+      // Host / tests without embedded emoji face.
+    }
+    return null;
+  }
+
+  function drawTextWithFallback(text: string, x: number, baselineY: number, style: TextDrawStyle): void {
+    const primary = fontFor(style);
+    const emoji = emojiFontFor(style);
+    const primaryProbe = printFontGlyphProbe(primary);
+    const emojiProbe = emoji ? printFontGlyphProbe(emoji) : null;
+    fillPaint.setColor(grayToColor(skiaMod, style.ink));
+    fillPaint.setStyle(PaintStyle.Fill);
+    fillPaint.setAntiAlias(true);
+    let cx = x;
+    for (const seg of segmentPrintText(text, primaryProbe, emojiProbe)) {
+      const font = seg.useEmoji && emoji ? emoji : primary;
+      canvas.drawText(seg.text, cx, baselineY, fillPaint, font);
+      cx += font.measureText(seg.text).width;
+    }
+    fillPaint.setAntiAlias(false);
   }
 
   return {
@@ -232,15 +277,13 @@ function makeSkiaRasterSurface(widthDots: number, heightDots: number, skiaMod: S
         italic: style.italic,
         backend: 'skia',
       });
-      const font = fontFor(style);
-      fillPaint.setColor(grayToColor(skiaMod, style.ink));
-      fillPaint.setStyle(PaintStyle.Fill);
-      fillPaint.setAntiAlias(true);
-      canvas.drawText(text, x, y + style.fontSizeDots, fillPaint, font);
-      fillPaint.setAntiAlias(false);
+      drawTextWithFallback(text, x, y + style.fontSizeDots, style);
     },
     measureTextWidth(text, style) {
-      return fontFor(style).measureText(text).width;
+      const primary = printFontGlyphProbe(fontFor(style));
+      const emoji = emojiFontFor(style);
+      const emojiProbe = emoji ? printFontGlyphProbe(emoji) : null;
+      return measurePrintTextWidth(text, primary, emojiProbe);
     },
     withRotation(cx, cy, degrees, draw) {
       const turns = ((degrees % 360) + 360) % 360;
@@ -365,7 +408,7 @@ function makeDotRasterSurface(dot: DotSurface): RasterSurface {
       const cellW = Math.max(1, Math.round(style.fontSizeDots * 0.55));
       const cellH = Math.max(1, style.fontSizeDots);
       let cursor = x;
-      for (const ch of text) {
+      for (const ch of normalizePrintText(text)) {
         if (ch !== ' ') {
           paintRect(cursor, y, Math.max(1, cellW - 1), Math.max(1, cellH - 1), style.ink);
         }
@@ -374,7 +417,7 @@ function makeDotRasterSurface(dot: DotSurface): RasterSurface {
     },
     measureTextWidth(text, style) {
       const cellW = Math.max(1, Math.round(style.fontSizeDots * 0.55));
-      return text.length * cellW;
+      return normalizePrintText(text).length * cellW;
     },
     withRotation(cx, cy, degrees, draw) {
       const turns = ((degrees % 360) + 360) % 360;

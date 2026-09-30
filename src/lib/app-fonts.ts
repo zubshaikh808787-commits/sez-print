@@ -15,6 +15,7 @@ import { NotoSansTelugu_400Regular } from '@expo-google-fonts/noto-sans-telugu';
 import { OpenSans_400Regular } from '@expo-google-fonts/open-sans';
 import { Oswald_500Medium } from '@expo-google-fonts/oswald';
 import { PlayfairDisplay_700Bold } from '@expo-google-fonts/playfair-display';
+import { NotoEmoji_400Regular } from '@expo-google-fonts/noto-emoji';
 import { Roboto_400Regular } from '@expo-google-fonts/roboto';
 
 /** All custom families used by FONT_LIBRARY — load once at app root so editor/preview are real. */
@@ -35,4 +36,5 @@ export const APP_FONT_MAP = {
   NotoSansMalayalam_400Regular,
   NotoSansGujarati_400Regular,
   NotoSansGurmukhi_400Regular,
+  NotoEmoji_400Regular,
 };
