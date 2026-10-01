@@ -6,6 +6,7 @@ import {
   AlignBottomIcon,
   AlignHorizontalCenterIcon,
   AlignObjectCenterHIcon,
+  AlignObjectCenterVIcon,
   AlignObjectLeftIcon,
   AlignObjectRightIcon,
   AlignTopIcon,
@@ -203,7 +204,7 @@ export function PositionControls({
           </View>
           <View style={styles.alignRow}>
             {gridBtn(<AlignTopIcon />, () => alignTo('top'))}
-            {gridBtn(<AlignVerticalCenterIcon />, () => alignTo('center-v'))}
+            {gridBtn(<AlignObjectCenterVIcon />, () => alignTo('center-v'))}
             {gridBtn(<AlignBottomIcon />, () => alignTo('bottom'))}
             {gridBtn(<StretchVerticalIcon />, stretchHeight)}
           </View>
@@ -221,11 +222,11 @@ export function PositionControls({
 }
 
 const BTN = {
-  size: 44,
-  radius: 6,
-  bg: '#EEF1F5',
-  centerBg: '#E8ECF1',
-  gap: 6,
+  size: 46,
+  radius: 8,
+  bg: '#F3F4F6',
+  centerBg: '#F3F4F6',
+  gap: 8,
 } as const;
 
 const styles = StyleSheet.create({

@@ -1,59 +1,61 @@
-import Svg, { Line, Path, Polyline, Rect } from 'react-native-svg';
+import Svg, { Path, Polygon, Rect } from 'react-native-svg';
 import type { ReactNode } from 'react';
 
-const ICON_COLOR = '#556473';
+/** WePrint Position-tab ink. */
+const ICON_COLOR = '#5C6770';
+const KNOCKOUT = '#F3F4F6';
 
 type IconProps = { size?: number; color?: string };
 
 function SvgWrap({ size, children }: { size: number; children: ReactNode }) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 18 18">
+    <Svg width={size} height={size} viewBox="0 0 24 24">
       {children}
     </Svg>
   );
 }
 
-export function NudgeUpIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function NudgeUpIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Polyline points="9,4 5.5,8.5 12.5,8.5" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <Polygon points="12,5 5.5,16.5 18.5,16.5" fill={color} />
     </SvgWrap>
   );
 }
 
-export function NudgeDownIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function NudgeDownIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Polyline points="9,14 5.5,9.5 12.5,9.5" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <Polygon points="12,19 5.5,7.5 18.5,7.5" fill={color} />
     </SvgWrap>
   );
 }
 
-export function NudgeLeftIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function NudgeLeftIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Polyline points="4,9 8.5,5.5 8.5,12.5" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <Polygon points="5,12 16.5,5.5 16.5,18.5" fill={color} />
     </SvgWrap>
   );
 }
 
-export function NudgeRightIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function NudgeRightIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Polyline points="14,9 9.5,5.5 9.5,12.5" fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <Polygon points="19,12 7.5,5.5 7.5,18.5" fill={color} />
     </SvgWrap>
   );
 }
 
 /** D-pad center: checkmark to center element on label. */
-export function CenterCheckIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function CenterCheckIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Polyline
-        points="4.5,9.5 7.5,12.5 13.5,6.5"
+      <Path
+        d="M5.5 12.2 L10 16.6 L18.6 7.4"
         fill="none"
         stroke={color}
-        strokeWidth="1.8"
+        strokeWidth="2.2"
         strokeLinejoin="round"
         strokeLinecap="round"
       />
@@ -61,165 +63,160 @@ export function CenterCheckIcon({ size = 18, color = ICON_COLOR }: IconProps) {
   );
 }
 
-/** Row 1: center vertically on label (box on horizontal midline). */
-export function AlignVerticalCenterIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+/** Row 1: vertical bar with a center line to the right (center on label height). */
+export function AlignVerticalCenterIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Line x1="2" y1="9" x2="16" y2="9" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Rect x="7" y="6.5" width="4" height="5" rx="0.6" stroke={color} strokeWidth="1.3" fill="none" />
+      <Rect x="4.2" y="4" width="2.6" height="16" rx="0.6" fill={color} />
+      <Rect x="6.8" y="10.7" width="13" height="2.6" rx="0.5" fill={color} />
     </SvgWrap>
   );
 }
 
-/** Row 1: center horizontally on label (box on vertical midline). */
-export function AlignHorizontalCenterIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+/** Row 1: top bar with a center line downward (center on label width). */
+export function AlignHorizontalCenterIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Line x1="9" y1="2" x2="9" y2="16" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Rect x="6.5" y="7" width="5" height="4" rx="0.6" stroke={color} strokeWidth="1.3" fill="none" />
+      <Rect x="4" y="4.2" width="16" height="2.6" rx="0.6" fill={color} />
+      <Rect x="10.7" y="6.8" width="2.6" height="13" rx="0.5" fill={color} />
     </SvgWrap>
   );
 }
 
-/** Row 1: fit element to full label (corner brackets). */
-export function FitToCanvasIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+/** Row 1: fit element to the full label (corner brackets only). */
+export function FitToCanvasIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Rect
-        x="5"
-        y="5"
-        width="8"
-        height="8"
-        rx="0.8"
-        stroke={color}
-        strokeWidth="1.2"
-        strokeDasharray="2 1.5"
+      <Path
+        d="M9 4.2 H4.2 V9 M15 4.2 H19.8 V9 M19.8 15 V19.8 H15 M9 19.8 H4.2 V15"
         fill="none"
+        stroke={color}
+        strokeWidth="2.1"
+        strokeLinejoin="round"
+        strokeLinecap="round"
       />
-      <Polyline points="3,6 3,3 6,3" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
-      <Polyline points="12,3 15,3 15,6" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
-      <Polyline points="15,12 15,15 12,15" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
-      <Polyline points="6,15 3,15 3,12" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
     </SvgWrap>
   );
 }
 
 /** Row 2: align object left edge to label. */
-export function AlignObjectLeftIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function AlignObjectLeftIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Line x1="4" y1="2" x2="4" y2="16" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Rect x="5.5" y="6.5" width="5" height="5" rx="0.6" stroke={color} strokeWidth="1.3" fill="none" />
+      <Rect x="3.2" y="3.6" width="2.5" height="16.8" rx="0.5" fill={color} />
+      <Rect x="8.4" y="7" width="11.2" height="10" rx="1.2" stroke={color} strokeWidth="1.7" fill="none" />
     </SvgWrap>
   );
 }
 
 /** Row 2: align object horizontal center. */
-export function AlignObjectCenterHIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function AlignObjectCenterHIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Line x1="9" y1="2" x2="9" y2="16" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Rect x="6.5" y="6.5" width="5" height="5" rx="0.6" stroke={color} strokeWidth="1.3" fill="none" />
+      <Rect x="4.2" y="6.6" width="15.6" height="10.8" rx="1.2" stroke={color} strokeWidth="1.7" fill="none" />
+      <Rect x="10.75" y="3.4" width="2.5" height="17.2" rx="0.5" fill={color} />
     </SvgWrap>
   );
 }
 
 /** Row 2: align object right edge to label. */
-export function AlignObjectRightIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function AlignObjectRightIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Line x1="14" y1="2" x2="14" y2="16" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Rect x="7.5" y="6.5" width="5" height="5" rx="0.6" stroke={color} strokeWidth="1.3" fill="none" />
+      <Rect x="4.2" y="7" width="11.2" height="10" rx="1.2" stroke={color} strokeWidth="1.7" fill="none" />
+      <Rect x="18.3" y="3.6" width="2.5" height="16.8" rx="0.5" fill={color} />
     </SvgWrap>
   );
 }
 
 /** Row 2: stretch width to label edges. */
-export function StretchHorizontalIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function StretchHorizontalIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Rect x="5" y="6.5" width="8" height="5" rx="0.6" stroke={color} strokeWidth="1.3" fill="none" />
-      <Line x1="2.5" y1="9" x2="5" y2="9" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Line x1="13" y1="9" x2="15.5" y2="9" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Polyline points="3.5,7.5 2.5,9 3.5,10.5" fill="none" stroke={color} strokeWidth="1.1" strokeLinejoin="round" />
-      <Polyline points="14.5,7.5 15.5,9 14.5,10.5" fill="none" stroke={color} strokeWidth="1.1" strokeLinejoin="round" />
+      <Rect x="8.2" y="8.2" width="7.6" height="7.6" rx="1" stroke={color} strokeWidth="1.6" fill="none" />
+      <Polygon points="2.4,12 6.6,8.6 6.6,15.4" fill={color} />
+      <Polygon points="21.6,12 17.4,8.6 17.4,15.4" fill={color} />
     </SvgWrap>
   );
 }
 
 /** Row 3: align object top edge. */
-export function AlignTopIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function AlignTopIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Line x1="2" y1="4" x2="16" y2="4" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Rect x="6.5" y="5" width="5" height="5" rx="0.6" stroke={color} strokeWidth="1.3" fill="none" />
+      <Rect x="3.6" y="3.2" width="16.8" height="2.5" rx="0.5" fill={color} />
+      <Rect x="7" y="8.4" width="10" height="11.2" rx="1.2" stroke={color} strokeWidth="1.7" fill="none" />
+    </SvgWrap>
+  );
+}
+
+/** Row 3: align object vertical center. */
+export function AlignObjectCenterVIcon({ size = 22, color = ICON_COLOR }: IconProps) {
+  return (
+    <SvgWrap size={size}>
+      <Rect x="6.6" y="4.2" width="10.8" height="15.6" rx="1.2" stroke={color} strokeWidth="1.7" fill="none" />
+      <Rect x="3.4" y="10.75" width="17.2" height="2.5" rx="0.5" fill={color} />
     </SvgWrap>
   );
 }
 
 /** Row 3: align object bottom edge. */
-export function AlignBottomIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function AlignBottomIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Line x1="2" y1="14" x2="16" y2="14" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Rect x="6.5" y="8" width="5" height="5" rx="0.6" stroke={color} strokeWidth="1.3" fill="none" />
+      <Rect x="7" y="4.2" width="10" height="11.2" rx="1.2" stroke={color} strokeWidth="1.7" fill="none" />
+      <Rect x="3.6" y="18.3" width="16.8" height="2.5" rx="0.5" fill={color} />
     </SvgWrap>
   );
 }
 
 /** Row 3: stretch height to label edges. */
-export function StretchVerticalIcon({ size = 18, color = ICON_COLOR }: IconProps) {
+export function StretchVerticalIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Rect x="6.5" y="5" width="5" height="8" rx="0.6" stroke={color} strokeWidth="1.3" fill="none" />
-      <Line x1="9" y1="2.5" x2="9" y2="5" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Line x1="9" y1="13" x2="9" y2="15.5" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
-      <Polyline points="7.5,3.5 9,2.5 10.5,3.5" fill="none" stroke={color} strokeWidth="1.1" strokeLinejoin="round" />
-      <Polyline points="7.5,14.5 9,15.5 10.5,14.5" fill="none" stroke={color} strokeWidth="1.1" strokeLinejoin="round" />
+      <Rect x="8.2" y="8.2" width="7.6" height="7.6" rx="1" stroke={color} strokeWidth="1.6" fill="none" />
+      <Polygon points="12,2.4 8.6,6.6 15.4,6.6" fill={color} />
+      <Polygon points="12,21.6 8.6,17.4 15.4,17.4" fill={color} />
     </SvgWrap>
   );
 }
 
 /** Bottom row: send to back (|◀). */
-export function SendToBackIcon({ size = 20, color = ICON_COLOR }: IconProps) {
+export function SendToBackIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Line x1="4" y1="3" x2="4" y2="15" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
-      <Rect x="7" y="6" width="7" height="6" rx="0.8" stroke={color} strokeWidth="1.3" fill="none" />
-      <Polyline points="6,9 4,9 5.5,7.5" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
-      <Polyline points="6,9 4,9 5.5,10.5" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
+      <Rect x="4" y="4.5" width="2.6" height="15" rx="0.5" fill={color} />
+      <Polygon points="18.8,6.2 9.2,12 18.8,17.8" fill={color} />
     </SvgWrap>
   );
 }
 
 /** Bottom row: bring to front (▶|). */
-export function BringToFrontIcon({ size = 20, color = ICON_COLOR }: IconProps) {
+export function BringToFrontIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Rect x="4" y="6" width="7" height="6" rx="0.8" stroke={color} strokeWidth="1.3" fill="none" />
-      <Line x1="14" y1="3" x2="14" y2="15" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
-      <Polyline points="12,9 14,9 12.5,7.5" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
-      <Polyline points="12,9 14,9 12.5,10.5" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
+      <Polygon points="5.2,6.2 14.8,12 5.2,17.8" fill={color} />
+      <Rect x="17.4" y="4.5" width="2.6" height="15" rx="0.5" fill={color} />
     </SvgWrap>
   );
 }
 
 /** Bottom row: send one layer backward. */
-export function SendBackwardIcon({ size = 20, color = ICON_COLOR }: IconProps) {
+export function SendBackwardIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Rect x="4" y="7.5" width="6.5" height="5" rx="0.7" stroke={color} strokeWidth="1.1" fill="none" opacity={0.45} />
-      <Rect x="7" y="5.5" width="6.5" height="5" rx="0.7" stroke={color} strokeWidth="1.3" fill="none" />
+      <Rect x="3.4" y="3.4" width="11.2" height="11.2" rx="1.6" stroke={color} strokeWidth="1.7" fill="none" />
+      <Rect x="9.2" y="9.2" width="11.2" height="11.2" rx="1.6" stroke={color} strokeWidth="1.7" fill={KNOCKOUT} />
     </SvgWrap>
   );
 }
 
 /** Bottom row: bring one layer forward. */
-export function BringForwardIcon({ size = 20, color = ICON_COLOR }: IconProps) {
+export function BringForwardIcon({ size = 22, color = ICON_COLOR }: IconProps) {
   return (
     <SvgWrap size={size}>
-      <Rect x="4.5" y="5.5" width="6.5" height="5" rx="0.7" stroke={color} strokeWidth="1.3" fill="none" />
-      <Rect x="7.5" y="7.5" width="6.5" height="5" rx="0.7" stroke={color} strokeWidth="1.1" fill="none" opacity={0.45} />
+      <Rect x="9.2" y="9.2" width="11.2" height="11.2" rx="1.6" stroke={color} strokeWidth="1.7" fill="none" />
+      <Rect x="3.4" y="3.4" width="11.2" height="11.2" rx="1.6" stroke={color} strokeWidth="1.7" fill={KNOCKOUT} />
     </SvgWrap>
   );
 }
