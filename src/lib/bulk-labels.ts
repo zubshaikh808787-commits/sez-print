@@ -6,6 +6,7 @@ import {
 } from '@/components/editor/types';
 import {
   createLabelDocument,
+  generateId,
   type LabelDocument,
   type LabelElement,
   type LabelOrientation,
@@ -18,7 +19,14 @@ import {
   repositionDocumentToSize,
   scaleDocumentToSize,
 } from '@/lib/element-sizing';
-import type { ExcelSheet } from '@/stores/data-store';
+import { useDataStore, type ExcelSheet } from '@/stores/data-store';
+import { useLabelStore } from '@/stores/label-store';
+import {
+  generateSerialLabels,
+  parseSequenceFromText,
+  type BarcodeSymbology,
+  type SequenceRuleConfig,
+} from '@/lib/printer/SerialLabelEngine';
 
 export type BulkSlotKind = 'text' | 'barcode' | 'qrcode';
 
@@ -57,6 +65,10 @@ export type BulkLabelSet = {
   activeRowIndex: number;
   barcodeEncodeMode: string;
   qrErrorLevel: QrErrorLevel;
+  /** Static non-slot elements (e.g., Header text, lines, clipart, logos, shapes) that appear on all bulk/serial labels */
+  staticElements?: LabelElement[];
+  /** Embedded sheet fallback in case data-store files are unavailable */
+  embeddedSheet?: ExcelSheet;
 };
 
 export function bulkSlotId(columnIndex: number): string {
@@ -72,8 +84,13 @@ export function resolveBulkSheet(
   bulk: BulkLabelSet,
 ): ExcelSheet | null {
   const file = files.find((f) => f.id === bulk.excelFileId);
-  if (!file) return null;
-  return file.sheets[bulk.sheetIndex] ?? file.sheets[0] ?? null;
+  if (file && (file.sheets[bulk.sheetIndex] ?? file.sheets[0])) {
+    return file.sheets[bulk.sheetIndex] ?? file.sheets[0];
+  }
+  if (bulk.embeddedSheet) {
+    return bulk.embeddedSheet;
+  }
+  return null;
 }
 
 export function cellValue(sheet: ExcelSheet, rowIndex: number, columnIndex: number): string {
@@ -266,10 +283,14 @@ export function projectBulkDocument(
 ): LabelDocument {
   if (!doc.bulk) return doc;
   const clamped = Math.max(0, Math.min(rowIndex, Math.max(0, doc.bulk.rowCount - 1)));
+  const slotElements = projectBulkElements(doc.bulk, sheet, clamped);
+  const slotIds = new Set(doc.bulk.slots.map((s) => s.id));
+  const staticElements =
+    doc.bulk.staticElements ?? doc.elements.filter((el) => !slotIds.has(el.id));
   return {
     ...doc,
-    elements: projectBulkElements(doc.bulk, sheet, clamped),
-    bulk: { ...doc.bulk, activeRowIndex: clamped },
+    elements: [...staticElements, ...slotElements],
+    bulk: { ...doc.bulk, activeRowIndex: clamped, staticElements },
   };
 }
 
@@ -439,7 +460,10 @@ export function syncBulkFromProjectedElements(
     }
   }
 
-  return { ...bulk, rowContentOverrides: contentOverrides, slotTemplates };
+  const slotIds = new Set(bulk.slots.map((s) => s.id));
+  const staticElements = elements.filter((el) => !slotIds.has(el.id));
+
+  return { ...bulk, rowContentOverrides: contentOverrides, slotTemplates, staticElements };
 }
 
 export type BulkStockSizeMode = 'scale' | 'keep';
@@ -514,7 +538,12 @@ export function resizeBulkDocumentToSize(
     for (const [rowKey, rowMap] of Object.entries(bulk.rowGeometryOverrides)) {
       rowGeometryOverrides[rowKey] = mapGeometryRecord(rowMap, mapGeo);
     }
-    nextBulk = { ...bulk, sharedGeometry, slotTemplates, rowGeometryOverrides };
+    const staticElements = (bulk.staticElements ?? []).map((el) => ({
+      ...el,
+      left: el.left * sx,
+      top: el.top * sy,
+    }));
+    nextBulk = { ...bulk, sharedGeometry, slotTemplates, rowGeometryOverrides, staticElements };
   } else {
     const sharedEls = bulk.slots
       .map((slot) => {
@@ -544,8 +573,388 @@ export function resizeBulkDocumentToSize(
       }
       if (Object.keys(nextRow).length > 0) rowGeometryOverrides[rowKey] = nextRow;
     }
-    nextBulk = { ...bulk, sharedGeometry, slotTemplates, rowGeometryOverrides };
+
+    const staticElements = bulk.staticElements
+      ? scaleSlotElements(bulk.staticElements, oldW, oldH, widthMm, heightMm)
+      : undefined;
+
+    nextBulk = { ...bulk, sharedGeometry, slotTemplates, rowGeometryOverrides, staticElements };
   }
 
   return hydrateBulkDocument({ ...doc, widthMm, heightMm, bulk: nextBulk }, files);
+}
+
+export type CreateSerialLabelParams = {
+  name?: string;
+  widthMm: number;
+  heightMm: number;
+  orientation?: LabelOrientation;
+  paperType?: PaperType;
+  headerText?: string;
+  samplePattern: string;
+  startNumber: number;
+  endNumber: number;
+  step?: number;
+  zeroPadding?: number;
+  includeBarcode?: boolean;
+  barcodeSymbology?: 'CODE128' | 'CODE39' | 'EAN13' | 'UPCA' | 'QRCODE' | 'NONE';
+  barcodePrefix?: string;
+  barcodeSuffix?: string;
+  barcodeMirrorsText?: boolean;
+  barcodePadding?: number;
+  qrErrorLevel?: QrErrorLevel;
+};
+
+/**
+ * Creates a fully-formed serial label document with a backing virtual data sheet,
+ * customizable header, barcode/QR slots, and exact physical dimensions.
+ * The document can be opened directly in the Canvas Editor (/edit) and printed (/print).
+ */
+export function createSerialLabelDocument(params: CreateSerialLabelParams): LabelDocument {
+  const {
+    name,
+    widthMm,
+    heightMm,
+    orientation = 0,
+    paperType = 'Label',
+    headerText,
+    samplePattern,
+    startNumber,
+    endNumber,
+    step = 1,
+    zeroPadding,
+    includeBarcode = true,
+    barcodeSymbology = 'CODE128',
+    barcodePrefix = '',
+    barcodeSuffix = '',
+    barcodeMirrorsText = true,
+    barcodePadding,
+    qrErrorLevel = 'M',
+  } = params;
+
+  // 1. Sequence Parsing & Generation
+  const parsed = parseSequenceFromText(samplePattern) ?? {
+    prefix: samplePattern.replace(/\d+$/, ''),
+    number: startNumber,
+    suffix: '',
+    digitWidth: String(startNumber).length,
+  };
+
+  const isQr = barcodeSymbology === 'QRCODE';
+  const hasBarcode = includeBarcode && barcodeSymbology !== 'NONE';
+
+  const engineSymbology: BarcodeSymbology =
+    barcodeSymbology === 'CODE39'
+      ? 'CODE39'
+      : barcodeSymbology === 'EAN13'
+      ? 'EAN13'
+      : barcodeSymbology === 'UPCA'
+      ? 'UPCA'
+      : 'CODE128';
+
+  const config: SequenceRuleConfig = {
+    startNumber,
+    endNumber,
+    step: step || 1,
+    textPadding: zeroPadding ?? parsed.digitWidth,
+    barcodeMirrorsText,
+    barcodePrefix,
+    barcodeSuffix,
+    barcodePadding,
+    barcodeSymbology: engineSymbology,
+  };
+
+  const generated = generateSerialLabels(
+    { fields: {}, textFieldKey: 'text', barcodeFieldKey: 'barcode' },
+    parsed,
+    config,
+  );
+
+  if (generated.length === 0) {
+    throw new Error('No labels could be generated from the given range.');
+  }
+
+  // 2. Generate Backing Data Sheet
+  const columns = hasBarcode ? ['Serial No', isQr ? 'QR Code' : 'Barcode'] : ['Serial No'];
+  const rows = generated.map((item) => (hasBarcode ? [item.text, item.barcodeValue] : [item.text]));
+  const sheet: ExcelSheet = {
+    name: 'Serial Sequence',
+    columns,
+    rows,
+  };
+
+  // 3. Persist Virtual Excel File in data-store
+  const excelFile = useDataStore.getState().addExcelFile({
+    name: name ?? `Serial ${generated[0].text}…${generated[generated.length - 1].text}`,
+    uri: `serial://${Date.now()}-${generated[0].text}`,
+    sheets: [sheet],
+    activeSheetIndex: 0,
+  });
+
+  // 4. Balanced Layout Coordinates
+  const hasHeader = Boolean(headerText && headerText.trim().length > 0);
+  const headerHeight = hasHeader ? Math.max(4, Math.min(8, heightMm * 0.2)) : 0;
+  const headerTop = 2;
+  const contentTop = hasHeader ? headerTop + headerHeight + 1.5 : 2;
+  const availHeight = Math.max(8, heightMm - contentTop - 2);
+  const availWidth = Math.max(10, widthMm - 4);
+
+  const staticElements: LabelElement[] = [];
+
+  if (hasHeader) {
+    const headerEl: LabelElement = {
+      ...DEFAULT_ELEMENT_STATE,
+      id: generateId('hdr'),
+      type: 'text',
+      text: headerText!.trim(),
+      contentType: 'Manual',
+      left: 2,
+      top: headerTop,
+      width: availWidth,
+      height: headerHeight,
+      fontSize: Math.max(7, Math.min(13, Math.round(headerHeight * 1.6))),
+      bold: true,
+      align: 'center',
+      autoWrapping: 'Word',
+      needPrinting: true,
+    };
+    staticElements.push(headerEl);
+  }
+
+  const slotTemplates: Record<string, LabelElement> = {};
+  const sharedGeometry: Record<string, BulkGeometry> = {};
+  const slots: BulkSlot[] = [];
+
+  if (hasBarcode) {
+    if (isQr) {
+      const qrSize = Math.min(availWidth * 0.45, availHeight * 0.9, 35);
+      const isSideBySide = widthMm >= heightMm * 1.25;
+
+      if (isSideBySide) {
+        // Side-by-side: QR left, Serial Text right
+        const qrEl: LabelElement = {
+          ...DEFAULT_QRCODE_STATE,
+          id: 'col:1',
+          type: 'qrcode',
+          content: generated[0].barcodeValue,
+          contentType: 'Manual',
+          encodeMode: 'QRCode',
+          errorLevel: qrErrorLevel,
+          left: 3,
+          top: contentTop + (availHeight - qrSize) / 2,
+          width: qrSize,
+          height: qrSize,
+          visible: true,
+          needPrinting: true,
+        };
+
+        const textLeft = 3 + qrSize + 3;
+        const textWidth = Math.max(10, widthMm - textLeft - 3);
+        const textEl: LabelElement = {
+          ...DEFAULT_ELEMENT_STATE,
+          id: 'col:0',
+          type: 'text',
+          text: generated[0].text,
+          contentType: 'Manual',
+          left: textLeft,
+          top: contentTop + (availHeight - 8) / 2,
+          width: textWidth,
+          height: 8,
+          fontSize: Math.max(9, Math.min(18, Math.round(heightMm * 0.28))),
+          bold: true,
+          align: 'left',
+          autoWrapping: 'Word',
+          needPrinting: true,
+        };
+
+        slotTemplates['col:0'] = textEl;
+        slotTemplates['col:1'] = qrEl;
+        sharedGeometry['col:0'] = geometryOfElement(textEl);
+        sharedGeometry['col:1'] = geometryOfElement(qrEl);
+      } else {
+        // Stacked: QR top, Serial Text bottom
+        const qrEl: LabelElement = {
+          ...DEFAULT_QRCODE_STATE,
+          id: 'col:1',
+          type: 'qrcode',
+          content: generated[0].barcodeValue,
+          contentType: 'Manual',
+          encodeMode: 'QRCode',
+          errorLevel: qrErrorLevel,
+          left: (widthMm - qrSize) / 2,
+          top: contentTop,
+          width: qrSize,
+          height: qrSize,
+          visible: true,
+          needPrinting: true,
+        };
+
+        const textTop = contentTop + qrSize + 1;
+        const textHeight = Math.max(4, heightMm - textTop - 1.5);
+        const textEl: LabelElement = {
+          ...DEFAULT_ELEMENT_STATE,
+          id: 'col:0',
+          type: 'text',
+          text: generated[0].text,
+          contentType: 'Manual',
+          left: 2,
+          top: textTop,
+          width: availWidth,
+          height: textHeight,
+          fontSize: Math.max(8, Math.min(14, Math.round(textHeight * 1.5))),
+          bold: true,
+          align: 'center',
+          autoWrapping: 'Word',
+          needPrinting: true,
+        };
+
+        slotTemplates['col:0'] = textEl;
+        slotTemplates['col:1'] = qrEl;
+        sharedGeometry['col:0'] = geometryOfElement(textEl);
+        sharedGeometry['col:1'] = geometryOfElement(qrEl);
+      }
+
+      slots.push({
+        id: 'col:0',
+        columnIndex: 0,
+        columnName: 'Serial No',
+        kind: 'text',
+      });
+      slots.push({
+        id: 'col:1',
+        columnIndex: 1,
+        columnName: 'QR Code',
+        kind: 'qrcode',
+      });
+    } else {
+      // 1D Barcode
+      const bcEncodeMode =
+        barcodeSymbology === 'CODE39'
+          ? 'CODE-39'
+          : barcodeSymbology === 'EAN13'
+          ? 'EAN-13'
+          : barcodeSymbology === 'UPCA'
+          ? 'UPC-A'
+          : 'CODE-128';
+
+      const bcHeight = Math.max(6, Math.min(availHeight * 0.58, 25));
+      const bcWidth = Math.max(15, availWidth * 0.92);
+      const bcLeft = (widthMm - bcWidth) / 2;
+      const bcTop = contentTop;
+
+      const barcodeEl: LabelElement = {
+        ...DEFAULT_BARCODE_STATE,
+        id: 'col:1',
+        type: 'barcode',
+        content: generated[0].barcodeValue,
+        contentType: 'Manual',
+        encodeMode: bcEncodeMode,
+        textFlag: 'Hide',
+        left: bcLeft,
+        top: bcTop,
+        width: bcWidth,
+        height: bcHeight,
+        visible: true,
+        needPrinting: true,
+      };
+
+      const textTop = bcTop + bcHeight + 1.2;
+      const textHeight = Math.max(4, heightMm - textTop - 1.5);
+      const textEl: LabelElement = {
+        ...DEFAULT_ELEMENT_STATE,
+        id: 'col:0',
+        type: 'text',
+        text: generated[0].text,
+        contentType: 'Manual',
+        left: 2,
+        top: textTop,
+        width: availWidth,
+        height: textHeight,
+        fontSize: Math.max(8, Math.min(18, Math.round(textHeight * 1.6))),
+        bold: true,
+        align: 'center',
+        autoWrapping: 'Word',
+        needPrinting: true,
+      };
+
+      slotTemplates['col:0'] = textEl;
+      slotTemplates['col:1'] = barcodeEl;
+      sharedGeometry['col:0'] = geometryOfElement(textEl);
+      sharedGeometry['col:1'] = geometryOfElement(barcodeEl);
+
+      slots.push({
+        id: 'col:0',
+        columnIndex: 0,
+        columnName: 'Serial No',
+        kind: 'text',
+      });
+      slots.push({
+        id: 'col:1',
+        columnIndex: 1,
+        columnName: 'Barcode',
+        kind: 'barcode',
+      });
+    }
+  } else {
+    // Text only
+    const textHeight = Math.min(16, availHeight * 0.65);
+    const textTop = contentTop + (availHeight - textHeight) / 2;
+    const textEl: LabelElement = {
+      ...DEFAULT_ELEMENT_STATE,
+      id: 'col:0',
+      type: 'text',
+      text: generated[0].text,
+      contentType: 'Manual',
+      left: 2,
+      top: textTop,
+      width: availWidth,
+      height: textHeight,
+      fontSize: Math.max(12, Math.min(28, Math.round(textHeight * 1.6))),
+      bold: true,
+      align: 'center',
+      autoWrapping: 'Word',
+      needPrinting: true,
+    };
+
+    slotTemplates['col:0'] = textEl;
+    sharedGeometry['col:0'] = geometryOfElement(textEl);
+
+    slots.push({
+      id: 'col:0',
+      columnIndex: 0,
+      columnName: 'Serial No',
+      kind: 'text',
+    });
+  }
+
+  const bulk: BulkLabelSet = {
+    excelFileId: excelFile.id,
+    sheetIndex: 0,
+    rowCount: generated.length,
+    slots,
+    slotTemplates,
+    sharedGeometry,
+    rowGeometryOverrides: {},
+    rowContentOverrides: {},
+    activeRowIndex: 0,
+    barcodeEncodeMode: barcodeSymbology === 'CODE39' ? 'CODE-39' : 'CODE-128',
+    qrErrorLevel,
+    staticElements,
+    embeddedSheet: sheet,
+  };
+
+  const initialElements = [...staticElements, ...projectBulkElements(bulk, sheet, 0)];
+
+  const doc = createLabelDocument({
+    name: name ?? `Serial: ${generated[0].text}…${generated[generated.length - 1].text}`,
+    widthMm,
+    heightMm,
+    orientation,
+    paperType,
+    elements: initialElements,
+  });
+
+  doc.bulk = bulk;
+  useLabelStore.getState().upsertDocument(doc);
+  return doc;
 }

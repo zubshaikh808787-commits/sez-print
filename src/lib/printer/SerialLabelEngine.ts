@@ -178,11 +178,25 @@ export function generateSerialLabels(
 
     let barcodeValue: string;
     if (barcodeMirrorsText) {
-      barcodeValue = buildBarcodeValue(String(n).padStart(textPadding ?? parsedText.digitWidth, '0'), barcodeSymbology);
+      if (barcodeSymbology === 'EAN13' || barcodeSymbology === 'UPCA') {
+        barcodeValue = buildBarcodeValue(
+          String(n).padStart(textPadding ?? parsedText.digitWidth, '0'),
+          barcodeSymbology,
+        );
+      } else {
+        barcodeValue = text;
+      }
     } else {
       const bcNumStr = pad(n, barcodePadding);
-      barcodeValue = buildBarcodeValue(`${barcodePrefix}${bcNumStr}`.replace(/\D/g, ''), barcodeSymbology);
-      if (barcodeSymbology === 'CODE128' || barcodeSymbology === 'CODE39' || barcodeSymbology === 'CUSTOM') {
+      barcodeValue = buildBarcodeValue(
+        `${barcodePrefix}${bcNumStr}`.replace(/\D/g, ''),
+        barcodeSymbology,
+      );
+      if (
+        barcodeSymbology === 'CODE128' ||
+        barcodeSymbology === 'CODE39' ||
+        barcodeSymbology === 'CUSTOM'
+      ) {
         barcodeValue = `${barcodePrefix}${bcNumStr}${barcodeSuffix}`;
       }
     }

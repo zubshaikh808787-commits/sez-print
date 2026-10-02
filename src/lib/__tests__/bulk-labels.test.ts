@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+if (typeof (globalThis as any).window === 'undefined') {
+  (globalThis as any).window = { localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } };
+}
+
 import { barcodeModulesForMode } from '@/lib/barcode-code128';
 import {
   applyGeometryToAllLabels,
@@ -258,3 +262,67 @@ function resolved(
 ) {
   return bulk.rowGeometryOverrides[String(row)]?.[slotId] ?? bulk.sharedGeometry[slotId];
 }
+
+test('createSerialLabelDocument generates sequential labels, header, barcode, and bulk projection', async () => {
+  const { createSerialLabelDocument } = await import('@/lib/bulk-labels');
+  const doc = createSerialLabelDocument({
+    name: 'Asset Test',
+    widthMm: 60,
+    heightMm: 40,
+    headerText: 'COMPANY ASSET',
+    samplePattern: 'SN-001',
+    startNumber: 1,
+    endNumber: 5,
+    step: 1,
+    zeroPadding: 3,
+    includeBarcode: true,
+    barcodeSymbology: 'CODE128',
+  });
+
+  assert.ok(doc);
+  assert.equal(doc.widthMm, 60);
+  assert.equal(doc.heightMm, 40);
+  assert.equal(doc.bulk?.rowCount, 5);
+  assert.equal(doc.bulk?.staticElements?.length, 1);
+
+  const header = doc.elements.find((el) => el.type === 'text' && el.text === 'COMPANY ASSET');
+  assert.ok(header, 'Header element must exist on initial document');
+
+  const serialText = doc.elements.find((el) => el.id === 'col:0');
+  assert.ok(serialText && serialText.type === 'text');
+  assert.equal(serialText.text, 'SN-001');
+
+  const barcode = doc.elements.find((el) => el.id === 'col:1');
+  assert.ok(barcode && barcode.type === 'barcode');
+  assert.equal(barcode.content, 'SN-001');
+
+  // Verify projection for page 4 (row index 4 -> SN-005)
+  const sheet = doc.bulk?.embeddedSheet;
+  assert.ok(sheet);
+  const row4 = projectBulkDocument(doc, sheet, 4);
+  assert.equal(row4.elements.find((el) => el.id === 'col:0')?.type === 'text' && (row4.elements.find((el) => el.id === 'col:0') as any).text, 'SN-005');
+  assert.equal(row4.elements.find((el) => el.id === 'col:1')?.type === 'barcode' && (row4.elements.find((el) => el.id === 'col:1') as any).content, 'SN-005');
+  assert.ok(row4.elements.some((el) => el.type === 'text' && el.text === 'COMPANY ASSET'), 'Header must persist across row projection');
+});
+
+test('createSerialLabelDocument with QR code generates valid 2D slot', async () => {
+  const { createSerialLabelDocument } = await import('@/lib/bulk-labels');
+  const doc = createSerialLabelDocument({
+    widthMm: 50,
+    heightMm: 30,
+    headerText: 'LOCATION',
+    samplePattern: 'LOC-10',
+    startNumber: 10,
+    endNumber: 12,
+    step: 1,
+    includeBarcode: true,
+    barcodeSymbology: 'QRCODE',
+  });
+
+  assert.ok(doc);
+  assert.equal(doc.bulk?.rowCount, 3);
+  const qr = doc.elements.find((el) => el.id === 'col:1');
+  assert.ok(qr && qr.type === 'qrcode');
+  assert.equal(qr.content, 'LOC-10');
+});
+

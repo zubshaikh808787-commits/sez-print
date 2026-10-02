@@ -1,9 +1,14 @@
 /**
  * SerialLabelScreen / serial-label.tsx
  *
- * Screen for the "Serial Labels" feature.
- * Generates sequences of labels & barcodes from a single sample + range,
- * previews them, and prints the batch directly to connected thermal printers (TD-404, Josh, Tez, Dev, LabelX).
+ * Comprehensive Serial Label Generator with:
+ * - Label Dimensions & Stock Preset selector (50x30, 40x30, 60x40, 70x50, 100x150, 30x20, Custom)
+ * - Sequence rules (Prefix, Start, End, Step, Zero-Padding)
+ * - Header / Title text customization with one-tap suggestions
+ * - Barcode & 2D QR Code symbology options (CODE128, CODE39, EAN13, UPCA, QR, Text-Only)
+ * - Live interactive preview carousel
+ * - Seamless "Edit on Canvas" (/edit) workflow with full drag, resize, typography, shapes & graphics
+ * - Direct Batch Print (/print) with progress monitoring
  */
 
 import React, { useMemo, useState, useRef } from 'react';
@@ -19,6 +24,8 @@ import {
   Pressable,
   Modal,
   ActivityIndicator,
+  Switch,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -28,57 +35,136 @@ import { getPrinterManager } from '@/lib/printer/printer-manager';
 import {
   generateSerialLabelsFromSample,
   validateRange,
+  parseSequenceFromText,
   GeneratedLabel,
   LabelTemplate,
   SequenceRuleConfig,
   BarcodeSymbology,
 } from '@/lib/printer/SerialLabelEngine';
+import { createSerialLabelDocument } from '@/lib/bulk-labels';
+import { Palette, Type } from '@/constants/ui';
+import type { PaperType } from '@/lib/label-document';
+
+type SizePreset = {
+  id: string;
+  name: string;
+  widthMm: number;
+  heightMm: number;
+};
+
+const SIZE_PRESETS: SizePreset[] = [
+  { id: '50x30', name: '50 × 30 mm', widthMm: 50, heightMm: 30 },
+  { id: '40x30', name: '40 × 30 mm', widthMm: 40, heightMm: 30 },
+  { id: '60x40', name: '60 × 40 mm', widthMm: 60, heightMm: 40 },
+  { id: '70x50', name: '70 × 50 mm', widthMm: 70, heightMm: 50 },
+  { id: '100x150', name: '100 × 150 mm', widthMm: 100, heightMm: 150 },
+  { id: '30x20', name: '30 × 20 mm', widthMm: 30, heightMm: 20 },
+  { id: 'custom', name: 'Custom Size', widthMm: 50, heightMm: 30 },
+];
+
+const HEADER_PRESETS = [
+  'ASSET TAG',
+  'INVENTORY',
+  'PROPERTY OF',
+  'QC PASSED',
+  'SERIAL NO.',
+  'BATCH NO.',
+  'CAUTION',
+];
+
+type SymbologyOption = 'CODE128' | 'CODE39' | 'EAN13' | 'UPCA' | 'QRCODE' | 'NONE';
 
 function encodeTsplSerialLabel(
   text: string,
   barcodeValue: string,
   widthMm = 50,
   heightMm = 30,
+  headerText?: string,
 ): Uint8Array {
-  const lines = [
+  const lines: string[] = [
     `SIZE ${widthMm} mm,${heightMm} mm`,
     `GAP 2 mm,0 mm`,
     `DIRECTION 1`,
     `CLS`,
-    `TEXT 30,25,"3",0,1,1,"${text}"`,
-    `BARCODE 30,75,"128",45,1,0,2,4,"${barcodeValue}"`,
-    `PRINT 1`,
-    ``,
-  ].join('\r\n');
-  const buf = new Uint8Array(lines.length);
-  for (let i = 0; i < lines.length; i++) {
-    buf[i] = lines.charCodeAt(i) & 0xff;
+  ];
+
+  let currentY = 25;
+  if (headerText && headerText.trim().length > 0) {
+    lines.push(`TEXT 30,${currentY},"3",0,1,1,"${headerText.trim()}"`);
+    currentY += 35;
+  }
+
+  if (barcodeValue) {
+    lines.push(`BARCODE 30,${currentY},"128",45,1,0,2,4,"${barcodeValue}"`);
+    currentY += 55;
+  }
+
+  lines.push(`TEXT 30,${currentY},"3",0,1,1,"${text}"`);
+  lines.push(`PRINT 1`);
+  lines.push(``);
+
+  const raw = lines.join('\r\n');
+  const buf = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    buf[i] = raw.charCodeAt(i) & 0xff;
   }
   return buf;
 }
 
-function LabelPreview({
+function LivePreviewCard({
   item,
   widthMm,
   heightMm,
+  headerText,
+  hasHeader,
+  symbology,
 }: {
   item: GeneratedLabel;
   widthMm: string;
   heightMm: string;
+  headerText: string;
+  hasHeader: boolean;
+  symbology: SymbologyOption;
 }) {
+  const w = parseFloat(widthMm) || 50;
+  const h = parseFloat(heightMm) || 30;
+  const aspectRatio = Math.max(0.6, Math.min(2.5, w / Math.max(h, 1)));
+
   return (
-    <View style={styles.previewCard}>
+    <View style={[styles.previewCard, { width: 145, minHeight: 120 / aspectRatio }]}>
       <View style={styles.previewHeader}>
         <Text style={styles.previewIndex}>#{item.index + 1}</Text>
         <Text style={styles.previewDim}>
           {widthMm}×{heightMm}mm
         </Text>
       </View>
-      <Text style={styles.previewText}>{item.text}</Text>
-      <View style={styles.barcodeBox}>
-        <Text style={styles.barcodeBars}>||| | |||| | || ||| |</Text>
-        <Text style={styles.barcodeText}>{item.barcodeValue}</Text>
-      </View>
+
+      {hasHeader && headerText.trim().length > 0 ? (
+        <Text style={styles.cardHeaderText} numberOfLines={1}>
+          {headerText.trim()}
+        </Text>
+      ) : null}
+
+      {symbology === 'QRCODE' ? (
+        <View style={styles.qrBox}>
+          <View style={styles.qrCornerTl} />
+          <View style={styles.qrCornerTr} />
+          <View style={styles.qrCornerBl} />
+          <View style={styles.qrCornerBr} />
+          <Text style={styles.qrBars}>■ □ ■ ■ □</Text>
+          <Text style={styles.qrBars}>□ ■ □ ■ ■</Text>
+          <Text style={styles.qrBars}>■ ■ □ □ ■</Text>
+        </View>
+      ) : symbology !== 'NONE' ? (
+        <View style={styles.barcodeBox}>
+          <Text style={styles.barcodeBars}>||| | |||| | || ||| |</Text>
+          <Text style={styles.barcodeText}>{item.barcodeValue}</Text>
+        </View>
+      ) : null}
+
+      <Text style={styles.previewText} numberOfLines={1}>
+        {item.text}
+      </Text>
     </View>
   );
 }
@@ -93,68 +179,137 @@ export default function SerialLabelScreen() {
     status === 'printing' ||
     Boolean(deviceId) ||
     getPrinterManager().isConnected;
-  const connectedName = deviceName || (getPrinterManager().isConnected ? 'Connected Printer' : 'Thermal Printer');
+  const connectedName =
+    deviceName || (getPrinterManager().isConnected ? 'Connected Printer' : 'Thermal Printer');
 
-  const [sampleText, setSampleText] = useState('Desk1');
+  // Form State
+  const [sampleText, setSampleText] = useState('SN-001');
   const [endNumber, setEndNumber] = useState('20');
   const [step, setStep] = useState('1');
-  const [padding, setPadding] = useState(''); // blank = auto infer
+  const [paddingOption, setPaddingOption] = useState<'auto' | 'none' | '2' | '3' | '4' | '5'>('auto');
+
+  // Label Dimensions
+  const [selectedPreset, setSelectedPreset] = useState<string>('50x30');
   const [widthMm, setWidthMm] = useState('50');
   const [heightMm, setHeightMm] = useState('30');
-  const [barcodeSymbology, setBarcodeSymbology] = useState<BarcodeSymbology>('CODE128');
+  const [paperType, setPaperType] = useState<PaperType>('Label');
+
+  // Header / Title
+  const [hasHeader, setHasHeader] = useState(true);
+  const [headerText, setHeaderText] = useState('ASSET MANAGEMENT');
+
+  // Barcode / Symbology
+  const [symbology, setSymbology] = useState<SymbologyOption>('CODE128');
+
+  // Results & Printing State
   const [generated, setGenerated] = useState<GeneratedLabel[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  // Printing state
   const [isPrinting, setIsPrinting] = useState(false);
   const [printProgress, setPrintProgress] = useState({ current: 0, total: 0, label: '' });
   const cancelPrintRef = useRef(false);
 
-  const template: LabelTemplate = {
-    fields: {},
-    textFieldKey: 'displayText',
-    barcodeFieldKey: 'barcodeValue',
-  };
-
   const startNumberMatch = sampleText.match(/(\d+)(\D*)$/);
   const startNumber = startNumberMatch ? parseInt(startNumberMatch[1], 10) : NaN;
 
+  const textPadding = useMemo(() => {
+    if (paddingOption === 'none') return 0;
+    if (paddingOption === 'auto') return undefined;
+    return parseInt(paddingOption, 10);
+  }, [paddingOption]);
+
   const rangeError = useMemo(() => {
-    if (!startNumberMatch) return 'Sample label needs a number, e.g. "Desk1" or "SN-001".';
+    if (!startNumberMatch || isNaN(startNumber)) {
+      return 'Sample label needs a number, e.g. "SN-001" or "Desk1".';
+    }
+    const end = Number(endNumber);
+    if (isNaN(end)) return 'End number must be a valid number.';
     const cfg: SequenceRuleConfig = {
       startNumber,
-      endNumber: Number(endNumber),
+      endNumber: end,
       step: Number(step) || 1,
-      textPadding: padding ? Number(padding) : undefined,
-      barcodeSymbology,
+      textPadding,
+      barcodeSymbology: symbology === 'QRCODE' || symbology === 'NONE' ? 'CODE128' : symbology,
     };
     return validateRange(cfg);
-  }, [sampleText, endNumber, step, padding, barcodeSymbology, startNumberMatch, startNumber]);
+  }, [sampleText, endNumber, step, textPadding, symbology, startNumberMatch, startNumber]);
 
-  function handlePreview() {
-    setError(null);
+  // Compute live sequence for preview
+  const liveLabels = useMemo(() => {
+    if (rangeError || isNaN(startNumber)) return [];
     try {
+      const template: LabelTemplate = {
+        fields: {},
+        textFieldKey: 'text',
+        barcodeFieldKey: 'barcode',
+      };
       const cfg: SequenceRuleConfig = {
         startNumber,
         endNumber: Number(endNumber),
         step: Number(step) || 1,
-        textPadding: padding ? Number(padding) : undefined,
-        barcodeSymbology,
+        textPadding,
+        barcodeSymbology: symbology === 'QRCODE' || symbology === 'NONE' ? 'CODE128' : symbology,
       };
-      const labels = generateSerialLabelsFromSample(sampleText, template, cfg);
-      setGenerated(labels);
-    } catch (e: any) {
-      setError(e.message);
-      setGenerated([]);
+      return generateSerialLabelsFromSample(sampleText, template, cfg);
+    } catch {
+      return [];
+    }
+  }, [sampleText, endNumber, step, textPadding, symbology, startNumber, rangeError]);
+
+  const previewLabels = generated.length > 0 ? generated : liveLabels;
+
+  function handleSelectPreset(preset: SizePreset) {
+    setSelectedPreset(preset.id);
+    if (preset.id !== 'custom') {
+      setWidthMm(String(preset.widthMm));
+      setHeightMm(String(preset.heightMm));
     }
   }
 
-  async function handleGenerateAndPrint() {
+  function handleOpenInCanvas() {
+    setError(null);
+    if (rangeError) {
+      Alert.alert('Invalid Sequence', rangeError);
+      return;
+    }
+
+    try {
+      const w = parseFloat(widthMm) || 50;
+      const h = parseFloat(heightMm) || 30;
+
+      const doc = createSerialLabelDocument({
+        name: `${hasHeader && headerText.trim() ? headerText.trim() : 'Serial Labels'} (${previewLabels[0]?.text ?? 'SN-001'}…${previewLabels[previewLabels.length - 1]?.text ?? 'End'})`,
+        widthMm: w,
+        heightMm: h,
+        orientation: 0,
+        paperType,
+        headerText: hasHeader ? headerText : undefined,
+        samplePattern: sampleText,
+        startNumber,
+        endNumber: Number(endNumber),
+        step: Number(step) || 1,
+        zeroPadding: textPadding,
+        includeBarcode: symbology !== 'NONE',
+        barcodeSymbology: symbology,
+      });
+
+      // Navigate directly to the Canvas Editor (/edit) with the newly created serial document!
+      router.push({
+        pathname: '/edit',
+        params: { labelId: doc.id },
+      });
+    } catch (e: any) {
+      setError(e.message);
+      Alert.alert('Creation Failed', e.message);
+    }
+  }
+
+  async function handleQuickBatchPrint() {
     const isConn =
       usePrinterStore.getState().status === 'connected' ||
       usePrinterStore.getState().status === 'printing' ||
       Boolean(usePrinterStore.getState().deviceId) ||
       getPrinterManager().isConnected;
+
     if (!isConn) {
       Alert.alert(
         'Printer Not Connected',
@@ -167,27 +322,15 @@ export default function SerialLabelScreen() {
       return;
     }
 
-    let labelsToPrint = generated;
+    const labelsToPrint = previewLabels;
     if (labelsToPrint.length === 0) {
-      try {
-        const cfg: SequenceRuleConfig = {
-          startNumber,
-          endNumber: Number(endNumber),
-          step: Number(step) || 1,
-          textPadding: padding ? Number(padding) : undefined,
-          barcodeSymbology,
-        };
-        labelsToPrint = generateSerialLabelsFromSample(sampleText, template, cfg);
-        setGenerated(labelsToPrint);
-      } catch (e: any) {
-        Alert.alert('Error', e.message);
-        return;
-      }
+      Alert.alert('No Labels', 'Please configure a valid sequence first.');
+      return;
     }
 
     Alert.alert(
       'Confirm Batch Print',
-      `Print ${labelsToPrint.length} sequential labels from "${labelsToPrint[0].text}" to "${labelsToPrint[labelsToPrint.length - 1].text}"?`,
+      `Print ${labelsToPrint.length} sequential labels from "${labelsToPrint[0].text}" to "${labelsToPrint[labelsToPrint.length - 1].text}" on ${connectedName}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -224,16 +367,23 @@ export default function SerialLabelScreen() {
         });
 
         if (pm.usesTd404CommandSet) {
-          const bytes = encodeTsplSerialLabel(item.text, item.barcodeValue, w, h);
+          const bytes = encodeTsplSerialLabel(
+            item.text,
+            item.barcodeValue,
+            w,
+            h,
+            hasHeader ? headerText : undefined,
+          );
           await pm.print(bytes);
         } else {
-          // Universal driver dispatch for Josh, Tez, Dev, LabelX, Wi-Fi
-          await pm.printTestLabel(`${item.text}\n${item.barcodeValue}`);
+          // Universal printer dispatch
+          const printContent = hasHeader && headerText.trim()
+            ? `${headerText.trim()}\n${item.text}\n${item.barcodeValue}`
+            : `${item.text}\n${item.barcodeValue}`;
+          await pm.printTestLabel(printContent);
         }
 
         successCount++;
-
-        // Brief delay between labels to allow hardware buffers to breathe
         await new Promise((resolve) => setTimeout(resolve, 350));
       }
 
@@ -256,21 +406,25 @@ export default function SerialLabelScreen() {
   }
 
   const previewSlice =
-    generated.length > 8
-      ? [...generated.slice(0, 4), ...generated.slice(-4)]
-      : generated;
+    previewLabels.length > 8
+      ? [...previewLabels.slice(0, 4), ...previewLabels.slice(-4)]
+      : previewLabels;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       {/* Header */}
       <View style={styles.navHeader}>
         <Pressable hitSlop={12} onPress={() => router.back()} style={styles.backBtn}>
-          <AppIcon name="chevron.left" tintColor="#0F172A" size={20} />
+          <AppIcon name="chevron.left" tintColor="#FFFFFF" size={20} />
           <Text style={styles.backText}>Back</Text>
         </Pressable>
         <Text style={styles.navTitle}>Serial Labels</Text>
         <Pressable hitSlop={12} onPress={() => router.push('/printer-connect')} style={styles.connectIconBtn}>
-          <AppIcon name="antenna.radiowaves.left.and.right" tintColor="#2563EB" size={20} />
+          <AppIcon
+            name="antenna.radiowaves.left.and.right"
+            tintColor={isConnected ? '#22C55E' : '#FFFFFF'}
+            size={20}
+          />
         </Pressable>
       </View>
 
@@ -282,34 +436,156 @@ export default function SerialLabelScreen() {
         >
           <View style={styles.statusLeft}>
             <View style={[styles.statusDot, isConnected ? styles.dotOnline : styles.dotOffline]} />
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.statusTitle}>
                 {isConnected ? `Printer: ${connectedName}` : 'No Printer Connected'}
               </Text>
               <Text style={styles.statusSubtitle}>
-                {isConnected ? 'Ready for serial batch printing' : 'Tap to scan and connect Bluetooth printer'}
+                {isConnected ? 'Ready for serial sequence printing' : 'Tap to scan and connect thermal printer'}
               </Text>
             </View>
           </View>
           <AppIcon name="chevron.right" tintColor="#64748B" size={16} />
         </Pressable>
 
-        {/* Title & Description */}
-        <Text style={styles.heading}>Serial Label Generator</Text>
-        <Text style={styles.subheading}>
-          Generate sequential numbers and barcodes automatically from a single sample label.
-        </Text>
-
-        {/* Configuration Section */}
+        {/* Section 1: Label Dimensions & Stock */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sequence Configuration</Text>
+          <View style={styles.cardHeaderRow}>
+            <AppIcon name="slider.horizontal.3" tintColor={Palette.accent} size={18} />
+            <Text style={styles.cardTitle}>Label Size & Dimensions</Text>
+          </View>
 
-          <Text style={styles.label}>Sample Label Pattern</Text>
+          <Text style={styles.subLabel}>Stock Presets</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
+            {SIZE_PRESETS.map((preset) => {
+              const active = selectedPreset === preset.id;
+              return (
+                <TouchableOpacity
+                  key={preset.id}
+                  style={[styles.presetChip, active && styles.presetChipActive]}
+                  onPress={() => handleSelectPreset(preset)}
+                >
+                  <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>
+                    {preset.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <View style={styles.row}>
+            <View style={styles.col}>
+              <Text style={styles.label}>Width (mm)</Text>
+              <TextInput
+                style={styles.input}
+                value={widthMm}
+                onChangeText={(v) => {
+                  setSelectedPreset('custom');
+                  setWidthMm(v);
+                }}
+                keyboardType="numeric"
+                placeholder="50"
+                placeholderTextColor="#94A3B8"
+              />
+            </View>
+            <View style={styles.col}>
+              <Text style={styles.label}>Height (mm)</Text>
+              <TextInput
+                style={styles.input}
+                value={heightMm}
+                onChangeText={(v) => {
+                  setSelectedPreset('custom');
+                  setHeightMm(v);
+                }}
+                keyboardType="numeric"
+                placeholder="30"
+                placeholderTextColor="#94A3B8"
+              />
+            </View>
+          </View>
+
+          <Text style={styles.label}>Paper Type</Text>
+          <View style={styles.chipsRow}>
+            {(['Label', 'Receipt', 'Black mark', 'Transparent', 'Cardstock'] as PaperType[]).map((type) => (
+              <TouchableOpacity
+                key={type}
+                style={[styles.chip, paperType === type && styles.chipActive]}
+                onPress={() => setPaperType(type)}
+              >
+                <Text style={paperType === type ? styles.chipTextActive : styles.chipText}>
+                  {type}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Section 2: Header / Title */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderBetween}>
+            <View style={styles.cardHeaderRow}>
+              <AppIcon name="character" tintColor={Palette.accent} size={18} />
+              <Text style={styles.cardTitle}>Label Header / Title</Text>
+            </View>
+            <Switch
+              value={hasHeader}
+              onValueChange={setHasHeader}
+              trackColor={{ false: '#CBD5E1', true: Palette.accent }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+
+          {hasHeader ? (
+            <View style={styles.headerForm}>
+              <Text style={styles.label}>Header Text</Text>
+              <TextInput
+                style={styles.input}
+                value={headerText}
+                onChangeText={setHeaderText}
+                placeholder="e.g. PROPERTY OF ACME CORP"
+                placeholderTextColor="#94A3B8"
+              />
+
+              <Text style={styles.subLabel}>Suggestions</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
+                {HEADER_PRESETS.map((txt) => (
+                  <TouchableOpacity
+                    key={txt}
+                    style={[styles.suggestionChip, headerText === txt && styles.suggestionChipActive]}
+                    onPress={() => setHeaderText(txt)}
+                  >
+                    <Text
+                      style={[
+                        styles.suggestionChipText,
+                        headerText === txt && styles.suggestionChipTextActive,
+                      ]}
+                    >
+                      {txt}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          ) : (
+            <Text style={styles.hintText}>
+              Labels will be generated without a top header text banner.
+            </Text>
+          )}
+        </View>
+
+        {/* Section 3: Sequence & Numbering Rules */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <AppIcon name="list.number" tintColor={Palette.accent} size={18} />
+            <Text style={styles.cardTitle}>Sequence & Numbering</Text>
+          </View>
+
+          <Text style={styles.label}>Sample Pattern / Prefix</Text>
           <TextInput
             style={styles.input}
             value={sampleText}
             onChangeText={setSampleText}
-            placeholder="e.g. Desk1 or SN-001"
+            placeholder="e.g. SN-001 or Desk1"
             placeholderTextColor="#94A3B8"
           />
 
@@ -326,7 +602,7 @@ export default function SerialLabelScreen() {
               />
             </View>
             <View style={styles.col}>
-              <Text style={styles.label}>Step</Text>
+              <Text style={styles.label}>Step (+ / -)</Text>
               <TextInput
                 style={styles.input}
                 value={step}
@@ -336,81 +612,83 @@ export default function SerialLabelScreen() {
                 placeholderTextColor="#94A3B8"
               />
             </View>
-            <View style={styles.col}>
-              <Text style={styles.label}>Zero-Pad</Text>
-              <TextInput
-                style={styles.input}
-                value={padding}
-                onChangeText={setPadding}
-                keyboardType="numeric"
-                placeholder="auto"
-                placeholderTextColor="#94A3B8"
-              />
-            </View>
           </View>
 
-          <View style={styles.row}>
-            <View style={styles.col}>
-              <Text style={styles.label}>Width (mm)</Text>
-              <TextInput
-                style={styles.input}
-                value={widthMm}
-                onChangeText={setWidthMm}
-                keyboardType="numeric"
-                placeholder="50"
-                placeholderTextColor="#94A3B8"
-              />
-            </View>
-            <View style={styles.col}>
-              <Text style={styles.label}>Height (mm)</Text>
-              <TextInput
-                style={styles.input}
-                value={heightMm}
-                onChangeText={setHeightMm}
-                keyboardType="numeric"
-                placeholder="30"
-                placeholderTextColor="#94A3B8"
-              />
-            </View>
-          </View>
-
-          <Text style={styles.label}>Barcode Symbology</Text>
+          <Text style={styles.label}>Zero-Padding</Text>
           <View style={styles.chipsRow}>
-            {(['CODE128', 'CODE39', 'EAN13', 'UPCA'] as BarcodeSymbology[]).map((sym) => (
+            {(
+              [
+                { id: 'auto', label: 'Auto' },
+                { id: 'none', label: 'None (1, 2…)' },
+                { id: '2', label: '2 Digits (01)' },
+                { id: '3', label: '3 Digits (001)' },
+                { id: '4', label: '4 Digits (0001)' },
+              ] as const
+            ).map((opt) => (
               <TouchableOpacity
-                key={sym}
-                style={[styles.chip, barcodeSymbology === sym && styles.chipActive]}
-                onPress={() => setBarcodeSymbology(sym)}
+                key={opt.id}
+                style={[styles.chip, paddingOption === opt.id && styles.chipActive]}
+                onPress={() => setPaddingOption(opt.id)}
               >
-                <Text style={barcodeSymbology === sym ? styles.chipTextActive : styles.chipText}>
-                  {sym}
+                <Text style={paddingOption === opt.id ? styles.chipTextActive : styles.chipText}>
+                  {opt.label}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          {(rangeError || error) && (
-            <Text style={styles.error}>{error ?? rangeError}</Text>
+          {rangeError || error ? (
+            <Text style={styles.errorText}>{error ?? rangeError}</Text>
+          ) : (
+            <View style={styles.summaryBadge}>
+              <Text style={styles.summaryBadgeText}>
+                ✨ {previewLabels.length} Sequential Labels: {previewLabels[0]?.text ?? 'Start'} →{' '}
+                {previewLabels[previewLabels.length - 1]?.text ?? 'End'}
+              </Text>
+            </View>
           )}
-
-          <TouchableOpacity
-            style={[styles.button, styles.secondaryButton, !!rangeError && styles.btnDisabled]}
-            onPress={handlePreview}
-            disabled={!!rangeError}
-          >
-            <Text style={styles.buttonText}>Preview Sequence</Text>
-          </TouchableOpacity>
         </View>
 
-        {/* Results & Action */}
-        {generated.length > 0 && (
-          <View style={styles.resultsContainer}>
+        {/* Section 4: Barcode & Symbology */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <AppIcon name="barcode" tintColor={Palette.accent} size={18} />
+            <Text style={styles.cardTitle}>Barcode & Symbology</Text>
+          </View>
+
+          <View style={styles.chipsRow}>
+            {(
+              [
+                { id: 'CODE128', label: 'CODE-128 (Standard)' },
+                { id: 'CODE39', label: 'CODE-39' },
+                { id: 'EAN13', label: 'EAN-13' },
+                { id: 'UPCA', label: 'UPC-A' },
+                { id: 'QRCODE', label: 'QR Code' },
+                { id: 'NONE', label: 'None (Text Only)' },
+              ] as const
+            ).map((item) => {
+              const active = symbology === item.id;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => setSymbology(item.id)}
+                >
+                  <Text style={active ? styles.chipTextActive : styles.chipText}>{item.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Section 5: Live Sequence Preview */}
+        {previewLabels.length > 0 && (
+          <View style={styles.previewContainer}>
             <View style={styles.resultsHeader}>
-              <Text style={styles.previewCount}>
-                ✨ {generated.length} labels ready to print
-              </Text>
-              <Text style={styles.previewRange}>
-                {generated[0].text} → {generated[generated.length - 1].text}
+              <Text style={styles.previewHeading}>Live Label Sequence Preview</Text>
+              <Text style={styles.previewSubheading}>
+                {previewLabels[0]?.text} … {previewLabels[previewLabels.length - 1]?.text} (
+                {previewLabels.length} labels)
               </Text>
             </View>
 
@@ -419,27 +697,57 @@ export default function SerialLabelScreen() {
               data={previewSlice}
               keyExtractor={(item) => String(item.index)}
               renderItem={({ item }) => (
-                <LabelPreview item={item} widthMm={widthMm} heightMm={heightMm} />
+                <LivePreviewCard
+                  item={item}
+                  widthMm={widthMm}
+                  heightMm={heightMm}
+                  headerText={headerText}
+                  hasHeader={hasHeader}
+                  symbology={symbology}
+                />
               )}
               style={styles.previewList}
               showsHorizontalScrollIndicator={false}
             />
-
-            <TouchableOpacity style={styles.button} onPress={handleGenerateAndPrint}>
-              <AppIcon name="printer.fill" tintColor="#FFFFFF" size={18} />
-              <Text style={[styles.buttonText, { marginLeft: 8 }]}>
-                Print Batch ({generated.length} Labels)
-              </Text>
-            </TouchableOpacity>
           </View>
         )}
+
+        {/* Primary Action: Edit on Canvas */}
+        <TouchableOpacity
+          style={[styles.actionPrimaryBtn, !!rangeError && styles.btnDisabled]}
+          onPress={handleOpenInCanvas}
+          disabled={!!rangeError}
+        >
+          <View style={styles.actionBtnIcon}>
+            <AppIcon name="square.and.pencil" tintColor="#FFFFFF" size={20} />
+          </View>
+          <View style={styles.actionBtnTextCol}>
+            <Text style={styles.actionPrimaryText}>Edit on Canvas</Text>
+            <Text style={styles.actionPrimarySubtext}>
+              Custom sizing, drag & drop, fonts, shapes, clipart & print
+            </Text>
+          </View>
+          <AppIcon name="chevron.right" tintColor="#FFFFFF" size={18} />
+        </TouchableOpacity>
+
+        {/* Secondary Action: Direct Batch Print */}
+        <TouchableOpacity
+          style={[styles.actionSecondaryBtn, !!rangeError && styles.btnDisabled]}
+          onPress={handleQuickBatchPrint}
+          disabled={!!rangeError}
+        >
+          <AppIcon name="printer.fill" tintColor="#FFFFFF" size={18} />
+          <Text style={styles.actionSecondaryText}>
+            Quick Print Batch ({previewLabels.length} Labels)
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
 
       {/* Printing Modal */}
       <Modal visible={isPrinting} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.progressCard}>
-            <ActivityIndicator size="large" color="#2563EB" />
+            <ActivityIndicator size="large" color={Palette.accent} />
             <Text style={styles.modalHeading}>Printing Serial Labels</Text>
             <Text style={styles.modalProgressText}>
               Label {printProgress.current} of {printProgress.total}
@@ -475,120 +783,151 @@ export default function SerialLabelScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F1F5F9' },
+  root: { flex: 1, backgroundColor: Palette.screen },
   navHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#CBD5E1',
-    backgroundColor: '#FFFFFF',
+    paddingVertical: 14,
+    backgroundColor: Palette.header,
   },
-  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, width: 60 },
-  backText: { fontSize: 16, color: '#0F172A', fontWeight: '500' },
-  navTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A' },
-  connectIconBtn: { width: 60, alignItems: 'flex-end', justifyContent: 'center' },
-  scrollContent: { padding: 16 },
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, width: 70 },
+  backText: { fontSize: 16, color: '#FFFFFF', fontWeight: '600' },
+  navTitle: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
+  connectIconBtn: { width: 70, alignItems: 'flex-end', justifyContent: 'center' },
+  scrollContent: { padding: 16, paddingBottom: 40 },
   statusBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 14,
+    padding: 12,
     borderRadius: 12,
     marginBottom: 16,
     borderWidth: 1,
   },
   statusBannerOnline: { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' },
   statusBannerOffline: { backgroundColor: '#FFF1F2', borderColor: '#FECDD3' },
-  statusLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  statusLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   statusDot: { width: 10, height: 10, borderRadius: 5 },
   dotOnline: { backgroundColor: '#16A34A' },
   dotOffline: { backgroundColor: '#E11D48' },
-  statusTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
-  statusSubtitle: { fontSize: 12, color: '#64748B', marginTop: 2 },
-  heading: { fontSize: 22, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
-  subheading: { fontSize: 13, color: '#64748B', lineHeight: 18, marginBottom: 16 },
+  statusTitle: { fontSize: 13, fontWeight: '700', color: '#0F172A' },
+  statusSubtitle: { fontSize: 11, color: '#64748B', marginTop: 1 },
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     padding: 16,
+    marginBottom: 14,
     shadowColor: '#000',
     shadowOpacity: 0.04,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
-    marginBottom: 16,
   },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', marginBottom: 8 },
-  label: { fontSize: 13, fontWeight: '600', color: '#334155', marginTop: 12, marginBottom: 6 },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  cardHeaderBetween: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
+  label: { fontSize: 13, fontWeight: '600', color: '#334155', marginTop: 10, marginBottom: 5 },
+  subLabel: { fontSize: 12, fontWeight: '600', color: '#64748B', marginTop: 8, marginBottom: 4 },
+  hintText: { fontSize: 12, color: '#94A3B8', marginTop: 6, fontStyle: 'italic' },
   input: {
     backgroundColor: '#F8FAFC',
     borderWidth: 1,
     borderColor: '#CBD5E1',
     borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
+    paddingVertical: 9,
+    fontSize: 14,
     color: '#0F172A',
   },
-  row: { flexDirection: 'row', gap: 8 },
+  row: { flexDirection: 'row', gap: 10 },
   col: { flex: 1 },
-  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  presetScroll: { flexDirection: 'row', marginVertical: 4 },
+  presetChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginRight: 8,
+  },
+  presetChipActive: {
+    backgroundColor: Palette.accent,
+    borderColor: Palette.accent,
+  },
+  presetChipText: { fontSize: 12, fontWeight: '600', color: '#475569' },
+  presetChipTextActive: { color: '#FFFFFF' },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
   chip: {
     borderWidth: 1,
     borderColor: '#CBD5E1',
     backgroundColor: '#F8FAFC',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
-  chipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
-  chipText: { color: '#475569', fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
-  error: { color: '#EF4444', marginTop: 10, fontSize: 13, fontWeight: '500' },
-  button: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    marginTop: 16,
+  chipActive: { backgroundColor: Palette.accent, borderColor: Palette.accent },
+  chipText: { color: '#475569', fontSize: 12, fontWeight: '600' },
+  chipTextActive: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+  headerForm: { marginTop: 4 },
+  suggestionChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginRight: 6,
   },
-  secondaryButton: { backgroundColor: '#0F172A' },
-  btnDisabled: { opacity: 0.5 },
-  buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
-  resultsContainer: {
+  suggestionChipActive: { backgroundColor: '#214668', borderColor: '#214668' },
+  suggestionChipText: { fontSize: 11, fontWeight: '600', color: '#475569' },
+  suggestionChipTextActive: { color: '#FFFFFF' },
+  summaryBadge: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 12,
+  },
+  summaryBadgeText: { color: '#16A34A', fontSize: 13, fontWeight: '700' },
+  errorText: { color: '#EF4444', marginTop: 10, fontSize: 13, fontWeight: '600' },
+  previewContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
-    padding: 16,
+    padding: 14,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOpacity: 0.04,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
-    marginBottom: 20,
   },
-  resultsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  previewCount: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
-  previewRange: { fontSize: 13, color: '#64748B', fontWeight: '600' },
-  previewList: { marginBottom: 8 },
+  resultsHeader: { marginBottom: 10 },
+  previewHeading: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+  previewSubheading: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  previewList: { paddingVertical: 4 },
   previewCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 10,
-    padding: 12,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    padding: 10,
     marginRight: 10,
-    minWidth: 130,
     alignItems: 'center',
+    justifyContent: 'space-between',
     shadowColor: '#000',
     shadowOpacity: 0.03,
     shadowRadius: 4,
@@ -599,14 +938,82 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    marginBottom: 8,
+    marginBottom: 4,
   },
-  previewIndex: { fontSize: 10, color: '#64748B', fontWeight: '700' },
-  previewDim: { fontSize: 10, color: '#94A3B8' },
-  previewText: { fontWeight: '700', fontSize: 16, color: '#0F172A', marginBottom: 8 },
-  barcodeBox: { alignItems: 'center', width: '100%', backgroundColor: '#F8FAFC', padding: 6, borderRadius: 6 },
-  barcodeBars: { fontSize: 12, letterSpacing: 2, color: '#0F172A', fontWeight: '900' },
-  barcodeText: { fontSize: 10, color: '#475569', marginTop: 2, fontWeight: '600' },
+  previewIndex: { fontSize: 9, color: '#64748B', fontWeight: '700' },
+  previewDim: { fontSize: 9, color: '#94A3B8' },
+  cardHeaderText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 4,
+    width: '100%',
+  },
+  barcodeBox: {
+    alignItems: 'center',
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    padding: 4,
+    borderRadius: 4,
+    marginVertical: 4,
+  },
+  barcodeBars: { fontSize: 11, letterSpacing: 1.5, color: '#0F172A', fontWeight: '900' },
+  barcodeText: { fontSize: 8, color: '#475569', marginTop: 1, fontWeight: '600' },
+  qrBox: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 6,
+    marginVertical: 4,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 4,
+  },
+  qrBars: { fontSize: 9, letterSpacing: 2, color: '#0F172A', fontWeight: '900', lineHeight: 10 },
+  qrCornerTl: { position: 'absolute', top: 2, left: 2, width: 4, height: 4, borderWidth: 1, borderColor: '#000' },
+  qrCornerTr: { position: 'absolute', top: 2, right: 2, width: 4, height: 4, borderWidth: 1, borderColor: '#000' },
+  qrCornerBl: { position: 'absolute', bottom: 2, left: 2, width: 4, height: 4, borderWidth: 1, borderColor: '#000' },
+  qrCornerBr: { position: 'absolute', bottom: 2, right: 2, width: 4, height: 4, borderWidth: 1, borderColor: '#000' },
+  previewText: { fontWeight: '800', fontSize: 13, color: '#0F172A', marginTop: 4, textAlign: 'center' },
+  actionPrimaryBtn: {
+    backgroundColor: Palette.accent,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    shadowColor: Palette.accent,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  actionBtnIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  actionBtnTextCol: { flex: 1 },
+  actionPrimaryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  actionPrimarySubtext: { color: 'rgba(255,255,255,0.85)', fontSize: 11, marginTop: 2 },
+  actionSecondaryBtn: {
+    backgroundColor: Palette.header,
+    borderRadius: 10,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 20,
+  },
+  actionSecondaryText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  btnDisabled: { opacity: 0.45 },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -628,7 +1035,7 @@ const styles = StyleSheet.create({
   },
   modalHeading: { fontSize: 18, fontWeight: '700', color: '#0F172A', marginTop: 14, marginBottom: 6 },
   modalProgressText: { fontSize: 14, color: '#64748B', fontWeight: '500' },
-  modalCurrentLabel: { fontSize: 16, fontWeight: '700', color: '#2563EB', marginTop: 4, marginBottom: 16 },
+  modalCurrentLabel: { fontSize: 16, fontWeight: '700', color: Palette.accent, marginTop: 4, marginBottom: 16 },
   progressBarBg: {
     width: '100%',
     height: 8,
@@ -637,7 +1044,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 20,
   },
-  progressBarFill: { height: '100%', backgroundColor: '#2563EB' },
+  progressBarFill: { height: '100%', backgroundColor: Palette.accent },
   cancelBtn: { paddingVertical: 8, paddingHorizontal: 20 },
   cancelBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 14 },
 });
