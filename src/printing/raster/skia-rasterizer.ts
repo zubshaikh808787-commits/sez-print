@@ -174,13 +174,7 @@ function placementBox(el: LabelElement, dpi: number): DotBox {
   };
 }
 
-function drawDocumentToSurface(
-  doc: LabelDocument,
-  dpi: number,
-  surface: RasterSurface,
-  bitmapWidthDots: number,
-  bitmapHeightDots: number,
-): void {
+function drawDocumentToSurface(doc: LabelDocument, dpi: number, surface: RasterSurface): void {
   const dpm = dpmScaled(dpi);
   const circular = doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse';
   for (const el of sortLayers(doc.elements)) {
@@ -201,11 +195,7 @@ function drawDocumentToSurface(
           drawQr(surface, el, dpi, box);
           break;
         case 'border':
-          drawPrintBorder(surface, el, dpi, activeDotScale, {
-            circular,
-            bitmapWidthDots,
-            bitmapHeightDots,
-          });
+          drawPrintBorder(surface, el, dpi, activeDotScale, { circular });
           break;
         case 'line':
           drawLine(surface, el, dpm, box);
@@ -255,7 +245,7 @@ export function rasterizeDocumentToBitmapTimed(
   const allocMs = performance.now() - tAlloc0;
 
   const tDraw0 = performance.now();
-  drawDocumentToSurface(doc, dpi, surface, packedW, packedH);
+  drawDocumentToSurface(doc, dpi, surface);
   const drawWallMs = performance.now() - tDraw0;
   const encodeMs = encodeAccumMs;
   const drawMs = Math.max(0, drawWallMs - encodeMs);
