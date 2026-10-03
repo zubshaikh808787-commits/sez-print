@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "sez-print",
-    "slug": "sez-print",
+    "slug": "zub",
     "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -112,9 +112,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "371f5893-bcd6-404f-8e45-227898d40375"
+        "projectId": "58c85e5d-48d8-47a5-b443-071090a2e642"
       }
     },
-    "owner": "kkssksksks-team"
+    "owner": "hdedhws-team"
   }
 }
