@@ -44,7 +44,7 @@ import {
 } from '@/printer-core';
 import { makeStatus, resolveProfile } from '@/printer-core';
 import { isLikelyJoshName } from '@/lib/printer/printer-heuristics';
-import { joshEffectiveDpi, joshGapTypeFromMedia } from '@/lib/printer/josh-print';
+import { joshEffectiveDpi, joshGapTypeFromMedia, joshLpapiSpeed } from '@/lib/printer/josh-print';
 
 export const JOSH_DRIVER_ID = 'josh';
 
@@ -177,7 +177,7 @@ export class JoshDriver implements PrinterDriver {
       dpi,
       copies: job.copies,
       density: job.density,
-      speed: job.speed,
+      speed: joshLpapiSpeed(job.speed),
       orientation: job.rotation,
       gapType,
       gapLength: Math.round(job.gapMm),

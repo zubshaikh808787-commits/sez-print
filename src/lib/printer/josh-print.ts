@@ -54,6 +54,20 @@ export function joshHeadWidthMm(
   return settingsWidthMm ?? 50;
 }
 
+/**
+ * App print speed is 1–8 (TSPL-style). LPAPI is 1–5, higher = faster feed.
+ * UI 4+ maps to max 5 so Josh does not inherit a slow TD-404 default.
+ */
+export const JOSH_LPAPI_MAX_SPEED = 5;
+
+export function joshLpapiSpeed(uiSpeed?: number | null): number {
+  if (uiSpeed == null || !Number.isFinite(uiSpeed) || uiSpeed < 0) return JOSH_LPAPI_MAX_SPEED;
+  if (uiSpeed <= 1) return 2;
+  if (uiSpeed <= 2) return 3;
+  if (uiSpeed <= 3) return 4;
+  return JOSH_LPAPI_MAX_SPEED;
+}
+
 export function joshLabelDots(
   widthMm: number,
   heightMm: number,

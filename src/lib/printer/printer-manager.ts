@@ -17,7 +17,7 @@ import {
   BLUETOOTH_OFF_MESSAGE,
   bluetoothOffScanResult,
 } from '@/lib/printer/bluetooth-guard';
-import { joshEffectiveDpi, joshGapTypeFromMedia, joshHeadWidthMm } from '@/lib/printer/josh-print';
+import { joshEffectiveDpi, joshGapTypeFromMedia, joshHeadWidthMm, joshLpapiSpeed } from '@/lib/printer/josh-print';
 import {
   isLikelyTezName,
   isLikelyShaktiName,
@@ -3549,7 +3549,7 @@ class PrinterManager {
         const gapType = joshGapTypeFromMedia(options.media ?? 'gap');
         const gapLength = options.gapMm != null ? Math.max(0, options.gapMm) : 3;
         console.info(
-          `[JOSH-PRINT-P1:PREFLIGHT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm dpi=${dpi} gapType=${gapType} gap=${gapLength}mm density=${options.density ?? 'auto'} speed=${options.speed ?? 'auto'} offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
+          `[JOSH-PRINT-P1:PREFLIGHT] mm-locked PNG print: ${options.widthMm}x${options.heightMm}mm dpi=${dpi} gapType=${gapType} gap=${gapLength}mm density=${options.density ?? 'auto'} speed=${joshLpapiSpeed(options.speed)} (ui=${options.speed ?? 'auto'}) offset=${options.hOffsetMm ?? 0}x${options.vOffsetMm ?? 0}`,
         );
         await this.ensureConnected();
         const t0 = Date.now();
@@ -3560,7 +3560,7 @@ class PrinterManager {
           heightMm: options.heightMm,
           copies: Math.max(1, Math.round(options.copies ?? 1)),
           density: options.density != null ? options.density : -1,
-          speed: options.speed != null ? options.speed : -1,
+          speed: joshLpapiSpeed(options.speed),
           orientation: options.orientation ?? 0,
           gapType,
           gapLength,

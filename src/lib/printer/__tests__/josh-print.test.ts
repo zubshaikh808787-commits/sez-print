@@ -1,4 +1,4 @@
-import { joshEffectiveDpi, joshHeadWidthMm, JOSH_HARDWARE_DPI } from '../josh-print';
+import { joshEffectiveDpi, joshHeadWidthMm, joshLpapiSpeed, JOSH_HARDWARE_DPI } from '../josh-print';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -18,5 +18,11 @@ assert(joshHeadWidthMm(50, 108) === 50, 'device width wins');
 assert(joshHeadWidthMm(null, 108) === 50, '108 mm is leaked TD-404 default');
 assert(joshHeadWidthMm(null, 48) === 48, 'explicit Josh width kept');
 assert(joshHeadWidthMm() === 50, 'default Josh head 50 mm');
+
+assert(joshLpapiSpeed(null) === 5, 'default Josh speed is LPAPI max');
+assert(joshLpapiSpeed(4) === 5, 'UI 4 maps to LPAPI 5');
+assert(joshLpapiSpeed(8) === 5, 'UI 8 maps to LPAPI 5');
+assert(joshLpapiSpeed(3) === 4, 'UI 3 maps to LPAPI 4');
+assert(joshLpapiSpeed(1) === 2, 'UI 1 stays a slow LPAPI 2');
 
 console.log('--- all josh print DPI helper tests passed ---');

@@ -52,10 +52,8 @@ class JoshPrinterManager(private val context: Context) {
         private const val CONNECT_TIMEOUT_MS = 20_000L
         private const val CONNECT_RETRY_DELAY_MS = 1_500L
         private const val CONNECT_MAX_ATTEMPTS = 2
-        /** Wait for Success / Failed / DataEnded settle. Do not auto-succeed early. */
-        private const val PRINT_TIMEOUT_MS = 15_000L
-        /** After DataEnded with no Success/Failed, treat as sent-unconfirmed. */
-        private const val PRINT_DATA_ENDED_SETTLE_MS = 1_500L
+        /** After submit, wait this long for an immediate Failed. Do not wait for paper-out Success. */
+        private const val PRINT_SUBMIT_ACK_MS = 400L
         /** Brief pause after a rejected printBitmap before fallbacks, so in-flight progress can arrive. */
         private const val PRINT_FALLBACK_GUARD_MS = 150L
         private const val MAX_RECONNECT_ATTEMPTS = 3
@@ -234,19 +232,13 @@ class JoshPrinterManager(private val context: Context) {
                     mainHandler.post { handlePrintFailed(reason) }
                 }
                 PrintProgress.DataEnded -> {
-                    Log.i(TAG, "[JOSH-PRINT-P3:DATA-TRANSMITTED] Bluetooth byte transmission completed, waiting for hardware print confirmation...")
-                    printDataEndedFallback?.let { mainHandler.removeCallbacks(it) }
-                    val dataEndedRunnable = Runnable {
-                        if (printLatch != null && isPrinting.get() && !lastPrintSuccess && !lastPrintFailed) {
-                            Log.i(TAG, "[JOSH-PRINT-P4:SENT-UNCONFIRMED] DataEnded settled with no Success/Failed; completing as sent-unconfirmed.")
-                            lastPrintSuccess = true
-                            lastPrintConfirmedByDevice = false
-                            printLatch?.countDown()
-                            handlePrintSentUnconfirmed()
-                        }
+                    Log.i(TAG, "[JOSH-PRINT-P3:DATA-TRANSMITTED] Bluetooth byte transmission completed")
+                    if (printLatch != null && isPrinting.get() && !lastPrintSuccess && !lastPrintFailed) {
+                        lastPrintSuccess = true
+                        lastPrintConfirmedByDevice = false
+                        printLatch?.countDown()
+                        handlePrintSentUnconfirmed()
                     }
-                    printDataEndedFallback = dataEndedRunnable
-                    mainHandler.postDelayed(dataEndedRunnable, PRINT_DATA_ENDED_SETTLE_MS)
                 }
                 else -> {
                     Log.d(TAG, "[JOSH-PRINT-P4:HARDWARE-PROGRESS] $progress (info=$addiInfo)")
@@ -982,11 +974,25 @@ class JoshPrinterManager(private val context: Context) {
                 Log.w(TAG, "[$jobId] [JOSH-PRINT-P2:GAP] setPrintPageGap* threw (non-fatal)", e)
             }
 
+            val lpapiSpeed = lpapiSpeedFromUi(paramSpeed)
+            val lpapiDensity = paramDensity
+            try {
+                if (lpapiSpeed >= 0) {
+                    currentApi.setPrintSpeed(lpapiSpeed)
+                    Log.i(TAG, "[$jobId] [JOSH-PRINT-P2:SPEED] setPrintSpeed($lpapiSpeed) from ui=$paramSpeed")
+                }
+                if (lpapiDensity >= 0) {
+                    currentApi.setPrintDarkness(lpapiDensity)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "[$jobId] [JOSH-PRINT-P2:SPEED] setPrintSpeed/Darkness threw (non-fatal)", e)
+            }
+
             val printParams = Bundle().apply {
                 if (gapTypeValue >= 0) putInt(PrintParamName.GAP_TYPE, gapTypeValue)
                 if (gapLengthValue >= 0) putInt(PrintParamName.GAP_LENGTH, gapLengthValue)
-                if (paramDensity >= 0) putInt(PrintParamName.PRINT_DENSITY, paramDensity)
-                if (paramSpeed >= 0) putInt(PrintParamName.PRINT_SPEED, paramSpeed)
+                if (lpapiDensity >= 0) putInt(PrintParamName.PRINT_DENSITY, lpapiDensity)
+                if (lpapiSpeed >= 0) putInt(PrintParamName.PRINT_SPEED, lpapiSpeed)
                 if (copies > 1) putInt(PrintParamName.PRINT_COPIES, copies)
             }
             val finalParams = if (printParams.isEmpty) null else printParams
@@ -1051,37 +1057,26 @@ class JoshPrinterManager(private val context: Context) {
             }
             val tSubmit = System.currentTimeMillis()
 
-            Log.i(TAG, "[$jobId] [JOSH-PRINT-P4:WAIT-HARDWARE] PRINT_SUBMITTED waiting for Success/Failed (timeout=${PRINT_TIMEOUT_MS}ms)")
+            Log.i(TAG, "[$jobId] [JOSH-PRINT-P4:WAIT-HARDWARE] PRINT_SUBMITTED waiting ${PRINT_SUBMIT_ACK_MS}ms for immediate Failed (not paper-out)")
 
-            // ── Wait for completion callback ───────────────────────────
-            val completed = try {
-                latch.await(PRINT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            try {
+                latch.await(PRINT_SUBMIT_ACK_MS, TimeUnit.MILLISECONDS)
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
-                false
             }
             printLatch = null
             val tDone = System.currentTimeMillis()
 
-            if (!completed) {
-                Log.e(TAG, "[$jobId] PRINT_TIMEOUT No callback within ${PRINT_TIMEOUT_MS}ms")
-                lastError = "JOSH_PRINT_TIMEOUT"
-                setState(State.PRINT_FAILED)
-                emitError("JOSH_PRINT_TIMEOUT", "Print timed out — printer may be unresponsive")
-                emitPrintProgress(jobId, "TIMEOUT", mapOf("timeoutMs" to PRINT_TIMEOUT_MS))
-
-                // Check connection after timeout
-                val postState = currentApi.printerState
-                if (postState == null || postState == PrinterState.Disconnected) {
-                    Log.w(TAG, "[$jobId] Connection lost after timeout")
-                    handleDisconnected()
-                }
+            if (lastPrintFailed) {
+                Log.e(TAG, "[$jobId] PRINT_FAILED callback received")
                 return null
             }
 
             if (!lastPrintSuccess) {
-                Log.e(TAG, "[$jobId] PRINT_FAILED callback received")
-                return null
+                // printBitmap already accepted the job. Do not block the app on paper-out Success (~6s).
+                lastPrintSuccess = true
+                lastPrintConfirmedByDevice = false
+                Log.i(TAG, "[$jobId] [JOSH-PRINT-P4:SENT] No immediate Failed; returning after submit (paper still feeding)")
             }
 
             val result = mapOf<String, Any?>(
@@ -1144,10 +1139,10 @@ class JoshPrinterManager(private val context: Context) {
             }
         }
         newSpeed?.let {
-            speed = it
+            speed = lpapiSpeedFromUi(it)
             if (currentApi != null && state.get() == State.CONNECTED) {
-                currentApi.setPrintSpeed(it)
-                Log.d(TAG, "[CONFIG] speed=$it")
+                currentApi.setPrintSpeed(speed)
+                Log.d(TAG, "[CONFIG] speed=$speed (ui=$it)")
             }
         }
         newGapType?.let {
@@ -1548,6 +1543,17 @@ class JoshPrinterManager(private val context: Context) {
 
     private fun dpmFor(dpi: Double): Double {
         return if (dpi >= 190.0 && dpi <= 220.0) HARDWARE_DPM else dpi / 25.4
+    }
+
+    /** UI 1–8 (TSPL-style) → LPAPI 1–5, higher is faster. Default 5. */
+    private fun lpapiSpeedFromUi(requested: Int): Int {
+        if (requested < 0) return 5
+        return when {
+            requested <= 1 -> 2
+            requested <= 2 -> 3
+            requested <= 3 -> 4
+            else -> 5
+        }
     }
 
     private fun refreshPrinterInfo(api: LPAPI) {
