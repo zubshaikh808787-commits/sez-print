@@ -8,6 +8,18 @@ export type JoshDevice = {
   transport: 'josh-lpapi';
   sdkId: 'josh';
   bonded?: boolean;
+  deviceDpi?: number;
+  deviceWidthMm?: number;
+};
+
+export type JoshPrinterInfo = {
+  deviceDpi: number;
+  deviceWidthMm: number | null;
+  deviceWidthRaw: number | null;
+  deviceName: string | null;
+  deviceVersion: string | null;
+  queried: boolean;
+  macAddress: string | null;
 };
 
 export type JoshPrinterState = {
@@ -40,8 +52,9 @@ export type JoshPrintResult = {
   waitMs: number;
   totalMs: number;
   /** true only for a genuine PrintProgress.Success hardware ACK; false when the
-   *  DataEnded 200ms no-ACK fallback completed the job instead. */
+   *  DataEnded settle completed the job as sent-unconfirmed. */
   confirmedByDevice: boolean;
+  dpi?: number;
 };
 
 export type JoshPngLabelOptions = {
@@ -73,6 +86,7 @@ type NativeJoshPrinter = {
   reconnect(): Promise<boolean>;
   getState(): JoshPrinterState;
   isConnected(): boolean;
+  getPrinterInfo?(): JoshPrinterInfo;
   configureParams(params: {
     density?: number;
     speed?: number;
@@ -259,6 +273,29 @@ export function getJoshState(): JoshPrinterState | null {
   }
 }
 
+export function getJoshPrinterInfo(): JoshPrinterInfo | null {
+  const mod = getNative();
+  if (!mod || typeof mod.getPrinterInfo !== 'function') return null;
+  try {
+    const info = mod.getPrinterInfo();
+    if (!info) return null;
+    const dpi = Number(info.deviceDpi);
+    return {
+      deviceDpi: Number.isFinite(dpi) && dpi > 0 ? dpi : 203,
+      deviceWidthMm:
+        info.deviceWidthMm == null ? null : Number(info.deviceWidthMm) || null,
+      deviceWidthRaw:
+        info.deviceWidthRaw == null ? null : Number(info.deviceWidthRaw) || null,
+      deviceName: info.deviceName ?? null,
+      deviceVersion: info.deviceVersion ?? null,
+      queried: Boolean(info.queried),
+      macAddress: info.macAddress ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function configureJoshParams(params: {
   density?: number;
   speed?: number;
@@ -285,7 +322,7 @@ export async function printJoshPngLabel(
     pngBase64: options.pngBase64,
     widthMm: options.widthMm,
     heightMm: options.heightMm,
-    dpi: options.dpi ?? 203,
+    ...(options.dpi != null ? { dpi: options.dpi } : {}),
     copies: options.copies ?? 1,
     density: options.density ?? -1,
     speed: options.speed ?? -1,

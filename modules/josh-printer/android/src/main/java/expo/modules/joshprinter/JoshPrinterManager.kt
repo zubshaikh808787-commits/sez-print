@@ -52,8 +52,12 @@ class JoshPrinterManager(private val context: Context) {
         private const val CONNECT_TIMEOUT_MS = 20_000L
         private const val CONNECT_RETRY_DELAY_MS = 1_500L
         private const val CONNECT_MAX_ATTEMPTS = 2
-        private const val PRINT_TIMEOUT_MS = 4_000L
-        private const val PRINT_SUBMIT_FALLBACK_MS = 800L
+        /** Wait for Success / Failed / DataEnded settle. Do not auto-succeed early. */
+        private const val PRINT_TIMEOUT_MS = 15_000L
+        /** After DataEnded with no Success/Failed, treat as sent-unconfirmed. */
+        private const val PRINT_DATA_ENDED_SETTLE_MS = 1_500L
+        /** Brief pause after a rejected printBitmap before fallbacks, so in-flight progress can arrive. */
+        private const val PRINT_FALLBACK_GUARD_MS = 150L
         private const val MAX_RECONNECT_ATTEMPTS = 3
         private val RECONNECT_DELAYS_MS = longArrayOf(1000, 2000, 4000)
 
@@ -108,6 +112,21 @@ class JoshPrinterManager(private val context: Context) {
     private var lastConnectedAddress: PrinterAddress? = null
     private val lastConnectedAt = AtomicLong(0)
     private var connectLatch: CountDownLatch? = null
+    private val allowAutoReconnect = AtomicBoolean(true)
+    @Volatile
+    private var reconnectThread: Thread? = null
+
+    // ─── Device geometry from LPAPI.getPrinterInfo() ────────────────────
+    @Volatile
+    private var cachedDeviceDpi: Double? = null
+    @Volatile
+    private var cachedDeviceWidthMm: Double? = null
+    @Volatile
+    private var cachedDeviceWidthRaw: Double? = null
+    @Volatile
+    private var cachedDeviceName: String? = null
+    @Volatile
+    private var cachedDeviceVersion: String? = null
 
     // ─── Discovery ─────────────────────────────────────────────────────
 
@@ -120,11 +139,11 @@ class JoshPrinterManager(private val context: Context) {
     private val isPrinting = AtomicBoolean(false)
     private var printLatch: CountDownLatch? = null
     private var lastPrintSuccess = false
-    /** true only for a genuine PrintProgress.Success ACK from the printer hardware;
-     *  false when DataEnded's 200ms no-ACK fallback completed the job instead. */
+    private var lastPrintFailed = false
+    /** true only for a genuine PrintProgress.Success ACK from the printer hardware. */
     private var lastPrintConfirmedByDevice = false
+    private val printProgressSeen = AtomicBoolean(false)
     private val jobIdCounter = AtomicInteger(0)
-    private var printSubmitFallback: Runnable? = null
     private var printDataEndedFallback: Runnable? = null
 
     // ─── Configuration ─────────────────────────────────────────────────
@@ -192,10 +211,12 @@ class JoshPrinterManager(private val context: Context) {
             addiInfo: Any?
         ) {
             Log.i(TAG, "[JOSH-PRINT-P4:HARDWARE-PROGRESS] progress=$progress addiInfo=$addiInfo")
+            printProgressSeen.set(true)
             when (progress) {
                 PrintProgress.Success -> {
                     Log.i(TAG, "[JOSH-PRINT-P4:HARDWARE-ACK] Physical print confirmed by printer hardware!")
                     cancelPrintFallbacks()
+                    lastPrintFailed = false
                     lastPrintSuccess = true
                     lastPrintConfirmedByDevice = true
                     printLatch?.countDown()
@@ -204,6 +225,8 @@ class JoshPrinterManager(private val context: Context) {
                 PrintProgress.Failed -> {
                     cancelPrintFallbacks()
                     lastPrintSuccess = false
+                    lastPrintFailed = true
+                    lastPrintConfirmedByDevice = false
                     val reason = addiInfo?.toString() ?: "Print job failed"
                     Log.e(TAG, "[JOSH-PRINT-P4:HARDWARE-FAIL] Physical print failed at hardware level: $reason")
                     lastError = "JOSH_PRINT_FAILED: $reason"
@@ -214,15 +237,16 @@ class JoshPrinterManager(private val context: Context) {
                     Log.i(TAG, "[JOSH-PRINT-P3:DATA-TRANSMITTED] Bluetooth byte transmission completed, waiting for hardware print confirmation...")
                     printDataEndedFallback?.let { mainHandler.removeCallbacks(it) }
                     val dataEndedRunnable = Runnable {
-                        if (printLatch != null && isPrinting.get() && !lastPrintSuccess) {
-                            Log.i(TAG, "[JOSH-PRINT-P4:FALLBACK-SUCCESS] DataEnded confirmed and safety timer elapsed; completing print.")
+                        if (printLatch != null && isPrinting.get() && !lastPrintSuccess && !lastPrintFailed) {
+                            Log.i(TAG, "[JOSH-PRINT-P4:SENT-UNCONFIRMED] DataEnded settled with no Success/Failed; completing as sent-unconfirmed.")
                             lastPrintSuccess = true
+                            lastPrintConfirmedByDevice = false
                             printLatch?.countDown()
-                            handlePrintSuccess()
+                            handlePrintSentUnconfirmed()
                         }
                     }
                     printDataEndedFallback = dataEndedRunnable
-                    mainHandler.postDelayed(dataEndedRunnable, 200)
+                    mainHandler.postDelayed(dataEndedRunnable, PRINT_DATA_ENDED_SETTLE_MS)
                 }
                 else -> {
                     Log.d(TAG, "[JOSH-PRINT-P4:HARDWARE-PROGRESS] $progress (info=$addiInfo)")
@@ -288,6 +312,8 @@ class JoshPrinterManager(private val context: Context) {
      */
     fun destroy() {
         Log.i(TAG, "[DESTROY] Shutting down JoshPrinterManager")
+        allowAutoReconnect.set(false)
+        cancelReconnect()
         stopDiscovery()
         try {
             api?.quit()
@@ -299,6 +325,7 @@ class JoshPrinterManager(private val context: Context) {
         connectedPrinterAddress = null
         connectedPrinterName = null
         connectedMacAddress = null
+        clearCachedPrinterInfo()
         setState(State.IDLE)
     }
 
@@ -454,6 +481,7 @@ class JoshPrinterManager(private val context: Context) {
             }
         }
         connectingMacAddress = macAddress
+        allowAutoReconnect.set(true)
 
         // Pre-flight: Check Bluetooth adapter is enabled
         val btAdapter = BluetoothAdapter.getDefaultAdapter()
@@ -476,6 +504,7 @@ class JoshPrinterManager(private val context: Context) {
             connectedMacAddress.equals(macAddress, ignoreCase = true)
         ) {
             Log.i(TAG, "[CONNECT] Already connected to $macAddress — no-op")
+            refreshPrinterInfo(currentApi)
             return true
         }
 
@@ -515,6 +544,7 @@ class JoshPrinterManager(private val context: Context) {
             if (connectedMacAddress != null && connectedMacAddress.equals(macAddress, ignoreCase = true)) {
                 isConnecting.set(false)
                 setState(State.CONNECTED)
+                refreshPrinterInfo(currentApi)
                 return true
             }
         }
@@ -666,11 +696,14 @@ class JoshPrinterManager(private val context: Context) {
                     lastConnectedAt.set(System.currentTimeMillis())
                 }
                 lastConnectedAddress = targetAddress
-                Log.i(TAG, "[JOSH-CONN-P4:CONFIRMED] Connected to ${connectedPrinterName ?: macAddress} on attempt $attempt")
+                refreshPrinterInfo(currentApi)
+                Log.i(TAG, "[JOSH-CONN-P4:CONFIRMED] Connected to ${connectedPrinterName ?: macAddress} on attempt $attempt dpi=${cachedDeviceDpi} widthMm=${cachedDeviceWidthMm}")
                 listener?.onStateChanged(State.CONNECTED, mapOf(
                     "printerName" to (connectedPrinterName ?: targetAddress.shownName ?: resolvedName),
                     "macAddress" to macAddress,
                     "timestamp" to System.currentTimeMillis(),
+                    "deviceDpi" to cachedDeviceDpi,
+                    "deviceWidthMm" to cachedDeviceWidthMm,
                 ))
                 return true
             }
@@ -698,6 +731,8 @@ class JoshPrinterManager(private val context: Context) {
      */
     fun disconnect() {
         val currentState = state.get()
+        allowAutoReconnect.set(false)
+        cancelReconnect()
         if (currentState == State.DISCONNECTED || currentState == State.IDLE) {
             Log.d(TAG, "[DISCONNECT] Already disconnected")
             return
@@ -724,6 +759,7 @@ class JoshPrinterManager(private val context: Context) {
         connectedPrinterAddress = null
         connectedPrinterName = null
         connectedMacAddress = null
+        clearCachedPrinterInfo()
         isPrinting.set(false)
         isConnecting.set(false)
         setState(State.DISCONNECTED)
@@ -735,6 +771,10 @@ class JoshPrinterManager(private val context: Context) {
      * @return true if reconnection succeeded.
      */
     fun reconnect(): Boolean {
+        if (!allowAutoReconnect.get()) {
+            Log.i(TAG, "[RECONNECT] Skipped — auto-reconnect cancelled")
+            return false
+        }
         val lastAddr = lastConnectedAddress ?: run {
             Log.w(TAG, "[RECONNECT] No last known address")
             return false
@@ -757,6 +797,10 @@ class JoshPrinterManager(private val context: Context) {
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
                 break
+            }
+            if (!allowAutoReconnect.get()) {
+                Log.i(TAG, "[RECONNECT] Cancelled mid-backoff")
+                return false
             }
 
             val success = connect(lastAddr.macAddress, lastAddr.shownName)
@@ -842,7 +886,9 @@ class JoshPrinterManager(private val context: Context) {
         isPrinting.set(true)
         val jobId = "JOSH-PRINT-${String.format("%03d", jobIdCounter.incrementAndGet())}"
         setState(State.PRINTING)
-        Log.i(TAG, "[$jobId] [JOSH-PRINT-P1:PREFLIGHT] Start ${widthMm}x${heightMm}mm @${dpi}DPI copies=$copies")
+        var pageBitmap: Bitmap? = null
+        val hardwareDpi = resolvePrintDpi(dpi)
+        Log.i(TAG, "[$jobId] [JOSH-PRINT-P1:PREFLIGHT] Start ${widthMm}x${heightMm}mm @${hardwareDpi}DPI (requested=$dpi device=${cachedDeviceDpi}) copies=$copies")
 
         try {
             val t0 = System.currentTimeMillis()
@@ -856,8 +902,7 @@ class JoshPrinterManager(private val context: Context) {
                 }
             val tDecode = System.currentTimeMillis()
 
-            val hardwareDpi = if (dpi == 300.0) 300.0 else HARDWARE_DPI
-            val dpm = if (hardwareDpi == 300.0) hardwareDpi / 25.4 else HARDWARE_DPM
+            val dpm = dpmFor(hardwareDpi)
 
             var working = decoded
             var finalWidthMm = widthMm
@@ -920,7 +965,10 @@ class JoshPrinterManager(private val context: Context) {
             )
 
             lastPrintSuccess = false
+            lastPrintFailed = false
             lastPrintConfirmedByDevice = false
+            printProgressSeen.set(false)
+            pageBitmap = bitmap
             val latch = CountDownLatch(1)
             printLatch = latch
 
@@ -958,20 +1006,33 @@ class JoshPrinterManager(private val context: Context) {
             }
             Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 1 (direct printBitmap) submitted=$submitted")
 
-            // Strategy 2 (Fallback - startJob with centered alignment):
+            fun canFallback(): Boolean {
+                return !submitted &&
+                    !printProgressSeen.get() &&
+                    !lastPrintSuccess &&
+                    !lastPrintFailed
+            }
+
             if (!submitted) {
+                try {
+                    Thread.sleep(PRINT_FALLBACK_GUARD_MS)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+
+            // Fallbacks only if printBitmap rejected AND no DataEnded/Success/Failed has fired.
+            if (canFallback()) {
                 Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 2 fallback to submitMmJob startJob(mm)")
                 submitted = submitMmJob(currentApi, bitmap, finalWidthMm, finalHeightMm, xMm, yMm, finalParams, alignment)
             }
 
-            // Strategy 3 (Fallback - startJob without extra params):
-            if (!submitted) {
+            if (canFallback()) {
                 Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 3 fallback to submitMmJob no-params")
                 submitted = submitMmJob(currentApi, bitmap, finalWidthMm, finalHeightMm, xMm, yMm, null, alignment)
             }
 
-            // Strategy 4 (Fallback - printBitmap null params):
-            if (!submitted) {
+            if (canFallback()) {
                 submitted = try {
                     currentApi.printBitmap(bitmap, null)
                 } catch (e: Exception) {
@@ -981,7 +1042,7 @@ class JoshPrinterManager(private val context: Context) {
                 Log.i(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] Strategy 4 printBitmap(null) submitted=$submitted")
             }
 
-            if (!submitted) {
+            if (!submitted && !printProgressSeen.get() && !lastPrintSuccess) {
                 Log.e(TAG, "[$jobId] [JOSH-PRINT-P3:SUBMIT] PRINT_REJECTED all print strategies were rejected")
                 printLatch = null
                 lastError = "JOSH_PRINT_FAILED: Print request rejected by printer SDK"
@@ -990,23 +1051,7 @@ class JoshPrinterManager(private val context: Context) {
             }
             val tSubmit = System.currentTimeMillis()
 
-            // printBitmap on some LPAPI firmware never emits PrintProgress — complete quickly after submit.
-            printSubmitFallback?.let { mainHandler.removeCallbacks(it) }
-            val submitFallback = Runnable {
-                if (printLatch != null && isPrinting.get() && !lastPrintSuccess) {
-                    Log.i(
-                        TAG,
-                        "[$jobId] [JOSH-PRINT-P4:SUBMIT-FALLBACK] printBitmap submitted without LPAPI progress; completing.",
-                    )
-                    lastPrintSuccess = true
-                    printLatch?.countDown()
-                    mainHandler.post { handlePrintSuccess() }
-                }
-            }
-            printSubmitFallback = submitFallback
-            mainHandler.postDelayed(submitFallback, PRINT_SUBMIT_FALLBACK_MS)
-
-            Log.i(TAG, "[$jobId] [JOSH-PRINT-P4:WAIT-HARDWARE] PRINT_SUBMITTED waiting for physical completion (timeout=${PRINT_TIMEOUT_MS}ms)")
+            Log.i(TAG, "[$jobId] [JOSH-PRINT-P4:WAIT-HARDWARE] PRINT_SUBMITTED waiting for Success/Failed (timeout=${PRINT_TIMEOUT_MS}ms)")
 
             // ── Wait for completion callback ───────────────────────────
             val completed = try {
@@ -1039,9 +1084,6 @@ class JoshPrinterManager(private val context: Context) {
                 return null
             }
 
-            // Recycle bitmap
-            if (!bitmap.isRecycled) bitmap.recycle()
-
             val result = mapOf<String, Any?>(
                 "jobId" to jobId,
                 "copies" to copies,
@@ -1049,6 +1091,7 @@ class JoshPrinterManager(private val context: Context) {
                 "heightMm" to finalHeightMm,
                 "targetW" to targetW,
                 "targetH" to targetH,
+                "dpi" to hardwareDpi,
                 "decodeMs" to (tDecode - t0),
                 "fitMs" to (tFit - tDecode),
                 "submitMs" to (tSubmit - tFit),
@@ -1068,6 +1111,10 @@ class JoshPrinterManager(private val context: Context) {
             return null
         } finally {
             cancelPrintFallbacks()
+            try {
+                val bmp = pageBitmap
+                if (bmp != null && !bmp.isRecycled) bmp.recycle()
+            } catch (_: Exception) {}
             isPrinting.set(false)
             printLock.unlock()
             if (isConnected()) {
@@ -1190,7 +1237,7 @@ class JoshPrinterManager(private val context: Context) {
         val dw = src.width * scale
         val dh = src.height * scale
         val left = if (alignment.equals("left", ignoreCase = true)) 0f else (pageW - dw) / 2f
-        val top = if (alignment.equals("left", ignoreCase = true)) 0f else (pageH - dh) / 2f
+        val top = (pageH - dh) / 2f
         val paint = Paint().apply {
             isFilterBitmap = true
             isDither = true
@@ -1215,7 +1262,7 @@ class JoshPrinterManager(private val context: Context) {
                 false
             } else {
                 val hAlign = if (alignment.equals("left", ignoreCase = true)) 0 else 1
-                val vAlign = if (alignment.equals("left", ignoreCase = true)) 0 else 1
+                val vAlign = 1
                 try {
                     api.setItemHorizontalAlignment(hAlign)
                     api.setItemVerticalAlignment(vAlign)
@@ -1282,6 +1329,24 @@ class JoshPrinterManager(private val context: Context) {
             "speed" to speed,
             "gapType" to gapType,
             "gapLength" to gapLengthMm,
+            "deviceDpi" to cachedDeviceDpi,
+            "deviceWidthMm" to cachedDeviceWidthMm,
+        )
+    }
+
+    fun getPrinterInfoSnapshot(): Map<String, Any?> {
+        val currentApi = api
+        if (currentApi != null && isConnected() && cachedDeviceDpi == null) {
+            refreshPrinterInfo(currentApi)
+        }
+        return mapOf(
+            "deviceDpi" to (cachedDeviceDpi ?: HARDWARE_DPI),
+            "deviceWidthMm" to cachedDeviceWidthMm,
+            "deviceWidthRaw" to cachedDeviceWidthRaw,
+            "deviceName" to (cachedDeviceName ?: connectedPrinterName),
+            "deviceVersion" to cachedDeviceVersion,
+            "queried" to (cachedDeviceDpi != null),
+            "macAddress" to connectedMacAddress,
         )
     }
 
@@ -1300,11 +1365,14 @@ class JoshPrinterManager(private val context: Context) {
 
         setState(State.CONNECTED)
         connectLatch?.countDown()
+        api?.let { refreshPrinterInfo(it) }
 
         listener?.onStateChanged(State.CONNECTED, mapOf(
             "printerName" to (connectedPrinterName ?: connectedMacAddress),
             "macAddress" to connectedMacAddress,
             "timestamp" to lastConnectedAt.get(),
+            "deviceDpi" to cachedDeviceDpi,
+            "deviceWidthMm" to cachedDeviceWidthMm,
         ))
     }
 
@@ -1320,6 +1388,7 @@ class JoshPrinterManager(private val context: Context) {
         connectedMacAddress = null
         if (!isConnecting.get()) {
             connectingMacAddress = null
+            clearCachedPrinterInfo()
         }
 
         // If actively connecting, DO NOT abort the connection attempt or count down the latch!
@@ -1340,19 +1409,22 @@ class JoshPrinterManager(private val context: Context) {
             printLatch?.countDown()
         }
 
-        // Attempt auto-reconnect if unexpected disconnect while previously connected.
-        if (wasConnected && lastConnectedAddress != null && !isConnecting.get()) {
+        // Attempt auto-reconnect only when still allowed (not after explicit disconnect/destroy).
+        if (wasConnected && lastConnectedAddress != null && !isConnecting.get() && allowAutoReconnect.get()) {
             Log.i(TAG, "[AUTO_RECONNECT] Unexpected disconnect — scheduling reconnect")
-            Thread({
+            val thread = Thread({
                 try {
-                    Thread.sleep(500) // brief pause before reconnect
+                    Thread.sleep(500)
+                    if (!allowAutoReconnect.get()) return@Thread
                     reconnect()
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
-            }, "josh-reconnect").start()
-        } else if (wasConnected && isConnecting.get()) {
-            Log.d(TAG, "[AUTO_RECONNECT] Suppressed — manual connect in progress")
+            }, "josh-reconnect")
+            reconnectThread = thread
+            thread.start()
+        } else if (wasConnected && (isConnecting.get() || !allowAutoReconnect.get())) {
+            Log.d(TAG, "[AUTO_RECONNECT] Suppressed — connecting=${isConnecting.get()} allow=${allowAutoReconnect.get()}")
         }
     }
 
@@ -1401,6 +1473,7 @@ class JoshPrinterManager(private val context: Context) {
         Log.i(TAG, "[PRINT_SUCCESS]")
         cancelPrintFallbacks()
         lastPrintSuccess = true
+        lastPrintFailed = false
         setState(State.PRINT_SUCCESS)
         printLatch?.countDown()
 
@@ -1408,10 +1481,21 @@ class JoshPrinterManager(private val context: Context) {
         emitPrintProgress(jobId, "SUCCESS", emptyMap())
     }
 
+    private fun handlePrintSentUnconfirmed() {
+        Log.i(TAG, "[PRINT_SENT_UNCONFIRMED]")
+        lastPrintSuccess = true
+        lastPrintFailed = false
+        lastPrintConfirmedByDevice = false
+        setState(State.PRINT_SUCCESS)
+        val jobId = "JOSH-PRINT-${String.format("%03d", jobIdCounter.get())}"
+        emitPrintProgress(jobId, "SENT_UNCONFIRMED", emptyMap())
+    }
+
     private fun handlePrintFailed(reason: String) {
         Log.e(TAG, "[PRINT_FAILED] $reason")
         cancelPrintFallbacks()
         lastPrintSuccess = false
+        lastPrintFailed = true
         lastError = "JOSH_PRINT_FAILED: $reason"
         setState(State.PRINT_FAILED)
         printLatch?.countDown()
@@ -1422,10 +1506,117 @@ class JoshPrinterManager(private val context: Context) {
     }
 
     private fun cancelPrintFallbacks() {
-        printSubmitFallback?.let { mainHandler.removeCallbacks(it) }
-        printSubmitFallback = null
         printDataEndedFallback?.let { mainHandler.removeCallbacks(it) }
         printDataEndedFallback = null
+    }
+
+    private fun cancelReconnect() {
+        val thread = reconnectThread
+        reconnectThread = null
+        if (thread != null && thread.isAlive) {
+            thread.interrupt()
+            try {
+                thread.join(500)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+    }
+
+    private fun clearCachedPrinterInfo() {
+        cachedDeviceDpi = null
+        cachedDeviceWidthMm = null
+        cachedDeviceWidthRaw = null
+        cachedDeviceName = null
+        cachedDeviceVersion = null
+    }
+
+    /**
+     * Device DPI wins. Honour explicit JS 300 only when the device is ~300 DPI
+     * or getPrinterInfo() failed. requested <= 0 means "use device / default".
+     */
+    private fun resolvePrintDpi(requested: Double): Double {
+        val device = cachedDeviceDpi
+        if (device != null && device > 0) {
+            if (requested == 300.0 && device >= 280.0) return 300.0
+            return device
+        }
+        if (requested == 300.0) return 300.0
+        if (requested == 203.0) return 203.0
+        return HARDWARE_DPI
+    }
+
+    private fun dpmFor(dpi: Double): Double {
+        return if (dpi >= 190.0 && dpi <= 220.0) HARDWARE_DPM else dpi / 25.4
+    }
+
+    private fun refreshPrinterInfo(api: LPAPI) {
+        try {
+            val info = api.javaClass.methods.firstOrNull { method ->
+                method.parameterCount == 0 &&
+                    (method.name == "getPrinterInfo" ||
+                        method.returnType.simpleName.contains("PrinterInfo"))
+            }?.invoke(api) ?: return
+            val dpi = readNumericField(info, "deviceDPI")
+            val width = readNumericField(info, "deviceWidth")
+            val name = readStringField(info, "deviceName")
+            val version = readStringField(info, "deviceVersion") ?: readStringField(info, "softwareVersion")
+            if (dpi != null && dpi > 0) {
+                cachedDeviceDpi = dpi
+            }
+            if (width != null && width > 0) {
+                cachedDeviceWidthRaw = width
+                cachedDeviceWidthMm = normalizeDeviceWidthMm(width, cachedDeviceDpi ?: HARDWARE_DPI)
+            }
+            if (!name.isNullOrBlank()) cachedDeviceName = name
+            if (!version.isNullOrBlank()) cachedDeviceVersion = version
+            Log.i(
+                TAG,
+                "[INFO] getPrinterInfo dpi=${cachedDeviceDpi} widthRaw=${cachedDeviceWidthRaw} widthMm=${cachedDeviceWidthMm} name=$cachedDeviceName",
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "[INFO] getPrinterInfo failed: ${t.message}")
+        }
+    }
+
+    private fun normalizeDeviceWidthMm(raw: Double, dpi: Double): Double {
+        if (raw in 15.0..120.0) return raw
+        if (raw in 150.0..1600.0) {
+            val dpm = dpmFor(dpi)
+            return raw / dpm
+        }
+        if (raw > 1600.0) return raw / 100.0
+        return raw
+    }
+
+    private fun readNumericField(obj: Any, name: String): Double? {
+        try {
+            val field = obj.javaClass.getField(name)
+            val value = field.get(obj)
+            if (value is Number) return value.toDouble()
+        } catch (_: Throwable) {}
+        try {
+            val getter = "get" + name.replaceFirstChar { it.uppercase() }
+            val method = obj.javaClass.methods.firstOrNull { it.name.equals(getter, ignoreCase = true) && it.parameterCount == 0 }
+            val value = method?.invoke(obj)
+            if (value is Number) return value.toDouble()
+        } catch (_: Throwable) {}
+        return null
+    }
+
+    private fun readStringField(obj: Any, name: String): String? {
+        try {
+            val field = obj.javaClass.getField(name)
+            val value = field.get(obj)
+            if (value is String) return value
+        } catch (_: Throwable) {}
+        try {
+            val getter = "get" + name.replaceFirstChar { it.uppercase() }
+            val method = obj.javaClass.methods.firstOrNull { it.name.equals(getter, ignoreCase = true) && it.parameterCount == 0 }
+            val value = method?.invoke(obj)
+            if (value is String) return value
+        } catch (_: Throwable) {}
+        return null
     }
 
     // ═══════════════════════════════════════════════════════════════════

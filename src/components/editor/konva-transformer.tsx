@@ -135,6 +135,8 @@ export type KonvaTransformerProps = {
     widthMm: number;
     heightMm: number;
   }) => { leftMm: number; topMm: number };
+  showGrid?: boolean;
+  gridKnockoutColor?: string;
 };
 
 const HIT_TARGET_PX = 36;
@@ -227,6 +229,8 @@ export const KonvaTransformer = memo(function KonvaTransformer({
   pointerToMm,
   snapMoveMm,
   safeModeSv,
+  showGrid = false,
+  gridKnockoutColor = '#FFFFFF',
 }: KonvaTransformerProps) {
   const pxPerMMSafe = pxPerMM > 0 && Number.isFinite(pxPerMM) ? pxPerMM : 1;
   const sx = pxPerMMSafe;
@@ -1022,7 +1026,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
             return;
           }
           hasMovedSv.value = true;
-          liftSv.value = DRAG_LIFT_OPACITY;
+          if (!showGrid) {
+            liftSv.value = DRAG_LIFT_OPACITY;
+          }
           runOnJS(cancelPendingRemoveJS)();
 
           if (
@@ -1281,6 +1287,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     animH,
     isInteracting,
     liftSv,
+    showGrid,
     selectedSv,
     topBarSelectionVisibleSv,
     bottomPanelVisibleSv,
@@ -1556,8 +1563,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       top: liveTop,
       width: liveW,
       height: liveH,
-      opacity: (element.opacity ?? 1) * liftSv.value,
+      opacity: (element.opacity ?? 1) * (showGrid ? 1 : liftSv.value),
       zIndex: zBoost + (element.zIndex ?? 1),
+      overflow: 'visible' as const,
     };
   });
 
@@ -1677,6 +1685,12 @@ export const KonvaTransformer = memo(function KonvaTransformer({
 
   return (
     <Animated.View ref={containerRef} style={containerStyle} collapsable={false}>
+      {showGrid ? (
+        <View
+          pointerEvents="none"
+          style={[styles.gridKnockout, { backgroundColor: gridKnockoutColor }]}
+        />
+      ) : null}
       <GestureDetector gesture={bodyDragGesture}>
         <View
           collapsable={false}
@@ -1710,7 +1724,7 @@ export const KonvaTransformer = memo(function KonvaTransformer({
       </GestureDetector>
 
       <Animated.View
-        style={[StyleSheet.absoluteFill, selectionOverlayStyle]}>
+        style={[StyleSheet.absoluteFill, styles.selectionOverlay, selectionOverlayStyle]}>
         <View
           pointerEvents="none"
           style={[
@@ -1785,7 +1799,9 @@ export const KonvaTransformer = memo(function KonvaTransformer({
     prev.groupScaleYSv === next.groupScaleYSv &&
     prev.groupHandleSv === next.groupHandleSv &&
     prev.groupScaleMinSv === next.groupScaleMinSv &&
-    prev.groupScaleMaxSv === next.groupScaleMaxSv
+    prev.groupScaleMaxSv === next.groupScaleMaxSv &&
+    prev.showGrid === next.showGrid &&
+    prev.gridKnockoutColor === next.gridKnockoutColor
   );
 });
 
@@ -1850,6 +1866,16 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     overflow: 'visible',
+    zIndex: 1,
+  },
+  gridKnockout: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
+  selectionOverlay: {
+    zIndex: 20,
+    overflow: 'visible',
+    elevation: 8,
   },
   selectionOutline: {
     ...StyleSheet.absoluteFillObject,

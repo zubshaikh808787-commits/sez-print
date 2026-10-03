@@ -116,6 +116,7 @@ import {
 } from '@/components/editor/signature-property-panel';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { ZoomableEditPad } from '@/components/editor/zoomable-edit-pad';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { EditingPad } from '@/components/editor/editing-pad';
 import { KonvaCanvas } from '@/components/editor/konva-canvas';
 import type {
@@ -126,7 +127,7 @@ import type {
 } from '@/components/editor/konva-transformer';
 import { CanvasPanelDivider } from '@/components/editor/canvas-panel-divider';
 import { StaticToolPalette } from '@/components/editor/static-tool-palette';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 const smoothEasing = Easing.out(Easing.cubic);
 import {
@@ -779,7 +780,13 @@ export default function EditScreen() {
   }, [editorSettings.safeMode, safeModeSv]);
 
   useEffect(() => {
-    bottomPanelVisibleSv.value = panelOpen && selectedIds.length > 0 ? 1 : 0;
+    const show = panelOpen && selectedIds.length > 0;
+    if (show) {
+      bottomPanelVisibleSv.value = 1;
+      return;
+    }
+    if (bottomPanelVisibleSv.value === 0) return;
+    bottomPanelVisibleSv.value = withTiming(0, { duration: 110, easing: smoothEasing });
   }, [panelOpen, selectedIds.length, bottomPanelVisibleSv]);
 
   useEffect(() => {
@@ -796,22 +803,31 @@ export default function EditScreen() {
     pointerEvents: topBarSelectionVisibleSv.value > 0.5 ? 'auto' : 'none',
   }));
 
-  const staticPaletteAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
-    zIndex: bottomPanelVisibleSv.value > 0.5 ? 0 : 1,
-    pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'none' : 'auto',
-  }));
+  const staticPaletteAnimatedStyle = useAnimatedStyle(() => {
+    const shown = bottomPanelVisibleSv.value;
+    return {
+      opacity: 1 - shown,
+      zIndex: shown > 0.5 ? 0 : 1,
+      pointerEvents: shown > 0.5 ? 'none' : 'auto',
+    };
+  });
 
-  const propertyPanelAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
-    zIndex: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
-    pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
-  }));
+  const propertyPanelAnimatedStyle = useAnimatedStyle(() => {
+    const shown = bottomPanelVisibleSv.value;
+    return {
+      opacity: shown,
+      zIndex: shown > 0.5 ? 1 : 0,
+      pointerEvents: shown > 0.5 ? 'auto' : 'none',
+    };
+  });
 
-  const panelCloseBtnAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: bottomPanelVisibleSv.value > 0.5 ? 1 : 0,
-    pointerEvents: bottomPanelVisibleSv.value > 0.5 ? 'auto' : 'none',
-  }));
+  const panelCloseBtnAnimatedStyle = useAnimatedStyle(() => {
+    const shown = bottomPanelVisibleSv.value;
+    return {
+      opacity: shown,
+      pointerEvents: shown > 0.5 ? 'auto' : 'none',
+    };
+  });
 
   const [gridSpacingPopoverVisible, setGridSpacingPopoverVisible] = useState(false);
   const [padZoom, setPadZoom] = useState(1);
@@ -1926,12 +1942,37 @@ export default function EditScreen() {
 
   const handleDeselectAll = useCallback(() => {
     topBarSelectionVisibleSv.value = 0;
-    bottomPanelVisibleSv.value = 0;
     setSelectedIds([]);
     setPrimaryId(null);
     commitSelectedTableCell(null);
     setPanelOpen(false);
-  }, [topBarSelectionVisibleSv, bottomPanelVisibleSv, commitSelectedTableCell]);
+  }, [topBarSelectionVisibleSv, commitSelectedTableCell]);
+
+  const outsideCanvasTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .maxDuration(220)
+        .maxDistance(14)
+        .onEnd((_e, success) => {
+          'worklet';
+          if (!success) return;
+          activeSelectedIdSv.value = '';
+          topBarSelectionVisibleSv.value = 0;
+          groupEligibleSv.value = 0;
+          bottomPanelVisibleSv.value = withTiming(0, {
+            duration: 110,
+            easing: Easing.out(Easing.cubic),
+          });
+          runOnJS(handleDeselectAll)();
+        }),
+    [
+      activeSelectedIdSv,
+      bottomPanelVisibleSv,
+      groupEligibleSv,
+      handleDeselectAll,
+      topBarSelectionVisibleSv,
+    ],
+  );
 
   const toggleMultipleMode = useCallback(() => {
     const turningOn = !multipleMode;
@@ -3595,6 +3636,21 @@ export default function EditScreen() {
     <View style={styles.contextualTopBar}>
       <Pressable
         style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
+        onPress={() => {
+          activeSelectedIdSv.value = '';
+          topBarSelectionVisibleSv.value = 0;
+          groupEligibleSv.value = 0;
+          bottomPanelVisibleSv.value = withTiming(0, { duration: 110, easing: smoothEasing });
+          handleDeselectAll();
+        }}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel="Drop element selection">
+        <AppIcon name="chevron.left" tintColor="#FFFFFF" size={18} />
+      </Pressable>
+      <View style={styles.contextualBarDivider} />
+      <Pressable
+        style={({ pressed }) => [styles.contextualBarBtn, pressed && styles.pressed]}
         onPress={deleteSelected}
         hitSlop={12}
         accessibilityRole="button"
@@ -3674,6 +3730,11 @@ export default function EditScreen() {
         oneFingerPanEnabled={selectedIds.length === 0}
         doubleTapEnabled={false}>
         <View style={[styles.workspace, { backgroundColor: stageBg }]} pointerEvents="box-none">
+          {selectedIds.length > 0 ? (
+            <GestureDetector gesture={outsideCanvasTap}>
+              <View style={StyleSheet.absoluteFillObject} collapsable={false} />
+            </GestureDetector>
+          ) : null}
           <View
             style={[
               styles.rulerFrame,

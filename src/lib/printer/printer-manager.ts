@@ -17,7 +17,7 @@ import {
   BLUETOOTH_OFF_MESSAGE,
   bluetoothOffScanResult,
 } from '@/lib/printer/bluetooth-guard';
-import { joshEffectiveDpi, joshGapTypeFromMedia } from '@/lib/printer/josh-print';
+import { joshEffectiveDpi, joshGapTypeFromMedia, joshHeadWidthMm } from '@/lib/printer/josh-print';
 import {
   isLikelyTezName,
   isLikelyShaktiName,
@@ -275,6 +275,9 @@ class PrinterManager {
   private aclListener: { remove: () => void } | undefined;
   private aclDisconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingAclDisconnectMac: string | null = null;
+  /** Last LPAPI getPrinterInfo() values for the connected JOSH unit. */
+  private joshDeviceDpi: number | null = null;
+  private joshDeviceWidthMm: number | null = null;
 
   private decrementPrintQueue(): void {
     this.printQueueDepth = Math.max(0, this.printQueueDepth - 1);
@@ -498,6 +501,29 @@ class PrinterManager {
     } catch {
       return null;
     }
+  }
+
+  private cacheJoshPrinterInfo(): void {
+    try {
+      const info = this.getJosh()?.getJoshPrinterInfo?.();
+      if (!info) return;
+      if (info.deviceDpi != null && Number.isFinite(info.deviceDpi) && info.deviceDpi > 0) {
+        this.joshDeviceDpi = info.deviceDpi;
+      }
+      if (info.deviceWidthMm != null && Number.isFinite(info.deviceWidthMm) && info.deviceWidthMm > 0) {
+        this.joshDeviceWidthMm = info.deviceWidthMm;
+      }
+      console.info(
+        `[JOSH-INFO] deviceDpi=${this.joshDeviceDpi} widthMm=${this.joshDeviceWidthMm} queried=${info.queried}`,
+      );
+    } catch (error) {
+      console.warn('[JOSH-INFO] getJoshPrinterInfo failed:', error);
+    }
+  }
+
+  private clearJoshPrinterInfo(): void {
+    this.joshDeviceDpi = null;
+    this.joshDeviceWidthMm = null;
   }
 
   private getTez() {
@@ -733,9 +759,9 @@ class PrinterManager {
 
     // JOSH / LPAPI printer
     if (store.sdkId === 'josh' || this.activeTransport === 'josh-lpapi') {
-      const dpi = joshEffectiveDpi(settings.printerDpi);
+      const dpi = joshEffectiveDpi(settings.printerDpi, this.joshDeviceDpi);
       const alignment = 'center';
-      const headWidthMm = settings.printheadWidthMm === 108 ? 50 : (settings.printheadWidthMm ?? 50);
+      const headWidthMm = joshHeadWidthMm(this.joshDeviceWidthMm, settings.printheadWidthMm);
       const headWidthDots = mmToDots(headWidthMm, dpi);
       return {
         id: 'josh-lpapi',
@@ -800,6 +826,11 @@ class PrinterManager {
   /** Returns the DPI of the active printer profile. */
   getPrintDpi(): number {
     return this.getActivePrinterProfile().dpi;
+  }
+
+  /** LPAPI-reported DPI for the connected JOSH unit, or null if unknown. */
+  getJoshDeviceDpi(): number | null {
+    return this.joshDeviceDpi;
   }
 
   getLastScanError(): string | null {
@@ -2286,6 +2317,7 @@ class PrinterManager {
 
       try {
         await this.ensurePermissions('connect-only');
+        await this.stopScanAsync();
         console.info(
           `[JOSH-CONN-P1:IDENTIFY] Initiating JOSH connection: mac=${deviceId}, name=${deviceName ?? 'unknown'}, transport=${transport ?? 'auto'}`,
         );
@@ -2295,6 +2327,11 @@ class PrinterManager {
         console.info('[JOSH-CONN-P2:PREPARE] Ensuring JOSH SDK is idle before opening connection');
         await josh.disconnectJosh().catch(() => {});
         await new Promise((resolve) => setTimeout(resolve, 150));
+        const labelx = this.getLabelX();
+        if (labelx?.isLabelXConnected?.()) {
+          console.info('[JOSH-CONN-P2:PREPARE] Closing active Label X session before opening JOSH');
+          await labelx.disconnectLabelX().catch(() => {});
+        }
         const dev = this.getDev();
         if (dev?.isDevConnected()) {
           console.info('[JOSH-CONN-P2:PREPARE] Closing active DEV session before opening JOSH');
@@ -2325,8 +2362,9 @@ class PrinterManager {
         this.backendPrinterId = null;
         this.bleNegotiatedMtu = 0;
         this.lastErrorMessage = null;
+        this.cacheJoshPrinterInfo();
         console.info(
-          `[JOSH-CONN-P4:CONFIRMED] JOSH connected in ${Date.now() - connectStart} ms → ${result.id} (${result.name ?? deviceName})`,
+          `[JOSH-CONN-P4:CONFIRMED] JOSH connected in ${Date.now() - connectStart} ms → ${result.id} (${result.name ?? deviceName}) dpi=${this.joshDeviceDpi} widthMm=${this.joshDeviceWidthMm}`,
         );
         usePrinterStore.getState().setConnectedDevice(result.id, result.name ?? deviceName ?? deviceId, {
           transport: 'josh-lpapi',
@@ -2340,6 +2378,7 @@ class PrinterManager {
           error,
         );
         this.lastErrorMessage = error instanceof Error ? error.message : String(error);
+        this.clearJoshPrinterInfo();
         // JOSH printers do NOT support raw SPP — never fall back to classic SPP.
         usePrinterStore.getState().clearConnection();
         throw error instanceof Error ? error : new Error('Failed to connect to JOSH printer.');
@@ -2618,6 +2657,7 @@ class PrinterManager {
     this.backendPrinterId = null;
     this.bleNegotiatedMtu = 0;
     this.connectionState = 'disconnected';
+    this.clearJoshPrinterInfo();
     usePrinterStore.getState().clearConnection();
   }
 
@@ -3505,7 +3545,7 @@ class PrinterManager {
       this.connectionState = 'printing';
       try {
         const profile = this.getActivePrinterProfile();
-        const dpi = joshEffectiveDpi(options.dpi ?? profile.dpi);
+        const dpi = joshEffectiveDpi(options.dpi ?? profile.dpi, this.joshDeviceDpi);
         const gapType = joshGapTypeFromMedia(options.media ?? 'gap');
         const gapLength = options.gapMm != null ? Math.max(0, options.gapMm) : 3;
         console.info(
@@ -3530,7 +3570,7 @@ class PrinterManager {
           alignment: options.alignment ?? profile.alignment,
         });
         console.info(
-          `[JOSH-PRINT-P5:FINALIZE] JOSH mm print completed in ${Date.now() - t0} ms |`,
+          `[JOSH-PRINT-P5:FINALIZE] JOSH mm print completed in ${Date.now() - t0} ms confirmed=${result?.confirmedByDevice === true} |`,
           result,
         );
       } finally {

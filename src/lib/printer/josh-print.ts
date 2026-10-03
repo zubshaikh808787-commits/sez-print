@@ -22,10 +22,36 @@ export const JOSH_GAP_TYPE = {
   blackMark: 3,
 } as const;
 
-export function joshEffectiveDpi(settingsDpi?: number | null): number {
+export function joshEffectiveDpi(
+  settingsDpi?: number | null,
+  deviceDpi?: number | null,
+): number {
+  if (deviceDpi != null && Number.isFinite(deviceDpi) && deviceDpi > 0) {
+    if (settingsDpi === 300 && deviceDpi >= 280) return 300;
+    if (deviceDpi >= 190 && deviceDpi <= 220) return 203;
+    if (deviceDpi >= 280 && deviceDpi < 302) return 300;
+    return Math.round(deviceDpi);
+  }
   if (settingsDpi === 300) return 300;
   if (settingsDpi === 203) return 203;
   return JOSH_HARDWARE_DPI;
+}
+
+/** Prefer LPAPI-reported head width. 108 mm is the leaked TD-404 default. */
+export function joshHeadWidthMm(
+  deviceWidthMm?: number | null,
+  settingsWidthMm?: number | null,
+): number {
+  if (
+    deviceWidthMm != null &&
+    Number.isFinite(deviceWidthMm) &&
+    deviceWidthMm >= 15 &&
+    deviceWidthMm <= 120
+  ) {
+    return deviceWidthMm;
+  }
+  if (settingsWidthMm === 108) return 50;
+  return settingsWidthMm ?? 50;
 }
 
 export function joshLabelDots(

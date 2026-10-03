@@ -9,7 +9,7 @@ import type { SelectSource, TransformStartKind } from './konva-transformer';
 
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
 import { CanvasGridOverlay } from '@/components/editor/canvas-grid-overlay';
-import { DEFAULT_GRID_SPACING_MM, printGridOccluderRectsPx } from '@/lib/editor/canvas-grid';
+import { DEFAULT_GRID_SPACING_MM } from '@/lib/editor/canvas-grid';
 import { type LiveRulerBounds } from '@/components/canvas-rulers';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
 import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
@@ -132,6 +132,8 @@ type ElementChrome = {
   }) => { leftMm: number; topMm: number };
   /** 1 when Safe Mode is on. */
   safeModeSv?: SharedValue<number>;
+  showGrid?: boolean;
+  gridKnockoutColor?: string;
 };
 
 const CanvasElementNodes = memo(function CanvasElementNodes({
@@ -191,6 +193,8 @@ const CanvasElementNodes = memo(function CanvasElementNodes({
           pointerToMm={chrome.pointerToMm}
           snapMoveMm={chrome.snapMoveMm}
           safeModeSv={chrome.safeModeSv}
+          showGrid={chrome.showGrid}
+          gridKnockoutColor={chrome.gridKnockoutColor}
         />
       ))}
     </>
@@ -393,11 +397,6 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
 
   const sortedElements = useMemo(() => sortLayers(doc.elements), [doc.elements]);
 
-  const gridOccluders = useMemo(
-    () => (showGrid ? printGridOccluderRectsPx(sortedElements, pxPerMM) : []),
-    [showGrid, sortedElements, pxPerMM],
-  );
-
   const chrome = useMemo<ElementChrome>(
     () => ({
       pxPerMM,
@@ -441,6 +440,8 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       pointerToMm,
       snapMoveMm,
       safeModeSv,
+      showGrid,
+      gridKnockoutColor: stickerFillColor,
     }),
     [
       pxPerMM,
@@ -481,6 +482,8 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
       pointerToMm,
       snapMoveMm,
       safeModeSv,
+      showGrid,
+      stickerFillColor,
     ],
   );
 
@@ -547,28 +550,27 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
         ref={ref}
         options={{ format: 'png', quality: 1 }}
         style={[styles.elementLayer, { width: w, height: h }]}>
+        <View pointerEvents="none" style={styles.gridUnderElements}>
+          <CanvasGridOverlay
+            widthPx={w}
+            heightPx={h}
+            pxPerMM={pxPerMM}
+            spacingMm={resolvedGridSpacingMm}
+            visible={showGrid}
+            minSpacingPx={0}
+            strokeWidth={1}
+          />
+        </View>
         <GestureDetector gesture={deselectGesture}>
           <View style={StyleSheet.absoluteFillObject} collapsable={false} />
         </GestureDetector>
 
-        <View pointerEvents="box-none" collapsable={false} style={[StyleSheet.absoluteFillObject, { overflow: 'hidden' }]}>
+        <View pointerEvents="box-none" collapsable={false} style={[StyleSheet.absoluteFillObject, styles.elementNodes]}>
           <CanvasElementNodes elements={sortedElements} chrome={chrome} />
         </View>
       </ViewShot>
       {mediaShapeGuide}
       {cableFlagOutline}
-      <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.gridOverlay]}>
-        <CanvasGridOverlay
-          widthPx={w}
-          heightPx={h}
-          pxPerMM={pxPerMM}
-          spacingMm={resolvedGridSpacingMm}
-          visible={showGrid}
-          occluders={gridOccluders}
-          minSpacingPx={0}
-          strokeWidth={1}
-        />
-      </View>
       {snapGuides.length > 0 ? (
         <Svg width={w} height={h} style={StyleSheet.absoluteFillObject} pointerEvents="none">
           {snapGuides.map((guide, index) =>
@@ -612,7 +614,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: 'transparent',
   },
-  gridOverlay: {
+  gridUnderElements: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+    elevation: 0,
+  },
+  elementNodes: {
+    overflow: 'visible',
     zIndex: 2,
     elevation: 2,
   },

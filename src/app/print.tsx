@@ -602,7 +602,9 @@ export default function PrintScreen() {
 
   const jobDpi = (() => {
     const raw = jewelryJobDpi ?? cableJobDpi ?? ratTailJobDpi ?? getPrinterManager().getPrintDpi();
-    return getPrinterManager().isJosh ? joshEffectiveDpi(raw) : raw;
+    return getPrinterManager().isJosh
+      ? joshEffectiveDpi(raw, getPrinterManager().getJoshDeviceDpi())
+      : raw;
   })();
 
   /** Printer-dot artboard. TD-404 captures packed BITMAP dots; others use SIZE dots. */

@@ -22,6 +22,7 @@ import {
   addJoshConnectionListener,
   connectJosh,
   disconnectJosh,
+  getJoshPrinterInfo,
   isJoshConnected,
   printJoshPngLabel,
 } from 'josh-printer';
@@ -43,7 +44,7 @@ import {
 } from '@/printer-core';
 import { makeStatus, resolveProfile } from '@/printer-core';
 import { isLikelyJoshName } from '@/lib/printer/printer-heuristics';
-import { joshGapTypeFromMedia } from '@/lib/printer/josh-print';
+import { joshEffectiveDpi, joshGapTypeFromMedia } from '@/lib/printer/josh-print';
 
 export const JOSH_DRIVER_ID = 'josh';
 
@@ -63,10 +64,8 @@ export class JoshDriver implements PrinterDriver {
     maxLabelHeightMm: 1000,
     // JOSH LPAPI has native copy support in the print job params (copies field).
     nativeCopies: true,
-    // printBitmap() blocks on a CountDownLatch released by the SDK's real
-    // PrintProgress.Success hardware ACK — see RasterJob.confirmed below. A
-    // DataEnded 200ms fallback exists for models that never send that ACK; that
-    // path is distinguished natively (confirmedByDevice) rather than assumed.
+    // printBitmap() waits for Success, Failed, or DataEnded settle. confirmed
+    // is true only for a genuine Success ACK; sent-unconfirmed is still success.
     statusQuery: false,
     physicalCompletionCallback: true,
     maxChunkBytes: 2048,
@@ -76,6 +75,7 @@ export class JoshDriver implements PrinterDriver {
 
   private device: ConnectedDevice | undefined;
   private dialect: Dialect = 'bitmap';
+  private lastDeviceDpi: number | undefined;
   private readonly disconnectListeners = new Set<(reason: string) => void>();
   private nativeWatch: { remove: () => void } | undefined;
 
@@ -88,6 +88,8 @@ export class JoshDriver implements PrinterDriver {
     const result = await connectJosh(deviceId, name ?? null);
     const resolvedName = result?.name ?? name ?? null;
     const profile = resolveProfile(JOSH_DRIVER_ID, resolvedName);
+    const info = getJoshPrinterInfo();
+    this.lastDeviceDpi = joshEffectiveDpi(profile?.dpi, info?.deviceDpi);
 
     this.device = {
       id: result?.macAddress ?? deviceId,
@@ -110,6 +112,7 @@ export class JoshDriver implements PrinterDriver {
     this.nativeWatch?.remove();
     this.nativeWatch = undefined;
     this.device = undefined;
+    this.lastDeviceDpi = undefined;
     try {
       await disconnectJosh();
     } catch {
@@ -157,7 +160,11 @@ export class JoshDriver implements PrinterDriver {
     if (!this.isConnected()) throw new Error('No JOSH printer connected.');
 
     const profile = resolveProfile(JOSH_DRIVER_ID, this.device?.name);
-    const dpi = profile?.dpi ?? this.capabilities.dpi;
+    const info = getJoshPrinterInfo();
+    const dpi = joshEffectiveDpi(
+      this.lastDeviceDpi ?? profile?.dpi ?? this.capabilities.dpi,
+      info?.deviceDpi,
+    );
     const started = Date.now();
     onProgress?.({ stage: 'transferring' });
 

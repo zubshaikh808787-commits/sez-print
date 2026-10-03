@@ -182,13 +182,13 @@ class JoshPrinterModule : Module() {
           val success = mgr.connect(macAddress, name)
           if (success) {
             Log.i("JoshPrinter", "[JOSH-NATIVE-BRIDGE] Connection confirmed! Resolving promise to JS")
-            val res = mapOf(
-              "id" to macAddress,
-              "name" to (name ?: macAddress),
-              "macAddress" to macAddress,
-              "transport" to "josh-lpapi",
-              "sdkId" to "josh"
-            )
+            val res = HashMap<String, Any?>()
+            res["id"] = macAddress
+            res["name"] = name ?: macAddress
+            res["macAddress"] = macAddress
+            res["transport"] = "josh-lpapi"
+            res["sdkId"] = "josh"
+            res.putAll(mgr.getPrinterInfoSnapshot())
             promise.resolve(res)
           } else {
             val err = mgr.lastError ?: "Failed to connect to JOSH printer"
@@ -238,6 +238,11 @@ class JoshPrinterModule : Module() {
     Function("isConnected") {
       val mgr = getOrInitManager()
       mgr?.isConnected() ?: false
+    }
+
+    Function("getPrinterInfo") {
+      val mgr = getOrInitManager()
+      mgr?.getPrinterInfoSnapshot() ?: emptyMap<String, Any?>()
     }
 
     AsyncFunction("configureParams") { params: Map<String, Any?>, promise: Promise ->
@@ -313,7 +318,7 @@ class JoshPrinterModule : Module() {
         return@AsyncFunction
       }
 
-      val dpi = (options["dpi"] as? Number)?.toDouble() ?: 203.0
+      val dpi = (options["dpi"] as? Number)?.toDouble() ?: -1.0
       val density = (options["density"] as? Number)?.toInt() ?: -1
       val speed = (options["speed"] as? Number)?.toInt() ?: -1
       val direction = (options["direction"] as? Number)?.toInt()

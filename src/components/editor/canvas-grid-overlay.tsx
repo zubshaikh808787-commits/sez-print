@@ -70,7 +70,7 @@ export const CanvasGridOverlay = memo(function CanvasGridOverlay({
 
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFillObject} collapsable={false}>
-      <Svg pointerEvents="none" width={widthPx} height={heightPx}>
+      <Svg pointerEvents="none" width={widthPx} height={heightPx} collapsable={false}>
         {paths.vertical ? (
           <Path d={paths.vertical} stroke={stroke} strokeWidth={strokeWidth} fill="none" />
         ) : null}
