@@ -305,49 +305,19 @@ export function flipGrayVertical(src: GrayBitmap): GrayBitmap {
   return { width, height, gray: out };
 }
 
-/** Add white columns. Content dots are copied unchanged. */
-export function padGray(src: GrayBitmap, left: number, right: number): GrayBitmap {
-  const l = Math.max(0, Math.round(left));
-  const r = Math.max(0, Math.round(right));
-  if (l === 0 && r === 0) return src;
-  const out = createWhiteGray(src.width + l + r, src.height);
-  for (let y = 0; y < src.height; y++) {
-    out.gray.set(src.gray.subarray(y * src.width, (y + 1) * src.width), y * out.width + l);
-  }
-  return out;
-}
-
-/** Pad `dx` white columns on the left and drop the same width on the right. */
-export function shiftGrayRight(src: GrayBitmap, dx: number): GrayBitmap {
-  const shift = Math.max(0, Math.round(dx));
-  if (shift <= 0) return src;
-  const { width, height, gray } = src;
-  const out = createWhiteGray(width, height);
-  const keep = Math.max(0, width - shift);
-  for (let y = 0; y < height; y++) {
-    const srcOff = y * width;
-    const dstOff = y * width + shift;
-    out.gray.set(gray.subarray(srcOff, srcOff + keep), dstOff);
-  }
-  return out;
-}
-
-/** Keep the left `widthDots` columns (TSPL pack-down). Never crop the left. */
-export function cropGrayKeepLeft(src: GrayBitmap, widthDots: number, heightDots: number): GrayBitmap {
+export function cropGrayRight(src: GrayBitmap, widthDots: number, heightDots: number): GrayBitmap {
   const w = Math.max(1, widthDots);
   const h = Math.max(1, heightDots);
   if (src.width === w && src.height === h) return src;
   const out = createWhiteGray(w, h);
   const copyW = Math.min(src.width, w);
   const copyH = Math.min(src.height, h);
+  const sx = Math.max(0, Math.floor((src.width - copyW) / 2));
+  const sy = Math.max(0, Math.floor((src.height - copyH) / 2));
   for (let y = 0; y < copyH; y++) {
-    out.gray.set(src.gray.subarray(y * src.width, y * src.width + copyW), y * w);
+    out.gray.set(src.gray.subarray((sy + y) * src.width + sx, (sy + y) * src.width + sx + copyW), y * w);
   }
   return out;
-}
-
-export function cropGrayRight(src: GrayBitmap, widthDots: number, heightDots: number): GrayBitmap {
-  return cropGrayKeepLeft(src, widthDots, heightDots);
 }
 
 export function withDpi(bitmap: RenderedBitmap, axis: AxisDpi): RenderedBitmap {

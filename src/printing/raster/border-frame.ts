@@ -123,19 +123,14 @@ export function inwardFrameBandsInBox(
   dpi: number,
   lineWidthMm: number | undefined,
   styleId: BorderStyleId,
-  insets?: { left: number; right: number; top: number; bottom: number },
 ): FrameBand[] {
   const inset = borderInsetDots(dpi);
-  const left = insets?.left ?? inset;
-  const right = insets?.right ?? inset;
-  const top = insets?.top ?? inset;
-  const bottom = insets?.bottom ?? inset;
   const fallback = borderStrokeFallbackMm(styleId);
   const stroke = borderStrokeDots(lineWidthMm, dpi, fallback);
-  const ix = left;
-  const iy = top;
-  const iw = Math.max(1, boxWidthDots - left - right);
-  const ih = Math.max(1, boxHeightDots - top - bottom);
+  const ix = inset;
+  const iy = inset;
+  const iw = Math.max(1, boxWidthDots - inset * 2);
+  const ih = Math.max(1, boxHeightDots - inset * 2);
 
   if (styleId === 'dashed' || styleId === 'dotted') {
     return dashedFrameBands(ix, iy, iw, ih, stroke, styleId === 'dotted');
@@ -158,108 +153,6 @@ export function inwardFrameBandsInBox(
     return cornerBracketBands(ix, iy, iw, ih, stroke, styleId, dpi);
   }
   return solidFrameBands(ix, iy, iw, ih, stroke);
-}
-
-function insideRounded(
-  px: number,
-  py: number,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  rad: number,
-): boolean {
-  if (w <= 0 || h <= 0 || px < x || py < y || px >= x + w || py >= y + h) return false;
-  const r = Math.max(0, Math.min(rad, w / 2, h / 2));
-  if (r < 0.5) return true;
-  const lx = px - x;
-  const ly = py - y;
-  if (lx >= r && lx < w - r) return true;
-  if (ly >= r && ly < h - r) return true;
-  const cx = lx < r ? r : w - r;
-  const cy = ly < r ? r : h - r;
-  const dx = lx - cx;
-  const dy = ly - cy;
-  return dx * dx + dy * dy <= r * r;
-}
-
-function paintMask(
-  target: { fillRect: (x: number, y: number, w: number, h: number, gray: number) => void },
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  on: (px: number, py: number) => boolean,
-): void {
-  for (let py = y0; py < y1; py++) {
-    let run = -1;
-    for (let px = x0; px <= x1; px++) {
-      const ink = px < x1 && on(px + 0.5, py + 0.5);
-      if (ink && run < 0) run = px;
-      if (!ink && run >= 0) {
-        target.fillRect(run, py, px - run, 1, 0);
-        run = -1;
-      }
-    }
-  }
-}
-
-/** Stroke kept inside the rounded box. Outer edge is the box. */
-export function fillRoundStroke(
-  target: { fillRect: (x: number, y: number, w: number, h: number, gray: number) => void },
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  radius: number,
-  stroke: number,
-): void {
-  const t = Math.max(1, Math.round(stroke));
-  const ox = Math.round(x);
-  const oy = Math.round(y);
-  const ow = Math.max(1, Math.round(w));
-  const oh = Math.max(1, Math.round(h));
-  const innerX = ox + t;
-  const innerY = oy + t;
-  const innerW = ow - t * 2;
-  const innerH = oh - t * 2;
-  const innerR = Math.max(0, radius - t);
-  paintMask(target, ox, oy, ox + ow, oy + oh, (px, py) => {
-    return (
-      insideRounded(px, py, ox, oy, ow, oh, radius) &&
-      !insideRounded(px, py, innerX, innerY, innerW, innerH, innerR)
-    );
-  });
-}
-
-/** Ring inside an ellipse. Radii are the outer edge. */
-export function fillEllipseStroke(
-  target: { fillRect: (x: number, y: number, w: number, h: number, gray: number) => void },
-  cx: number,
-  cy: number,
-  rx: number,
-  ry: number,
-  stroke: number,
-): void {
-  const t = Math.max(1, Math.round(stroke));
-  const outerRx = Math.max(1, rx);
-  const outerRy = Math.max(1, ry);
-  const innerRx = Math.max(0, outerRx - t);
-  const innerRy = Math.max(0, outerRy - t);
-  const inside = (px: number, py: number, erx: number, ery: number) => {
-    if (erx <= 0 || ery <= 0) return false;
-    const nx = (px - cx) / erx;
-    const ny = (py - cy) / ery;
-    return nx * nx + ny * ny <= 1;
-  };
-  paintMask(
-    target,
-    Math.floor(cx - outerRx),
-    Math.floor(cy - outerRy),
-    Math.ceil(cx + outerRx),
-    Math.ceil(cy + outerRy),
-    (px, py) => inside(px, py, outerRx, outerRy) && !inside(px, py, innerRx, innerRy),
-  );
 }
 
 export function bandsToLayoutPx(bands: FrameBand[], density: number): FrameBand[] {
@@ -291,31 +184,14 @@ export function drawInwardFrameInBox(
   styleId: BorderStyleId,
   originX = 0,
   originY = 0,
-  insets?: { left: number; right: number; top: number; bottom: number },
-  circular = false,
 ): void {
   const inset = borderInsetDots(dpi);
-  const left = insets?.left ?? inset;
-  const right = insets?.right ?? inset;
-  const top = insets?.top ?? inset;
-  const bottom = insets?.bottom ?? inset;
   const fallback = borderStrokeFallbackMm(styleId);
   const stroke = borderStrokeDots(lineWidthMm, dpi, fallback);
-  const ix = originX + left;
-  const iy = originY + top;
-  const iw = Math.max(1, boxWidthDots - left - right);
-  const ih = Math.max(1, boxHeightDots - top - bottom);
-
-  if (circular) {
-    fillEllipseStroke(target, ix + iw / 2, iy + ih / 2, iw / 2, ih / 2, stroke);
-    return;
-  }
-  if (styleId === 'rounded' || styleId === 'pill-shape') {
-    const radius =
-      styleId === 'pill-shape' ? Math.min(iw, ih) / 2 : Math.max(stroke * 2, Math.min(iw, ih) * 0.08);
-    fillRoundStroke(target, ix, iy, iw, ih, radius, stroke);
-    return;
-  }
+  const ix = originX + inset;
+  const iy = originY + inset;
+  const iw = Math.max(1, boxWidthDots - inset * 2);
+  const ih = Math.max(1, boxHeightDots - inset * 2);
 
   if (styleId === 'double' || styleId === 'label-frame') {
     if (target.strokeRect) {
@@ -343,7 +219,7 @@ export function drawInwardFrameInBox(
     return;
   }
 
-  const bands = inwardFrameBandsInBox(boxWidthDots, boxHeightDots, dpi, lineWidthMm, styleId, insets);
+  const bands = inwardFrameBandsInBox(boxWidthDots, boxHeightDots, dpi, lineWidthMm, styleId);
   for (const band of bands) {
     target.fillRect(originX + band.left, originY + band.top, band.width, band.height, 0);
   }

@@ -176,7 +176,6 @@ function placementBox(el: LabelElement, dpi: number): DotBox {
 
 function drawDocumentToSurface(doc: LabelDocument, dpi: number, surface: RasterSurface): void {
   const dpm = dpmScaled(dpi);
-  const circular = doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse';
   for (const el of sortLayers(doc.elements)) {
     if (el.needPrinting === false || el.visible === false) continue;
     if (UNSUPPORTED.has(el.type)) {
@@ -195,7 +194,7 @@ function drawDocumentToSurface(doc: LabelDocument, dpi: number, surface: RasterS
           drawQr(surface, el, dpi, box);
           break;
         case 'border':
-          drawPrintBorder(surface, el, dpi, activeDotScale, { circular });
+          drawBorder(surface, el, dpi, dpm);
           break;
         case 'line':
           drawLine(surface, el, dpm, box);
@@ -501,6 +500,15 @@ function drawQr(
   }
 
   throw new Error(`Unsupported 2D encode mode: ${el.encodeMode}`);
+}
+
+function drawBorder(
+  surface: RasterSurface,
+  el: Extract<LabelElement, { type: 'border' }>,
+  dpi: number,
+  _dpm: number,
+): void {
+  drawPrintBorder(surface, el, dpi, activeDotScale);
 }
 
 function drawLine(
