@@ -15,6 +15,7 @@ import Svg, { Ellipse, Rect } from 'react-native-svg';
 import type { BorderStyleId } from '@/constants/border-library';
 import {
   bandsToLayoutPx,
+  borderFrameInsetsForElement,
   borderInsetDots,
   borderStrokeDots,
   borderStrokeFallbackMm,
@@ -37,6 +38,8 @@ export type BorderPreviewProps = {
   /** ViewShot capture at printer dpi — use inward bands, not centered SVG strokes. */
   forPrint?: boolean;
   printDpi?: number;
+  /** The box is already the outer edge. Do not inset another 2 mm. */
+  strokeFromOuterEdge?: boolean;
 };
 
 function strokePxFrom(lineWidthMm: number | undefined, scale: number, fallbackMm: number) {
@@ -52,6 +55,7 @@ function PrintFrameBands({
   printDpi,
   styleId,
   lineWidthMm,
+  strokeFromOuterEdge,
 }: {
   widthPx: number;
   heightPx: number;
@@ -60,11 +64,16 @@ function PrintFrameBands({
   printDpi: number;
   styleId: BorderStyleId;
   lineWidthMm?: number;
+  strokeFromOuterEdge?: boolean;
 }) {
   const density = PixelRatio.get() || 1;
   const widthDots = widthDotsProp ?? Math.max(1, Math.round(widthPx * density));
   const heightDots = heightDotsProp ?? Math.max(1, Math.round(heightPx * density));
-  const bands = inwardFrameBandsInBox(widthDots, heightDots, printDpi, lineWidthMm, styleId);
+  const insets = borderFrameInsetsForElement(
+    { geometryVersion: strokeFromOuterEdge ? 1 : undefined },
+    printDpi,
+  );
+  const bands = inwardFrameBandsInBox(widthDots, heightDots, printDpi, lineWidthMm, styleId, insets);
   const layoutBands = bandsToLayoutPx(bands, density);
   return (
     <View style={styles.fill}>
@@ -94,6 +103,7 @@ function PrintCircularRing({
   dashed,
   dotted,
   double,
+  strokeFromOuterEdge,
 }: {
   widthPx: number;
   heightPx: number;
@@ -103,9 +113,10 @@ function PrintCircularRing({
   dashed?: boolean;
   dotted?: boolean;
   double?: boolean;
+  strokeFromOuterEdge?: boolean;
 }) {
   const density = PixelRatio.get() || 1;
-  const insetDots = borderInsetDots(printDpi);
+  const insetDots = strokeFromOuterEdge ? 0 : borderInsetDots(printDpi);
   const strokeDots = borderStrokeDots(lineWidthMm, printDpi, borderStrokeFallbackMm(styleId));
   const inset = insetDots / density;
   const stroke = strokeDots / density;
@@ -235,6 +246,7 @@ export function BorderPreview({
   heightDots,
   forPrint = false,
   printDpi,
+  strokeFromOuterEdge = false,
 }: BorderPreviewProps) {
   const [layout, setLayout] = useState({ w: widthPx ?? 0, h: heightPx ?? 0 });
   const onLayout = (e: LayoutChangeEvent) => {
@@ -268,6 +280,7 @@ export function BorderPreview({
             dashed={opts.dashed}
             dotted={opts.dotted}
             double={opts.double}
+            strokeFromOuterEdge={strokeFromOuterEdge}
           />
         </View>
       );
@@ -282,6 +295,7 @@ export function BorderPreview({
           printDpi={printDpiResolved}
           styleId={styleId}
           lineWidthMm={lineWidthMm}
+          strokeFromOuterEdge={strokeFromOuterEdge}
         />
       </View>
     );

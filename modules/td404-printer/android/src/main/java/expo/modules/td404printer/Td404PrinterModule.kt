@@ -881,6 +881,13 @@ class Td404PrinterModule : Module() {
       "writeMs" to writeMs,
       "path" to "mono-bitmap",
       "dryRun" to dryRun,
+      "reference" to "$xDots,$yDots",
+      "bitmapX" to 0,
+      "bitmapY" to 0,
+      "marginL" to ink.marginL,
+      "marginR" to ink.marginR,
+      "marginT" to ink.marginT,
+      "marginB" to ink.marginB,
     )
     if (dryRun) {
       result["jobBase64"] = android.util.Base64.encodeToString(job, android.util.Base64.NO_WRAP)

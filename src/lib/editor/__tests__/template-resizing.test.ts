@@ -95,8 +95,9 @@ assert(scaledQr.width <= 15, `QR code dimension does not exceed label height (${
 
 // 1d. Border Perimeter Locking
 assert(scaledBorder !== undefined, 'Scaled border element exists');
-assert(scaledBorder.left === 0 && scaledBorder.top === 0, 'Border locked to top-left (0, 0)');
-assert(scaledBorder.width === 50 && scaledBorder.height === 15, `Border perimeter matches new label dimensions exactly (50x15mm, got ${scaledBorder.width}x${scaledBorder.height})`);
+assert(scaledBorder.left === 2 && scaledBorder.top === 2, 'Border keeps a 2 mm margin');
+assert(scaledBorder.width === 46 && scaledBorder.height === 11, `Border outer box is the label minus 2 mm each side (got ${scaledBorder.width}x${scaledBorder.height})`);
+assert(scaledBorder.geometryVersion === 1, 'Border stores the inset in its rectangle');
 assert(scaledBorder.lineWidth > 0 && scaledBorder.lineWidth < 1.0, `Border lineWidth scaled by fontScale (${scaledBorder.lineWidth}mm)`);
 
 // 2. Width-Only Expansion: 50x30mm -> 70x30mm (Barcode Proportion Guard)

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import { migrateDocumentBorders } from '@/lib/border-geometry';
 import { cloneDocument, generateId, type LabelDocument } from '@/lib/label-document';
 
 export type LabelGroup = {
@@ -84,16 +85,27 @@ export const useLabelStore = create<LabelStoreState>()(
         return copy;
       },
 
-      getDocument: (id) =>
-        get().documents.find((d) => d.id === id) ??
-        get().cloudTemplates.find((d) => d.id === id),
+      getDocument: (id) => {
+        const doc =
+          get().documents.find((d) => d.id === id) ??
+          get().cloudTemplates.find((d) => d.id === id);
+        return doc ? migrateDocumentBorders(doc) : undefined;
+      },
 
       ensureLocalDocument: (id) => {
         const local = get().documents.find((d) => d.id === id);
-        if (local) return local;
+        if (local) {
+          const migrated = migrateDocumentBorders(local);
+          if (migrated !== local) {
+            set((state) => ({
+              documents: state.documents.map((d) => (d.id === id ? migrated : d)),
+            }));
+          }
+          return migrated;
+        }
         const cloud = get().cloudTemplates.find((d) => d.id === id);
         if (!cloud) return null;
-        const copy = cloneDocument(cloud);
+        const copy = migrateDocumentBorders(cloneDocument(cloud));
         copy.updatedAt = Date.now();
         set((state) => ({ documents: [copy, ...state.documents] }));
         return copy;
@@ -149,6 +161,19 @@ export const useLabelStore = create<LabelStoreState>()(
     {
       name: 'sez-print/labels',
       storage: createJSONStorage(() => AsyncStorage),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const documents = state.documents.map(migrateDocumentBorders);
+        const cloudTemplates = state.cloudTemplates.map(migrateDocumentBorders);
+        const changed =
+          documents.some((doc, i) => doc !== state.documents[i]) ||
+          cloudTemplates.some((doc, i) => doc !== state.cloudTemplates[i]);
+        if (changed) {
+          queueMicrotask(() => {
+            useLabelStore.setState({ documents, cloudTemplates });
+          });
+        }
+      },
     },
   ),
 );

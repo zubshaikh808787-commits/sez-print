@@ -73,6 +73,7 @@ import {
   waitForNextPaint,
 } from '@/lib/printer/print-job';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
+import { createPrintSpec } from '@/lib/printer/print-spec';
 import { joshEffectiveDpi } from '@/lib/printer/josh-print';
 import * as FileSystem from 'expo-file-system/legacy';
 import { logPrintTrace } from '@/printing';
@@ -1020,7 +1021,10 @@ export default function PrintScreen() {
               assertHeadlessRasterDocument(pageDoc);
               await ensurePrintTypefaces();
               const docPrepMs = Date.now() - tPrep0;
-              const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, { threshold });
+              const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, {
+                threshold,
+                bakeTd404Feed: true,
+              });
               const bitmap = timed.result;
               const tNative0 = Date.now();
               usedNative = await manager.printMonoLabelFast({
@@ -1386,6 +1390,7 @@ export default function PrintScreen() {
                   exactWidthPx={printCaptureLayoutPx.widthPx}
                   exactHeightPx={printCaptureLayoutPx.heightPx}
                   printDpi={jobDpi}
+                  bakeTd404Feed={getPrinterManager().usesTd404CommandSet}
                   showArtboardBorder={false}
                   hideNonPrinting
                 />
@@ -1611,8 +1616,25 @@ export default function PrintScreen() {
                   onPlus={() => setGapLength((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
                   bordered
                 />
+                <Text style={{ color: '#9CA3AF', fontSize: 12, paddingTop: 8 }}>
+                  {(() => {
+                    const mgr = getPrinterManager();
+                    if (!mgr.usesTd404CommandSet) {
+                      return 'Offsets move this printer’s bitmap origin.';
+                    }
+                    const page = activeDoc;
+                    const spec = createPrintSpec({
+                      widthMm: page?.widthMm ?? 50,
+                      heightMm: page?.heightMm ?? 30,
+                      dpi: jobDpi,
+                      profile: mgr.getActivePrinterProfile(),
+                      calibration: { horizontalOffsetMm: hOffset, verticalOffsetMm: vOffset },
+                    });
+                    return `TD-404 sends BITMAP 0,0. REFERENCE is ${spec.xOffsetDots},${spec.yOffsetDots} dots. The border is placed in dots: top on row 0, left/right/bottom 24 dots in at 304 DPI. Positive offsets still move the whole print.`;
+                  })()}
+                </Text>
                 <StepperRow
-                  label="Horizontal Offset (saved for this printer)"
+                  label="Horizontal Offset (REFERENCE x, saved)"
                   value={`${hOffset.toFixed(2)} mm`}
                   minusDisabled={hOffset <= -10}
                   onMinus={() => setHOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
@@ -1620,7 +1642,7 @@ export default function PrintScreen() {
                   bordered
                 />
                 <StepperRow
-                  label="Vertical Offset (saved for this printer)"
+                  label="Vertical Offset (REFERENCE y, saved)"
                   value={`${vOffset.toFixed(2)} mm`}
                   minusDisabled={vOffset <= -10}
                   onMinus={() => setVOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
@@ -1670,7 +1692,10 @@ export default function PrintScreen() {
                   if (!doc) return;
                   const png = await captureRef(shotRef, printCaptureShotOptions);
                   if (TD404_HEADLESS_SKIA_PRINT) {
-                    const timed = rasterizeDocumentToBitmapTimed(doc, jobDpi, { threshold: 160 });
+                    const timed = rasterizeDocumentToBitmapTimed(doc, jobDpi, {
+                      threshold: 160,
+                      bakeTd404Feed: true,
+                    });
                     const result = await printTd404MonoLabel({
                       monoBytes: timed.result.mono1bppBuffer,
                       widthDots: timed.result.widthDots,

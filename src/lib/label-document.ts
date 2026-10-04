@@ -83,6 +83,8 @@ export type BorderElementState = {
   lockMovement: boolean;
   needPrinting: boolean;
   drawingColorIndex: number;
+  /** 1 = the rectangle is already the outer edge (2 mm inside the label). */
+  geometryVersion?: 1;
 };
 
 export type SignatureElementState = {

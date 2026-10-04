@@ -13,6 +13,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,6 +30,10 @@ import {
   createPrintSpec,
   mmToDots,
 } from '@/lib/printer/print-spec';
+import { defaultBorderPlacement } from '@/lib/border-geometry';
+import { createLabelDocument } from '@/lib/label-document';
+import { solveBorderAxis } from '@/lib/printer/border-calibration';
+import { rasterizeDocumentToBitmap } from '@/printing/raster/skia-rasterizer';
 import { usePrinterStore } from '@/stores/printer-store';
 import { generateCalibrationTspl, PRINTER_DPI, DOTS_PER_MM } from '@/printing/calibration';
 
@@ -143,6 +148,28 @@ function CalibrationGrid({
   );
 }
 
+function MeasureField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <View style={styles.measureField}>
+      <Text style={styles.measureLabel}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        keyboardType="decimal-pad"
+        style={styles.measureInput}
+      />
+    </View>
+  );
+}
+
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.infoRow}>
@@ -172,6 +199,14 @@ export default function CalibrationPrintScreen() {
   const [printing, setPrinting] = useState(false);
   const [selectedSizeIndex, setSelectedSizeIndex] = useState(0);
   const [lastReport, setLastReport] = useState<string | null>(null);
+  const [borderL, setBorderL] = useState('2');
+  const [borderR, setBorderR] = useState('2');
+  const [borderT, setBorderT] = useState('2');
+  const [borderB, setBorderB] = useState('2');
+  const printerDeviceId = usePrinterStore((s) => s.deviceId ?? s.lastDeviceId);
+  const printerSdkId = usePrinterStore((s) => s.sdkId);
+  const setPrintCalibration = usePrinterStore((s) => s.setPrintCalibration);
+  const calibrationKey = printerDeviceId ?? printerSdkId ?? 'unknown';
 
   const activeSize = CALIBRATION_SIZES[selectedSizeIndex] ?? CALIBRATION_SIZES[0];
   const widthMm = activeSize.widthMm;
@@ -273,6 +308,116 @@ export default function CalibrationPrintScreen() {
     }
   }, [manager, widthMm, heightMm]);
 
+  const printBorderCheck = useCallback(async () => {
+    if (!manager.usesTd404CommandSet) {
+      Alert.alert('Border check', 'Connect a TD-404. This check uses headless mono and REFERENCE.');
+      return;
+    }
+    if (!manager.isConnected) {
+      Alert.alert('Printer Not Connected', 'Connect the TD-404, then print the 2 mm border.');
+      return;
+    }
+    setPrinting(true);
+    try {
+      await manager.ensureConnected();
+      const placement = defaultBorderPlacement(50, 30);
+      const doc = createLabelDocument({
+        name: 'Border check 50x30',
+        widthMm: 50,
+        heightMm: 30,
+        paperType: 'Label',
+        elements: [
+          {
+            id: 'border-check',
+            type: 'border',
+            borderStyle: 'solid-medium',
+            lineWidth: 0.55,
+            needPrinting: true,
+            drawingColorIndex: 0,
+            ...placement,
+          },
+        ],
+      });
+      const saved = usePrinterStore.getState().printCalibration[calibrationKey];
+      const bitmap = rasterizeDocumentToBitmap(doc, dpi, { threshold: 160, bakeTd404Feed: true });
+      await manager.printMonoLabelFast({
+        monoBytes: bitmap.mono1bppBuffer,
+        widthDots: bitmap.widthDots,
+        heightDots: bitmap.heightDots,
+        bytesPerRow: bitmap.bytesPerRow,
+        widthMm: 50,
+        heightMm: 30,
+        gapMm: 3,
+        dpi,
+        hOffsetMm: saved?.hOffsetMm ?? 0,
+        vOffsetMm: saved?.vOffsetMm ?? 0,
+      });
+      const specNow = createPrintSpec({
+        widthMm: 50,
+        heightMm: 30,
+        dpi,
+        profile,
+        gapMm: 3,
+        calibration: {
+          horizontalOffsetMm: saved?.hOffsetMm ?? 0,
+          verticalOffsetMm: saved?.vOffsetMm ?? 0,
+        },
+      });
+      const summary = [
+        'Border check 50×30 sent (headless mono).',
+        `REFERENCE ${specNow.xOffsetDots},${specNow.yOffsetDots}  BITMAP 0,0`,
+        'Logcat: PRINT-INK is the border box after the TD-404 bake. Other layers are not moved.',
+        'Ruler: measure label edge to the outside of the stroke. Target 2.00 ± 0.25 mm on three labels.',
+        'If the top varies by more than 0.5 mm between labels, that is the feed, not another inset.',
+      ].join('\n');
+      setLastReport(summary);
+      Alert.alert('Border check sent', summary);
+    } catch (error) {
+      const message = formatPrintFailure(error);
+      if (message) Alert.alert('Print Failed', message);
+    } finally {
+      setPrinting(false);
+    }
+  }, [calibrationKey, dpi, manager, profile]);
+
+  const saveBorderShift = useCallback(() => {
+    const left = Number(borderL);
+    const right = Number(borderR);
+    const top = Number(borderT);
+    const bottom = Number(borderB);
+    if (![left, right, top, bottom].every((n) => Number.isFinite(n))) {
+      Alert.alert('Border check', 'Enter left, right, top, and bottom in millimetres.');
+      return;
+    }
+    const hOffsetMm = Math.round(((right - left) / 2) * 1000) / 1000;
+    const vOffsetMm = Math.round(((bottom - top) / 2) * 1000) / 1000;
+    let note = '';
+    try {
+      const vertical = solveBorderAxis({
+        nearMm: top,
+        farMm: bottom,
+        realLabelMm: 30,
+        configuredLabelMm: 30,
+      });
+      note = `Vertical fit scale ${vertical.scale.toFixed(4)} is not applied. REFERENCE only shifts.`;
+    } catch (error) {
+      note = error instanceof Error ? error.message : 'Could not fit the vertical axis.';
+    }
+    if (calibrationKey === 'unknown') {
+      Alert.alert('Border check', 'Connect the printer before saving an offset.');
+      return;
+    }
+    setPrintCalibration(calibrationKey, { hOffsetMm, vOffsetMm });
+    const summary = [
+      `Saved REFERENCE fine-tune h ${hOffsetMm.toFixed(3)} mm, v ${vOffsetMm.toFixed(3)} mm.`,
+      'Positive vertical moves the print down. The 1 mm horizontal media origin stays on top of h. The border bake is separate.',
+      note,
+      'Reprint the border check and measure three labels. Stop if the top jumps by more than 0.5 mm.',
+    ].join('\n');
+    setLastReport(summary);
+    Alert.alert('Border offset saved', summary);
+  }, [borderB, borderL, borderR, borderT, calibrationKey, setPrintCalibration]);
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.two }]}>
@@ -335,7 +480,33 @@ export default function CalibrationPrintScreen() {
           <InfoRow label="Label Size" value={`${widthMm}\u00d7${heightMm}mm`} />
           <InfoRow label="Label Dots" value={`${spec.widthDots}\u00d7${spec.heightDots}`} />
           <InfoRow label="Raster Width" value={`${spec.rasterWidthDots} dots (${spec.bytesPerRow} bytes/row)`} />
-          <InfoRow label="BITMAP Offset" value={`x=${spec.xOffsetDots}, y=${spec.yOffsetDots}`} />
+          <InfoRow label="REFERENCE (no user offset)" value={`${spec.xOffsetDots},${spec.yOffsetDots}`} />
+          <InfoRow label="BITMAP" value="0,0" />
+        </View>
+
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>2 mm border check</Text>
+          <Text style={styles.helpText}>
+            Prints a 50×30 border with the TD-404 correction baked into that border only. Set the Print screen offsets to 0 first, then measure from each die-cut edge to the outside of the stroke. Saving stores a REFERENCE fine-tune on top of the 1 mm media origin.
+          </Text>
+          <Pressable
+            disabled={printing}
+            onPress={() => void printBorderCheck()}
+            style={({ pressed }) => [styles.printBtn, pressed && styles.pressed]}>
+            <Text style={styles.printBtnText}>Print 2 mm border 50×30</Text>
+          </Pressable>
+          <View style={styles.measureRow}>
+            <MeasureField label="Left" value={borderL} onChange={setBorderL} />
+            <MeasureField label="Right" value={borderR} onChange={setBorderR} />
+            <MeasureField label="Top" value={borderT} onChange={setBorderT} />
+            <MeasureField label="Bottom" value={borderB} onChange={setBorderB} />
+          </View>
+          <Pressable
+            disabled={printing}
+            onPress={saveBorderShift}
+            style={({ pressed }) => [styles.printBtn, { marginTop: 8 }, pressed && styles.pressed]}>
+            <Text style={styles.printBtnText}>Save REFERENCE shift for this printer</Text>
+          </Pressable>
         </View>
 
         {lastReport ? (
@@ -549,6 +720,22 @@ const styles = StyleSheet.create({
     color: '#111827',
     lineHeight: 18,
     fontVariant: ['tabular-nums'],
+  },
+  measureRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  measureField: { width: '47%' },
+  measureLabel: { color: '#6B7280', fontSize: 12, marginBottom: 4 },
+  measureInput: {
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    color: '#111827',
   },
   helpText: {
     fontSize: 13,

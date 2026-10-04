@@ -1,4 +1,5 @@
 import { DEFAULT_TIME_STATE, TIME_DISPLAY_SAMPLE } from '@/components/editor/types';
+import { insetBorderBox } from '@/lib/border-geometry';
 import { elementSizeMm, mmToPt, ptToMm, textBlockHeightMm, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { isRatTailGeometry, ratTailBodyRectMm, scaleMediaGeometry } from '@/lib/media-geometry';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
@@ -582,18 +583,17 @@ function scaleElementFields(
  */
 function scaleBorderElement(
   el: LabelElement & { type: 'border' },
-  left: number,
-  top: number,
+  _left: number,
+  _top: number,
   width: number,
   height: number,
   fontScale: number,
 ): LabelElement {
+  const pinned = insetBorderBox(0, 0, width, height, width, height);
   return {
     ...el,
-    left,
-    top,
-    width,
-    height,
+    ...pinned,
+    geometryVersion: 1,
     rotation: 0 as const,
     lockMovement: true,
     lineWidth: Math.max(0.1, el.lineWidth * fontScale),
@@ -704,12 +704,6 @@ export function fitDocumentCenteredOnPage(
   const oy = (heightMm - contentH) / 2;
   const nextDoc = { ...doc, widthMm, heightMm };
   const elements = doc.elements.map((el) => {
-    if (el.type === 'border') {
-      return clampElementToLabel(
-        scaleBorderElement(el, ox, oy, contentW, contentH, scale),
-        nextDoc,
-      );
-    }
     const scaled = scaleElementFields(el, scale, scale, scale, contentW, contentH);
     scaled.left = ox + scaled.left;
     scaled.top = oy + scaled.top;

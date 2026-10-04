@@ -7,7 +7,7 @@ import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelDocument } from '@/lib/label-document';
 import { fitLabelSize, mediaShapeClipStyle } from '@/lib/label-geometry';
-import { dotsPerMm, rectMmToDots } from '@/lib/printer/print-spec';
+import { dotsPerMm, rectMmToDots, td404BorderOuterDots } from '@/lib/printer/print-spec';
 import { canvasFillFromDocument, sortLayers, templateUsesDieCutBackground } from '@/lib/template-schema';
 
 /** Workspace chrome around the artboard — not part of template content. */
@@ -146,6 +146,8 @@ type LabelPreviewProps = {
   showArtboardBorder?: boolean;
   /** Omit elements with needPrinting === false (print capture only). */
   hideNonPrinting?: boolean;
+  /** TD-404 capture only. Same border and feed cancel as the headless raster. */
+  bakeTd404Feed?: boolean;
 };
 
 function LabelElements({
@@ -153,11 +155,13 @@ function LabelElements({
   scale,
   hideNonPrinting = false,
   printDpi,
+  bakeTd404Feed = false,
 }: {
   document: LabelDocument;
   scale: number;
   hideNonPrinting?: boolean;
   printDpi?: number;
+  bakeTd404Feed?: boolean;
 }) {
   const dpm = printDpi != null ? dotsPerMm(printDpi) : null;
   return (
@@ -177,12 +181,26 @@ function LabelElements({
         let widthDots: number | undefined;
         let heightDots: number | undefined;
         let contentScale = scale;
+        const strokeFromOuterEdge = element.type === 'border' && element.geometryVersion === 1;
         if (printDpi != null && dpm != null) {
           // Style sizes are DIP. Android View.getWidth() is physical pixels
           // (DIP × density). The capture view is sized at dots/density so the
           // snapshot is 1 physical pixel per printer dot — no later scale.
           const density = PixelRatio.get() || 1;
-          const box = rectMmToDots(element.left, element.top, size.width, size.height, printDpi);
+          const pageW = Math.round(document.widthMm * dpm);
+          const pageH = Math.round(document.heightMm * dpm);
+          const outer =
+            bakeTd404Feed && element.type === 'border'
+              ? td404BorderOuterDots(pageW, pageH, printDpi)
+              : null;
+          const box = outer
+            ? {
+                x0: outer.x0,
+                y0: outer.y0,
+                widthDots: outer.x1 - outer.x0,
+                heightDots: outer.y1 - outer.y0,
+              }
+            : rectMmToDots(element.left, element.top, size.width, size.height, printDpi);
           leftPx = box.x0 / density;
           topPx = box.y0 / density;
           widthPx = Math.max(1 / density, box.widthDots / density);
@@ -229,6 +247,7 @@ function LabelElements({
               forPrint={printDpi != null}
               printDpi={printDpi}
               mediaShape={document.mediaShape}
+              strokeFromOuterEdge={strokeFromOuterEdge}
             />
           </View>
         );
@@ -255,6 +274,7 @@ function LabelCanvas({
   showBorder = true,
   hideNonPrinting = false,
   printDpi,
+  bakeTd404Feed = false,
 }: {
   document: LabelDocument;
   fitted: { widthPx: number; heightPx: number; scale: number };
@@ -262,6 +282,7 @@ function LabelCanvas({
   showBorder?: boolean;
   hideNonPrinting?: boolean;
   printDpi?: number;
+  bakeTd404Feed?: boolean;
 }) {
   return (
     <ArtboardFrame
@@ -295,6 +316,7 @@ function LabelCanvas({
             scale={fitted.scale}
             hideNonPrinting={hideNonPrinting}
             printDpi={printDpi}
+            bakeTd404Feed={bakeTd404Feed}
           />
         </>
       ) : null}
@@ -382,6 +404,7 @@ export function LabelPreview({
   style,
   showArtboardBorder = true,
   hideNonPrinting = false,
+  bakeTd404Feed = false,
 }: LabelPreviewProps) {
   const [stageWidth, setStageWidth] = useState(0);
 
@@ -420,6 +443,7 @@ export function LabelPreview({
           showBorder={showArtboardBorder}
           hideNonPrinting={hideNonPrinting}
           printDpi={printDpi}
+          bakeTd404Feed={bakeTd404Feed}
         />
       </View>
     );

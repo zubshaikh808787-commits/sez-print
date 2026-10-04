@@ -7,6 +7,8 @@
 
 import { fillEllipse, fillRect, makeDotSurface, strokeRect, type DotSurface } from './dot-surface';
 
+export type RasterSurfaceBackend = 'skia' | 'dot-buffer';
+
 export type TextDrawRecord = {
   text: string;
   x: number;
@@ -407,7 +409,7 @@ export function makeOffscreenSurface(
   }
   const skiaMod = loadSkiaModule();
   const makeOffscreen = skiaMod?.Skia?.Surface?.MakeOffscreen;
-  if (typeof makeOffscreen === 'function' && backend !== 'dot-buffer') {
+  if (typeof makeOffscreen === 'function') {
     try {
       return makeSkiaRasterSurface(widthDots, heightDots, skiaMod!);
     } catch {

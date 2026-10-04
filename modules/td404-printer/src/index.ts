@@ -49,6 +49,13 @@ export type Td404MonoLabelResult = {
   writeMs?: number;
   path?: string;
   dryRun?: boolean;
+  reference?: string;
+  bitmapX?: number;
+  bitmapY?: number;
+  marginL?: number;
+  marginR?: number;
+  marginT?: number;
+  marginB?: number;
   jobBase64?: string;
   wireBmpBase64?: string;
   bytesPerRow?: number;

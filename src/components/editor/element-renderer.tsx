@@ -107,6 +107,8 @@ type ContentProps = {
   printDpi?: number;
   /** Host label media — circular borders draw as rings. */
   mediaShape?: string | null;
+  /** Tagged border: the element box is already the outer edge. */
+  strokeFromOuterEdge?: boolean;
   selectedTableCell?: { row: number; col: number } | null;
   tableSelectionColor?: string;
 };
@@ -1032,6 +1034,7 @@ export function ElementContentView({
   forPrint,
   printDpi,
   mediaShape,
+  strokeFromOuterEdge,
   selectedTableCell,
   tableSelectionColor,
 }: ContentProps) {
@@ -1130,6 +1133,7 @@ export function ElementContentView({
     }
     case 'border': {
       const circular = mediaShape === 'circle' || mediaShape === 'ellipse';
+      const tagged = strokeFromOuterEdge === true || element.geometryVersion === 1;
       if (forPrint && printDpi != null) {
         return (
           <View style={[styles.fill, { overflow: 'hidden' }]}>
@@ -1144,6 +1148,22 @@ export function ElementContentView({
               heightDots={heightDots}
               forPrint
               printDpi={printDpi}
+              strokeFromOuterEdge={tagged}
+            />
+          </View>
+        );
+      }
+      if (tagged) {
+        return (
+          <View style={styles.fillVisible}>
+            <BorderPreview
+              styleId={element.borderStyle}
+              scale={scale}
+              lineWidthMm={element.lineWidth || 0.55}
+              circular={circular}
+              widthPx={widthPx}
+              heightPx={heightPx}
+              strokeFromOuterEdge
             />
           </View>
         );

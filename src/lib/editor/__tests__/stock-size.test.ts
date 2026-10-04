@@ -74,10 +74,11 @@ test('scale path still pins a full-bleed border to the new stock', () => {
   const source = doc(50, 30, [borderEl(50, 30)]);
   const next = scaleDocumentToSize(source, 80, 20);
   const border = next.elements.find((el) => el.id === 'border')!;
-  assert.equal(border.left, 0);
-  assert.equal(border.top, 0);
-  assert.equal(border.width, 80);
-  assert.equal(border.height, 20);
+  assert.equal(border.left, 2);
+  assert.equal(border.top, 2);
+  assert.equal(border.width, 76);
+  assert.equal(border.height, 16);
+  assert.equal(border.type === 'border' ? border.geometryVersion : 0, 1);
 });
 
 test('keep-as-is repositions inactive ups panels', () => {

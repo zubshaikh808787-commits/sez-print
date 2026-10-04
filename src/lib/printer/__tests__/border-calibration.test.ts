@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { makeDotSurface, fillRect, strokeRect } from '@/printing/raster/dot-surface';
 import { drawPrintBorder } from '@/printing/raster/print-border';
 import { PRINT_BORDER_INSET_MM } from '@/printing/raster/border-frame';
-import { createPrintSpec, dotsPerMm, mmToDots, PRINTER_PROFILES, TD404_MEDIA_ORIGIN_H_MM } from '@/lib/printer/print-spec';
+import {
+  createPrintSpec,
+  dotsPerMm,
+  mmToDots,
+  PRINTER_PROFILES,
+  TD404_MEDIA_ORIGIN_H_MM,
+} from '@/lib/printer/print-spec';
 import {
   borderExceedsBitmap,
   borderOuterDots,
@@ -21,6 +27,9 @@ function margins(
   heightMm: number,
   element = fullBleedBorderElement(widthMm, heightMm),
   extraBottomInsetMm = 0,
+  bakeFeed = false,
+  labelWidthMm?: number,
+  labelHeightMm?: number,
 ) {
   const dpm = dotsPerMm(dpi);
   const sizeW = Math.round(widthMm * dpm);
@@ -35,7 +44,12 @@ function margins(
     element,
     dpi,
     1,
-    { extraBottomInsetMm },
+    {
+      extraBottomInsetMm,
+      bakeFeed,
+      bitmapWidthDots: bakeFeed ? packedW : undefined,
+      bitmapHeightDots: bakeFeed ? sizeH : undefined,
+    },
   );
   let minX = packedW;
   let maxX = -1;
@@ -194,5 +208,39 @@ assert.ok(Math.abs(torn.T - insetDots) <= 1, `tear top ${torn.T}`);
 assert.ok(Math.abs(torn.B - (insetDots + tearDots)) <= 1, `tear bottom ${torn.B}, expected ${insetDots + tearDots}`);
 const tornFull = margins(50, 30, fullBleedBorderElement(50, 30), 1);
 assert.ok(Math.abs(tornFull.T - insetDots) <= 1 && Math.abs(tornFull.B - (insetDots + tearDots)) <= 1, `full-bleed tear T${tornFull.T} B${tornFull.B}`);
+
+const sideDots = mmToDots(2, dpi);
+for (const [widthMm, heightMm] of [
+  [50, 50],
+  [40, 40],
+  [30, 30],
+  [50, 75],
+  [50, 25],
+  [40, 30],
+  [75, 50],
+  [80, 20],
+  [100, 150],
+] as const) {
+  const baked = margins(
+    widthMm,
+    heightMm,
+    {
+      ...fullBleedBorderElement(widthMm, heightMm),
+      left: 2,
+      top: 2,
+      width: widthMm - 4,
+      height: heightMm - 4,
+      geometryVersion: 1,
+    },
+    0,
+    true,
+    widthMm,
+    heightMm,
+  );
+  assert.ok(Math.abs(baked.L - sideDots) <= 1, `baked ${widthMm}x${heightMm} left ${baked.L}`);
+  assert.ok(Math.abs(baked.R - sideDots) <= 1, `baked ${widthMm}x${heightMm} right ${baked.R}`);
+  assert.ok(baked.T <= 1, `baked ${widthMm}x${heightMm} top ${baked.T}`);
+  assert.ok(Math.abs(baked.B - sideDots) <= 1, `baked ${widthMm}x${heightMm} bottom ${baked.B}`);
+}
 
 console.log('ok border-calibration');

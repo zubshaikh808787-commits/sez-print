@@ -44,6 +44,8 @@ export type RasterizeOptions = {
   backend?: RasterSurfaceBackend;
   /** Ground-truth only. Default 1. Packs/draws at N× then caller downscales. */
   dotScale?: number;
+  /** TD-404 production print. Place the border and cancel the −1 mm feed on other layers. */
+  bakeTd404Feed?: boolean;
 }
 
 export type RasterBitmap = {
@@ -143,6 +145,7 @@ export type RasterizeTiming = {
 
 let encodeAccumMs = 0;
 let activeDotScale = 1;
+let activeBakeFeed = false;
 
 function dots(mm: number, dpi: number): number {
   return mmToDots(mm, dpi) * activeDotScale;
@@ -174,7 +177,13 @@ function placementBox(el: LabelElement, dpi: number): DotBox {
   };
 }
 
-function drawDocumentToSurface(doc: LabelDocument, dpi: number, surface: RasterSurface): void {
+function drawDocumentToSurface(
+  doc: LabelDocument,
+  dpi: number,
+  surface: RasterSurface,
+  bitmapWidthDots: number,
+  bitmapHeightDots: number,
+): void {
   const dpm = dpmScaled(dpi);
   for (const el of sortLayers(doc.elements)) {
     if (el.needPrinting === false || el.visible === false) continue;
@@ -194,7 +203,11 @@ function drawDocumentToSurface(doc: LabelDocument, dpi: number, surface: RasterS
           drawQr(surface, el, dpi, box);
           break;
         case 'border':
-          drawBorder(surface, el, dpi, dpm);
+          drawPrintBorder(surface, el, dpi, activeDotScale, {
+            bitmapWidthDots,
+            bitmapHeightDots,
+            bakeFeed: activeBakeFeed,
+          });
           break;
         case 'line':
           drawLine(surface, el, dpm, box);
@@ -234,6 +247,7 @@ export function rasterizeDocumentToBitmapTimed(
   const { packedW, packedH } = packedPageDots(doc.widthMm, doc.heightMm, dpi);
   const threshold = options.threshold ?? 160;
   activeDotScale = Math.max(1, Math.round(options.dotScale ?? 1));
+  activeBakeFeed = options.bakeTd404Feed === true;
   resetTextDrawLog();
   const surfW = packedW * activeDotScale;
   const surfH = packedH * activeDotScale;
@@ -244,7 +258,7 @@ export function rasterizeDocumentToBitmapTimed(
   const allocMs = performance.now() - tAlloc0;
 
   const tDraw0 = performance.now();
-  drawDocumentToSurface(doc, dpi, surface);
+  drawDocumentToSurface(doc, dpi, surface, packedW, packedH);
   const drawWallMs = performance.now() - tDraw0;
   const encodeMs = encodeAccumMs;
   const drawMs = Math.max(0, drawWallMs - encodeMs);
@@ -500,15 +514,6 @@ function drawQr(
   }
 
   throw new Error(`Unsupported 2D encode mode: ${el.encodeMode}`);
-}
-
-function drawBorder(
-  surface: RasterSurface,
-  el: Extract<LabelElement, { type: 'border' }>,
-  dpi: number,
-  _dpm: number,
-): void {
-  drawPrintBorder(surface, el, dpi, activeDotScale);
 }
 
 function drawLine(

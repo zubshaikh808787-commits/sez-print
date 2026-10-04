@@ -26,6 +26,7 @@ import {
 import { IosAlertInput, IosAlertModal } from '@/components/ui/ios-alert-modal';
 import { editorBridge } from '@/constants/editor-bridge';
 import { DRAWING_COLORS } from '@/components/editor/types';
+import { defaultBorderPlacement } from '@/lib/border-geometry';
 import { generateId, parseOrientation, type LabelDocument, type LabelOrientation, type PaperType } from '@/lib/label-document';
 import { clampLabelMm } from '@/lib/label-geometry';
 import {
@@ -105,12 +106,7 @@ export default function LabelSettingsScreen() {
                 type: 'border' as const,
                 borderStyle,
                 lineWidth: 0.55,
-                rotation: 0 as const,
-                left: 0,
-                top: 0,
-                width: doc.widthMm,
-                height: doc.heightMm,
-                lockMovement: true,
+                ...defaultBorderPlacement(doc.widthMm, doc.heightMm),
                 needPrinting: true,
                 drawingColorIndex: settingsNow.defaultDrawingColorIndex,
               },

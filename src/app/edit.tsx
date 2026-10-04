@@ -49,6 +49,7 @@ import {
   normalizeDocumentElements,
   scaleDocumentToSize,
 } from '@/lib/element-sizing';
+import { defaultBorderPlacement } from '@/lib/border-geometry';
 import { labelOverlapRegionsMm, overlapBannerPositionsPx } from '@/lib/editor/safe-mode';
 import { clampToLabelBounds, fitFontSizeToLabel } from '@/lib/editor/label-bounds';
 import { GridSpacingPopover } from '@/components/editor/grid-spacing-popover';
@@ -1800,23 +1801,20 @@ export default function EditScreen() {
           };
           break;
         }
-        case 'border':
+        case 'border': {
+          const placement = defaultBorderPlacement(maxW, maxH);
           element = {
             id: base.id,
             type: 'border',
             borderStyle: 'solid-medium',
             lineWidth: 0.55,
-            rotation: 0,
-            left: 0,
-            top: 0,
-            width: maxW,
-            height: maxH,
-            lockMovement: true,
+            ...placement,
             needPrinting: true,
             drawingColorIndex: 0,
             ...overrides,
           };
           break;
+        }
         case 'signature': {
           const fit = fitShapeDefaults(maxW, maxH, elements);
           element = {

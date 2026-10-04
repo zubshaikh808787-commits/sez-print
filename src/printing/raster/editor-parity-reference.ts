@@ -158,6 +158,8 @@ export function rasterizeEditorParityReference(doc: LabelDocument, dpi: number):
           },
           el,
           dpi,
+          1,
+          { bitmapWidthDots: packedW, bitmapHeightDots: packedH },
         );
         break;
       default:

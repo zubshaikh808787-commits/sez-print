@@ -113,6 +113,28 @@ export function mediaOriginXMm(profile: PrinterProfile): number {
   return profile.id.startsWith('td404') ? TD404_MEDIA_ORIGIN_H_MM : 0;
 }
 
+/**
+ * Outer edge of a TD-404 border, in printer dots, measured from the packed bitmap.
+ * 2 mm is `dotsPerMm * 2` (24 dots at 304). Top is row 0: a 24-dot top inset
+ * was printing about 4 mm down, and the stroke cannot sit above the bitmap.
+ * Bottom stays 24 dots up so the stroke cannot fall off the label.
+ */
+export function td404BorderOuterDots(
+  widthDots: number,
+  heightDots: number,
+  dpi: number,
+): { x0: number; y0: number; x1: number; y1: number } {
+  const side = dotsPerMm(dpi) * 2;
+  const x0 = side;
+  const y0 = 0;
+  return {
+    x0,
+    y0,
+    x1: Math.max(x0 + 1, widthDots - side),
+    y1: Math.max(y0 + 1, heightDots - side),
+  };
+}
+
 /** Keep millimetres to 0.01. Never integer-round a typed size. */
 export function quantizeMm(mm: number): number {
   if (!Number.isFinite(mm)) return 0.1;
@@ -315,8 +337,8 @@ export type CreatePrintSpecOptions = {
  * hardware sensor calibration (GAP / BLINE / REFERENCE 0,0) to establish
  * the label's origin at the top-left of the media.
  * Injecting an artificial printhead offset shifts the image off the physical label.
- * Hardware centering is 0. TD-404 adds TD404_MEDIA_ORIGIN_H_MM so canvas 0 mm
- * is the die-cut, not the liner side edge. User H offset fine-tunes REFERENCE x.
+ * Hardware centering is 0. TD-404 adds TD404_MEDIA_ORIGIN_H_MM on REFERENCE x.
+ * REFERENCE y is the user vertical offset only. The border inset is in dots.
  */
 export function computePrintheadCenteringOffset(
   _labelWidthDots: number,

@@ -117,20 +117,42 @@ function cornerBracketBands(
  * Frame ink in printer dots inside a full-bleed box (0,0 = label top-left).
  * Outer edge of the stroke sits `borderInsetDots` from each label edge.
  */
+export type FrameInsets = { left: number; right: number; top: number; bottom: number };
+
+/**
+ * Insets for one border element. geometryVersion 1 already stores the 2 mm
+ * margin in the rectangle, so the stroke inset is 0. Untagged borders inset
+ * 2 mm at draw time. extraBottomInsetMm is off in production (0).
+ */
+export function borderFrameInsetsForElement(
+  el: { geometryVersion?: 1 },
+  dpi: number,
+  extraBottomInsetMm = 0,
+): FrameInsets {
+  const base = el.geometryVersion === 1 ? 0 : borderInsetDots(dpi);
+  const extra = Math.max(0, mmToDots(extraBottomInsetMm, dpi));
+  return { left: base, right: base, top: base, bottom: base + extra };
+}
+
 export function inwardFrameBandsInBox(
   boxWidthDots: number,
   boxHeightDots: number,
   dpi: number,
   lineWidthMm: number | undefined,
   styleId: BorderStyleId,
+  insets?: FrameInsets,
 ): FrameBand[] {
-  const inset = borderInsetDots(dpi);
+  const fallbackInset = borderInsetDots(dpi);
+  const left = insets?.left ?? fallbackInset;
+  const right = insets?.right ?? fallbackInset;
+  const top = insets?.top ?? fallbackInset;
+  const bottom = insets?.bottom ?? fallbackInset;
   const fallback = borderStrokeFallbackMm(styleId);
   const stroke = borderStrokeDots(lineWidthMm, dpi, fallback);
-  const ix = inset;
-  const iy = inset;
-  const iw = Math.max(1, boxWidthDots - inset * 2);
-  const ih = Math.max(1, boxHeightDots - inset * 2);
+  const ix = left;
+  const iy = top;
+  const iw = Math.max(1, boxWidthDots - left - right);
+  const ih = Math.max(1, boxHeightDots - top - bottom);
 
   if (styleId === 'dashed' || styleId === 'dotted') {
     return dashedFrameBands(ix, iy, iw, ih, stroke, styleId === 'dotted');
@@ -184,14 +206,19 @@ export function drawInwardFrameInBox(
   styleId: BorderStyleId,
   originX = 0,
   originY = 0,
+  insets?: FrameInsets,
 ): void {
-  const inset = borderInsetDots(dpi);
+  const fallbackInset = borderInsetDots(dpi);
+  const left = insets?.left ?? fallbackInset;
+  const right = insets?.right ?? fallbackInset;
+  const top = insets?.top ?? fallbackInset;
+  const bottom = insets?.bottom ?? fallbackInset;
   const fallback = borderStrokeFallbackMm(styleId);
   const stroke = borderStrokeDots(lineWidthMm, dpi, fallback);
-  const ix = originX + inset;
-  const iy = originY + inset;
-  const iw = Math.max(1, boxWidthDots - inset * 2);
-  const ih = Math.max(1, boxHeightDots - inset * 2);
+  const ix = originX + left;
+  const iy = originY + top;
+  const iw = Math.max(1, boxWidthDots - left - right);
+  const ih = Math.max(1, boxHeightDots - top - bottom);
 
   if (styleId === 'double' || styleId === 'label-frame') {
     if (target.strokeRect) {
@@ -219,7 +246,7 @@ export function drawInwardFrameInBox(
     return;
   }
 
-  const bands = inwardFrameBandsInBox(boxWidthDots, boxHeightDots, dpi, lineWidthMm, styleId);
+  const bands = inwardFrameBandsInBox(boxWidthDots, boxHeightDots, dpi, lineWidthMm, styleId, insets);
   for (const band of bands) {
     target.fillRect(originX + band.left, originY + band.top, band.width, band.height, 0);
   }
