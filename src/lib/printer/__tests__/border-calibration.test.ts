@@ -128,14 +128,14 @@ assert.equal(spec.xOffsetDots, mmToDots(TD404_MEDIA_ORIGIN_H_MM, dpi));
 assert.equal(spec.yOffsetDots, 0);
 assert.equal(spec.gapMm, 3);
 
-const cancelled = createPrintSpec({
+const plusOne = createPrintSpec({
   widthMm: 50,
   heightMm: 30,
   dpi,
   profile: PRINTER_PROFILES['td404-304'],
   calibration: { horizontalOffsetMm: 1, verticalOffsetMm: 0 },
 });
-assert.equal(cancelled.xOffsetDots, 0, 'user +1 mm cancels the 1 mm media origin');
+assert.equal(plusOne.xOffsetDots, mmToDots(TD404_MEDIA_ORIGIN_H_MM + 1, dpi));
 
 const retired = migrateCalibrationEntry({ hOffsetMm: 1, vOffsetMm: 0.5 });
 assert.equal(retired.entry.hOffsetMm, 0);

@@ -103,11 +103,11 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
 export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-304'];
 
 /**
- * TD-404 / Ninestar 4" head: printhead column 0 sits ~1 mm inboard of the
- * die-cut left edge. Canvas 0 mm is the sticker edge, so a job at REFERENCE 0,0
- * starts and ends 1 mm late on paper. This is applied on top of user H offset.
+ * TD-404 firmware origin is the liner / side edge, not the die-cut.
+ * The sticker starts ~1 mm inboard. Canvas 0 mm is the die-cut, so REFERENCE
+ * x is shifted +1 mm (on top of user H offset). BITMAP stays 0,0.
  */
-export const TD404_MEDIA_ORIGIN_H_MM = -1;
+export const TD404_MEDIA_ORIGIN_H_MM = 1;
 
 export function mediaOriginXMm(profile: PrinterProfile): number {
   return profile.id.startsWith('td404') ? TD404_MEDIA_ORIGIN_H_MM : 0;
@@ -315,8 +315,8 @@ export type CreatePrintSpecOptions = {
  * hardware sensor calibration (GAP / BLINE / REFERENCE 0,0) to establish
  * the label's origin at the top-left of the media.
  * Injecting an artificial printhead offset shifts the image off the physical label.
- * Hardware centering is 0. TD-404 still applies TD404_MEDIA_ORIGIN_H_MM so
- * BITMAP column 0 meets the die-cut edge; user H offset is extra fine-tuning.
+ * Hardware centering is 0. TD-404 adds TD404_MEDIA_ORIGIN_H_MM so canvas 0 mm
+ * is the die-cut, not the liner side edge. User H offset fine-tunes REFERENCE x.
  */
 export function computePrintheadCenteringOffset(
   _labelWidthDots: number,
@@ -344,9 +344,9 @@ export function createPrintSpec(options: CreatePrintSpecOptions): PrintSpec {
   const rasterWidthDots = layout.bitmapDotsW;
   const bytesPerRow = layout.bytesPerRow;
 
-  // SIZE origin is firmware top-left. Pack-down leftover is cropped on the right.
-  // TD-404 X is printhead column 0, ~1 mm inboard of the die-cut; pull it back
-  // with REFERENCE (negative allowed). Never bake that shift into the bitmap.
+  // SIZE origin is firmware top-left (liner). Pack-down leftover is cropped on the right.
+  // TD-404 die-cut is ~1 mm inboard of the side edge — REFERENCE x includes that.
+  // Never bake the shift into the bitmap.
   const forceLeft = options.calibration?.forceLeftAligned === true;
   const centeringProfile = forceLeft ? { ...profile, alignment: 'left' as PrinterAlignment } : profile;
   const centeringOffsetDots = computePrintheadCenteringOffset(widthDots, centeringProfile);
