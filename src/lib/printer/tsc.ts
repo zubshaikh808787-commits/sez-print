@@ -59,6 +59,7 @@ function mediaCommand(media: TscJobOptions['media'], gapMm: number): string {
  *
  * DIRECTION 0,0 keeps the same top-left origin as the editor preview so
  * alignment matches on-screen layout (DIRECTION 1 flips print vs preview).
+ * Calibration is REFERENCE (signed dots). BITMAP stays 0,0 so negatives do not clip.
  */
 export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): Uint8Array {
   const gap = options.gapMm ?? 2;
@@ -71,11 +72,12 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
   const sizeCmd = formatTsplSizeCommand(options.widthMm, options.heightMm);
   const mediaCmd = mediaCommand(options.media ?? 'gap', gap);
 
-  const bitmapCmd = `BITMAP ${x},${y},${bitmap.bytesPerRow},${bitmap.height},0`;
+  const bitmapCmd = `BITMAP 0,0,${bitmap.bytesPerRow},${bitmap.height},0`;
   console.info(
     '[tsc] TSPL job:',
     sizeCmd, '|',
     mediaCmd.trim(), '|',
+    `REFERENCE ${x},${y}`, '|',
     bitmapCmd, '|',
     'SPEED', speed, '| DENSITY', density, '|',
     'payload:', bitmap.data.length, 'bytes',
@@ -90,9 +92,10 @@ export function encodeTscBitmapJob(bitmap: BitRaster, options: TscJobOptions): U
     `SPEED ${speed}\r\n` +
     `DENSITY ${density}\r\n` +
     'DIRECTION 0,0\r\n' +
-    'REFERENCE 0,0\r\n' +
+    'OFFSET 0 mm\r\n' +
+    `REFERENCE ${x},${y}\r\n` +
     'CLS\r\n' +
-    `BITMAP ${x},${y},${bitmap.bytesPerRow},${bitmap.height},0,`;
+    `BITMAP 0,0,${bitmap.bytesPerRow},${bitmap.height},0,`;
 
   const footer = '\r\nPRINT 1\r\n';
 

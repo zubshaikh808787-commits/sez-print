@@ -485,8 +485,6 @@ export default function PrintScreen() {
     setGapLength(settings.gapLengthMm);
     setDarkness(settings.printDarkness);
     setSpeed(settings.printSpeed);
-    setHOffset(settings.hOffsetMm);
-    setVOffset(settings.vOffsetMm);
     setOrientation(`${sourceDocument.orientation}°` as (typeof ORIENTATIONS)[number]);
     setPaperType(sourceDocument.paperType);
   }, [sourceDocument]);
@@ -793,16 +791,6 @@ export default function PrintScreen() {
           timer.end('pageWaitForPaint');
         }
 
-        // Negative TD-404 calibration used to bake into PNG pixels and clip the
-        // left/top edge off the bitmap (missing border verticals). Clamp at 0.
-        const td404HOffset = Math.max(0, hOffset);
-        const td404VOffset = Math.max(0, vOffset);
-        if (manager.usesTd404CommandSet && (td404HOffset !== hOffset || td404VOffset !== vOffset)) {
-          console.warn(
-            `[print] TD-404 clamped negative calibration h ${hOffset}→${td404HOffset}mm v ${vOffset}→${td404VOffset}mm`,
-          );
-        }
-
         const pageDoc = displayDocument ?? previewDocument;
         const td404HeadlessMono =
           manager.usesTd404CommandSet &&
@@ -1046,8 +1034,8 @@ export default function PrintScreen() {
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: td404VOffset,
-                hOffsetMm: td404HOffset,
+                vOffsetMm: vOffset,
+                hOffsetMm: hOffset,
                 media: wantsBline ? 'bline' : media,
                 dpi: jobDpi,
               });
@@ -1096,8 +1084,8 @@ export default function PrintScreen() {
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: td404VOffset,
-                hOffsetMm: td404HOffset,
+                vOffsetMm: vOffset,
+                hOffsetMm: hOffset,
                 media: wantsBline ? 'bline' : media,
                 orientation: 0,
                 dpi: jobDpi,
@@ -1166,8 +1154,8 @@ export default function PrintScreen() {
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: td404VOffset,
-                hOffsetMm: td404HOffset,
+                vOffsetMm: vOffset,
+                hOffsetMm: hOffset,
                 media: wantsBline ? 'bline' : media,
                 orientation: 0,
                 dpi: jobDpi,

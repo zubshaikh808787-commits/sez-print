@@ -827,16 +827,14 @@ export function reviewHeader(
   const centeringDots = computePrintheadCenteringOffset(spec.widthDots, spec.profile);
   const crop = spec.widthDots - spec.rasterWidthDots;
   const gap = `${gapMm.toFixed(2)}`;
-  const bitmapX = spec.xOffsetDots < 0 || spec.yOffsetDots < 0 ? 0 : spec.xOffsetDots;
-  const bitmapY = spec.xOffsetDots < 0 || spec.yOffsetDots < 0 ? 0 : spec.yOffsetDots;
   const header = [
     `SIZE ${widthMm.toFixed(2)} mm,${heightMm.toFixed(2)} mm`,
     `GAP ${gap} mm,0 mm`,
     'DIRECTION 1',
     'SET TEAR ON',
     'OFFSET 0 mm',
-    'REFERENCE 0,0',
-    `BITMAP ${bitmapX},${bitmapY},${spec.bytesPerRow},${spec.heightDots},0`,
+    `REFERENCE ${spec.xOffsetDots},${spec.yOffsetDots}`,
+    `BITMAP 0,0,${spec.bytesPerRow},${spec.heightDots},0`,
     `xDots=${spec.xOffsetDots} yDots=${spec.yOffsetDots}`,
     `stored hOffsetMm=${hOffsetMm} vOffsetMm=${vOffsetMm}`,
     `alignment centering=${centeringDots}`,
@@ -844,10 +842,10 @@ export function reviewHeader(
   ];
   const negativeMono =
     spec.xOffsetDots < 0 || spec.yOffsetDots < 0
-      ? 'mono throws: printMonoLabel cannot bake negative offsets. PNG bakes the shift into the bitmap and BITMAP stays 0,0.'
-      : 'offsets are non-negative, so BITMAP x,y equal xDots,yDots on both paths.';
+      ? 'negative origin is REFERENCE, not BITMAP. Payload columns stay intact.'
+      : 'offsets are non-negative; REFERENCE x,y equal xDots,yDots and BITMAP stays 0,0.';
   const positiveShift =
-    'A positive offset moves BITMAP x,y. Ink inside the bitmap does not move, so margins in the payload stay put and the paper shifts by that many dots.';
+    'H/V offset moves REFERENCE. Ink inside the bitmap does not move; the paper origin shifts by that many dots.';
   return { spec, centeringDots, crop, header, negativeMono, positiveShift };
 }
 

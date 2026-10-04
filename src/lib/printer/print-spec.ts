@@ -102,6 +102,17 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
 
 export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-304'];
 
+/**
+ * TD-404 / Ninestar 4" head: printhead column 0 sits ~1 mm inboard of the
+ * die-cut left edge. Canvas 0 mm is the sticker edge, so a job at REFERENCE 0,0
+ * starts and ends 1 mm late on paper. This is applied on top of user H offset.
+ */
+export const TD404_MEDIA_ORIGIN_H_MM = -1;
+
+export function mediaOriginXMm(profile: PrinterProfile): number {
+  return profile.id.startsWith('td404') ? TD404_MEDIA_ORIGIN_H_MM : 0;
+}
+
 /** Keep millimetres to 0.01. Never integer-round a typed size. */
 export function quantizeMm(mm: number): number {
   if (!Number.isFinite(mm)) return 0.1;
@@ -304,7 +315,8 @@ export type CreatePrintSpecOptions = {
  * hardware sensor calibration (GAP / BLINE / REFERENCE 0,0) to establish
  * the label's origin at the top-left of the media.
  * Injecting an artificial printhead offset shifts the image off the physical label.
- * Hardware offset is 0; fine-tuning is controlled by user calibration offsets.
+ * Hardware centering is 0. TD-404 still applies TD404_MEDIA_ORIGIN_H_MM so
+ * BITMAP column 0 meets the die-cut edge; user H offset is extra fine-tuning.
  */
 export function computePrintheadCenteringOffset(
   _labelWidthDots: number,
@@ -332,16 +344,19 @@ export function createPrintSpec(options: CreatePrintSpecOptions): PrintSpec {
   const rasterWidthDots = layout.bitmapDotsW;
   const bytesPerRow = layout.bytesPerRow;
 
-  // SIZE origin is the label top-left. BITMAP x/y are user calibration only.
-  // Do not shift for pack-down leftover (those 0–7 columns are cropped on the right).
+  // SIZE origin is firmware top-left. Pack-down leftover is cropped on the right.
+  // TD-404 X is printhead column 0, ~1 mm inboard of the die-cut; pull it back
+  // with REFERENCE (negative allowed). Never bake that shift into the bitmap.
   const forceLeft = options.calibration?.forceLeftAligned === true;
   const centeringProfile = forceLeft ? { ...profile, alignment: 'left' as PrinterAlignment } : profile;
   const centeringOffsetDots = computePrintheadCenteringOffset(widthDots, centeringProfile);
 
-  const calibXOffsetDots = mmToDots(options.calibration?.horizontalOffsetMm ?? 0, dpi);
+  const calibXOffsetDots = mmToDots(
+    (options.calibration?.horizontalOffsetMm ?? 0) + mediaOriginXMm(profile),
+    dpi,
+  );
   const calibYOffsetDots = mmToDots(options.calibration?.verticalOffsetMm ?? 0, dpi);
 
-  // Allow negative calibration — TD404/Dev bake negatives into the bitmap.
   const xOffsetDots = centeringOffsetDots + calibXOffsetDots;
   const yOffsetDots = calibYOffsetDots;
 

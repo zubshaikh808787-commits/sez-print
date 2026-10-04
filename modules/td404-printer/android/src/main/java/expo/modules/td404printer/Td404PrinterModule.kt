@@ -598,17 +598,6 @@ class Td404PrinterModule : Module() {
 
     val sizeCmd = "SIZE ${formatMm(widthMm)} mm,${formatMm(heightMm)} mm\r\n"
 
-    // Negative BITMAP x/y clips when baked into pixels. Clamp to 0 so left/top ink
-    // (e.g. border verticals) is never cropped off the bitmap.
-    var bitmapX = xDots.coerceAtLeast(0)
-    var bitmapY = yDots.coerceAtLeast(0)
-    if (xDots < 0 || yDots < 0) {
-      android.util.Log.w(
-        "Td404Printer",
-        "PRINT-TRACE OFFSET_CLAMP raw=${xDots},${yDots} → BITMAP ${bitmapX},${bitmapY} (negative offsets do not bake)",
-      )
-    }
-
     val dither = (options["dither"] as? Boolean) ?: false
     val contentW = minOf(bitmap.width, packedW)
     val contentH = minOf(bitmap.height, packedH)
@@ -697,10 +686,7 @@ class Td404PrinterModule : Module() {
       "DENSITY $density\r\n" +
       "DIRECTION $direction\r\n" +
       "SET TEAR ON\r\n" +
-      "OFFSET 0 mm\r\n" +
-      "REFERENCE 0,0\r\n" +
-      "CLS\r\n" +
-      "BITMAP $bitmapX,$bitmapY,$bytesPerRow,$contentH,0,"
+      tsplOriginAndBitmap(xDots, yDots, bytesPerRow, contentH)
     // TSPL PRINT m,n — one socket write for all copies (avoids re-sending bitmap per copy).
     val printCmd = if (copies <= 1) "PRINT 1\r\n" else "PRINT 1,$copies\r\n"
     val footer = "\r\n$printCmd"
@@ -756,9 +742,9 @@ class Td404PrinterModule : Module() {
       "path" to "labelcommand-sdk",
       "dryRun" to dryRun,
       "nativeRev" to nativeRev,
-      "reference" to "0,0",
-      "bitmapX" to bitmapX,
-      "bitmapY" to bitmapY,
+      "reference" to "$xDots,$yDots",
+      "bitmapX" to 0,
+      "bitmapY" to 0,
       "requestedX" to xDots,
       "requestedY" to yDots,
       "pngWidth" to pngW,
@@ -831,15 +817,6 @@ class Td404PrinterModule : Module() {
       )
     }
 
-    val bitmapX = xDots.coerceAtLeast(0)
-    val bitmapY = yDots.coerceAtLeast(0)
-    if (xDots < 0 || yDots < 0) {
-      android.util.Log.w(
-        "Td404Printer",
-        "PRINT-TRACE MONO_OFFSET_CLAMP raw=${xDots},${yDots} → BITMAP ${bitmapX},${bitmapY}",
-      )
-    }
-
     val wireBmp = ByteArray(expectedLen)
     for (i in 0 until expectedLen) {
       wireBmp[i] = (monoBytes[i].toInt() xor 0xFF).toByte()
@@ -847,7 +824,7 @@ class Td404PrinterModule : Module() {
     val ink = wireInkMargins(wireBmp, bytesPerRow, packedW, heightDots)
     android.util.Log.i(
       "Td404Printer",
-      "PRINT-INK MONO native_rev=$nativeRev packed=${packedW}x${heightDots} BITMAP=${bitmapX},${bitmapY} $ink",
+      "PRINT-INK MONO native_rev=$nativeRev packed=${packedW}x${heightDots} REFERENCE=${xDots},${yDots} BITMAP=0,0 $ink",
     )
 
     val sizeCmd = "SIZE ${formatMm(widthMm)} mm,${formatMm(heightMm)} mm\r\n"
@@ -863,10 +840,7 @@ class Td404PrinterModule : Module() {
       "DENSITY $density\r\n" +
       "DIRECTION $direction\r\n" +
       "SET TEAR ON\r\n" +
-      "OFFSET 0 mm\r\n" +
-      "REFERENCE 0,0\r\n" +
-      "CLS\r\n" +
-      "BITMAP $bitmapX,$bitmapY,$bytesPerRow,$heightDots,0,"
+      tsplOriginAndBitmap(xDots, yDots, bytesPerRow, heightDots)
     val printCmd = if (copies <= 1) "PRINT 1\r\n" else "PRINT 1,$copies\r\n"
     val footer = "\r\n$printCmd"
 
@@ -952,6 +926,17 @@ class Td404PrinterModule : Module() {
     }
     if (maxX < 0) return WireInk(width, width, height, height)
     return WireInk(minX, width - 1 - maxX, minY, height - 1 - maxY)
+  }
+
+  /**
+   * Calibration lives on REFERENCE (signed dots). BITMAP stays 0,0 so a
+   * negative origin shift does not crop left/top ink out of the payload.
+   */
+  private fun tsplOriginAndBitmap(xDots: Int, yDots: Int, bytesPerRow: Int, heightDots: Int): String {
+    return "OFFSET 0 mm\r\n" +
+      "REFERENCE $xDots,$yDots\r\n" +
+      "CLS\r\n" +
+      "BITMAP 0,0,$bytesPerRow,$heightDots,0,"
   }
 
   /** 304 → 12 dots/mm, 203 → 8. Matches print-spec dotsPerMm. Other dpi values are rejected. */
