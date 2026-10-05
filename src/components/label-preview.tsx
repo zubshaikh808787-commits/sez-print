@@ -1,12 +1,14 @@
 import { Image } from 'expo-image';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { PixelRatio, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
+import { PrintGridLayer } from '@/components/print-grid-layer';
 import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelDocument } from '@/lib/label-document';
 import { fitLabelSize, mediaShapeClipStyle } from '@/lib/label-geometry';
+import { printGridKnockoutsMm, printGridSpacingMm } from '@/lib/print-grid';
 import { dotsPerMm, rectMmToDots, td404BorderOuterDots } from '@/lib/printer/print-spec';
 import { canvasFillFromDocument, sortLayers, templateUsesDieCutBackground } from '@/lib/template-schema';
 
@@ -148,7 +150,11 @@ type LabelPreviewProps = {
   hideNonPrinting?: boolean;
   /** TD-404 capture only. Same border and feed cancel as the headless raster. */
   bakeTd404Feed?: boolean;
+  /** H/V print offset in mm. Moves every element, border included, by the same amount. */
+  shiftMm?: ShiftMm;
 };
+
+type ShiftMm = { x: number; y: number };
 
 function LabelElements({
   document,
@@ -156,14 +162,18 @@ function LabelElements({
   hideNonPrinting = false,
   printDpi,
   bakeTd404Feed = false,
+  shiftMm,
 }: {
   document: LabelDocument;
   scale: number;
   hideNonPrinting?: boolean;
   printDpi?: number;
   bakeTd404Feed?: boolean;
+  shiftMm?: ShiftMm;
 }) {
   const dpm = printDpi != null ? dotsPerMm(printDpi) : null;
+  const shiftDotsX = dpm != null ? Math.round((shiftMm?.x ?? 0) * dpm) : 0;
+  const shiftDotsY = dpm != null ? Math.round((shiftMm?.y ?? 0) * dpm) : 0;
   return (
     <>
       {sortLayers(document.elements)
@@ -201,8 +211,8 @@ function LabelElements({
                 heightDots: outer.y1 - outer.y0,
               }
             : rectMmToDots(element.left, element.top, size.width, size.height, printDpi);
-          leftPx = box.x0 / density;
-          topPx = box.y0 / density;
+          leftPx = (box.x0 + shiftDotsX) / density;
+          topPx = (box.y0 + shiftDotsY) / density;
           widthPx = Math.max(1 / density, box.widthDots / density);
           heightPx = Math.max(1 / density, box.heightDots / density);
           widthDots = box.widthDots;
@@ -211,8 +221,8 @@ function LabelElements({
         } else {
           widthPx = Math.max(1, size.width * scale);
           heightPx = Math.max(1, size.height * scale);
-          leftPx = element.left * scale;
-          topPx = element.top * scale;
+          leftPx = (element.left + (shiftMm?.x ?? 0)) * scale;
+          topPx = (element.top + (shiftMm?.y ?? 0)) * scale;
         }
         return (
           <View
@@ -275,6 +285,7 @@ function LabelCanvas({
   hideNonPrinting = false,
   printDpi,
   bakeTd404Feed = false,
+  shiftMm,
 }: {
   document: LabelDocument;
   fitted: { widthPx: number; heightPx: number; scale: number };
@@ -283,7 +294,11 @@ function LabelCanvas({
   hideNonPrinting?: boolean;
   printDpi?: number;
   bakeTd404Feed?: boolean;
+  shiftMm?: ShiftMm;
 }) {
+  const gridSpacingMm = printGridSpacingMm(document);
+  const elements = document.elements;
+  const gridKnockouts = useMemo(() => printGridKnockoutsMm({ elements }), [elements]);
   return (
     <ArtboardFrame
       document={document}
@@ -311,12 +326,25 @@ function LabelCanvas({
               />
             </>
           )}
+          {gridSpacingMm != null ? (
+            <PrintGridLayer
+              widthMm={document.widthMm}
+              heightMm={document.heightMm}
+              spacingMm={gridSpacingMm}
+              knockoutsMm={gridKnockouts}
+              widthPx={fitted.widthPx || 1}
+              heightPx={fitted.heightPx || 1}
+              printDpi={printDpi}
+              shiftMm={printDpi != null ? shiftMm : undefined}
+            />
+          ) : null}
           <LabelElements
             document={document}
             scale={fitted.scale}
             hideNonPrinting={hideNonPrinting}
             printDpi={printDpi}
             bakeTd404Feed={bakeTd404Feed}
+            shiftMm={shiftMm}
           />
         </>
       ) : null}
@@ -405,6 +433,7 @@ export function LabelPreview({
   showArtboardBorder = true,
   hideNonPrinting = false,
   bakeTd404Feed = false,
+  shiftMm,
 }: LabelPreviewProps) {
   const [stageWidth, setStageWidth] = useState(0);
 
@@ -444,6 +473,7 @@ export function LabelPreview({
           hideNonPrinting={hideNonPrinting}
           printDpi={printDpi}
           bakeTd404Feed={bakeTd404Feed}
+          shiftMm={shiftMm}
         />
       </View>
     );
@@ -464,6 +494,7 @@ export function LabelPreview({
         style={style}
         showBorder={showArtboardBorder}
         hideNonPrinting={hideNonPrinting}
+        shiftMm={shiftMm}
       />
     );
   }

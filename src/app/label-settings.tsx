@@ -24,6 +24,7 @@ import {
   SettingsValueRow,
 } from '@/components/settings-ui';
 import { IosAlertInput, IosAlertModal } from '@/components/ui/ios-alert-modal';
+import { borderStyleStrokeMm } from '@/constants/border-library';
 import { editorBridge } from '@/constants/editor-bridge';
 import { DRAWING_COLORS } from '@/components/editor/types';
 import { defaultBorderPlacement } from '@/lib/border-geometry';
@@ -43,7 +44,7 @@ import { useDataStore } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
-const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent'] as const;
+const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent', 'Black mark'] as const;
 const MIRROR_MODES = ['Close', 'Reverse', 'Syntropy'] as const;
 
 export default function LabelSettingsScreen() {
@@ -97,7 +98,9 @@ export default function LabelSettingsScreen() {
         const settingsNow = resolveLabelSettings(doc);
         const nextElements = existing
           ? doc.elements.map((el) =>
-              el.id === existing.id && el.type === 'border' ? { ...el, borderStyle } : el,
+              el.id === existing.id && el.type === 'border'
+                ? { ...el, borderStyle, lineWidth: borderStyleStrokeMm(borderStyle) }
+                : el,
             )
           : [
               ...doc.elements,
@@ -105,7 +108,7 @@ export default function LabelSettingsScreen() {
                 id: generateId(),
                 type: 'border' as const,
                 borderStyle,
-                lineWidth: 0.55,
+                lineWidth: borderStyleStrokeMm(borderStyle),
                 ...defaultBorderPlacement(doc.widthMm, doc.heightMm),
                 needPrinting: true,
                 drawingColorIndex: settingsNow.defaultDrawingColorIndex,

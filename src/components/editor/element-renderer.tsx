@@ -17,6 +17,7 @@ import { ClipartIcon } from '@/components/clipart-icon';
 import { SignaturePreview } from '@/components/editor/signature-drawing-board';
 import { MonoImagePreview } from '@/components/editor/mono-image-preview';
 import { BorderPreview } from '@/components/border-preview';
+import { borderShapeForMedia } from '@/printing/raster/border-shapes';
 import { formatDataSourceColumn } from '@/lib/editor/data-source-display';
 import {
   looksLikeImageUri,
@@ -1132,7 +1133,7 @@ export function ElementContentView({
       );
     }
     case 'border': {
-      const circular = mediaShape === 'circle' || mediaShape === 'ellipse';
+      const shape = borderShapeForMedia(mediaShape);
       const tagged = strokeFromOuterEdge === true || element.geometryVersion === 1;
       if (forPrint && printDpi != null) {
         return (
@@ -1140,8 +1141,8 @@ export function ElementContentView({
             <BorderPreview
               styleId={element.borderStyle}
               scale={scale}
-              lineWidthMm={element.lineWidth || 0.55}
-              circular={circular}
+              lineWidthMm={element.lineWidth || undefined}
+              shape={shape}
               widthPx={widthPx}
               heightPx={heightPx}
               widthDots={widthDots}
@@ -1159,8 +1160,8 @@ export function ElementContentView({
             <BorderPreview
               styleId={element.borderStyle}
               scale={scale}
-              lineWidthMm={element.lineWidth || 0.55}
-              circular={circular}
+              lineWidthMm={element.lineWidth || undefined}
+              shape={shape}
               widthPx={widthPx}
               heightPx={heightPx}
               strokeFromOuterEdge
@@ -1176,8 +1177,8 @@ export function ElementContentView({
           <BorderPreview
             styleId={element.borderStyle}
             scale={scale}
-            lineWidthMm={element.lineWidth || 0.55}
-            circular={circular}
+            lineWidthMm={element.lineWidth || undefined}
+            shape={shape}
             widthPx={innerW}
             heightPx={innerH}
           />

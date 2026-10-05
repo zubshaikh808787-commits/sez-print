@@ -1,5 +1,6 @@
-import type { BorderStyleId } from '@/constants/border-library';
+import { resolveBorderStyle } from '@/constants/border-library';
 import type { LabelElement } from '@/lib/label-document';
+import { borderShapeForMedia } from '@/printing/raster/border-shapes';
 import { mmToDots, td404BorderOuterDots } from '@/lib/printer/print-spec';
 import {
   borderFrameInsetsForElement,
@@ -22,6 +23,8 @@ export type DrawPrintBorderOpts = {
   extraBottomInsetMm?: number;
   /** TD-404 only. Place the outer stroke from td404BorderOuterDots. */
   bakeFeed?: boolean;
+  /** Label die-cut. Circle and ellipse labels print a ring instead of a rectangle. */
+  mediaShape?: string;
 };
 
 /** Inward frame from the border element's rectangle, clipped to the sent bitmap. */
@@ -58,7 +61,7 @@ export function drawPrintBorder(
   }
   const w = Math.max(1, x1 - x0);
   const h = Math.max(1, y1 - y0);
-  const style = (el.borderStyle ?? 'solid-medium') as BorderStyleId;
+  const style = resolveBorderStyle(el.borderStyle);
   const unit = baked
     ? { left: 0, right: 0, top: 0, bottom: 0 }
     : borderFrameInsetsForElement(el, dpi, opts?.extraBottomInsetMm ?? 0);
@@ -68,5 +71,17 @@ export function drawPrintBorder(
     top: unit.top * s,
     bottom: unit.bottom * s,
   };
-  drawInwardFrameInBox(target, w, h, dpi, el.lineWidth, style, x0, y0, insets);
+  drawInwardFrameInBox(
+    target,
+    w,
+    h,
+    dpi,
+    el.lineWidth,
+    style,
+    x0,
+    y0,
+    insets,
+    borderShapeForMedia(opts?.mediaShape),
+    s,
+  );
 }

@@ -21,6 +21,7 @@ import {
 } from '@/lib/label-document';
 import { dotsPerMm, mmToDots, rectMmToDots } from '@/lib/printer/print-spec';
 import { sortLayers } from '@/lib/template-schema';
+import { printGridKnockoutsMm, printGridRectsDots, printGridSpacingMm } from '@/lib/print-grid';
 import { computeWrappedLines, layoutPrintText } from '@/lib/text-metrics';
 import { formatBarcodeHri } from '@/lib/barcode/hri';
 import { stretchThenRoundBars } from './barcode-stretch';
@@ -46,6 +47,11 @@ export type RasterizeOptions = {
   dotScale?: number;
   /** TD-404 production print. Place the border and cancel the −1 mm feed on other layers. */
   bakeTd404Feed?: boolean;
+  /**
+   * User H/V offset in printer dots, applied to the finished page so every layer
+   * (border included) moves by the same amount. Ink pushed past an edge is cropped.
+   */
+  shiftDots?: { x: number; y: number };
 }
 
 export type RasterBitmap = {
@@ -185,6 +191,14 @@ function drawDocumentToSurface(
   bitmapHeightDots: number,
 ): void {
   const dpm = dpmScaled(dpi);
+  const gridSpacing = printGridSpacingMm(doc);
+  if (gridSpacing != null) {
+    const s = activeDotScale;
+    const knockouts = printGridKnockoutsMm(doc);
+    for (const r of printGridRectsDots(doc.widthMm, doc.heightMm, gridSpacing, dpi, knockouts)) {
+      surface.fillRect(r.left * s, r.top * s, r.width * s, r.height * s, 0);
+    }
+  }
   for (const el of sortLayers(doc.elements)) {
     if (el.needPrinting === false || el.visible === false) continue;
     if (UNSUPPORTED.has(el.type)) {
@@ -207,6 +221,7 @@ function drawDocumentToSurface(
             bitmapWidthDots,
             bitmapHeightDots,
             bakeFeed: activeBakeFeed,
+            mediaShape: doc.mediaShape,
           });
           break;
         case 'line':
@@ -264,7 +279,13 @@ export function rasterizeDocumentToBitmapTimed(
   const drawMs = Math.max(0, drawWallMs - encodeMs);
 
   const tRead0 = performance.now();
-  const gray = surface.readGray();
+  const gray = shiftGray(
+    surface.readGray(),
+    surfW,
+    surfH,
+    Math.round(options.shiftDots?.x ?? 0) * activeDotScale,
+    Math.round(options.shiftDots?.y ?? 0) * activeDotScale,
+  );
   const readbackMs = performance.now() - tRead0;
 
   const tPack0 = performance.now();
@@ -304,6 +325,22 @@ export function rasterizeDocumentToBitmapTimed(
     result,
     gray,
   };
+}
+
+/** Move the whole page by (dx, dy) dots. Uncovered area is white. */
+export function shiftGray(gray: Uint8Array, width: number, height: number, dx: number, dy: number): Uint8Array {
+  if (dx === 0 && dy === 0) return gray;
+  const out = new Uint8Array(width * height);
+  out.fill(255);
+  const x0 = Math.max(0, dx);
+  const x1 = Math.min(width, width + dx);
+  if (x1 <= x0) return out;
+  for (let y = 0; y < height; y++) {
+    const sy = y - dy;
+    if (sy < 0 || sy >= height) continue;
+    out.set(gray.subarray(sy * width + x0 - dx, sy * width + x1 - dx), y * width + x0);
+  }
+  return out;
 }
 
 function inkValue(antiColor?: boolean): number {

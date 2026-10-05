@@ -9,6 +9,8 @@ import type { SelectSource, TransformStartKind } from './konva-transformer';
 
 import { KonvaTransformer, type TransformCommitPayload, type TransformMovePayload } from './konva-transformer';
 import { CanvasGridOverlay } from '@/components/editor/canvas-grid-overlay';
+import { PrintGridLayer } from '@/components/print-grid-layer';
+import { printGridKnockoutsMm, printGridSpacingMm } from '@/lib/print-grid';
 import { DEFAULT_GRID_SPACING_MM } from '@/lib/editor/canvas-grid';
 import { type LiveRulerBounds } from '@/components/canvas-rulers';
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
@@ -337,6 +339,12 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
   const w = Math.max(1, canvasWidthPx);
   const h = Math.max(1, canvasHeightPx);
   const resolvedGridSpacingMm = gridSpacingMm ?? DEFAULT_GRID_SPACING_MM;
+  const printGridSpacing = printGridSpacingMm(doc);
+  const docElements = doc.elements;
+  const printGridKnockouts = useMemo(
+    () => printGridKnockoutsMm({ elements: docElements }),
+    [docElements],
+  );
   const showGridSv = useSharedValue(showGrid ? 1 : 0);
   useEffect(() => {
     showGridSv.value = showGrid ? 1 : 0;
@@ -624,6 +632,17 @@ export const KonvaCanvas = forwardRef<ViewShot, KonvaCanvasProps>(function Konva
           ) : null}
 
           {jewelryGuides}
+
+          {printGridSpacing != null ? (
+            <PrintGridLayer
+              widthMm={doc.widthMm}
+              heightMm={doc.heightMm}
+              spacingMm={printGridSpacing}
+              knockoutsMm={printGridKnockouts}
+              widthPx={w}
+              heightPx={h}
+            />
+          ) : null}
 
           {doc.elements.length === 0 && !stockCut ? (
             <View style={styles.emptyHintWrap}>

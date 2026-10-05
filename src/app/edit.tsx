@@ -1,6 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppIcon, type AppIconName } from '@/components/app-icon';
+import { PrintGridIcon, SafeModeIcon } from '@/components/editor/chrome-icons';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Alert,
@@ -195,6 +196,7 @@ import {
   type TablePropertyTab,
   type TimePropertyTab,
 } from '@/components/editor/types';
+import { borderStyleStrokeMm } from '@/constants/border-library';
 import { editorBridge, barcodeEncodeModeForScanType, isQrScanType } from '@/constants/editor-bridge';
 import { createIndustryTemplateDocument } from '@/constants/template-documents';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
@@ -223,6 +225,7 @@ import {
   type LabelDocument,
   type LabelElement,
 } from '@/lib/label-document';
+import { resolveLabelSettings } from '@/lib/label-settings';
 import { PdfPageNav } from '@/components/pdf-editor/pdf-page-nav';
 import { pickExcelWorkbook } from '@/lib/excel-import';
 import { useDataStore } from '@/stores/data-store';
@@ -1954,6 +1957,32 @@ export default function EditScreen() {
   const gridSpacingMm =
     editorSettings.editorGridSpacingMm ?? DEFAULT_EDITOR_SETTINGS.editorGridSpacingMm;
 
+  const printGridOn = doc.settings?.printGrid === true;
+
+  const togglePrintGrid = useCallback(() => {
+    setDoc((prev) => {
+      const settings = resolveLabelSettings(prev);
+      return {
+        ...prev,
+        settings: { ...settings, printGrid: !settings.printGrid, printGridSpacingMm: gridSpacingMm },
+      };
+    });
+    setDirty(true);
+  }, [gridSpacingMm]);
+
+  const changeGridSpacing = useCallback(
+    (mm: number) => {
+      patchEditor({ editorGridSpacingMm: mm });
+      if (!docRef.current.settings?.printGrid) return;
+      setDoc((prev) => ({
+        ...prev,
+        settings: { ...resolveLabelSettings(prev), printGridSpacingMm: mm },
+      }));
+      setDirty(true);
+    },
+    [patchEditor],
+  );
+
   const resetTabToRegularForElement = useCallback((type: ElementType) => {
     switch (type) {
       case 'barcode':
@@ -3159,10 +3188,11 @@ export default function EditScreen() {
         const borderStyle = editorBridge.borderResult;
         editorBridge.borderResult = null;
         const existingBorder = docRef.current.elements.find((el) => el.type === 'border');
+        const lineWidth = borderStyleStrokeMm(borderStyle);
         if (existingBorder) {
-          patchElement(existingBorder.id, { borderStyle });
+          patchElement(existingBorder.id, { borderStyle, lineWidth });
         } else {
-          addElement('border', { borderStyle });
+          addElement('border', { borderStyle, lineWidth });
         }
       }
 
@@ -4117,11 +4147,34 @@ export default function EditScreen() {
                 editorSettings.safeMode && styles.canvasChromeBtnActive,
                 pressed && styles.pressed,
               ]}>
-              <AppIcon
-                name={editorSettings.safeMode ? 'checkmark.shield.fill' : 'lock.open'}
-                tintColor={editorSettings.safeMode ? Palette.accent : Palette.muted}
-                size={18}
+              <SafeModeIcon
+                active={editorSettings.safeMode}
+                color={editorSettings.safeMode ? Palette.accent : Palette.muted}
               />
+            </Pressable>
+
+            <Pressable
+              onPress={togglePrintGrid}
+              hitSlop={10}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: printGridOn }}
+              accessibilityLabel="Print grid"
+              accessibilityHint="Prints the grid on the label and shows it in the preview."
+              style={({ pressed }) => [
+                styles.printGridBtn,
+                printGridOn && styles.canvasChromeBtnActive,
+                pressed && styles.pressed,
+              ]}>
+              <PrintGridIcon
+                active={printGridOn}
+                color={printGridOn ? Palette.accent : Palette.muted}
+                size={16}
+              />
+              <Text
+                numberOfLines={1}
+                style={[styles.printGridBtnText, printGridOn && styles.printGridBtnTextOn]}>
+                Print grid
+              </Text>
             </Pressable>
 
             <Pressable
@@ -4482,7 +4535,7 @@ export default function EditScreen() {
         visible={gridSpacingPopoverVisible}
         spacingMm={gridSpacingMm}
         onClose={() => setGridSpacingPopoverVisible(false)}
-        onSpacingChange={(mm) => patchEditor({ editorGridSpacingMm: mm })}
+        onSpacingChange={changeGridSpacing}
       />
 
       <Modal
@@ -4840,6 +4893,22 @@ const styles = StyleSheet.create({
   },
   canvasChromeBtnActive: {
     backgroundColor: 'rgba(23, 166, 184, 0.15)',
+  },
+  printGridBtn: {
+    minWidth: 52,
+    height: 44,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  printGridBtnText: {
+    color: Palette.muted,
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  printGridBtnTextOn: {
+    color: Palette.accent,
   },
   dimText: {
     color: Palette.muted,

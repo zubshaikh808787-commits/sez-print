@@ -1,3 +1,4 @@
+import { BORDER_LIBRARY, resolveBorderStyle } from '@/constants/border-library';
 import {
   applyUpsBatchMirror,
   createUpsConfig,
@@ -32,6 +33,9 @@ export type LabelSettings = {
   antiColor: boolean;
   defaultDrawingColorIndex: number;
   dataSourceFileId: string | null;
+  /** Print a square grid over the whole label (shown in the editor and the preview too). */
+  printGrid: boolean;
+  printGridSpacingMm: number;
 };
 
 export const LABEL_DRAWING_COLORS = [
@@ -62,6 +66,8 @@ export function defaultLabelSettings(): LabelSettings {
     antiColor: false,
     defaultDrawingColorIndex: 1,
     dataSourceFileId: null,
+    printGrid: false,
+    printGridSpacingMm: 5,
   };
 }
 
@@ -120,6 +126,20 @@ function applyMirrorMode(doc: LabelDocument, settings: LabelSettings): LabelDocu
   return doc;
 }
 
+/**
+ * Set the paper type and keep the canvas fill in step: Transparent clears a plain
+ * white fill, other papers turn an empty fill white. Coloured and image backgrounds stay.
+ */
+export function applyPaperType(doc: LabelDocument, paperType: PaperType): LabelDocument {
+  const bg = doc.background;
+  const plainWhite = bg?.type === 'color' && /^#?f{3}(f{3})?$/i.test(bg.color.trim());
+  const empty = !bg || bg.type === 'none';
+  let background = bg;
+  if (paperType === 'Transparent' && plainWhite) background = { type: 'none' };
+  else if (paperType !== 'Transparent' && empty) background = { type: 'color', color: '#FFFFFF' };
+  return { ...doc, paperType, background };
+}
+
 export type LabelDocumentPatch = {
   name?: string;
   widthMm?: number;
@@ -138,9 +158,9 @@ export function patchLabelDocument(
   patch: LabelDocumentPatch,
   excelFiles: { id: string; sheets: ExcelSheet[] }[] = [],
 ): LabelDocument {
-  const { widthMm: nextW, heightMm: nextH, sizeHandling, ...rest } = patch;
+  const { widthMm: nextW, heightMm: nextH, sizeHandling, paperType, ...rest } = patch;
   let next: LabelDocument = {
-    ...doc,
+    ...(paperType != null ? applyPaperType(doc, paperType) : doc),
     ...rest,
     settings: patch.settings
       ? { ...resolveLabelSettings(doc), ...patch.settings }
@@ -194,5 +214,6 @@ export function backgroundSummary(doc: LabelDocument): string {
 export function borderSummary(doc: LabelDocument): string {
   const border = doc.elements.find((el) => el.type === 'border');
   if (!border) return 'Not set';
-  return border.borderStyle;
+  const style = resolveBorderStyle(border.borderStyle);
+  return BORDER_LIBRARY.find((item) => item.id === style)?.name ?? style;
 }

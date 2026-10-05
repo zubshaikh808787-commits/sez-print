@@ -73,7 +73,14 @@ import {
   waitForNextPaint,
 } from '@/lib/printer/print-job';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
-import { createPrintSpec } from '@/lib/printer/print-spec';
+import {
+  createPrintSpec,
+  mmToDots,
+  TD404_BORDER_BOTTOM_MM,
+  TD404_BORDER_LEFT_MM,
+  TD404_BORDER_RIGHT_MM,
+  TD404_BORDER_TOP_MM,
+} from '@/lib/printer/print-spec';
 import { joshEffectiveDpi } from '@/lib/printer/josh-print';
 import * as FileSystem from 'expo-file-system/legacy';
 import { logPrintTrace } from '@/printing';
@@ -90,7 +97,7 @@ import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
-import { defaultLabelSettings, resolveLabelSettings } from '@/lib/label-settings';
+import { applyPaperType, defaultLabelSettings, resolveLabelSettings } from '@/lib/label-settings';
 import { loadAndRenderPdf, printPdfToThermal, type RenderedPdfPage } from '@/lib/pdf-printer';
 
 import { fitLabelSize, printMediaSizeMm, type LabelSizeMm } from '@/lib/label-geometry';
@@ -343,6 +350,9 @@ export default function PrintScreen() {
   }>();
 
   const getDocument = useLabelStore((s) => s.getDocument);
+  const storedLabel = useLabelStore((s) =>
+    params.labelId ? s.documents.find((d) => d.id === params.labelId) ?? null : null,
+  );
   const defaults = useSettingsStore((s) => s.defaults);
   const printingSettings = useSettingsStore((s) => s.printing);
   const status = usePrinterStore((s) => s.status);
@@ -393,6 +403,7 @@ export default function PrintScreen() {
     return doc;
   }, [
     params.labelId,
+    storedLabel,
     params.scanData,
     params.scanType,
     params.imageUri,
@@ -639,6 +650,28 @@ export default function PrintScreen() {
     [params.labelId],
   );
 
+  /** Save the paper type on the label so the next print, the editor and Label Settings all use it. */
+  const changePaperType = useCallback(
+    (next: PaperType) => {
+      setPaperType(next);
+      if (!params.labelId) return;
+      const store = useLabelStore.getState();
+      const stored = store.documents.find((d) => d.id === params.labelId);
+      if (!stored) return;
+      store.upsertDocument(applyPaperType(stored, next));
+    },
+    [params.labelId],
+  );
+
+  /** Printer offset (Print screen, saved per printer) plus the label's own offset (Label Settings). */
+  const printOffsetMm = useMemo(() => {
+    const label = sourceDocument ? resolveLabelSettings(sourceDocument) : null;
+    return {
+      x: Math.round((hOffset + (label?.hOffsetMm ?? 0)) * 100) / 100,
+      y: Math.round((vOffset + (label?.vOffsetMm ?? 0)) * 100) / 100,
+    };
+  }, [sourceDocument, hOffset, vOffset]);
+
   // Sync print size if a different document ID or dimension is loaded
   const lastDocKeyRef = useRef<string | null>(null);
   useEffect(() => {
@@ -781,8 +814,13 @@ export default function PrintScreen() {
         jewelry: jewelryDieCutJob,
       });
       const { density: printDensity, threshold, speed: printSpeed, dither } = quality;
+      // TD-404 at 0°: the offset is drawn into the bitmap, so the border moves exactly
+      // like every other layer and REFERENCE keeps only the media origin.
+      const bakeOffset = manager.usesTd404CommandSet && orientationDeg === 0;
+      const offsetH = bakeOffset ? 0 : printOffsetMm.x;
+      const offsetV = bakeOffset ? 0 : printOffsetMm.y;
       console.info(
-        `[print] Advanced params → density=${printDensity} speed=${printSpeed} threshold=${threshold} gap=${gapLength}mm hOffset=${hOffset}mm vOffset=${vOffset}mm darknessUI=${darkness ?? 'Auto'} speedUI=${speed ?? 'Auto'}`,
+        `[print] Advanced params → density=${printDensity} speed=${printSpeed} threshold=${threshold} gap=${gapLength}mm offset=${printOffsetMm.x}x${printOffsetMm.y}mm (${bakeOffset ? 'bitmap' : 'REFERENCE'}) darknessUI=${darkness ?? 'Auto'} speedUI=${speed ?? 'Auto'}`,
       );
 
       for (let page = 0; page < pageCount; page++) {
@@ -920,8 +958,8 @@ export default function PrintScreen() {
             copies,
             density: printDensity !== undefined && printDensity !== null ? Math.min(2, Math.max(0, Math.floor(printDensity / 5))) : 1,
             speed: printSpeed,
-            hOffsetMm: hOffset,
-            vOffsetMm: vOffset,
+            hOffsetMm: offsetH,
+            vOffsetMm: offsetV,
             media: wantsBline ? 'bline' : media,
             threshold,
             dither,
@@ -946,8 +984,8 @@ export default function PrintScreen() {
             speed: printSpeed,
             orientation: 0,
             dpi: jobDpi,
-            hOffsetMm: hOffset,
-            vOffsetMm: vOffset,
+            hOffsetMm: offsetH,
+            vOffsetMm: offsetV,
             media: wantsBline ? 'bline' : media,
             threshold: jewelryDieCutJob ? Math.max(threshold, 168) : threshold,
           });
@@ -971,8 +1009,8 @@ export default function PrintScreen() {
             speed: printSpeed,
             orientation: 0,
             dpi: jobDpi,
-            hOffsetMm: hOffset,
-            vOffsetMm: vOffset,
+            hOffsetMm: offsetH,
+            vOffsetMm: offsetV,
             media: wantsBline ? 'bline' : media,
             alignment: manager.isJosh ? 'center' : manager.getActivePrinterProfile().alignment,
           });
@@ -996,8 +1034,8 @@ export default function PrintScreen() {
               density: darkness != null ? printDensity : 14,
               speed: speed != null ? printSpeed : 3,
               threshold,
-              vOffsetMm: vOffset,
-              hOffsetMm: hOffset,
+              vOffsetMm: offsetV,
+              hOffsetMm: offsetH,
               media: wantsBline ? 'bline' : media,
               orientation: 0,
               dpi: jobDpi,
@@ -1026,6 +1064,9 @@ export default function PrintScreen() {
               const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, {
                 threshold,
                 bakeTd404Feed: true,
+                shiftDots: bakeOffset
+                  ? { x: mmToDots(printOffsetMm.x, jobDpi), y: mmToDots(printOffsetMm.y, jobDpi) }
+                  : undefined,
               });
               const bitmap = timed.result;
               const tNative0 = Date.now();
@@ -1040,8 +1081,8 @@ export default function PrintScreen() {
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: vOffset,
-                hOffsetMm: hOffset,
+                vOffsetMm: offsetV,
+                hOffsetMm: offsetH,
                 media: wantsBline ? 'bline' : media,
                 dpi: jobDpi,
               });
@@ -1090,8 +1131,8 @@ export default function PrintScreen() {
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: vOffset,
-                hOffsetMm: hOffset,
+                vOffsetMm: offsetV,
+                hOffsetMm: offsetH,
                 media: wantsBline ? 'bline' : media,
                 orientation: 0,
                 dpi: jobDpi,
@@ -1117,7 +1158,7 @@ export default function PrintScreen() {
                   capture_request_px: `${printCaptureSize.widthPx}x${printCaptureSize.heightPx}`,
                   view_layout_px: layoutPx ? `${layoutPx.w}x${layoutPx.h}` : null,
                   cal_stored: stored ? `h ${stored.hOffsetMm}mm v ${stored.vOffsetMm}mm` : 'none',
-                  cal_used: `h ${hOffset}mm v ${vOffset}mm`,
+                  cal_used: `h ${printOffsetMm.x}mm v ${printOffsetMm.y}mm ${bakeOffset ? 'bitmap' : 'REFERENCE'}`,
                   ref_requested:
                     nativeTiming?.requestedX != null
                       ? `${nativeTiming.requestedX},${nativeTiming.requestedY}`
@@ -1160,8 +1201,8 @@ export default function PrintScreen() {
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: vOffset,
-                hOffsetMm: hOffset,
+                vOffsetMm: offsetV,
+                hOffsetMm: offsetH,
                 media: wantsBline ? 'bline' : media,
                 orientation: 0,
                 dpi: jobDpi,
@@ -1188,7 +1229,7 @@ export default function PrintScreen() {
             orientation: 0,
             threshold,
             dither,
-            hOffsetMm: hOffset,
+            hOffsetMm: offsetH,
             dpi: jobDpi,
             fitArtwork: artworkPhoto,
           });
@@ -1202,8 +1243,8 @@ export default function PrintScreen() {
             copies: 1,
             density: printDensity,
             speed: printSpeed,
-            vOffsetMm: vOffset,
-            hOffsetMm: hOffset,
+            vOffsetMm: offsetV,
+            hOffsetMm: offsetH,
             media: wantsBline ? 'bline' : media,
             dpi: jobDpi,
           });
@@ -1256,8 +1297,7 @@ export default function PrintScreen() {
     darkness,
     speed,
     pageCount,
-    hOffset,
-    vOffset,
+    printOffsetMm,
     gapLength,
     copies,
     paperType,
@@ -1277,6 +1317,10 @@ export default function PrintScreen() {
     printCaptureSize.heightPx,
     calibrationKey,
   ]);
+
+  const unrotatedJob = !ratTail143Job && orientation === '0°';
+  const captureShiftMm =
+    getPrinterManager().usesTd404CommandSet && unrotatedJob ? printOffsetMm : undefined;
 
   return (
     <View style={styles.root}>
@@ -1393,6 +1437,7 @@ export default function PrintScreen() {
                   exactHeightPx={printCaptureLayoutPx.heightPx}
                   printDpi={jobDpi}
                   bakeTd404Feed={getPrinterManager().usesTd404CommandSet}
+                  shiftMm={captureShiftMm}
                   showArtboardBorder={false}
                   hideNonPrinting
                 />
@@ -1536,7 +1581,7 @@ export default function PrintScreen() {
 
             <View style={styles.cardSection}>
               <Text style={styles.groupLabel}>Paper Type</Text>
-              <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
+              <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={changePaperType} />
               {jewelryDieCutJob ? (
                 <Text style={[styles.helperText, { color: '#0284C7', marginTop: 6 }]}>
                   💡 Clear-liner jewelry rolls with black timing lines on the back require Paper Type set to "Black mark". If prints skip or overlap, run "Calibrate Paper Sensor" in Printer Connect.
@@ -1630,13 +1675,17 @@ export default function PrintScreen() {
                       heightMm: page?.heightMm ?? 30,
                       dpi: jobDpi,
                       profile: mgr.getActivePrinterProfile(),
-                      calibration: { horizontalOffsetMm: hOffset, verticalOffsetMm: vOffset },
+                      calibration: { horizontalOffsetMm: 0, verticalOffsetMm: 0 },
                     });
-                    return `TD-404 sends BITMAP 0,0. REFERENCE is ${spec.xOffsetDots},${spec.yOffsetDots} dots. The border is placed in dots: top 12, left 18, right 36, bottom 24 at 304 DPI. Set H and V to 0 before measuring. Positive offsets still move the whole print.`;
+                    const total = `H ${printOffsetMm.x.toFixed(2)} mm, V ${printOffsetMm.y.toFixed(2)} mm`;
+                    if (!unrotatedJob) {
+                      return `Total offset ${total} (this printer plus Label Settings). Rotated jobs send it on REFERENCE.`;
+                    }
+                    return `Total offset ${total} (this printer plus Label Settings). It moves text, codes and the border together inside the bitmap. REFERENCE stays at the media origin, ${spec.xOffsetDots},${spec.yOffsetDots} dots. The border has ${TD404_BORDER_LEFT_MM} mm room to the left, ${TD404_BORDER_RIGHT_MM} mm right, ${TD404_BORDER_TOP_MM} mm up and ${TD404_BORDER_BOTTOM_MM} mm down before it is cut off.`;
                   })()}
                 </Text>
                 <StepperRow
-                  label="Horizontal Offset (REFERENCE x, saved)"
+                  label="Horizontal Offset (saved for this printer)"
                   value={`${hOffset.toFixed(2)} mm`}
                   minusDisabled={hOffset <= -10}
                   onMinus={() => setHOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
@@ -1644,7 +1693,7 @@ export default function PrintScreen() {
                   bordered
                 />
                 <StepperRow
-                  label="Vertical Offset (REFERENCE y, saved)"
+                  label="Vertical Offset (saved for this printer)"
                   value={`${vOffset.toFixed(2)} mm`}
                   minusDisabled={vOffset <= -10}
                   onMinus={() => setVOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
