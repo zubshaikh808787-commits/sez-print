@@ -407,7 +407,8 @@ export default function CalibrationPrintScreen() {
       Alert.alert('Border check', 'Connect the printer before saving an offset.');
       return;
     }
-    setPrintCalibration(calibrationKey, { hOffsetMm, vOffsetMm });
+    // The border check prints with the manager defaults: DENSITY 10, SPEED 3.
+    setPrintCalibration(calibrationKey, { hOffsetMm, vOffsetMm, density: 10, speed: 3 });
     const summary = [
       `Saved REFERENCE fine-tune h ${hOffsetMm.toFixed(3)} mm, v ${vOffsetMm.toFixed(3)} mm.`,
       'Positive vertical moves the print down. The 1 mm horizontal media origin stays on top of h. The border bake is separate.',

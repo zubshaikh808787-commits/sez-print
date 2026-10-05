@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   BRIDGE_QUALITY_CAPS,
   TD404_QUALITY_CAPS,
+  calibrationQualityWarning,
   clampToCap,
   formatScale,
   hasManualScale,
@@ -139,5 +140,15 @@ assert.equal(resolvePrintQuality({ darkness: 20, speed: 9, caps: td }).speed, 7)
 assert.equal(resolvePrintQuality({ darkness: null, speed: 1, caps: td }).speed, 1);
 assert.equal(resolvePrintQuality({ darkness: null, speed: 7, caps: td }).speed, 7);
 assert.equal(resolvePrintQuality({ darkness: null, speed: 5, dieCut: true, caps: td }).speed, 5);
+
+// Calibration warning: only when recorded density/speed differ from this print's.
+assert.equal(calibrationQualityWarning(undefined, { density: 10, speed: 3 }), null);
+assert.equal(calibrationQualityWarning({ hOffsetMm: 0.5 } as { density?: number }, { density: 10, speed: 3 }), null, 'old entries without values');
+assert.equal(calibrationQualityWarning({ density: 10, speed: 3 }, { density: 10, speed: 3 }), null);
+const warn = calibrationQualityWarning({ density: 10, speed: 3 }, { density: 15, speed: 3 });
+assert.ok(warn?.includes('darkness 10, speed 3'), warn ?? '');
+assert.ok(warn?.includes('darkness 15, speed 3'));
+assert.ok(calibrationQualityWarning({ density: 10, speed: 3 }, { density: 10, speed: 5 }));
+assert.ok(calibrationQualityWarning({ density: 0, speed: 1 }, { density: 10, speed: 3 }), 'zero is a recorded value');
 
 console.log('ok bridge-quality');

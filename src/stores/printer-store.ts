@@ -26,6 +26,9 @@ export type PrintHistoryEntry = {
 export type PrintCalibrationEntry = {
   hOffsetMm: number;
   vOffsetMm: number;
+  /** DENSITY and SPEED the offsets were dialled in at (TD-404 only). */
+  density?: number;
+  speed?: number;
 };
 
 type PrinterStoreState = {

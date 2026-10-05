@@ -37,7 +37,9 @@ import { SEZNIK_PRINTER_MODELS } from '@/constants/printer-models';
 import { canonicalizeJewelryDieCutDocument } from '@/constants/jewelry-template-elements';
 import { resolvePrintQuality } from '@/lib/printer/print-quality';
 import {
+  calibrationQualityWarning,
   clampToCap,
+  hasManualScale,
   qualityCapsFor,
   resolveQualityBridge,
 } from '@/lib/printer/bridge-quality-caps';
@@ -497,9 +499,42 @@ export default function PrintScreen() {
   // Persist calibration per physical printer so a dialed-in offset survives
   // reopening Print — the controls used to always reset to 0mm, making a
   // real, fixed mechanical offset look like an unresolved random shift.
+  const currentQuality = useMemo(
+    () =>
+      resolvePrintQuality({
+        darkness,
+        speed,
+        grayThreshold: defaults.grayThreshold,
+        colorMode: defaults.colorMode,
+        dieCut: jewelryDieCutJob || cableFlagJob || ratTail143Job,
+        jewelry: jewelryDieCutJob,
+        caps: qualityCaps,
+      }),
+    [darkness, speed, defaults.grayThreshold, defaults.colorMode, jewelryDieCutJob, cableFlagJob, ratTail143Job, qualityCaps],
+  );
+  const calibrationQualityRef = useRef<{ density: number; speed: number } | undefined>(undefined);
+  calibrationQualityRef.current = hasManualScale(qualityCaps)
+    ? { density: currentQuality.density, speed: currentQuality.speed }
+    : undefined;
+  const calibrationQualityNote = hasManualScale(qualityCaps)
+    ? calibrationQualityWarning(savedCalibration, currentQuality)
+    : null;
+
+  // Offsets for a new key arrive on the next render; skip the stale write in between.
+  const calibrationKeyRef = useRef(calibrationKey);
   useEffect(() => {
     if (calibrationKey === 'unknown') return;
-    setPrintCalibration(calibrationKey, { hOffsetMm: hOffset, vOffsetMm: vOffset });
+    if (calibrationKeyRef.current !== calibrationKey) {
+      calibrationKeyRef.current = calibrationKey;
+      return;
+    }
+    const prev = usePrinterStore.getState().printCalibration[calibrationKey];
+    if (prev && prev.hOffsetMm === hOffset && prev.vOffsetMm === vOffset) return;
+    setPrintCalibration(calibrationKey, {
+      hOffsetMm: hOffset,
+      vOffsetMm: vOffset,
+      ...calibrationQualityRef.current,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hOffset, vOffset, calibrationKey]);
   const [zoom, setZoom] = useState(1);
@@ -1736,6 +1771,9 @@ export default function PrintScreen() {
                     bordered
                   />
                 )}
+                {calibrationQualityNote ? (
+                  <Text style={styles.calibrationQualityNote}>{calibrationQualityNote}</Text>
+                ) : null}
                 <StepperRow
                   label="Gap Length"
                   value={`${gapLength.toFixed(2)} mm`}
@@ -2139,6 +2177,11 @@ const styles = StyleSheet.create({
   stepperRowBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#ECEEF1',
+  },
+  calibrationQualityNote: {
+    color: '#B45309',
+    fontSize: 12,
+    paddingVertical: 8,
   },
   stepperLabel: {
     ...Type.body,

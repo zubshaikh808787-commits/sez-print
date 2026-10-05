@@ -99,6 +99,22 @@ export function stepQuality(value: number | null, cap: QualityScale, direction: 
   return clampToCap(value + direction * cap.step, cap).value ?? cap.default;
 }
 
+/**
+ * Darkness and speed change line thickness, so a position calibration only holds for the
+ * density and speed it was printed at. Null when they match or were not recorded.
+ */
+export function calibrationQualityWarning(
+  saved: { density?: number; speed?: number } | null | undefined,
+  current: { density: number; speed: number },
+): string | null {
+  if (saved?.density == null || saved.speed == null) return null;
+  if (saved.density === current.density && saved.speed === current.speed) return null;
+  return (
+    `Offsets were set at darkness ${saved.density}, speed ${saved.speed}; this print uses ` +
+    `darkness ${current.density}, speed ${current.speed}. Lines may shift 0.1-0.2 mm.`
+  );
+}
+
 export function isUntested(value: number | null, cap: QualityCap): boolean {
   return value != null && cap !== 'legacy' && cap.testedMax != null && value > cap.testedMax;
 }
