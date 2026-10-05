@@ -8,6 +8,8 @@ import {
   isUntested,
   qualityCapsFor,
   resolveQualityBridge,
+  scaleValueText,
+  stepQuality,
   type BridgeId,
   type QualityScale,
 } from '@/lib/printer/bridge-quality-caps';
@@ -55,6 +57,18 @@ assert.ok(!isUntested(3, speed));
 assert.ok(isUntested(4, speed));
 assert.ok(!isUntested(null, speed));
 assert.ok(!isUntested(15, density));
+
+// Stepper: Auto enters Manual at the default; Manual stays inside the scale.
+assert.equal(scaleValueText(null, density), 'Auto');
+assert.equal(scaleValueText(10, density), '10 of 15');
+assert.equal(stepQuality(null, density, 1), 10);
+assert.equal(stepQuality(null, density, -1), 10);
+assert.equal(stepQuality(null, speed, 1), 3);
+assert.equal(stepQuality(15, density, 1), 15);
+assert.equal(stepQuality(0, density, -1), 0);
+assert.equal(stepQuality(1, speed, -1), 1);
+assert.equal(stepQuality(7, speed, 1), 7);
+assert.equal(stepQuality(3, speed, 1), 4);
 
 // Frozen copy of resolvePrintQuality before bridge caps existed.
 function resolveBefore(input: PrintQualityInput): PrintQualityProfile {

@@ -88,6 +88,17 @@ export function formatScale(value: number | null, cap: QualityScale): string {
   return value == null ? `${cap.label} Auto` : `${cap.label} ${value} of ${cap.max}`;
 }
 
+/** Stepper value text: "Auto" or "10 of 15". */
+export function scaleValueText(value: number | null, cap: QualityScale): string {
+  return value == null ? 'Auto' : `${value} of ${cap.max}`;
+}
+
+/** One stepper tap. From Auto either button enters Manual at the default. */
+export function stepQuality(value: number | null, cap: QualityScale, direction: 1 | -1): number {
+  if (value == null) return cap.default;
+  return clampToCap(value + direction * cap.step, cap).value ?? cap.default;
+}
+
 export function isUntested(value: number | null, cap: QualityCap): boolean {
   return value != null && cap !== 'legacy' && cap.testedMax != null && value > cap.testedMax;
 }

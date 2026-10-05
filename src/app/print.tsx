@@ -37,6 +37,12 @@ import { SEZNIK_PRINTER_MODELS } from '@/constants/printer-models';
 import { canonicalizeJewelryDieCutDocument } from '@/constants/jewelry-template-elements';
 import { resolvePrintQuality } from '@/lib/printer/print-quality';
 import {
+  clampToCap,
+  qualityCapsFor,
+  resolveQualityBridge,
+} from '@/lib/printer/bridge-quality-caps';
+import { QualityControl, type QualityStepperProps } from '@/components/quality-control';
+import {
   CABLE_FLAG_DIECUT,
   CABLE_FLAG_PRINT_PRESET_SINGLE,
   cableFlagPrintDocument,
@@ -299,6 +305,10 @@ function StepperRow({
   );
 }
 
+function BorderedStepperRow(props: QualityStepperProps) {
+  return <StepperRow {...props} bordered />;
+}
+
 function ChipGroup<T extends string>({
   options,
   selected,
@@ -361,6 +371,19 @@ export default function PrintScreen() {
   const addHistoryEntry = usePrinterStore((s) => s.addHistoryEntry);
   const printerDeviceId = usePrinterStore((s) => s.deviceId ?? s.lastDeviceId);
   const printerSdkId = usePrinterStore((s) => s.sdkId);
+  const printerTransport = usePrinterStore((s) => s.transport);
+  const qualityBridge = useMemo(
+    () =>
+      resolveQualityBridge({
+        activeTransport: getPrinterManager().transport,
+        storeTransport: printerTransport,
+        sdkId: printerSdkId,
+      }),
+    // `status` re-reads the manager's live transport after connect / disconnect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [printerTransport, printerSdkId, status],
+  );
+  const qualityCaps = useMemo(() => qualityCapsFor(qualityBridge), [qualityBridge]);
   const printCalibration = usePrinterStore((s) => s.printCalibration);
   const setPrintCalibration = usePrinterStore((s) => s.setPrintCalibration);
   // A fixed print-head/media-guide offset is a per-unit hardware trait, not
@@ -499,6 +522,38 @@ export default function PrintScreen() {
     setOrientation(`${sourceDocument.orientation}°` as (typeof ORIENTATIONS)[number]);
     setPaperType(sourceDocument.paperType);
   }, [sourceDocument]);
+
+  // Bring darkness / speed inside the bridge's scale. Out-of-range values saved on the
+  // label are written back clamped, so the notice shows once.
+  const qualityClampNoticeShown = useRef(false);
+  useEffect(() => {
+    const d = clampToCap(darkness, qualityCaps.density);
+    const s = clampToCap(speed, qualityCaps.speed);
+    if (d.clamped) setDarkness(d.value);
+    if (s.clamped) setSpeed(s.value);
+    if (!params.labelId) return;
+    const store = useLabelStore.getState();
+    const stored = store.documents.find((doc) => doc.id === params.labelId);
+    if (!stored) return;
+    const saved = resolveLabelSettings(stored);
+    const savedD = clampToCap(saved.printDarkness, qualityCaps.density);
+    const savedS = clampToCap(saved.printSpeed, qualityCaps.speed);
+    if (!savedD.clamped && !savedS.clamped) return;
+    store.upsertDocument({
+      ...stored,
+      settings: { ...saved, printDarkness: savedD.value, printSpeed: savedS.value },
+    });
+    if (qualityClampNoticeShown.current) return;
+    qualityClampNoticeShown.current = true;
+    const changes = [
+      savedD.clamped ? `darkness ${saved.printDarkness} → ${savedD.value}` : null,
+      savedS.clamped ? `speed ${saved.printSpeed} → ${savedS.value}` : null,
+    ].filter(Boolean);
+    Alert.alert(
+      'Print settings adjusted',
+      `This label's saved ${changes.join(' and ')} was outside this printer's range and has been changed.`,
+    );
+  }, [darkness, speed, qualityCaps, params.labelId]);
 
   const shotRef = useRef<ViewShot>(null);
 
@@ -805,6 +860,12 @@ export default function PrintScreen() {
 
     try {
       const dieCutJob = jewelryDieCutJob || cableFlagJob || ratTail143Job;
+      const printerState = usePrinterStore.getState();
+      const jobBridge = resolveQualityBridge({
+        activeTransport: manager.transport,
+        storeTransport: printerState.transport,
+        sdkId: printerState.sdkId,
+      });
       const quality = resolvePrintQuality({
         darkness,
         speed,
@@ -812,6 +873,7 @@ export default function PrintScreen() {
         colorMode: defaults.colorMode,
         dieCut: dieCutJob,
         jewelry: jewelryDieCutJob,
+        caps: qualityCapsFor(jobBridge),
       });
       const { density: printDensity, threshold, speed: printSpeed, dither } = quality;
       // TD-404 at 0°: the offset is drawn into the bitmap, so the border moves exactly
@@ -820,7 +882,7 @@ export default function PrintScreen() {
       const offsetH = bakeOffset ? 0 : printOffsetMm.x;
       const offsetV = bakeOffset ? 0 : printOffsetMm.y;
       console.info(
-        `[print] Advanced params → density=${printDensity} speed=${printSpeed} threshold=${threshold} gap=${gapLength}mm offset=${printOffsetMm.x}x${printOffsetMm.y}mm (${bakeOffset ? 'bitmap' : 'REFERENCE'}) darknessUI=${darkness ?? 'Auto'} speedUI=${speed ?? 'Auto'}`,
+        `[print] Advanced params → density=${printDensity} speed=${printSpeed} threshold=${threshold} gap=${gapLength}mm offset=${printOffsetMm.x}x${printOffsetMm.y}mm (${bakeOffset ? 'bitmap' : 'REFERENCE'}) darknessUI=${darkness ?? 'Auto'} speedUI=${speed ?? 'Auto'} bridge=${jobBridge ?? 'none'} densityMode=${darkness == null ? 'auto' : 'manual'} speedMode=${speed == null ? 'auto' : 'manual'}`,
       );
 
       for (let page = 0; page < pageCount; page++) {
@@ -1625,36 +1687,55 @@ export default function PrintScreen() {
                   }}
                 />
 
-                <StepperRow
-                  label="Print Darkness"
-                  value={darkness == null ? 'Auto' : String(darkness)}
-                  minusDisabled={darkness != null && darkness <= 1}
-                  plusDisabled={darkness != null && darkness >= 15}
-                  onMinus={() =>
-                    setDarkness((d) => {
-                      if (d == null) return 7;
-                      if (d <= 1) return null;
-                      return d - 1;
-                    })
-                  }
-                  onPlus={() => setDarkness((d) => (d == null ? 8 : Math.min(15, d + 1)))}
-                  bordered
-                />
-                <StepperRow
-                  label="Print Speed"
-                  value={speed == null ? 'Auto' : String(speed)}
-                  minusDisabled={speed != null && speed <= 1}
-                  plusDisabled={speed != null && speed >= 8}
-                  onMinus={() =>
-                    setSpeed((s) => {
-                      if (s == null) return 2;
-                      if (s <= 1) return null;
-                      return s - 1;
-                    })
-                  }
-                  onPlus={() => setSpeed((s) => (s == null ? 3 : Math.min(8, s + 1)))}
-                  bordered
-                />
+                {qualityCaps.density !== 'legacy' ? (
+                  <QualityControl
+                    cap={qualityCaps.density}
+                    value={darkness}
+                    onChange={setDarkness}
+                    Stepper={BorderedStepperRow}
+                  />
+                ) : (
+                  <StepperRow
+                    label="Print Darkness"
+                    value={darkness == null ? 'Auto' : String(darkness)}
+                    minusDisabled={darkness != null && darkness <= 1}
+                    plusDisabled={darkness != null && darkness >= 15}
+                    onMinus={() =>
+                      setDarkness((d) => {
+                        if (d == null) return 7;
+                        if (d <= 1) return null;
+                        return d - 1;
+                      })
+                    }
+                    onPlus={() => setDarkness((d) => (d == null ? 8 : Math.min(15, d + 1)))}
+                    bordered
+                  />
+                )}
+                {qualityCaps.speed !== 'legacy' ? (
+                  <QualityControl
+                    cap={qualityCaps.speed}
+                    value={speed}
+                    onChange={setSpeed}
+                    Stepper={BorderedStepperRow}
+                    untestedNote="not tested on TD-404"
+                  />
+                ) : (
+                  <StepperRow
+                    label="Print Speed"
+                    value={speed == null ? 'Auto' : String(speed)}
+                    minusDisabled={speed != null && speed <= 1}
+                    plusDisabled={speed != null && speed >= 8}
+                    onMinus={() =>
+                      setSpeed((s) => {
+                        if (s == null) return 2;
+                        if (s <= 1) return null;
+                        return s - 1;
+                      })
+                    }
+                    onPlus={() => setSpeed((s) => (s == null ? 3 : Math.min(8, s + 1)))}
+                    bordered
+                  />
+                )}
                 <StepperRow
                   label="Gap Length"
                   value={`${gapLength.toFixed(2)} mm`}
