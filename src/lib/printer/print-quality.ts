@@ -3,6 +3,8 @@
  * Higher Auto defaults keep borders and thin text sharp on Tez/Josh/TD heads.
  */
 
+import { clampToCap, type BridgeQualityCaps } from '@/lib/printer/bridge-quality-caps';
+
 export type PrintQualityProfile = {
   /** Heat / darkness sent to OEM SDK (typically 1–15). */
   density: number;
@@ -21,6 +23,11 @@ export type PrintQualityInput = {
   /** Jewellery / cable / rat-tail die-cut stock. */
   dieCut?: boolean;
   jewelry?: boolean;
+  /**
+   * Bridge capability. A non-legacy scale clamps the manual value to it, and a manual
+   * darkness then changes DENSITY only (the threshold stays at its Auto value).
+   */
+  caps?: BridgeQualityCaps;
 };
 
 /**
@@ -28,6 +35,23 @@ export type PrintQualityInput = {
  * Default Auto aims for crisp borders (B&W threshold, density 10, speed 3).
  */
 export function resolvePrintQuality(input: PrintQualityInput): PrintQualityProfile {
+  const densityCap = input.caps?.density ?? 'legacy';
+  const speedCap = input.caps?.speed ?? 'legacy';
+  if (densityCap === 'legacy' && speedCap === 'legacy') return resolveLegacy(input);
+
+  const auto = resolveLegacy({ ...input, darkness: null, speed: null });
+  const legacy = resolveLegacy(input);
+  const density =
+    densityCap === 'legacy'
+      ? legacy.density
+      : (clampToCap(input.darkness, densityCap).value ?? auto.density);
+  const speed =
+    speedCap === 'legacy' ? legacy.speed : (clampToCap(input.speed, speedCap).value ?? auto.speed);
+  const threshold = densityCap === 'legacy' ? legacy.threshold : auto.threshold;
+  return { density, threshold, speed, dither: auto.dither };
+}
+
+function resolveLegacy(input: PrintQualityInput): PrintQualityProfile {
   const grayBase = Math.max(10, Math.min(250, input.grayThreshold ?? 160));
   // Halftone softens frames — only dither when user explicitly chose it.
   const dither = !input.dieCut && input.colorMode === 'Halftone';
