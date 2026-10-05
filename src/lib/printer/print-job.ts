@@ -1,4 +1,4 @@
-import type { LabelOrientation } from '@/lib/label-document';
+import type { LabelDocument, LabelOrientation } from '@/lib/label-document';
 import {
   mmToDots,
   printCaptureLayout as geometryPrintCaptureLayout,
@@ -29,6 +29,7 @@ import {
 import { encodeTscBitmapJob, inspectTsplJob } from '@/lib/printer/tsc';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
 import { logPrintTrace } from '@/printing';
+import { applyInkDarkness, rectsToPx, scanCodeRectsMm } from '@/printing/raster/ink-darkness';
 
 /** TD-404 / 203 DPI desktop thermal: ~4.25 in printable width. */
 export const TD404_MAX_WIDTH_MM = 108;
@@ -118,6 +119,26 @@ export function orientedPrintSize(
 export function rotatePngBase64(base64: string, orientation: LabelOrientation): string {
   if (orientation === 0) return base64;
   return grayToPngBase64(rotateGray(pngBase64ToGray(base64), orientation));
+}
+
+/**
+ * Unrotated ViewShot capture → the same bitmap darkness as the headless path, as a 0/255
+ * PNG. `doc` supplies the barcode / QR areas to leave alone; 0 steps returns the input.
+ */
+export function applyInkDarknessToPng(
+  base64: string,
+  steps: number,
+  threshold: number,
+  doc: LabelDocument | null,
+): string {
+  if (Math.round(steps) === 0) return base64;
+  const raster = pngBase64ToGray(base64);
+  const keep = doc && doc.widthMm > 0 ? rectsToPx(scanCodeRectsMm(doc), raster.width / doc.widthMm) : [];
+  return grayToPngBase64({
+    width: raster.width,
+    height: raster.height,
+    gray: applyInkDarkness(raster.gray, raster.width, raster.height, threshold, steps, keep),
+  });
 }
 
 /**

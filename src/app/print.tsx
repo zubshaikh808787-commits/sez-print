@@ -39,6 +39,7 @@ import { resolvePrintQuality } from '@/lib/printer/print-quality';
 import {
   calibrationQualityWarning,
   clampToCap,
+  darknessSteps,
   hasManualScale,
   qualityCapsFor,
   resolveQualityBridge,
@@ -68,6 +69,7 @@ import {
   type PaperType,
 } from '@/lib/label-document';
 import {
+  applyInkDarknessToPng,
   encodeConnectedPrinterJob,
   formatPrintFailure,
   orientedPrintSize,
@@ -913,6 +915,7 @@ export default function PrintScreen() {
         storeTransport: printerState.transport,
         sdkId: printerState.sdkId,
       });
+      const jobCaps = qualityCapsFor(jobBridge);
       const quality = resolvePrintQuality({
         darkness,
         speed,
@@ -920,16 +923,17 @@ export default function PrintScreen() {
         colorMode: defaults.colorMode,
         dieCut: dieCutJob,
         jewelry: jewelryDieCutJob,
-        caps: qualityCapsFor(jobBridge),
+        caps: jobCaps,
       });
       const { density: printDensity, threshold, speed: printSpeed, dither } = quality;
+      const inkSteps = darknessSteps(darkness, jobCaps);
       // TD-404 at 0°: the offset is drawn into the bitmap, so the border moves exactly
       // like every other layer and REFERENCE keeps only the media origin.
       const bakeOffset = manager.usesTd404CommandSet && orientationDeg === 0;
       const offsetH = bakeOffset ? 0 : printOffsetMm.x;
       const offsetV = bakeOffset ? 0 : printOffsetMm.y;
       console.info(
-        `[print] Advanced params → density=${printDensity} speed=${printSpeed} threshold=${threshold} gap=${gapLength}mm offset=${printOffsetMm.x}x${printOffsetMm.y}mm (${bakeOffset ? 'bitmap' : 'REFERENCE'}) darknessUI=${darkness ?? 'Auto'} speedUI=${speed ?? 'Auto'} bridge=${jobBridge ?? 'none'} densityMode=${darkness == null ? 'auto' : 'manual'} speedMode=${speed == null ? 'auto' : 'manual'}`,
+        `[print] Advanced params → density=${printDensity} speed=${printSpeed} threshold=${threshold} gap=${gapLength}mm offset=${printOffsetMm.x}x${printOffsetMm.y}mm (${bakeOffset ? 'bitmap' : 'REFERENCE'}) darknessUI=${darkness ?? 'Auto'} speedUI=${speed ?? 'Auto'} bridge=${jobBridge ?? 'none'} densityMode=${darkness == null ? 'auto' : 'manual'} speedMode=${speed == null ? 'auto' : 'manual'} inkSteps=${inkSteps}`,
       );
 
       for (let page = 0; page < pageCount; page++) {
@@ -1014,7 +1018,10 @@ export default function PrintScreen() {
           // it incorrectly (see printer-manager.ts). Pre-rotating here and always
           // telling native `orientation: 0` makes all four SDKs share one, tested,
           // lossless rotation path (rotateGray — exact axis transpose, no skew).
-          rotatedBase64 = rotatePngBase64(base64, orientationDeg);
+          rotatedBase64 = rotatePngBase64(
+            applyInkDarknessToPng(base64, inkSteps, threshold, pageDoc),
+            orientationDeg,
+          );
 
           logPrintTrace('EDITOR_CAPTURE', {
             userWidthMm: widthMm,
@@ -1172,6 +1179,7 @@ export default function PrintScreen() {
               const docPrepMs = Date.now() - tPrep0;
               const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, {
                 threshold,
+                darknessSteps: inkSteps,
                 bakeTd404Feed: true,
                 shiftDots: bakeOffset
                   ? { x: mmToDots(printOffsetMm.x, jobDpi), y: mmToDots(printOffsetMm.y, jobDpi) }
@@ -1300,7 +1308,10 @@ export default function PrintScreen() {
                   throw err instanceof Error ? err : new Error(String(err));
                 }
                 base64 = captured;
-                rotatedBase64 = rotatePngBase64(base64, orientationDeg);
+                rotatedBase64 = rotatePngBase64(
+                  applyInkDarknessToPng(base64, inkSteps, threshold, pageDoc),
+                  orientationDeg,
+                );
               }
               usedNative = await tryNativeSdkPngPrint({
                 pngBase64: rotatedBase64,
