@@ -115,6 +115,13 @@ export function calibrationQualityWarning(
   );
 }
 
+/** Manual darkness minus the scale default, for the bitmap darkness pass. 0 for Auto / legacy. */
+export function darknessSteps(darkness: number | null, caps: BridgeQualityCaps): number {
+  if (caps.density === 'legacy') return 0;
+  const value = clampToCap(darkness, caps.density).value;
+  return value == null ? 0 : value - caps.density.default;
+}
+
 export function isUntested(value: number | null, cap: QualityCap): boolean {
   return value != null && cap !== 'legacy' && cap.testedMax != null && value > cap.testedMax;
 }

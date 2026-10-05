@@ -27,6 +27,7 @@ import { formatBarcodeHri } from '@/lib/barcode/hri';
 import { stretchThenRoundBars } from './barcode-stretch';
 import { packGrayToMono1bpp } from './bit-packer';
 import { drawPrintBorder } from './print-border';
+import { applyInkDarkness, rectsToPx, scanCodeRectsMm } from './ink-darkness';
 import { drawQrMeet } from './qr-meet';
 import {
   makeOffscreenSurface,
@@ -52,6 +53,11 @@ export type RasterizeOptions = {
    * (border included) moves by the same amount. Ink pushed past an edge is cropped.
    */
   shiftDots?: { x: number; y: number };
+  /**
+   * Manual darkness minus the bridge default (TD-404: -10..+5). 0 or absent leaves the
+   * bitmap untouched. Barcodes and QR codes are excluded.
+   */
+  darknessSteps?: number;
 }
 
 export type RasterBitmap = {
@@ -279,8 +285,19 @@ export function rasterizeDocumentToBitmapTimed(
   const drawMs = Math.max(0, drawWallMs - encodeMs);
 
   const tRead0 = performance.now();
+  const steps = Math.round(options.darknessSteps ?? 0);
+  const drawn = surface.readGray();
   const gray = shiftGray(
-    surface.readGray(),
+    steps === 0
+      ? drawn
+      : applyInkDarkness(
+          drawn,
+          surfW,
+          surfH,
+          threshold,
+          steps,
+          rectsToPx(scanCodeRectsMm(doc), dpmScaled(dpi), activeDotScale),
+        ),
     surfW,
     surfH,
     Math.round(options.shiftDots?.x ?? 0) * activeDotScale,
