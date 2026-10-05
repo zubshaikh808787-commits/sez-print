@@ -333,6 +333,7 @@ export function SettingsStepperRow({
   onMinus,
   onPlus,
   minusDisabled,
+  plusDisabled,
   showDivider,
 }: {
   label: string;
@@ -340,6 +341,7 @@ export function SettingsStepperRow({
   onMinus?: () => void;
   onPlus?: () => void;
   minusDisabled?: boolean;
+  plusDisabled?: boolean;
   showDivider?: boolean;
 }) {
   return (
@@ -355,8 +357,12 @@ export function SettingsStepperRow({
             <Text style={[styles.stepperSymbol, minusDisabled && styles.stepperSymbolDisabled]}>−</Text>
           </Pressable>
           <Text style={styles.stepperValue}>{value}</Text>
-          <Pressable onPress={onPlus} hitSlop={SETTINGS_HIT_SLOP} style={styles.stepperCircle}>
-            <Text style={styles.stepperSymbol}>+</Text>
+          <Pressable
+            disabled={plusDisabled}
+            onPress={onPlus}
+            hitSlop={SETTINGS_HIT_SLOP}
+            style={[styles.stepperCircle, plusDisabled && styles.stepperCircleDisabled]}>
+            <Text style={[styles.stepperSymbol, plusDisabled && styles.stepperSymbolDisabled]}>+</Text>
           </Pressable>
         </View>
       </View>

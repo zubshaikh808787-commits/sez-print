@@ -29,12 +29,15 @@ export function QualityControl({
   onChange,
   Stepper,
   untestedNote,
+  footerInset = 0,
 }: {
   cap: QualityScale;
   value: number | null;
   onChange: (next: number | null) => void;
   Stepper: ComponentType<QualityStepperProps>;
   untestedNote?: string;
+  /** Horizontal padding for the note row, to line up with the screen's stepper rows. */
+  footerInset?: number;
 }) {
   const manual = value != null;
   const untested = isUntested(value, cap);
@@ -49,7 +52,7 @@ export function QualityControl({
         plusDisabled={manual && value >= cap.max}
       />
       {manual ? (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingHorizontal: footerInset }]}>
           <Text style={[styles.note, untested && styles.warn]} numberOfLines={2}>
             {formatScale(value, cap)}
             {untested && untestedNote ? ` · ${untestedNote}` : ''}

@@ -16,6 +16,7 @@ import {
 import { LabelSizeEditor } from '@/components/label-size-editor';
 import {
   SettingsCard,
+  SettingsDivider,
   SettingsNote,
   SettingsScreenShell,
   SettingsSegmentRow,
@@ -42,6 +43,10 @@ import { stockSizePromptCopy, type StockSizeHandling } from '@/lib/stock-size';
 import { isRatTail143Document } from '@/constants/rat-tail-143';
 import { useDataStore } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
+import { usePrinterStore } from '@/stores/printer-store';
+import { QualityControl } from '@/components/quality-control';
+import { clampToCap, qualityCapsFor, resolveQualityBridge } from '@/lib/printer/bridge-quality-caps';
+import { getPrinterManager } from '@/lib/printer/printer-manager';
 
 const ORIENTATIONS = ['0°', '90°', '180°', '270°'] as const;
 const PAPER_TYPES = ['Receipt', 'Label', 'Cardstock', 'Transparent', 'Black mark'] as const;
@@ -54,6 +59,22 @@ export default function LabelSettingsScreen() {
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
   const excelFiles = useDataStore((s) => s.excelFiles);
   const setActiveExcelFile = useDataStore((s) => s.setActiveExcelFile);
+  const printerStatus = usePrinterStore((s) => s.status);
+  const printerTransport = usePrinterStore((s) => s.transport);
+  const printerSdkId = usePrinterStore((s) => s.sdkId);
+  const qualityCaps = useMemo(
+    () =>
+      qualityCapsFor(
+        resolveQualityBridge({
+          activeTransport: getPrinterManager().transport,
+          storeTransport: printerTransport,
+          sdkId: printerSdkId,
+        }),
+      ),
+    // `printerStatus` re-reads the manager's live transport after connect / disconnect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [printerStatus, printerTransport, printerSdkId],
+  );
 
   const [doc, setDoc] = useState<LabelDocument | null>(null);
   const [nameModalVisible, setNameModalVisible] = useState(false);
@@ -331,37 +352,61 @@ export default function LabelSettingsScreen() {
       </SettingsCard>
 
       <SettingsCard>
-        <SettingsStepperRow
-          label="Print Darkness"
-          value={formatDarknessValue(settings.printDarkness)}
-          minusDisabled={settings.printDarkness != null && settings.printDarkness <= 1}
-          onMinus={() => {
-            if (settings.printDarkness == null) patchSettings({ printDarkness: 14 });
-            else if (settings.printDarkness > 1)
-              patchSettings({ printDarkness: settings.printDarkness - 1 });
-          }}
-          onPlus={() => {
-            if (settings.printDarkness == null) patchSettings({ printDarkness: 1 });
-            else if (settings.printDarkness < 15)
-              patchSettings({ printDarkness: settings.printDarkness + 1 });
-            else patchSettings({ printDarkness: null });
-          }}
-          showDivider
-        />
-        <SettingsStepperRow
-          label="Print Speed"
-          value={formatSpeedValue(settings.printSpeed)}
-          minusDisabled={settings.printSpeed != null && settings.printSpeed <= 1}
-          onMinus={() => {
-            if (settings.printSpeed == null) patchSettings({ printSpeed: 5 });
-            else if (settings.printSpeed > 1) patchSettings({ printSpeed: settings.printSpeed - 1 });
-          }}
-          onPlus={() => {
-            if (settings.printSpeed == null) patchSettings({ printSpeed: 1 });
-            else if (settings.printSpeed < 5) patchSettings({ printSpeed: settings.printSpeed + 1 });
-            else patchSettings({ printSpeed: null });
-          }}
-        />
+        {qualityCaps.density !== 'legacy' ? (
+          <>
+            <QualityControl
+              cap={qualityCaps.density}
+              value={clampToCap(settings.printDarkness, qualityCaps.density).value}
+              onChange={(next) => patchSettings({ printDarkness: next })}
+              Stepper={SettingsStepperRow}
+              footerInset={16}
+            />
+            <SettingsDivider />
+          </>
+        ) : (
+          <SettingsStepperRow
+            label="Print Darkness"
+            value={formatDarknessValue(settings.printDarkness)}
+            minusDisabled={settings.printDarkness != null && settings.printDarkness <= 1}
+            onMinus={() => {
+              if (settings.printDarkness == null) patchSettings({ printDarkness: 14 });
+              else if (settings.printDarkness > 1)
+                patchSettings({ printDarkness: settings.printDarkness - 1 });
+            }}
+            onPlus={() => {
+              if (settings.printDarkness == null) patchSettings({ printDarkness: 1 });
+              else if (settings.printDarkness < 15)
+                patchSettings({ printDarkness: settings.printDarkness + 1 });
+              else patchSettings({ printDarkness: null });
+            }}
+            showDivider
+          />
+        )}
+        {qualityCaps.speed !== 'legacy' ? (
+          <QualityControl
+            cap={qualityCaps.speed}
+            value={clampToCap(settings.printSpeed, qualityCaps.speed).value}
+            onChange={(next) => patchSettings({ printSpeed: next })}
+            Stepper={SettingsStepperRow}
+            untestedNote="not tested on TD-404"
+            footerInset={16}
+          />
+        ) : (
+          <SettingsStepperRow
+            label="Print Speed"
+            value={formatSpeedValue(settings.printSpeed)}
+            minusDisabled={settings.printSpeed != null && settings.printSpeed <= 1}
+            onMinus={() => {
+              if (settings.printSpeed == null) patchSettings({ printSpeed: 5 });
+              else if (settings.printSpeed > 1) patchSettings({ printSpeed: settings.printSpeed - 1 });
+            }}
+            onPlus={() => {
+              if (settings.printSpeed == null) patchSettings({ printSpeed: 1 });
+              else if (settings.printSpeed < 5) patchSettings({ printSpeed: settings.printSpeed + 1 });
+              else patchSettings({ printSpeed: null });
+            }}
+          />
+        )}
       </SettingsCard>
 
       <SettingsCard>
