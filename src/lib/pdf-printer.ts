@@ -29,7 +29,7 @@ export interface PdfPrintOptions {
   density?: number | null;
   /** Print speed (1–6). Default: 3. */
   speed?: number | null;
-  /** Label gap in mm. Default: 2. */
+  /** Label gap in mm. Default: 3. */
   gapMm?: number;
   /** Media type: gap, continuous (receipt), or bline (black mark). Default: 'gap'. */
   mediaType?: 'gap' | 'continuous' | 'bline';
@@ -189,7 +189,7 @@ export async function printPdfToThermal(
   const copies = Math.max(1, options.copies ?? 1);
   const density = options.density ?? 10;
   const speed = options.speed ?? 3;
-  const gapMm = options.gapMm ?? 2;
+  const gapMm = options.gapMm ?? 3;
   const mediaType = options.mediaType ?? 'gap';
   const dither = options.dither ?? true;
   const dpi = manager.getPrintDpi();

@@ -3131,7 +3131,11 @@ class PrinterManager {
         console.info(
           '[printer] SDK fast print done in',
           Date.now() - t0,
-          'ms |',
+          'ms | media=',
+          options.media ?? 'gap',
+          'gapMm=',
+          spec.gapMm,
+          '|',
           result,
         );
       } finally {
@@ -3254,7 +3258,11 @@ class PrinterManager {
         console.info(
           '[printer] TD-404 mono print done in',
           Date.now() - t0,
-          'ms | writeMs=',
+          'ms | media=',
+          options.media ?? 'gap',
+          'gapMm=',
+          spec.gapMm,
+          '| writeMs=',
           result.writeMs,
           'bytesSent=',
           result.bytesSent,

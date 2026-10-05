@@ -282,7 +282,7 @@ export default function CalibrationPrintScreen() {
         labelHeightMm: heightMm,
         boxWidthMm: boxW,
         boxHeightMm: boxH,
-        gapMm: 2,
+        gapMm: 3,
         thicknessMm: 0.35,
       });
       await manager.printRawTspl(res.tspl);

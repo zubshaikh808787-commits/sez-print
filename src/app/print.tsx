@@ -90,7 +90,7 @@ import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
 import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
-import { resolveLabelSettings } from '@/lib/label-settings';
+import { defaultLabelSettings, resolveLabelSettings } from '@/lib/label-settings';
 import { loadAndRenderPdf, printPdfToThermal, type RenderedPdfPage } from '@/lib/pdf-printer';
 
 import { fitLabelSize, printMediaSizeMm, type LabelSizeMm } from '@/lib/label-geometry';
@@ -447,7 +447,7 @@ export default function PrintScreen() {
   const [speed, setSpeed] = useState<number | null>(null);
   const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]>('0°');
   const [paperType, setPaperType] = useState<PaperType>(defaults.paperType);
-  const [gapLength, setGapLength] = useState(3);
+  const [gapLength, setGapLength] = useState(() => defaultLabelSettings().gapLengthMm);
   const [hOffset, setHOffset] = useState(() => savedCalibration?.hOffsetMm ?? 0);
   const [vOffset, setVOffset] = useState(() => savedCalibration?.vOffsetMm ?? 0);
 
@@ -476,7 +476,6 @@ export default function PrintScreen() {
   const [printPreset, setPrintPreset] = useState<PrintSizePreset | null>(defaultPreset);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const printingLockRef = useRef(false);
-  const upsGapInitialized = useRef(false);
   const labelSettingsInitialized = useRef(false);
 
   useEffect(() => {
@@ -624,19 +623,21 @@ export default function PrintScreen() {
   );
   const captureLayoutPx = useRef<{ w: number; h: number } | null>(null);
 
-  /** Live store ups config (compose strips it from the print document). */
-  const upsSource = useMemo(() => {
-    if (!params.labelId) return null;
-    return getDocument(params.labelId)?.ups ?? null;
-  }, [params.labelId, getDocument]);
-
-  // Stick 2-up media: default feed gap to 2 mm. Jewellery 3-up keeps 3 mm.
-  useEffect(() => {
-    if (!upsSource || upsGapInitialized.current) return;
-    if (upsSource.columns === JEWELRY_DIECUT.columns || jewelryDieCutJob || cableFlagJob || ratTail143Job) return;
-    upsGapInitialized.current = true;
-    setGapLength(2);
-  }, [upsSource, jewelryDieCutJob, cableFlagJob, ratTail143Job]);
+  /** Gap Length is the liner between two die-cuts. Save it on the label so the next print sends the same GAP. */
+  const changeGapLength = useCallback(
+    (next: number) => {
+      setGapLength(next);
+      if (!params.labelId) return;
+      const store = useLabelStore.getState();
+      const stored = store.documents.find((d) => d.id === params.labelId);
+      if (!stored) return;
+      store.upsertDocument({
+        ...stored,
+        settings: { ...resolveLabelSettings(stored), gapLengthMm: next },
+      });
+    },
+    [params.labelId],
+  );
 
   // Sync print size if a different document ID or dimension is loaded
   const lastDocKeyRef = useRef<string | null>(null);
@@ -717,6 +718,7 @@ export default function PrintScreen() {
           copies,
           density: darkness ?? 10,
           speed: speed ?? 3,
+          gapMm: gapLength,
           docName: jobName,
         });
 
@@ -1612,8 +1614,8 @@ export default function PrintScreen() {
                   label="Gap Length"
                   value={`${gapLength.toFixed(2)} mm`}
                   minusDisabled={gapLength <= 0}
-                  onMinus={() => setGapLength((v) => Math.max(0, Math.round((v - 0.5) * 100) / 100))}
-                  onPlus={() => setGapLength((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
+                  onMinus={() => changeGapLength(Math.max(0, Math.round((gapLength - 0.5) * 100) / 100))}
+                  onPlus={() => changeGapLength(Math.min(20, Math.round((gapLength + 0.5) * 100) / 100))}
                   bordered
                 />
                 <Text style={{ color: '#9CA3AF', fontSize: 12, paddingTop: 8 }}>
@@ -1703,6 +1705,7 @@ export default function PrintScreen() {
                       bytesPerRow: timed.result.bytesPerRow,
                       widthMm: doc.widthMm,
                       heightMm: doc.heightMm,
+                      gapMm: gapLength,
                       dpi: jobDpi,
                       dryRun: true,
                       gitSha: resolveGitSha(),
@@ -1717,6 +1720,7 @@ export default function PrintScreen() {
                       pngBase64: png,
                       widthMm: doc.widthMm,
                       heightMm: doc.heightMm,
+                      gapMm: gapLength,
                       dpi: jobDpi,
                       threshold: 160,
                       dryRun: true,

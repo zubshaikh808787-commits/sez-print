@@ -406,7 +406,7 @@ export function createPrintSpec(options: CreatePrintSpecOptions): PrintSpec {
     xOffsetDots,
     yOffsetDots,
     mediaType: options.mediaType ?? 'gap',
-    gapMm: options.gapMm ?? 2,
+    gapMm: options.gapMm ?? 3,
   };
 }
 
