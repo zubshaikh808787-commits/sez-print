@@ -24,8 +24,9 @@ export type PrintQualityInput = {
   dieCut?: boolean;
   jewelry?: boolean;
   /**
-   * Bridge capability. A non-legacy scale clamps the manual value to it, and a manual
-   * darkness then changes DENSITY only (the threshold stays at its Auto value).
+   * Bridge capability. A non-legacy scale clamps the manual value to it; a manual darkness
+   * then sets DENSITY and moves the threshold from its Auto value, so the scale default
+   * prints exactly like Auto and every other step changes the bitmap too.
    */
   caps?: BridgeQualityCaps;
 };
@@ -41,15 +42,28 @@ export function resolvePrintQuality(input: PrintQualityInput): PrintQualityProfi
 
   const auto = resolveLegacy({ ...input, darkness: null, speed: null });
   const legacy = resolveLegacy(input);
-  const density =
-    densityCap === 'legacy'
-      ? legacy.density
-      : (clampToCap(input.darkness, densityCap).value ?? auto.density);
   const speed =
     speedCap === 'legacy' ? legacy.speed : (clampToCap(input.speed, speedCap).value ?? auto.speed);
-  const threshold = densityCap === 'legacy' ? legacy.threshold : auto.threshold;
-  return { density, threshold, speed, dither: auto.dither };
+  if (densityCap === 'legacy') {
+    return { density: legacy.density, threshold: legacy.threshold, speed, dither: auto.dither };
+  }
+  const manual = clampToCap(input.darkness, densityCap).value;
+  if (manual == null) return { ...auto, speed };
+  const dieCut = input.jewelry || input.dieCut;
+  const perStep = dieCut ? DIECUT_THRESHOLD_PER_STEP : THRESHOLD_PER_STEP;
+  const [lo, hi] = dieCut ? DIECUT_THRESHOLD_RANGE : THRESHOLD_RANGE;
+  const threshold = Math.min(
+    hi,
+    Math.max(lo, auto.threshold + (manual - densityCap.default) * perStep),
+  );
+  return { density: manual, threshold, speed, dither: auto.dither };
 }
+
+/** Gray levels the B&W cutoff moves per darkness step on a capped bridge. */
+const THRESHOLD_PER_STEP = 8;
+const DIECUT_THRESHOLD_PER_STEP = 5;
+const THRESHOLD_RANGE = [80, 230] as const;
+const DIECUT_THRESHOLD_RANGE = [120, 220] as const;
 
 function resolveLegacy(input: PrintQualityInput): PrintQualityProfile {
   const grayBase = Math.max(10, Math.min(250, input.grayThreshold ?? 160));

@@ -558,6 +558,18 @@ export default function PrintScreen() {
     setPaperType(sourceDocument.paperType);
   }, [sourceDocument]);
 
+  // Darkness / speed changed in Label Settings while this screen stays mounted.
+  const savedQualityRef = useRef<{ d: number | null; s: number | null } | null>(null);
+  useEffect(() => {
+    if (!sourceDocument) return;
+    const { printDarkness: d, printSpeed: s } = resolveLabelSettings(sourceDocument);
+    const seen = savedQualityRef.current;
+    savedQualityRef.current = { d, s };
+    if (!seen) return;
+    if (seen.d !== d) setDarkness(d);
+    if (seen.s !== s) setSpeed(s);
+  }, [sourceDocument]);
+
   // Bring darkness / speed inside the bridge's scale. Out-of-range values saved on the
   // label are written back clamped, so the notice shows once.
   const qualityClampNoticeShown = useRef(false);

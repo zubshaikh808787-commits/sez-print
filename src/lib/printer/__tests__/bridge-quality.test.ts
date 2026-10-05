@@ -21,6 +21,7 @@ import {
   type PrintQualityInput,
   type PrintQualityProfile,
 } from '@/lib/printer/print-quality';
+import { packGrayToMono1bpp } from '@/printing/raster/bit-packer';
 
 // Capability table per bridge.
 const td = qualityCapsFor('td404-spp');
@@ -128,15 +129,33 @@ assert.equal(resolvePrintQuality({ darkness: null, speed: null, caps: td }).dens
 assert.equal(resolvePrintQuality({ darkness: null, speed: null, caps: td }).speed, 3);
 assert.equal(resolvePrintQuality({ darkness: null, speed: null, dieCut: true, caps: td }).speed, 2);
 
-// TD-404 Manual: DENSITY follows darkness 0-15, threshold stays at Auto, speed 1-7.
+// TD-404 Manual: DENSITY follows darkness 0-15 and the bitmap follows too. Darkness 10
+// (the default) prints exactly like Auto; every step away moves the threshold.
 for (const kind of jobKinds) {
-  const autoThreshold = resolveBefore({ darkness: null, speed: null, ...kind }).threshold;
-  for (const darkness of [0, 5, 10, 15]) {
-    const q = resolvePrintQuality({ darkness, speed: null, ...kind, caps: td });
+  const autoQ = resolveBefore({ darkness: null, speed: null, ...kind });
+  const at = (darkness: number) => resolvePrintQuality({ darkness, speed: null, ...kind, caps: td });
+  assert.deepEqual(at(10), autoQ, `manual 10 == Auto ${JSON.stringify(kind)}`);
+  let prev = -1;
+  for (let darkness = 0; darkness <= 15; darkness++) {
+    const q = at(darkness);
     assert.equal(q.density, darkness);
-    assert.equal(q.threshold, autoThreshold, 'darkness does not move the threshold');
+    assert.ok(q.threshold > prev, `threshold rises with darkness ${darkness} ${JSON.stringify(kind)}`);
+    prev = q.threshold;
   }
+  assert.ok(at(15).threshold > autoQ.threshold && at(5).threshold < autoQ.threshold);
 }
+assert.equal(resolvePrintQuality({ darkness: 15, speed: null, caps: td }).threshold, 200);
+assert.equal(resolvePrintQuality({ darkness: 5, speed: null, caps: td }).threshold, 120);
+assert.equal(resolvePrintQuality({ darkness: 0, speed: null, caps: td }).threshold, 80);
+
+// The packed bitmap gets more ink as darkness rises (anti-aliased text edges are gray).
+const ramp = Uint8Array.from({ length: 256 }, (_, i) => i);
+const inkAt = (darkness: number) => {
+  const { threshold } = resolvePrintQuality({ darkness, speed: null, caps: td });
+  const { mono1bppBuffer } = packGrayToMono1bpp(ramp, 256, 1, threshold);
+  return mono1bppBuffer.reduce((n, byte) => n + byte.toString(2).split('1').length - 1, 0);
+};
+assert.ok(inkAt(0) < inkAt(5) && inkAt(5) < inkAt(10) && inkAt(10) < inkAt(15), 'ink rises with darkness');
 assert.equal(resolvePrintQuality({ darkness: 20, speed: 9, caps: td }).density, 15);
 assert.equal(resolvePrintQuality({ darkness: 20, speed: 9, caps: td }).speed, 7);
 assert.equal(resolvePrintQuality({ darkness: null, speed: 1, caps: td }).speed, 1);

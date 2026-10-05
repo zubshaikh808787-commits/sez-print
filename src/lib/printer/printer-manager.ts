@@ -3137,6 +3137,7 @@ class PrinterManager {
           spec.gapMm,
           '|',
           result,
+          `| sent DENSITY ${options.density ?? 10} SPEED ${options.speed ?? 3} threshold=${options.threshold ?? 160}`,
         );
       } finally {
         const currentStore = usePrinterStore.getState();
@@ -3266,6 +3267,7 @@ class PrinterManager {
           result.writeMs,
           'bytesSent=',
           result.bytesSent,
+          `| sent DENSITY ${options.density ?? 10} SPEED ${options.speed ?? 3}`,
         );
       } finally {
         const currentStore = usePrinterStore.getState();
