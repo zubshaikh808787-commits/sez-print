@@ -1630,7 +1630,7 @@ export default function PrintScreen() {
                       profile: mgr.getActivePrinterProfile(),
                       calibration: { horizontalOffsetMm: hOffset, verticalOffsetMm: vOffset },
                     });
-                    return `TD-404 sends BITMAP 0,0. REFERENCE is ${spec.xOffsetDots},${spec.yOffsetDots} dots. The border is placed in dots: top on row 0, left/right/bottom 24 dots in at 304 DPI. Positive offsets still move the whole print.`;
+                    return `TD-404 sends BITMAP 0,0. REFERENCE is ${spec.xOffsetDots},${spec.yOffsetDots} dots. The border is placed in dots: top 12, left 18, right 36, bottom 24 at 304 DPI. Set H and V to 0 before measuring. Positive offsets still move the whole print.`;
                   })()}
                 </Text>
                 <StepperRow

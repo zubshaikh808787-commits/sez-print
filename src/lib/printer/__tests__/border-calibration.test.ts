@@ -7,6 +7,10 @@ import {
   dotsPerMm,
   mmToDots,
   PRINTER_PROFILES,
+  TD404_BORDER_BOTTOM_MM,
+  TD404_BORDER_LEFT_MM,
+  TD404_BORDER_RIGHT_MM,
+  TD404_BORDER_TOP_MM,
   TD404_MEDIA_ORIGIN_H_MM,
 } from '@/lib/printer/print-spec';
 import {
@@ -209,7 +213,10 @@ assert.ok(Math.abs(torn.B - (insetDots + tearDots)) <= 1, `tear bottom ${torn.B}
 const tornFull = margins(50, 30, fullBleedBorderElement(50, 30), 1);
 assert.ok(Math.abs(tornFull.T - insetDots) <= 1 && Math.abs(tornFull.B - (insetDots + tearDots)) <= 1, `full-bleed tear T${tornFull.T} B${tornFull.B}`);
 
-const sideDots = mmToDots(2, dpi);
+const leftDots = mmToDots(TD404_BORDER_LEFT_MM, dpi);
+const rightDots = mmToDots(TD404_BORDER_RIGHT_MM, dpi);
+const topDots = mmToDots(TD404_BORDER_TOP_MM, dpi);
+const bottomDots = mmToDots(TD404_BORDER_BOTTOM_MM, dpi);
 for (const [widthMm, heightMm] of [
   [50, 50],
   [40, 40],
@@ -237,10 +244,10 @@ for (const [widthMm, heightMm] of [
     widthMm,
     heightMm,
   );
-  assert.ok(Math.abs(baked.L - sideDots) <= 1, `baked ${widthMm}x${heightMm} left ${baked.L}`);
-  assert.ok(Math.abs(baked.R - sideDots) <= 1, `baked ${widthMm}x${heightMm} right ${baked.R}`);
-  assert.ok(baked.T <= 1, `baked ${widthMm}x${heightMm} top ${baked.T}`);
-  assert.ok(Math.abs(baked.B - sideDots) <= 1, `baked ${widthMm}x${heightMm} bottom ${baked.B}`);
+  assert.ok(Math.abs(baked.L - leftDots) <= 1, `baked ${widthMm}x${heightMm} left ${baked.L}`);
+  assert.ok(Math.abs(baked.R - rightDots) <= 1, `baked ${widthMm}x${heightMm} right ${baked.R}`);
+  assert.ok(Math.abs(baked.T - topDots) <= 1, `baked ${widthMm}x${heightMm} top ${baked.T}`);
+  assert.ok(Math.abs(baked.B - bottomDots) <= 1, `baked ${widthMm}x${heightMm} bottom ${baked.B}`);
 }
 
 console.log('ok border-calibration');

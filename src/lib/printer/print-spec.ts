@@ -115,23 +115,34 @@ export function mediaOriginXMm(profile: PrinterProfile): number {
 
 /**
  * Outer edge of a TD-404 border, in printer dots, measured from the packed bitmap.
- * 2 mm is `dotsPerMm * 2` (24 dots at 304). Top is row 0: a 24-dot top inset
- * was printing about 4 mm down, and the stroke cannot sit above the bitmap.
- * Bottom stays 24 dots up so the stroke cannot fall off the label.
+ *
+ * Ruler on the last print, with the previous insets: top 2 mm, left 2 mm,
+ * right 0.5 mm, bottom 3 mm. Top and left already match, so those insets stay.
+ * Right gains 1.5 mm (the stroke moves left). Bottom loses 1 mm (the stroke
+ * moves down). At 304 DPI that is top 12, left 18, right 36, bottom 24.
+ * The stroke stays inside the bitmap. REFERENCE is not moved.
  */
+export const TD404_BORDER_TOP_MM = 1;
+export const TD404_BORDER_LEFT_MM = 1.5;
+export const TD404_BORDER_RIGHT_MM = 3;
+export const TD404_BORDER_BOTTOM_MM = 2;
+
 export function td404BorderOuterDots(
   widthDots: number,
   heightDots: number,
   dpi: number,
 ): { x0: number; y0: number; x1: number; y1: number } {
-  const side = dotsPerMm(dpi) * 2;
-  const x0 = side;
-  const y0 = 0;
+  const left = mmToDots(TD404_BORDER_LEFT_MM, dpi);
+  const right = mmToDots(TD404_BORDER_RIGHT_MM, dpi);
+  const top = mmToDots(TD404_BORDER_TOP_MM, dpi);
+  const bottom = mmToDots(TD404_BORDER_BOTTOM_MM, dpi);
+  const x0 = left;
+  const y0 = top;
   return {
     x0,
     y0,
-    x1: Math.max(x0 + 1, widthDots - side),
-    y1: Math.max(y0 + 1, heightDots - side),
+    x1: Math.max(x0 + 1, widthDots - right),
+    y1: Math.max(y0 + 1, heightDots - bottom),
   };
 }
 
