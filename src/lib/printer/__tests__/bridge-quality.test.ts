@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   BRIDGE_QUALITY_CAPS,
   TD404_QUALITY_CAPS,
@@ -150,5 +152,36 @@ assert.ok(warn?.includes('darkness 10, speed 3'), warn ?? '');
 assert.ok(warn?.includes('darkness 15, speed 3'));
 assert.ok(calibrationQualityWarning({ density: 10, speed: 3 }, { density: 10, speed: 5 }));
 assert.ok(calibrationQualityWarning({ density: 0, speed: 1 }, { density: 10, speed: 3 }), 'zero is a recorded value');
+
+// Header lines. Td404PrinterModule builds them in Kotlin; this copies its format, and the
+// source check below fails if the Kotlin format changes.
+const td404QualityHeader = (density: number, speed: number) =>
+  `SPEED ${Math.trunc(speed)}\r\nDENSITY ${Math.trunc(density)}\r\n`;
+const kt = readFileSync(
+  join(process.cwd(), 'modules/td404-printer/android/src/main/java/expo/modules/td404printer/Td404PrinterModule.kt'),
+  'utf8',
+);
+const count = (needle: string) => kt.split(needle).length - 1;
+assert.equal(count('"SPEED $speed\\r\\n" +'), 2, 'PNG and mono jobs write SPEED $speed');
+assert.equal(count('"DENSITY $density\\r\\n" +'), 2, 'PNG and mono jobs write DENSITY $density');
+assert.equal(count('val density = (options["density"] as? Number)?.toInt() ?: 10'), 2);
+assert.equal(count('val speed = (options["speed"] as? Number)?.toInt() ?: 3'), 2);
+
+for (const [d, expected] of [[0, 'DENSITY 0\r\n'], [10, 'DENSITY 10\r\n'], [15, 'DENSITY 15\r\n']] as const) {
+  const q = resolvePrintQuality({ darkness: d, speed: null, caps: td });
+  assert.ok(td404QualityHeader(q.density, q.speed).endsWith(expected), `density ${d}`);
+}
+for (const [s, expected] of [[1, 'SPEED 1\r\n'], [3, 'SPEED 3\r\n'], [7, 'SPEED 7\r\n']] as const) {
+  const q = resolvePrintQuality({ darkness: null, speed: s, caps: td });
+  assert.ok(td404QualityHeader(q.density, q.speed).startsWith(expected), `speed ${s}`);
+}
+
+// Auto leaves the header byte-identical to before (normal and die-cut jobs).
+for (const kind of jobKinds) {
+  const before = resolveBefore({ darkness: null, speed: null, ...kind });
+  const after = resolvePrintQuality({ darkness: null, speed: null, ...kind, caps: td });
+  assert.equal(td404QualityHeader(after.density, after.speed), td404QualityHeader(before.density, before.speed));
+}
+assert.equal(td404QualityHeader(10, 3), 'SPEED 3\r\nDENSITY 10\r\n');
 
 console.log('ok bridge-quality');
