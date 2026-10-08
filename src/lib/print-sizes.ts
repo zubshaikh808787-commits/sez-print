@@ -613,6 +613,7 @@ export function applyPrintSize(
   preset: PrintSizePreset | null,
   custom: LabelSizeMm,
 ): LabelDocument {
+  if (source.printComposedUps) return source;
   if (preset?.id === 'a4' || preset?.sheet) return tileDocumentOnA4(source);
   if (preset?.id === '2ups') return tileDocumentTwoUp(source);
   if (preset?.id === 'jewellery-3up-14x100') return tileDocumentThreeUpRatTail(source);

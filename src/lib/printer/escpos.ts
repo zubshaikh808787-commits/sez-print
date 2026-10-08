@@ -461,9 +461,9 @@ export function cropGrayToSize(src: GrayRaster, destW: number, destH: number): G
   out.fill(255);
   const copyW = Math.min(src.width, width);
   const copyH = Math.min(src.height, height);
-  // Center-crop when TSPL pack-down trims 0–7 columns so content stays visually centered.
-  const sx = Math.max(0, Math.floor((src.width - copyW) / 2));
-  const sy = Math.max(0, Math.floor((src.height - copyH) / 2));
+  // Left-align. Pack-up pads white on the right; never crop the left.
+  const sx = 0;
+  const sy = 0;
   const srcGray = src.gray;
   for (let y = 0; y < copyH; y++) {
     const srcRow = (sy + y) * src.width + sx;
@@ -562,7 +562,7 @@ export class EditorRasterMismatchError extends Error {
 }
 
 /**
- * Map a capture onto precomputed SIZE dots, then pack-down for BITMAP.
+ * Map a capture onto precomputed SIZE dots, then pack-up (white right) for BITMAP.
  * Uniform density downsample (integer or fractional) is allowed. Different
  * aspect is a hard error — never top-left crop as a silent fit.
  */
@@ -764,6 +764,36 @@ export function fitGrayToSize(
     }
   }
   return { width, height, gray: out };
+}
+
+/**
+ * Place a bit raster on a dest canvas, origin top-left, white fill.
+ * destWidth is packed UP to a multiple of 8. Extra columns stay on the right.
+ */
+export function padBitsRight(
+  raster: BitRaster,
+  destWidth: number,
+  destHeight: number,
+): BitRaster {
+  const destW = tsplPackedWidthDots(destWidth);
+  const destH = Math.max(1, Math.round(destHeight));
+  const srcW = raster.bytesPerRow * 8;
+  const srcH = raster.height;
+  if (srcW === destW && srcH === destH) return raster;
+
+  const bytesPerRow = destW >> 3;
+  const out = new Uint8Array(bytesPerRow * destH);
+  const copyW = Math.min(srcW, destW);
+  const copyH = Math.min(srcH, destH);
+
+  for (let y = 0; y < copyH; y++) {
+    for (let x = 0; x < copyW; x++) {
+      if (raster.data[y * raster.bytesPerRow + (x >> 3)] & (0x80 >> (x & 7))) {
+        out[y * bytesPerRow + (x >> 3)] |= 0x80 >> (x & 7);
+      }
+    }
+  }
+  return { data: out, bytesPerRow, height: destH };
 }
 
 /**

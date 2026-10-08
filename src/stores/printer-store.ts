@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { generateId } from '@/lib/label-document';
+import { effectiveHOffsetMm } from '@/lib/printer/side-liner';
 import { type SeznikPrinterModelId } from '@/constants/printer-models';
 
 export type PrinterConnectionStatus =
@@ -23,13 +24,53 @@ export type PrintHistoryEntry = {
   source: 'label' | 'photo' | 'pdf' | 'scan' | 'excel' | 'img-to-label';
 };
 
+/** Bumped when media origin became 0,0 so leftover millimetre-chase H/V is dropped. */
+export const PRINT_ORIGIN_VERSION = 1;
+
 export type PrintCalibrationEntry = {
+  /** Printer correction only. The roll's side-liner shift is added at print time. */
   hOffsetMm: number;
   vOffsetMm: number;
-  /** DENSITY and SPEED the offsets were dialled in at (TD-404 only). */
-  density?: number;
-  speed?: number;
+  /** Liner strip beside the label on the loaded roll. */
+  sideLinerLeftMm?: number;
+  sideLinerRightMm?: number;
+  /** Liner gap between labels on the loaded roll. Unset until the user picks one. */
+  gapMm?: number;
+  originVersion?: number;
 };
+
+export type ResolvedPrintOffsets = {
+  hOffsetMm: number;
+  vOffsetMm: number;
+  sideLinerLeftMm: number;
+  sideLinerRightMm: number;
+  gapMm: number | null;
+};
+
+/** Load saved roll/printer offsets. Legacy entries without originVersion still keep H/V when set. */
+export function resolvedPrintOffsets(saved?: PrintCalibrationEntry | null): ResolvedPrintOffsets {
+  const sideLinerLeftMm = saved?.sideLinerLeftMm ?? 0;
+  const sideLinerRightMm = saved?.sideLinerRightMm ?? 0;
+  const gapMm = saved?.gapMm != null && Number.isFinite(saved.gapMm) ? saved.gapMm : null;
+  if (!saved) {
+    return { hOffsetMm: 0, vOffsetMm: 0, sideLinerLeftMm, sideLinerRightMm, gapMm };
+  }
+  const modern = saved.originVersion === PRINT_ORIGIN_VERSION;
+  const hOffsetMm =
+    modern || Number.isFinite(saved.hOffsetMm) ? Math.max(-10, Math.min(10, saved.hOffsetMm ?? 0)) : 0;
+  const vOffsetMm =
+    modern || Number.isFinite(saved.vOffsetMm) ? Math.max(-10, Math.min(10, saved.vOffsetMm ?? 0)) : 0;
+  return { hOffsetMm, vOffsetMm, sideLinerLeftMm, sideLinerRightMm, gapMm };
+}
+
+/** H/V to send with a job: printer correction plus the roll's side-liner shift. */
+export function jobPrintOffsets(saved?: PrintCalibrationEntry | null): { hOffsetMm: number; vOffsetMm: number } {
+  const r = resolvedPrintOffsets(saved);
+  return {
+    hOffsetMm: effectiveHOffsetMm(r.hOffsetMm, r.sideLinerLeftMm, r.sideLinerRightMm),
+    vOffsetMm: r.vOffsetMm,
+  };
+}
 
 type PrinterStoreState = {
   status: PrinterConnectionStatus;
@@ -60,7 +101,7 @@ type PrinterStoreState = {
   setStatus: (status: PrinterConnectionStatus) => void;
   setSelectedPrinterModel: (model: SeznikPrinterModelId) => void;
   setDevCommandSet: (cmd: 'tspl' | 'escpos') => void;
-  setPrintCalibration: (key: string, entry: PrintCalibrationEntry) => void;
+  setPrintCalibration: (key: string, entry: Partial<PrintCalibrationEntry>) => void;
   setConnectedDevice: (
     deviceId: string,
     deviceName: string,
@@ -106,9 +147,17 @@ export const usePrinterStore = create<PrinterStoreState>()(
       setSelectedPrinterModel: (selectedPrinterModel) => set({ selectedPrinterModel }),
       setDevCommandSet: (devCommandSet) => set({ devCommandSet }),
       setPrintCalibration: (key, entry) =>
-        set((state) => ({
-          printCalibration: { ...state.printCalibration, [key]: entry },
-        })),
+        set((state) => {
+          const prev = state.printCalibration[key];
+          const base =
+            prev?.originVersion === PRINT_ORIGIN_VERSION ? prev : { ...prev, hOffsetMm: 0, vOffsetMm: 0 };
+          return {
+            printCalibration: {
+              ...state.printCalibration,
+              [key]: { ...base, ...entry, originVersion: PRINT_ORIGIN_VERSION },
+            },
+          };
+        }),
 
       setConnectedDevice: (deviceId, deviceName, meta) =>
         set((state) => {

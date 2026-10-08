@@ -1,0 +1,95 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+--- border geometry: canvas rect vs bitmap (dots @ 304 dpi, 12 dots/mm) ---
+ok   20x20 default locked               expected 24,24-216,216 measured 24,24-216,216 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 20x20 moved+resized locked         expected 36,18-180,198 measured 24,24-216,216 delta -12,6,36,18 stroke 7 vs 7/7/7/7 clipped=false
+ok   20x20 unlocked                     expected 30,36-198,216 measured 30,36-198,216 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   20x20 untagged full-bleed          expected 24,24-216,216 measured 24,24-216,216 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   20x20 ellipse media                expected 24,24-216,216 measured 24,24-216,216 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   20x20 circle media                 expected 24,24-216,216 measured 24,24-216,216 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   30x10 default locked               expected 24,24-336,96 measured 24,24-336,96 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 30x10 moved+resized locked         expected 36,18-300,78 measured 24,24-336,96 delta -12,6,36,18 stroke 7 vs 7/7/7/7 clipped=false
+ok   30x10 unlocked                     expected 30,36-318,96 measured 30,36-318,96 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   30x10 untagged full-bleed          expected 24,24-336,96 measured 24,24-336,96 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   30x10 ellipse media                expected 24,24-336,96 measured 24,24-336,96 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   30x10 circle media                 expected 24,24-336,96 measured 24,24-336,96 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x30 default locked               expected 24,24-576,336 measured 24,24-576,336 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 50x30 moved+resized locked         expected 36,18-540,318 measured 24,24-576,336 delta -12,6,36,18 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x30 unlocked                     expected 30,36-558,336 measured 30,36-558,336 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x30 untagged full-bleed          expected 24,24-576,336 measured 24,24-576,336 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x30 ellipse media                expected 24,24-576,336 measured 24,24-576,336 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x30 circle media                 expected 24,24-576,336 measured 24,24-576,336 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x50 default locked               expected 24,24-576,576 measured 24,24-576,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 50x50 moved+resized locked         expected 36,18-540,558 measured 24,24-576,576 delta -12,6,36,18 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x50 unlocked                     expected 30,36-558,576 measured 30,36-558,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x50 untagged full-bleed          expected 24,24-576,576 measured 24,24-576,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x50 ellipse media                expected 24,24-576,576 measured 24,24-576,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x50 circle media                 expected 24,24-576,576 measured 24,24-576,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x14 default locked               expected 24,24-696,144 measured 24,24-696,144 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 60x14 moved+resized locked         expected 36,18-660,126 measured 24,24-696,144 delta -12,6,36,18 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x14 unlocked                     expected 30,36-678,144 measured 30,36-678,144 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x14 untagged full-bleed          expected 24,24-696,144 measured 24,24-696,144 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x14 ellipse media                expected 24,24-696,144 measured 24,24-696,144 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x14 circle media                 expected 24,24-696,144 measured 24,24-696,144 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x40 default locked               expected 24,24-696,456 measured 24,24-696,456 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 60x40 moved+resized locked         expected 36,18-660,438 measured 24,24-696,456 delta -12,6,36,18 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x40 unlocked                     expected 30,36-678,456 measured 30,36-678,456 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x40 untagged full-bleed          expected 24,24-696,456 measured 24,24-696,456 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x40 ellipse media                expected 24,24-696,456 measured 24,24-696,456 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x40 circle media                 expected 24,24-696,456 measured 24,24-696,456 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   100x50 default locked              expected 24,24-1176,576 measured 24,24-1176,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 100x50 moved+resized locked        expected 36,18-1140,558 measured 24,24-1176,576 delta -12,6,36,18 stroke 7 vs 7/7/7/7 clipped=false
+ok   100x50 unlocked                    expected 30,36-1158,576 measured 30,36-1158,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   100x50 untagged full-bleed         expected 24,24-1176,576 measured 24,24-1176,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   100x50 ellipse media               expected 24,24-1176,576 measured 24,24-1176,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   100x50 circle media                expected 24,24-1176,576 measured 24,24-1176,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   99x149.5 default locked            expected 24,24-1164,1770 measured 24,24-1164,1770 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 99x149.5 moved+resized locked      expected 36,18-1128,1752 measured 24,24-1164,1770 delta -12,6,36,18 stroke 7 vs 7/7/7/7 clipped=false
+ok   99x149.5 unlocked                  expected 30,36-1146,1770 measured 30,36-1146,1770 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   99x149.5 untagged full-bleed       expected 24,24-1164,1770 measured 24,24-1164,1770 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   99x149.5 ellipse media             expected 24,24-1164,1770 measured 24,24-1164,1770 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   99x149.5 circle media              expected 24,24-1164,1770 measured 24,24-1164,1770 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 100x30 two-up panels               expected 24,24-576,336 measured 24,24-1176,336 delta 0,0,600,0 stroke 7 vs 7/7/7/7 clipped=false
+FAIL 100x30 two-up panels               expected 624,24-1176,336 measured 24,24-1176,336 delta -600,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+wrote non-border snapshot C:\Users\omen\OneDrive\Desktop\sez-print\src\printing\raster\__tests__\fixtures\non-border-hashes.json
+ok   50x30 border+text/QR/barcode keeps content ink (missing bytes 0)
+ok   50x30 border+content               expected 24,24-576,336 measured 24,24-576,336 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x40 border+text/QR/barcode keeps content ink (missing bytes 0)
+ok   60x40 border+content               expected 24,24-696,456 measured 24,24-696,456 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   100x50 border+text/QR/barcode keeps content ink (missing bytes 0)
+ok   100x50 border+content              expected 24,24-1176,576 measured 24,24-1176,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   20x20 packed 240->240 dots, pad ink 0
+ok   30x10 packed 360->360 dots, pad ink 0
+ok   50x30 packed 600->600 dots, pad ink 0
+ok   50x50 packed 600->600 dots, pad ink 0
+ok   60x14 packed 720->720 dots, pad ink 0
+ok   60x40 packed 720->720 dots, pad ink 0
+ok   100x50 packed 1200->1200 dots, pad ink 0
+ok   99x149.5 packed 1188->1192 dots, pad ink 0
+[tsc] TSPL job: SIZE 50.00 mm,30.00 mm | GAP 1.00 mm,0 mm | REFERENCE 0,0 | BITMAP 0,0,75,360,0 | SPEED 6 | DENSITY 8 | payload: 27000 bytes | BITMAP width is byte-width 75 not pixel width 600
+[tsc] TSPL job: SIZE 50.00 mm,30.00 mm | GAP 1.00 mm,0 mm | REFERENCE 6,-6 | BITMAP 0,0,75,360,0 | SPEED 6 | DENSITY 8 | payload: 27000 bytes | BITMAP width is byte-width 75 not pixel width 600
+[tsc] TSPL job: SIZE 50.00 mm,30.00 mm | GAP 2.00 mm,0 mm | REFERENCE 0,0 | BITMAP 0,0,75,360,0 | SPEED 6 | DENSITY 8 | payload: 27000 bytes | BITMAP width is byte-width 75 not pixel width 600
+[tsc] TSPL job: SIZE 50.00 mm,30.00 mm | GAP 2.00 mm,0 mm | REFERENCE 6,-6 | BITMAP 0,0,75,360,0 | SPEED 6 | DENSITY 8 | payload: 27000 bytes | BITMAP width is byte-width 75 not pixel width 600
+[tsc] TSPL job: SIZE 50.00 mm,30.00 mm | GAP 3.00 mm,0 mm | REFERENCE 0,0 | BITMAP 0,0,75,360,0 | SPEED 6 | DENSITY 8 | payload: 27000 bytes | BITMAP width is byte-width 75 not pixel width 600
+[tsc] TSPL job: SIZE 50.00 mm,30.00 mm | GAP 3.00 mm,0 mm | REFERENCE 6,-6 | BITMAP 0,0,75,360,0 | SPEED 6 | DENSITY 8 | payload: 27000 bytes | BITMAP width is byte-width 75 not pixel width 600
+ok   GAP 1/2/3 and H/V change header only (payloads 1, headers 6)
+ok   20x20 calibration label            expected 24,24-216,216 measured 24,24-216,216 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   30x10 calibration label            expected 24,24-336,96 measured 24,24-336,96 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x30 calibration label            expected 24,24-576,336 measured 24,24-576,336 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   50x50 calibration label            expected 24,24-576,576 measured 24,24-576,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x14 calibration label            expected 24,24-696,144 measured 24,24-696,144 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   60x40 calibration label            expected 24,24-696,456 measured 24,24-696,456 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   100x50 calibration label           expected 24,24-1176,576 measured 24,24-1176,576 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+ok   99x149.5 calibration label         expected 24,24-1164,1770 measured 24,24-1164,1770 delta 0,0,0,0 stroke 7 vs 7/7/7/7 clipped=false
+--- 73 checks, 10 failed ---
+npm notice
+npm notice New major version of npm available! 11.16.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -29,6 +29,26 @@ export function packGrayToMono1bpp(
   return { bytesPerRow, mono1bppBuffer };
 }
 
+/** Pad (white) or crop the right so each row is destBytesPerRow. Logical 1bpp: 0 = white. */
+export function padMono1bppToBytesPerRow(
+  data: Uint8Array,
+  srcBytesPerRow: number,
+  height: number,
+  destBytesPerRow: number,
+): Uint8Array {
+  const srcBpr = Math.max(1, srcBytesPerRow | 0);
+  const destBpr = Math.max(1, destBytesPerRow | 0);
+  const h = Math.max(1, height | 0);
+  if (srcBpr === destBpr && data.length === destBpr * h) return data;
+  const out = new Uint8Array(destBpr * h);
+  const copy = Math.min(srcBpr, destBpr);
+  for (let y = 0; y < h; y++) {
+    const srcOff = y * srcBpr;
+    out.set(data.subarray(srcOff, srcOff + Math.min(copy, Math.max(0, data.length - srcOff))), y * destBpr);
+  }
+  return out;
+}
+
 /** Expand logical 1-bit (MSB, black=1) to 8-bit luminance for decoders. */
 export function unpackMono1bppToGray(
   packed: Uint8Array,

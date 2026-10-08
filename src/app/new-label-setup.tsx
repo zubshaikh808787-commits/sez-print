@@ -29,6 +29,7 @@ import {
     type LabelElement,
 } from '@/lib/label-document';
 import { clampLabelMm, containFitImageOnLabel, validateLabelSize } from '@/lib/label-geometry';
+import { buildCircleUpsPanelSeed } from '@/constants/industry-template-elements';
 import { scaleDocumentToSize } from '@/lib/element-sizing';
 import { useLabelStore } from '@/stores/label-store';
 import { useSettingsStore } from '@/stores/settings-store';
@@ -46,6 +47,8 @@ const SETUP_PRESETS = [
   { label: '14 × 96 mm (Jewellery Tag)', width: JEWELRY_DIECUT.tagWidthMm, height: JEWELRY_DIECUT.tagHeightMm },
   { label: '54 × 96 mm (3-Up Sheet)', width: JEWELRY_DIECUT.sheetWidthMm, height: JEWELRY_DIECUT.sheetHeightMm },
   { label: '50 × 73 mm (Cable Flag)', width: CABLE_FLAG_DIECUT.widthMm, height: CABLE_FLAG_DIECUT.heightMm },
+  { label: '30 × 30 mm (2-up circle)', width: 30, height: 30 },
+  { label: '40 × 40 mm (2-up circle)', width: 40, height: 40 },
 ];
 
 export default function NewLabelSetupScreen() {
@@ -54,6 +57,8 @@ export default function NewLabelSetupScreen() {
   const params = useLocalSearchParams<{
     isClone?: string;
     isTwoUps?: string;
+    /** @deprecated use 2ups Label + Round stickers toggle */
+    isTwoUpsCircle?: string;
     isJewellery3Up?: string;
     cloneFromId?: string;
     cloneName?: string;
@@ -71,7 +76,8 @@ export default function NewLabelSetupScreen() {
   const isImportImage = Boolean(params.importImageUri);
   const isSingleCanvas = params.isSingleCanvas === 'true' || isImportImage;
   const isClone = params.isClone === 'true';
-  const isTwoUps = !isSingleCanvas && params.isTwoUps === 'true';
+  const legacyRoundLink = !isSingleCanvas && params.isTwoUpsCircle === 'true';
+  const isTwoUps = !isSingleCanvas && (params.isTwoUps === 'true' || legacyRoundLink);
   const isJewellery3Up = !isSingleCanvas && params.isJewellery3Up === 'true';
   const defaults = useSettingsStore((s) => s.defaults);
   const upsertDocument = useLabelStore((s) => s.upsertDocument);
@@ -88,10 +94,10 @@ export default function NewLabelSetupScreen() {
             ? `${params.cloneName} Copy`
             : 'Label Copy'
           : isTwoUps
-            ? params.cloneName
-              ? `${params.cloneName} · 2ups`
-              : '2ups label'
-            : 'Default label',
+              ? params.cloneName
+                ? `${params.cloneName} · 2ups`
+                : '2ups label'
+              : 'Default label',
   );
   const [labelWidth, setLabelWidth] = useState(
     params.defaultWidth
@@ -100,9 +106,11 @@ export default function NewLabelSetupScreen() {
         ? JEWELRY_DIECUT.tagWidthMm
         : params.cloneWidth
           ? parseFloat(params.cloneWidth)
-          : isImportImage
-            ? 50
-            : 57,
+          : legacyRoundLink
+            ? 30
+            : isImportImage
+              ? 50
+              : 57,
   );
   const [labelHeight, setLabelHeight] = useState(
     params.defaultHeight
@@ -111,15 +119,20 @@ export default function NewLabelSetupScreen() {
         ? JEWELRY_DIECUT.tagHeightMm
         : params.cloneHeight
           ? parseFloat(params.cloneHeight)
-          : isImportImage
+          : legacyRoundLink
             ? 30
-            : 30,
+            : isImportImage
+              ? 30
+              : 30,
   );
   const [columns, setColumns] = useState(
     isSingleCanvas ? 1 : isJewellery3Up ? JEWELRY_DIECUT.columns : isTwoUps ? 2 : 1,
   );
   // Stick 2-up: labels sit flush (0 mm). Jewellery 3-up: 3 mm gaps.
-  const [columnSpacing, setColumnSpacing] = useState(isJewellery3Up ? JEWELRY_DIECUT.gapMm : isTwoUps ? 0 : 1);
+  const [columnSpacing, setColumnSpacing] = useState(
+    isJewellery3Up ? JEWELRY_DIECUT.gapMm : legacyRoundLink ? 2 : isTwoUps ? 0 : 1,
+  );
+  const [roundStickers, setRoundStickers] = useState(legacyRoundLink);
   const [batchEdit, setBatchEdit] = useState(false);
 
   const [nameModalVisible, setNameModalVisible] = useState(false);
@@ -130,6 +143,12 @@ export default function NewLabelSetupScreen() {
     if (params.focusSize === '1') setSizeModalVisible(true);
   }, [params.focusSize]);
 
+  const snapSquarePanel = (w: number, h: number) => {
+    const side = Math.min(w, h);
+    setLabelWidth(side);
+    setLabelHeight(side);
+  };
+
   const handleCreateLabel = () => {
     const size = clampLabelMm(labelWidth, labelHeight);
     const error = validateLabelSize(size.widthMm, size.heightMm);
@@ -137,6 +156,13 @@ export default function NewLabelSetupScreen() {
       Alert.alert('Invalid size', error);
       return;
     }
+    const panelSize =
+      columns > 1 && roundStickers
+        ? (() => {
+            const side = Math.min(size.widthMm, size.heightMm);
+            return { widthMm: side, heightMm: side };
+          })()
+        : { widthMm: size.widthMm, heightMm: size.heightMm };
 
     if (params.importImageUri) {
       const imgId = generateId();
@@ -204,34 +230,45 @@ export default function NewLabelSetupScreen() {
         // different size needs proportional rescale, or geometry stays stale
         // and clips at the new bounds.
         seedElements =
-          source.widthMm === size.widthMm && source.heightMm === size.heightMm
+          source.widthMm === panelSize.widthMm && source.heightMm === panelSize.heightMm
             ? cloned
             : scaleDocumentToSize(
                 { ...source, elements: cloned, ups: undefined },
-                size.widthMm,
-                size.heightMm,
+                panelSize.widthMm,
+                panelSize.heightMm,
               ).elements;
       }
     }
 
     if (columns > 1) {
+      const useRound = roundStickers;
+      const panelW = panelSize.widthMm;
+      const panelH = panelSize.heightMm;
+      let panelSeed = seedElements;
+      if (useRound && panelSeed.length === 0) {
+        panelSeed = buildCircleUpsPanelSeed(panelW, panelH);
+      }
       const ups = createUpsConfig({
         columns,
         columnSpacingMm: columnSpacing,
         batchEdit,
-        seedElements,
+        seedElements: panelSeed,
       });
       const doc = createLabelDocument({
         name: labelName,
-        widthMm: size.widthMm,
-        heightMm: size.heightMm,
+        widthMm: panelW,
+        heightMm: panelH,
         orientation: defaults.orientation,
         paperType: defaults.paperType,
+        mediaShape: useRound ? 'circle' : undefined,
         elements: ups.panels[0] ?? [],
         background: { type: 'color', color: '#FFFFFF' },
       });
       doc.ups = ups;
       doc.templateCategory = 'Multi-UP';
+      if (useRound) {
+        doc.templatePreviewType = panelW >= 40 ? 'two-ups-circle-40' : 'two-ups-circle-30';
+      }
       upsertDocument(doc);
       router.replace({ pathname: '/edit', params: { labelId: doc.id } });
       return;
@@ -263,8 +300,8 @@ export default function NewLabelSetupScreen() {
           {isImportImage
             ? 'Label Sizing Setup'
             : isTwoUps
-              ? '2ups label'
-              : isClone
+                ? '2ups label'
+                : isClone
                 ? 'Label Clone'
                 : t('editor.newLabel')}
         </Text>
@@ -282,6 +319,7 @@ export default function NewLabelSetupScreen() {
                 key={i}
                 style={[
                   styles.previewCell,
+                  columns > 1 && roundStickers && styles.previewCellRound,
                   {
                     marginRight: i < columns - 1 ? Math.max(0, columnSpacing * 4) : 0,
                     aspectRatio: isImportImage
@@ -305,12 +343,21 @@ export default function NewLabelSetupScreen() {
           </View>
           {columns > 1 ? (
             <Text style={styles.previewHint}>
-              Each panel is {labelWidth}×{labelHeight} mm — edit one at a time. Print strip ≈{' '}
+              Each panel is{' '}
+              {roundStickers
+                ? `${Math.min(labelWidth, labelHeight)} mm round`
+                : `${labelWidth}×${labelHeight} mm`}
+              {' — '}
+              edit one at a time. Print strip ≈{' '}
               {Math.max(
-                labelWidth,
-                Math.round((labelWidth * columns + columnSpacing * (columns - 1)) * 10) / 10,
+                roundStickers ? Math.min(labelWidth, labelHeight) : labelWidth,
+                Math.round(
+                  ((roundStickers ? Math.min(labelWidth, labelHeight) : labelWidth) * columns +
+                    columnSpacing * (columns - 1)) *
+                    10,
+                ) / 10,
               )}
-              ×{labelHeight} mm.
+              ×{roundStickers ? Math.min(labelWidth, labelHeight) : labelHeight} mm.
             </Text>
           ) : (
             <Text style={styles.previewHint}>
@@ -336,6 +383,12 @@ export default function NewLabelSetupScreen() {
                   onPress={() => {
                     setLabelWidth(p.width);
                     setLabelHeight(p.height);
+                    if (p.label.includes('2-up circle')) {
+                      setRoundStickers(true);
+                      if (columns < 2) setColumns(2);
+                      setColumnSpacing(2);
+                      snapSquarePanel(p.width, p.height);
+                    }
                   }}
                   style={[styles.presetChip, active && styles.presetChipActive]}>
                   <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>
@@ -410,6 +463,38 @@ export default function NewLabelSetupScreen() {
                     <Text style={styles.stepBtnText}>+</Text>
                   </Pressable>
                 </View>
+              </View>
+            ) : null}
+
+            {columns > 1 ? (
+              <View style={styles.card}>
+                <View style={styles.batchRow}>
+                  <Text style={styles.fieldLabel}>Round stickers</Text>
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() =>
+                      Alert.alert(
+                        'Round stickers',
+                        'Each panel is a circular die (square canvas). Use a circle border style or any content inside the round clip. Typical 30 mm round 2-up stock uses 2 mm spacing (62 × 30 mm strip).',
+                      )
+                    }>
+                    <Text style={styles.infoHint}>?</Text>
+                  </Pressable>
+                </View>
+                <Switch
+                  value={roundStickers}
+                  onValueChange={(on) => {
+                    setRoundStickers(on);
+                    if (on) {
+                      snapSquarePanel(labelWidth, labelHeight);
+                      if (columnSpacing === 0 && Math.min(labelWidth, labelHeight) <= 30) {
+                        setColumnSpacing(2);
+                      }
+                    }
+                  }}
+                  trackColor={{ false: '#D1D5DB', true: Palette.accent }}
+                  thumbColor="#FFFFFF"
+                />
               </View>
             ) : null}
 
@@ -558,6 +643,10 @@ const styles = StyleSheet.create({
     borderColor: '#C8D0D8',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  previewCellRound: {
+    borderRadius: 9999,
+    overflow: 'hidden',
   },
   previewCellLabel: {
     color: '#94A3B8',

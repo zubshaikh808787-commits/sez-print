@@ -7,6 +7,7 @@ import {
   Alert,
   PixelRatio,
   Pressable,
+  Switch,
   ScrollView,
   StyleSheet,
   Text,
@@ -35,16 +36,8 @@ import {
 } from '@/constants/jewelry-diecut';
 import { SEZNIK_PRINTER_MODELS } from '@/constants/printer-models';
 import { canonicalizeJewelryDieCutDocument } from '@/constants/jewelry-template-elements';
+import { tsplDirectionForLabel } from '@/constants/shipping-template-elements';
 import { resolvePrintQuality } from '@/lib/printer/print-quality';
-import {
-  calibrationQualityWarning,
-  clampToCap,
-  darknessSteps,
-  hasManualScale,
-  qualityCapsFor,
-  resolveQualityBridge,
-} from '@/lib/printer/bridge-quality-caps';
-import { QualityControl, type QualityStepperProps } from '@/components/quality-control';
 import {
   CABLE_FLAG_DIECUT,
   CABLE_FLAG_PRINT_PRESET_SINGLE,
@@ -69,7 +62,6 @@ import {
   type PaperType,
 } from '@/lib/label-document';
 import {
-  applyInkDarknessToPng,
   encodeConnectedPrinterJob,
   formatPrintFailure,
   orientedPrintSize,
@@ -83,31 +75,26 @@ import {
   waitForNextPaint,
 } from '@/lib/printer/print-job';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
-import {
-  createPrintSpec,
-  mmToDots,
-  TD404_BORDER_BOTTOM_MM,
-  TD404_BORDER_LEFT_MM,
-  TD404_BORDER_RIGHT_MM,
-  TD404_BORDER_TOP_MM,
-} from '@/lib/printer/print-spec';
+import { createPrintSpec } from '@/lib/printer/print-spec';
 import { joshEffectiveDpi } from '@/lib/printer/josh-print';
-import * as FileSystem from 'expo-file-system/legacy';
 import { logPrintTrace } from '@/printing';
-import { resolveBuildTime, resolveGitSha } from '@/lib/build-identity';
-import { printTd404MonoLabel, printTd404PngLabel } from 'td404-printer';
+import { resolveGitSha } from '@/lib/build-identity';
 import {
   assertHeadlessRasterDocument,
   canHeadlessRasterPrint,
   rasterizeDocumentToBitmapTimed,
 } from '@/printing/raster/skia-rasterizer';
-import { TD404_HEADLESS_SKIA_PRINT } from '@/printing/raster/td404-headless-flag';
+import { td404DocumentOffsetClipWarning } from '@/printing/raster/print-border';
+import { rasterizeViewShotPngWithStampedBorders } from '@/printing/raster/stamp-viewshot-borders';
+import { logBorderPrintDiagnostics } from '@/printing/raster/border-diagnostics';
+import { printBorderCalibrationTest } from '@/lib/printer/border-calibration-print';
+import { effectiveHOffsetMm, SIDE_LINER_MAX_MM, sideLinerShiftMm } from '@/lib/printer/side-liner';
 import { ensurePrintTypefaces } from '@/printing/raster/print-typeface';
 import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
-import { usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
+import { resolvedPrintOffsets, usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
-import { applyPaperType, defaultLabelSettings, resolveLabelSettings } from '@/lib/label-settings';
+import { resolveLabelSettings } from '@/lib/label-settings';
 import { loadAndRenderPdf, printPdfToThermal, type RenderedPdfPage } from '@/lib/pdf-printer';
 
 import { fitLabelSize, printMediaSizeMm, type LabelSizeMm } from '@/lib/label-geometry';
@@ -309,10 +296,6 @@ function StepperRow({
   );
 }
 
-function BorderedStepperRow(props: QualityStepperProps) {
-  return <StepperRow {...props} bordered />;
-}
-
 function ChipGroup<T extends string>({
   options,
   selected,
@@ -364,9 +347,6 @@ export default function PrintScreen() {
   }>();
 
   const getDocument = useLabelStore((s) => s.getDocument);
-  const storedLabel = useLabelStore((s) =>
-    params.labelId ? s.documents.find((d) => d.id === params.labelId) ?? null : null,
-  );
   const defaults = useSettingsStore((s) => s.defaults);
   const printingSettings = useSettingsStore((s) => s.printing);
   const status = usePrinterStore((s) => s.status);
@@ -375,19 +355,6 @@ export default function PrintScreen() {
   const addHistoryEntry = usePrinterStore((s) => s.addHistoryEntry);
   const printerDeviceId = usePrinterStore((s) => s.deviceId ?? s.lastDeviceId);
   const printerSdkId = usePrinterStore((s) => s.sdkId);
-  const printerTransport = usePrinterStore((s) => s.transport);
-  const qualityBridge = useMemo(
-    () =>
-      resolveQualityBridge({
-        activeTransport: getPrinterManager().transport,
-        storeTransport: printerTransport,
-        sdkId: printerSdkId,
-      }),
-    // `status` re-reads the manager's live transport after connect / disconnect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [printerTransport, printerSdkId, status],
-  );
-  const qualityCaps = useMemo(() => qualityCapsFor(qualityBridge), [qualityBridge]);
   const printCalibration = usePrinterStore((s) => s.printCalibration);
   const setPrintCalibration = usePrinterStore((s) => s.setPrintCalibration);
   // A fixed print-head/media-guide offset is a per-unit hardware trait, not
@@ -430,7 +397,6 @@ export default function PrintScreen() {
     return doc;
   }, [
     params.labelId,
-    storedLabel,
     params.scanData,
     params.scanType,
     params.imageUri,
@@ -485,60 +451,60 @@ export default function PrintScreen() {
   const [speed, setSpeed] = useState<number | null>(null);
   const [orientation, setOrientation] = useState<(typeof ORIENTATIONS)[number]>('0°');
   const [paperType, setPaperType] = useState<PaperType>(defaults.paperType);
-  const [gapLength, setGapLength] = useState(() => defaultLabelSettings().gapLengthMm);
-  const [hOffset, setHOffset] = useState(() => savedCalibration?.hOffsetMm ?? 0);
-  const [vOffset, setVOffset] = useState(() => savedCalibration?.vOffsetMm ?? 0);
+  const specialMediaJob = jewelryDieCutJob || cableFlagJob || ratTail143Job;
+  const [gapLength, setGapLength] = useState(
+    () => (!specialMediaJob ? resolvedPrintOffsets(savedCalibration).gapMm : null) ?? 3,
+  );
+  const [tearOn, setTearOn] = useState(true);
+  const [hCorrection, setHCorrection] = useState(() => resolvedPrintOffsets(savedCalibration).hOffsetMm);
+  const [vOffset, setVOffset] = useState(() => resolvedPrintOffsets(savedCalibration).vOffsetMm);
+  const [sideLinerLeft, setSideLinerLeft] = useState(
+    () => resolvedPrintOffsets(savedCalibration).sideLinerLeftMm,
+  );
+  const [sideLinerRight, setSideLinerRight] = useState(
+    () => resolvedPrintOffsets(savedCalibration).sideLinerRightMm,
+  );
+  const hOffset = effectiveHOffsetMm(hCorrection, sideLinerLeft, sideLinerRight);
 
   // Re-sync when the connected printer changes (or persisted calibration
   // finishes loading from AsyncStorage after this screen already mounted).
   useEffect(() => {
-    const saved = usePrinterStore.getState().printCalibration[calibrationKey];
-    setHOffset(saved?.hOffsetMm ?? 0);
-    setVOffset(saved?.vOffsetMm ?? 0);
+    const resync = () => {
+      const saved = usePrinterStore.getState().printCalibration[calibrationKey];
+      const next = resolvedPrintOffsets(saved);
+      setHCorrection(next.hOffsetMm);
+      setVOffset(next.vOffsetMm);
+      setSideLinerLeft(next.sideLinerLeftMm);
+      setSideLinerRight(next.sideLinerRightMm);
+      if (next.gapMm != null && !specialMediaJob) setGapLength(next.gapMm);
+    };
+    resync();
+    return usePrinterStore.persist.onFinishHydration(resync);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calibrationKey]);
+
+  const stepRollGap = (deltaMm: number) => {
+    const next = Math.min(20, Math.max(0, Math.round((gapLength + deltaMm) * 100) / 100));
+    setGapLength(next);
+    if (calibrationKey !== 'unknown' && !specialMediaJob) {
+      setPrintCalibration(calibrationKey, { gapMm: next });
+    }
+  };
 
   // Persist calibration per physical printer so a dialed-in offset survives
   // reopening Print — the controls used to always reset to 0mm, making a
   // real, fixed mechanical offset look like an unresolved random shift.
-  const currentQuality = useMemo(
-    () =>
-      resolvePrintQuality({
-        darkness,
-        speed,
-        grayThreshold: defaults.grayThreshold,
-        colorMode: defaults.colorMode,
-        dieCut: jewelryDieCutJob || cableFlagJob || ratTail143Job,
-        jewelry: jewelryDieCutJob,
-        caps: qualityCaps,
-      }),
-    [darkness, speed, defaults.grayThreshold, defaults.colorMode, jewelryDieCutJob, cableFlagJob, ratTail143Job, qualityCaps],
-  );
-  const calibrationQualityRef = useRef<{ density: number; speed: number } | undefined>(undefined);
-  calibrationQualityRef.current = hasManualScale(qualityCaps)
-    ? { density: currentQuality.density, speed: currentQuality.speed }
-    : undefined;
-  const calibrationQualityNote = hasManualScale(qualityCaps)
-    ? calibrationQualityWarning(savedCalibration, currentQuality)
-    : null;
-
-  // Offsets for a new key arrive on the next render; skip the stale write in between.
-  const calibrationKeyRef = useRef(calibrationKey);
   useEffect(() => {
-    if (calibrationKey === 'unknown') return;
-    if (calibrationKeyRef.current !== calibrationKey) {
-      calibrationKeyRef.current = calibrationKey;
-      return;
-    }
-    const prev = usePrinterStore.getState().printCalibration[calibrationKey];
-    if (prev && prev.hOffsetMm === hOffset && prev.vOffsetMm === vOffset) return;
+    if (calibrationKey === 'unknown' || !usePrinterStore.persist.hasHydrated()) return;
     setPrintCalibration(calibrationKey, {
-      hOffsetMm: hOffset,
+      hOffsetMm: hCorrection,
       vOffsetMm: vOffset,
-      ...calibrationQualityRef.current,
+      sideLinerLeftMm: sideLinerLeft,
+      sideLinerRightMm: sideLinerRight,
+      gapMm: specialMediaJob ? undefined : gapLength,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hOffset, vOffset, calibrationKey]);
+  }, [hCorrection, vOffset, sideLinerLeft, sideLinerRight, gapLength, calibrationKey, specialMediaJob]);
   const [zoom, setZoom] = useState(1);
   const [pageIndex, setPageIndex] = useState(0);
   const [printing, setPrinting] = useState(false);
@@ -547,62 +513,21 @@ export default function PrintScreen() {
   const [printPreset, setPrintPreset] = useState<PrintSizePreset | null>(defaultPreset);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const printingLockRef = useRef(false);
+  const upsGapInitialized = useRef(false);
   const labelSettingsInitialized = useRef(false);
 
   useEffect(() => {
     if (!sourceDocument || labelSettingsInitialized.current) return;
     labelSettingsInitialized.current = true;
     const settings = resolveLabelSettings(sourceDocument);
-    setGapLength(settings.gapLengthMm);
+    const rollGap = resolvedPrintOffsets(usePrinterStore.getState().printCalibration[calibrationKey]).gapMm;
+    setGapLength(rollGap != null && !specialMediaJob ? rollGap : settings.gapLengthMm);
+    setTearOn(settings.tearOn !== false);
     setDarkness(settings.printDarkness);
     setSpeed(settings.printSpeed);
     setOrientation(`${sourceDocument.orientation}°` as (typeof ORIENTATIONS)[number]);
     setPaperType(sourceDocument.paperType);
   }, [sourceDocument]);
-
-  // Darkness / speed changed in Label Settings while this screen stays mounted.
-  const savedQualityRef = useRef<{ d: number | null; s: number | null } | null>(null);
-  useEffect(() => {
-    if (!sourceDocument) return;
-    const { printDarkness: d, printSpeed: s } = resolveLabelSettings(sourceDocument);
-    const seen = savedQualityRef.current;
-    savedQualityRef.current = { d, s };
-    if (!seen) return;
-    if (seen.d !== d) setDarkness(d);
-    if (seen.s !== s) setSpeed(s);
-  }, [sourceDocument]);
-
-  // Bring darkness / speed inside the bridge's scale. Out-of-range values saved on the
-  // label are written back clamped, so the notice shows once.
-  const qualityClampNoticeShown = useRef(false);
-  useEffect(() => {
-    const d = clampToCap(darkness, qualityCaps.density);
-    const s = clampToCap(speed, qualityCaps.speed);
-    if (d.clamped) setDarkness(d.value);
-    if (s.clamped) setSpeed(s.value);
-    if (!params.labelId) return;
-    const store = useLabelStore.getState();
-    const stored = store.documents.find((doc) => doc.id === params.labelId);
-    if (!stored) return;
-    const saved = resolveLabelSettings(stored);
-    const savedD = clampToCap(saved.printDarkness, qualityCaps.density);
-    const savedS = clampToCap(saved.printSpeed, qualityCaps.speed);
-    if (!savedD.clamped && !savedS.clamped) return;
-    store.upsertDocument({
-      ...stored,
-      settings: { ...saved, printDarkness: savedD.value, printSpeed: savedS.value },
-    });
-    if (qualityClampNoticeShown.current) return;
-    qualityClampNoticeShown.current = true;
-    const changes = [
-      savedD.clamped ? `darkness ${saved.printDarkness} → ${savedD.value}` : null,
-      savedS.clamped ? `speed ${saved.printSpeed} → ${savedS.value}` : null,
-    ].filter(Boolean);
-    Alert.alert(
-      'Print settings adjusted',
-      `This label's saved ${changes.join(' and ')} was outside this printer's range and has been changed.`,
-    );
-  }, [darkness, speed, qualityCaps, params.labelId]);
 
   const shotRef = useRef<ViewShot>(null);
 
@@ -738,43 +663,21 @@ export default function PrintScreen() {
   );
   const captureLayoutPx = useRef<{ w: number; h: number } | null>(null);
 
-  /** Gap Length is the liner between two die-cuts. Save it on the label so the next print sends the same GAP. */
-  const changeGapLength = useCallback(
-    (next: number) => {
-      setGapLength(next);
-      if (!params.labelId) return;
-      const store = useLabelStore.getState();
-      const stored = store.documents.find((d) => d.id === params.labelId);
-      if (!stored) return;
-      store.upsertDocument({
-        ...stored,
-        settings: { ...resolveLabelSettings(stored), gapLengthMm: next },
-      });
-    },
-    [params.labelId],
-  );
+  /** Live store ups config (compose strips it from the print document). */
+  const upsSource = useMemo(() => {
+    if (!params.labelId) return null;
+    return getDocument(params.labelId)?.ups ?? null;
+  }, [params.labelId, getDocument]);
 
-  /** Save the paper type on the label so the next print, the editor and Label Settings all use it. */
-  const changePaperType = useCallback(
-    (next: PaperType) => {
-      setPaperType(next);
-      if (!params.labelId) return;
-      const store = useLabelStore.getState();
-      const stored = store.documents.find((d) => d.id === params.labelId);
-      if (!stored) return;
-      store.upsertDocument(applyPaperType(stored, next));
-    },
-    [params.labelId],
-  );
-
-  /** Printer offset (Print screen, saved per printer) plus the label's own offset (Label Settings). */
-  const printOffsetMm = useMemo(() => {
-    const label = sourceDocument ? resolveLabelSettings(sourceDocument) : null;
-    return {
-      x: Math.round((hOffset + (label?.hOffsetMm ?? 0)) * 100) / 100,
-      y: Math.round((vOffset + (label?.vOffsetMm ?? 0)) * 100) / 100,
-    };
-  }, [sourceDocument, hOffset, vOffset]);
+  // Stick 2-up media: default feed gap to 2 mm. Jewellery 3-up keeps 3 mm.
+  useEffect(() => {
+    if (!upsSource || upsGapInitialized.current) return;
+    if (upsSource.columns === JEWELRY_DIECUT.columns || specialMediaJob) return;
+    upsGapInitialized.current = true;
+    if (resolvedPrintOffsets(usePrinterStore.getState().printCalibration[calibrationKey]).gapMm != null) return;
+    setGapLength(2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [upsSource, specialMediaJob]);
 
   // Sync print size if a different document ID or dimension is loaded
   const lastDocKeyRef = useRef<string | null>(null);
@@ -823,9 +726,85 @@ export default function PrintScreen() {
   const jobName =
     previewDocument?.name ?? params.docName ?? (isPdfJob ? 'PDF Document' : 'Label');
 
+  /** Roll media at job time — UI state is authoritative (not a stale closure). */
+  const rollMediaNow = () => ({
+    gapMm: gapLength,
+    hCorrectionMm: hCorrection,
+    vOffsetMm: vOffset,
+    sideLinerLeftMm: sideLinerLeft,
+    sideLinerRightMm: sideLinerRight,
+    hOffsetMm: effectiveHOffsetMm(hCorrection, sideLinerLeft, sideLinerRight),
+  });
+
+  const printAlignmentTestSheet = useCallback(async () => {
+    const page = displayDocument ?? previewDocument;
+    if (!page || printingLockRef.current) return;
+    const mgr = getPrinterManager();
+    if (!mgr.isConnected) {
+      Alert.alert('Printer not connected', 'Connect your TD-404 before printing an alignment sheet.');
+      return;
+    }
+    if (!mgr.usesTd404CommandSet) {
+      Alert.alert('Not supported', 'Alignment sheets are for TD-404 TSPL printers.');
+      return;
+    }
+    printingLockRef.current = true;
+    setPrinting(true);
+    try {
+      const roll = rollMediaNow();
+      const spec = createPrintSpec({
+        widthMm: page.widthMm,
+        heightMm: page.heightMm,
+        dpi: jobDpi,
+        profile: mgr.getActivePrinterProfile(),
+        gapMm: roll.gapMm,
+        calibration: { horizontalOffsetMm: roll.hOffsetMm, verticalOffsetMm: roll.vOffsetMm },
+      });
+      const { sent } = await printBorderCalibrationTest({
+        widthMm: page.widthMm,
+        heightMm: page.heightMm,
+        dpi: jobDpi,
+        gapMm: roll.gapMm,
+        hOffsetMm: roll.hOffsetMm,
+        vOffsetMm: roll.vOffsetMm,
+        direction: tsplDirectionForLabel(page, page.widthMm, page.heightMm),
+        printerName: deviceName ?? 'unknown',
+      });
+      const monoTiming = mgr.getLastTd404MonoLabelTiming();
+      const refLine =
+        monoTiming?.reference ??
+        `${spec.xOffsetDots},${spec.yOffsetDots}`;
+      Alert.alert(
+        sent ? 'Alignment sheet sent' : 'Not sent',
+        sent
+          ? `Sent to the printer with H ${roll.hOffsetMm.toFixed(2)} mm, V ${roll.vOffsetMm.toFixed(2)} mm (REFERENCE ${refLine}). Measure the 2 mm border against the die-cut edge — the preview above does not move when you change H/V.`
+          : 'The printer did not accept the job.',
+      );
+    } catch (err) {
+      Alert.alert('Alignment sheet failed', err instanceof Error ? err.message : String(err));
+    } finally {
+      printingLockRef.current = false;
+      setPrinting(false);
+    }
+  }, [
+    displayDocument,
+    previewDocument,
+    jobDpi,
+    deviceName,
+    hCorrection,
+    vOffset,
+    sideLinerLeft,
+    sideLinerRight,
+    gapLength,
+  ]);
+
   const handlePrint = useCallback(async () => {
     if (printingLockRef.current) return;
     printingLockRef.current = true;
+    const roll = rollMediaNow();
+    const jobH = roll.hOffsetMm;
+    const jobV = roll.vOffsetMm;
+    const jobGap = roll.gapMm;
     if (isPdfJob) {
       const manager = getPrinterManager();
       if (!manager.isConnected) {
@@ -855,7 +834,6 @@ export default function PrintScreen() {
           copies,
           density: darkness ?? 10,
           speed: speed ?? 3,
-          gapMm: gapLength,
           docName: jobName,
         });
 
@@ -903,19 +881,29 @@ export default function PrintScreen() {
       return;
     }
 
+    const clipDoc = displayDocument ?? previewDocument;
+    if (manager.usesTd404CommandSet && clipDoc) {
+      const clipNote = td404DocumentOffsetClipWarning(clipDoc, jobDpi, jobH, jobV);
+      if (clipNote) {
+        const proceed = await new Promise<boolean>((resolve) => {
+          Alert.alert('Border near the label edge', clipNote, [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Print anyway', onPress: () => resolve(true) },
+          ]);
+        });
+        if (!proceed) {
+          printingLockRef.current = false;
+          return;
+        }
+      }
+    }
+
     useSettingsStore.getState().patchDefaults({ paperType });
     setPrinting(true);
     const timer = new PrintTimingLogger();
 
     try {
       const dieCutJob = jewelryDieCutJob || cableFlagJob || ratTail143Job;
-      const printerState = usePrinterStore.getState();
-      const jobBridge = resolveQualityBridge({
-        activeTransport: manager.transport,
-        storeTransport: printerState.transport,
-        sdkId: printerState.sdkId,
-      });
-      const jobCaps = qualityCapsFor(jobBridge);
       const quality = resolvePrintQuality({
         darkness,
         speed,
@@ -923,17 +911,18 @@ export default function PrintScreen() {
         colorMode: defaults.colorMode,
         dieCut: dieCutJob,
         jewelry: jewelryDieCutJob,
-        caps: jobCaps,
       });
       const { density: printDensity, threshold, speed: printSpeed, dither } = quality;
-      const inkSteps = darknessSteps(darkness, jobCaps);
-      // TD-404 at 0°: the offset is drawn into the bitmap, so the border moves exactly
-      // like every other layer and REFERENCE keeps only the media origin.
-      const bakeOffset = manager.usesTd404CommandSet && orientationDeg === 0;
-      const offsetH = bakeOffset ? 0 : printOffsetMm.x;
-      const offsetV = bakeOffset ? 0 : printOffsetMm.y;
+      const printSpec = createPrintSpec({
+        widthMm: paper.widthMm,
+        heightMm: paper.heightMm,
+        dpi: jobDpi,
+        profile: manager.getActivePrinterProfile(),
+        calibration: { horizontalOffsetMm: jobH, verticalOffsetMm: jobV },
+        gapMm: jobGap,
+      });
       console.info(
-        `[print] Advanced params → density=${printDensity} speed=${printSpeed} threshold=${threshold} gap=${gapLength}mm offset=${printOffsetMm.x}x${printOffsetMm.y}mm (${bakeOffset ? 'bitmap' : 'REFERENCE'}) darknessUI=${darkness ?? 'Auto'} speedUI=${speed ?? 'Auto'} bridge=${jobBridge ?? 'none'} densityMode=${darkness == null ? 'auto' : 'manual'} speedMode=${speed == null ? 'auto' : 'manual'} inkSteps=${inkSteps}`,
+        `[print] Advanced params → density=${printDensity} speed=${printSpeed} threshold=${threshold} gap=${jobGap}mm hCorrection=${roll.hCorrectionMm}mm linerL/R=${roll.sideLinerLeftMm}/${roll.sideLinerRightMm} hSent=${jobH}mm vSent=${jobV}mm REFERENCE=${printSpec.xOffsetDots},${printSpec.yOffsetDots} darknessUI=${darkness ?? 'Auto'} speedUI=${speed ?? 'Auto'}`,
       );
 
       for (let page = 0; page < pageCount; page++) {
@@ -945,7 +934,12 @@ export default function PrintScreen() {
           timer.end('pageWaitForPaint');
         }
 
-        const pageDoc = displayDocument ?? previewDocument;
+        const pageRaw = buildPageDocument(page);
+        const pageDoc =
+          pageRaw == null
+            ? displayDocument ?? previewDocument
+            : applyPrintSize(pageRaw, printPreset, printSize);
+        const tsplDirection = tsplDirectionForLabel(pageDoc, paper.widthMm, paper.heightMm);
         const td404HeadlessMono =
           manager.usesTd404CommandSet &&
           orientationDeg === 0 &&
@@ -1018,10 +1012,7 @@ export default function PrintScreen() {
           // it incorrectly (see printer-manager.ts). Pre-rotating here and always
           // telling native `orientation: 0` makes all four SDKs share one, tested,
           // lossless rotation path (rotateGray — exact axis transpose, no skew).
-          rotatedBase64 = rotatePngBase64(
-            applyInkDarknessToPng(base64, inkSteps, threshold, pageDoc),
-            orientationDeg,
-          );
+          rotatedBase64 = rotatePngBase64(base64, orientationDeg);
 
           logPrintTrace('EDITOR_CAPTURE', {
             userWidthMm: widthMm,
@@ -1070,12 +1061,12 @@ export default function PrintScreen() {
               : base64,
             widthMm: paper.widthMm,
             heightMm: paper.heightMm,
-            gapMm: gapLength,
+            gapMm: jobGap,
             copies,
             density: printDensity !== undefined && printDensity !== null ? Math.min(2, Math.max(0, Math.floor(printDensity / 5))) : 1,
             speed: printSpeed,
-            hOffsetMm: offsetH,
-            vOffsetMm: offsetV,
+            hOffsetMm: jobH,
+            vOffsetMm: jobV,
             media: wantsBline ? 'bline' : media,
             threshold,
             dither,
@@ -1094,14 +1085,14 @@ export default function PrintScreen() {
             pngBase64: rotatedBase64,
             widthMm: paper.widthMm,
             heightMm: paper.heightMm,
-            gapMm: gapLength,
+            gapMm: jobGap,
             copies,
             density: printDensity,
             speed: printSpeed,
             orientation: 0,
             dpi: jobDpi,
-            hOffsetMm: offsetH,
-            vOffsetMm: offsetV,
+            hOffsetMm: jobH,
+            vOffsetMm: jobV,
             media: wantsBline ? 'bline' : media,
             threshold: jewelryDieCutJob ? Math.max(threshold, 168) : threshold,
           });
@@ -1119,14 +1110,14 @@ export default function PrintScreen() {
             pngBase64: rotatedBase64,
             widthMm: paper.widthMm,
             heightMm: paper.heightMm,
-            gapMm: gapLength,
+            gapMm: jobGap,
             copies: copies,
             density: printDensity,
             speed: printSpeed,
             orientation: 0,
             dpi: jobDpi,
-            hOffsetMm: offsetH,
-            vOffsetMm: offsetV,
+            hOffsetMm: jobH,
+            vOffsetMm: jobV,
             media: wantsBline ? 'bline' : media,
             alignment: manager.isJosh ? 'center' : manager.getActivePrinterProfile().alignment,
           });
@@ -1145,13 +1136,13 @@ export default function PrintScreen() {
               pngBase64: rotatedBase64,
               widthMm: paper.widthMm,
               heightMm: paper.heightMm,
-              gapMm: gapLength,
+              gapMm: jobGap,
               copies,
               density: darkness != null ? printDensity : 14,
               speed: speed != null ? printSpeed : 3,
               threshold,
-              vOffsetMm: offsetV,
-              hOffsetMm: offsetH,
+              vOffsetMm: jobV,
+              hOffsetMm: jobH,
               media: wantsBline ? 'bline' : media,
               orientation: 0,
               dpi: jobDpi,
@@ -1177,15 +1168,17 @@ export default function PrintScreen() {
               assertHeadlessRasterDocument(pageDoc);
               await ensurePrintTypefaces();
               const docPrepMs = Date.now() - tPrep0;
-              const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, {
-                threshold,
-                darknessSteps: inkSteps,
-                bakeTd404Feed: true,
-                shiftDots: bakeOffset
-                  ? { x: mmToDots(printOffsetMm.x, jobDpi), y: mmToDots(printOffsetMm.y, jobDpi) }
-                  : undefined,
-              });
+              const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, { threshold });
               const bitmap = timed.result;
+              if (__DEV__) {
+                logBorderPrintDiagnostics(pageDoc, jobDpi, bitmap, {
+                  gapMm: jobGap,
+                  hOffsetMm: jobH,
+                  vOffsetMm: jobV,
+                  referenceDots: { x: printSpec.xOffsetDots, y: printSpec.yOffsetDots },
+                  printerName: deviceName ?? 'unknown',
+                });
+              }
               const tNative0 = Date.now();
               usedNative = await manager.printMonoLabelFast({
                 monoBytes: bitmap.mono1bppBuffer,
@@ -1194,14 +1187,16 @@ export default function PrintScreen() {
                 bytesPerRow: bitmap.bytesPerRow,
                 widthMm: pageDoc.widthMm,
                 heightMm: pageDoc.heightMm,
-                gapMm: gapLength,
+                gapMm: jobGap,
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: offsetV,
-                hOffsetMm: offsetH,
+                vOffsetMm: jobV,
+                hOffsetMm: jobH,
                 media: wantsBline ? 'bline' : media,
                 dpi: jobDpi,
+                tearOn,
+                direction: tsplDirection,
               });
               const nativeCallMs = Date.now() - tNative0;
               if (!usedNative) {
@@ -1239,20 +1234,56 @@ export default function PrintScreen() {
                 gate_15ms: rasterizeMs + bitpackMs < 15 ? 'pass' : 'fail',
                 note: 'Production headless mono — canvas mm maps 1:1 to packed BITMAP dots (same as calibration/location harness).',
               });
+            } else if (pageDoc) {
+              const stamped = rasterizeViewShotPngWithStampedBorders(
+                rotatedBase64,
+                pageDoc,
+                jobDpi,
+                threshold,
+              );
+              if (__DEV__) {
+                logBorderPrintDiagnostics(pageDoc, jobDpi, stamped, {
+                  gapMm: jobGap,
+                  hOffsetMm: jobH,
+                  vOffsetMm: jobV,
+                  referenceDots: { x: printSpec.xOffsetDots, y: printSpec.yOffsetDots },
+                  printerName: deviceName ?? 'unknown',
+                });
+              }
+              usedNative = await manager.printMonoLabelFast({
+                monoBytes: stamped.mono1bppBuffer,
+                widthDots: stamped.widthDots,
+                heightDots: stamped.heightDots,
+                bytesPerRow: stamped.bytesPerRow,
+                widthMm: pageDoc.widthMm,
+                heightMm: pageDoc.heightMm,
+                gapMm: jobGap,
+                copies,
+                density: printDensity,
+                speed: printSpeed,
+                vOffsetMm: jobV,
+                hOffsetMm: jobH,
+                media: wantsBline ? 'bline' : media,
+                dpi: jobDpi,
+                tearOn,
+                direction: tsplDirection,
+              });
             } else {
               usedNative = await tryNativeSdkPngPrint({
                 pngBase64: rotatedBase64,
                 widthMm: paper.widthMm,
                 heightMm: paper.heightMm,
-                gapMm: gapLength,
+                gapMm: jobGap,
                 copies,
                 density: printDensity,
                 speed: printSpeed,
-                vOffsetMm: offsetV,
-                hOffsetMm: offsetH,
+                vOffsetMm: jobV,
+                hOffsetMm: jobH,
                 media: wantsBline ? 'bline' : media,
                 orientation: 0,
                 dpi: jobDpi,
+                tearOn,
+                direction: tsplDirection,
               });
               if (usedNative) {
                 console.info(
@@ -1275,7 +1306,7 @@ export default function PrintScreen() {
                   capture_request_px: `${printCaptureSize.widthPx}x${printCaptureSize.heightPx}`,
                   view_layout_px: layoutPx ? `${layoutPx.w}x${layoutPx.h}` : null,
                   cal_stored: stored ? `h ${stored.hOffsetMm}mm v ${stored.vOffsetMm}mm` : 'none',
-                  cal_used: `h ${printOffsetMm.x}mm v ${printOffsetMm.y}mm ${bakeOffset ? 'bitmap' : 'REFERENCE'}`,
+                  cal_used: `h ${jobH}mm v ${jobV}mm`,
                   ref_requested:
                     nativeTiming?.requestedX != null
                       ? `${nativeTiming.requestedX},${nativeTiming.requestedY}`
@@ -1308,25 +1339,51 @@ export default function PrintScreen() {
                   throw err instanceof Error ? err : new Error(String(err));
                 }
                 base64 = captured;
-                rotatedBase64 = rotatePngBase64(
-                  applyInkDarknessToPng(base64, inkSteps, threshold, pageDoc),
-                  orientationDeg,
-                );
+                rotatedBase64 = rotatePngBase64(base64, orientationDeg);
               }
-              usedNative = await tryNativeSdkPngPrint({
-                pngBase64: rotatedBase64,
-                widthMm: paper.widthMm,
-                heightMm: paper.heightMm,
-                gapMm: gapLength,
-                copies,
-                density: printDensity,
-                speed: printSpeed,
-                vOffsetMm: offsetV,
-                hOffsetMm: offsetH,
-                media: wantsBline ? 'bline' : media,
-                orientation: 0,
-                dpi: jobDpi,
-              }).catch(() => false);
+              if (pageDoc) {
+                const stamped = rasterizeViewShotPngWithStampedBorders(
+                  rotatedBase64,
+                  pageDoc,
+                  jobDpi,
+                  threshold,
+                );
+                usedNative = await manager.printMonoLabelFast({
+                  monoBytes: stamped.mono1bppBuffer,
+                  widthDots: stamped.widthDots,
+                  heightDots: stamped.heightDots,
+                  bytesPerRow: stamped.bytesPerRow,
+                  widthMm: pageDoc.widthMm,
+                  heightMm: pageDoc.heightMm,
+                  gapMm: jobGap,
+                  copies,
+                  density: printDensity,
+                  speed: printSpeed,
+                  vOffsetMm: jobV,
+                  hOffsetMm: jobH,
+                  media: wantsBline ? 'bline' : media,
+                  dpi: jobDpi,
+                  tearOn,
+                  direction: tsplDirection,
+                }).catch(() => false);
+              } else {
+                usedNative = await tryNativeSdkPngPrint({
+                  pngBase64: rotatedBase64,
+                  widthMm: paper.widthMm,
+                  heightMm: paper.heightMm,
+                  gapMm: jobGap,
+                  copies,
+                  density: printDensity,
+                  speed: printSpeed,
+                  vOffsetMm: jobV,
+                  hOffsetMm: jobH,
+                  media: wantsBline ? 'bline' : media,
+                  orientation: 0,
+                  dpi: jobDpi,
+                  tearOn,
+                  direction: tsplDirection,
+                }).catch(() => false);
+              }
               if (!usedNative) {
                 throw err instanceof Error ? err : new Error(String(err));
               }
@@ -1349,7 +1406,7 @@ export default function PrintScreen() {
             orientation: 0,
             threshold,
             dither,
-            hOffsetMm: offsetH,
+            hOffsetMm: jobH,
             dpi: jobDpi,
             fitArtwork: artworkPhoto,
           });
@@ -1359,12 +1416,12 @@ export default function PrintScreen() {
           const bytes = encodeConnectedPrinterJob(bits, {
             widthMm: paper.widthMm,
             heightMm: paper.heightMm,
-            gapMm: gapLength,
+            gapMm: jobGap,
             copies: 1,
             density: printDensity,
             speed: printSpeed,
-            vOffsetMm: offsetV,
-            hOffsetMm: offsetH,
+            vOffsetMm: jobV,
+            hOffsetMm: jobH,
             media: wantsBline ? 'bline' : media,
             dpi: jobDpi,
           });
@@ -1408,6 +1465,9 @@ export default function PrintScreen() {
     params.docUri,
     previewDocument,
     displayDocument,
+    buildPageDocument,
+    printPreset,
+    printSize,
     jobDpi,
     defaults.labelWidth,
     defaults.labelHeight,
@@ -1417,8 +1477,12 @@ export default function PrintScreen() {
     darkness,
     speed,
     pageCount,
-    printOffsetMm,
+    hCorrection,
+    sideLinerLeft,
+    sideLinerRight,
+    vOffset,
     gapLength,
+    tearOn,
     copies,
     paperType,
     printingSettings.recordHistory,
@@ -1437,10 +1501,6 @@ export default function PrintScreen() {
     printCaptureSize.heightPx,
     calibrationKey,
   ]);
-
-  const unrotatedJob = !ratTail143Job && orientation === '0°';
-  const captureShiftMm =
-    getPrinterManager().usesTd404CommandSet && unrotatedJob ? printOffsetMm : undefined;
 
   return (
     <View style={styles.root}>
@@ -1556,10 +1616,9 @@ export default function PrintScreen() {
                   exactWidthPx={printCaptureLayoutPx.widthPx}
                   exactHeightPx={printCaptureLayoutPx.heightPx}
                   printDpi={jobDpi}
-                  bakeTd404Feed={getPrinterManager().usesTd404CommandSet}
-                  shiftMm={captureShiftMm}
                   showArtboardBorder={false}
                   hideNonPrinting
+                  omitBorders={getPrinterManager().usesTd404CommandSet}
                 />
               </ViewShot>
             </View>
@@ -1701,7 +1760,7 @@ export default function PrintScreen() {
 
             <View style={styles.cardSection}>
               <Text style={styles.groupLabel}>Paper Type</Text>
-              <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={changePaperType} />
+              <ChipGroup options={PAPER_TYPES} selected={paperType} onSelect={setPaperType} />
               {jewelryDieCutJob ? (
                 <Text style={[styles.helperText, { color: '#0284C7', marginTop: 6 }]}>
                   💡 Clear-liner jewelry rolls with black timing lines on the back require Paper Type set to "Black mark". If prints skip or overlap, run "Calibrate Paper Sensor" in Printer Connect.
@@ -1745,66 +1804,75 @@ export default function PrintScreen() {
                   }}
                 />
 
-                {qualityCaps.density !== 'legacy' ? (
-                  <QualityControl
-                    cap={qualityCaps.density}
-                    value={darkness}
-                    onChange={setDarkness}
-                    Stepper={BorderedStepperRow}
-                  />
-                ) : (
-                  <StepperRow
-                    label="Print Darkness"
-                    value={darkness == null ? 'Auto' : String(darkness)}
-                    minusDisabled={darkness != null && darkness <= 1}
-                    plusDisabled={darkness != null && darkness >= 15}
-                    onMinus={() =>
-                      setDarkness((d) => {
-                        if (d == null) return 7;
-                        if (d <= 1) return null;
-                        return d - 1;
-                      })
-                    }
-                    onPlus={() => setDarkness((d) => (d == null ? 8 : Math.min(15, d + 1)))}
-                    bordered
-                  />
-                )}
-                {qualityCaps.speed !== 'legacy' ? (
-                  <QualityControl
-                    cap={qualityCaps.speed}
-                    value={speed}
-                    onChange={setSpeed}
-                    Stepper={BorderedStepperRow}
-                    untestedNote="not tested on TD-404"
-                  />
-                ) : (
-                  <StepperRow
-                    label="Print Speed"
-                    value={speed == null ? 'Auto' : String(speed)}
-                    minusDisabled={speed != null && speed <= 1}
-                    plusDisabled={speed != null && speed >= 8}
-                    onMinus={() =>
-                      setSpeed((s) => {
-                        if (s == null) return 2;
-                        if (s <= 1) return null;
-                        return s - 1;
-                      })
-                    }
-                    onPlus={() => setSpeed((s) => (s == null ? 3 : Math.min(8, s + 1)))}
-                    bordered
-                  />
-                )}
-                {calibrationQualityNote ? (
-                  <Text style={styles.calibrationQualityNote}>{calibrationQualityNote}</Text>
-                ) : null}
                 <StepperRow
-                  label="Gap Length"
-                  value={`${gapLength.toFixed(2)} mm`}
-                  minusDisabled={gapLength <= 0}
-                  onMinus={() => changeGapLength(Math.max(0, Math.round((gapLength - 0.5) * 100) / 100))}
-                  onPlus={() => changeGapLength(Math.min(20, Math.round((gapLength + 0.5) * 100) / 100))}
+                  label="Print Darkness"
+                  value={darkness == null ? 'Auto' : String(darkness)}
+                  minusDisabled={darkness != null && darkness <= 1}
+                  plusDisabled={darkness != null && darkness >= 15}
+                  onMinus={() =>
+                    setDarkness((d) => {
+                      if (d == null) return 7;
+                      if (d <= 1) return null;
+                      return d - 1;
+                    })
+                  }
+                  onPlus={() => setDarkness((d) => (d == null ? 8 : Math.min(15, d + 1)))}
                   bordered
                 />
+                <StepperRow
+                  label="Print Speed"
+                  value={speed == null ? 'Auto' : String(speed)}
+                  minusDisabled={speed != null && speed <= 1}
+                  plusDisabled={speed != null && speed >= 8}
+                  onMinus={() =>
+                    setSpeed((s) => {
+                      if (s == null) return 2;
+                      if (s <= 1) return null;
+                      return s - 1;
+                    })
+                  }
+                  onPlus={() => setSpeed((s) => (s == null ? 3 : Math.min(8, s + 1)))}
+                  bordered
+                />
+                <StepperRow
+                  label={specialMediaJob ? 'Gap between labels' : 'Gap between labels (saved)'}
+                  value={`${gapLength.toFixed(2)} mm`}
+                  minusDisabled={gapLength <= 0}
+                  plusDisabled={gapLength >= 20}
+                  onMinus={() => stepRollGap(-0.1)}
+                  onPlus={() => stepRollGap(0.1)}
+                  bordered
+                />
+                <StepperRow
+                  label="Left side liner (saved)"
+                  value={`${sideLinerLeft.toFixed(2)} mm`}
+                  minusDisabled={sideLinerLeft <= 0}
+                  plusDisabled={sideLinerLeft >= SIDE_LINER_MAX_MM}
+                  onMinus={() => setSideLinerLeft((v) => Math.max(0, Math.round((v - 0.25) * 100) / 100))}
+                  onPlus={() =>
+                    setSideLinerLeft((v) => Math.min(SIDE_LINER_MAX_MM, Math.round((v + 0.25) * 100) / 100))
+                  }
+                  bordered
+                />
+                <StepperRow
+                  label="Right side liner (saved)"
+                  value={`${sideLinerRight.toFixed(2)} mm`}
+                  minusDisabled={sideLinerRight <= 0}
+                  plusDisabled={sideLinerRight >= SIDE_LINER_MAX_MM}
+                  onMinus={() => setSideLinerRight((v) => Math.max(0, Math.round((v - 0.25) * 100) / 100))}
+                  onPlus={() =>
+                    setSideLinerRight((v) => Math.min(SIDE_LINER_MAX_MM, Math.round((v + 0.25) * 100) / 100))
+                  }
+                  bordered
+                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}>
+                  <Text style={{ color: '#111827', fontSize: 15 }}>Tear-off (SET TEAR)</Text>
+                  <Switch
+                    value={tearOn}
+                    onValueChange={setTearOn}
+                    trackColor={{ false: '#D1D5DB', true: '#48C3C7' }}
+                  />
+                </View>
                 <Text style={{ color: '#9CA3AF', fontSize: 12, paddingTop: 8 }}>
                   {(() => {
                     const mgr = getPrinterManager();
@@ -1817,30 +1885,106 @@ export default function PrintScreen() {
                       heightMm: page?.heightMm ?? 30,
                       dpi: jobDpi,
                       profile: mgr.getActivePrinterProfile(),
-                      calibration: { horizontalOffsetMm: 0, verticalOffsetMm: 0 },
+                      calibration: { horizontalOffsetMm: hOffset, verticalOffsetMm: vOffset },
                     });
-                    const total = `H ${printOffsetMm.x.toFixed(2)} mm, V ${printOffsetMm.y.toFixed(2)} mm`;
-                    if (!unrotatedJob) {
-                      return `Total offset ${total} (this printer plus Label Settings). Rotated jobs send it on REFERENCE.`;
-                    }
-                    return `Total offset ${total} (this printer plus Label Settings). It moves text, codes and the border together inside the bitmap. REFERENCE stays at the media origin, ${spec.xOffsetDots},${spec.yOffsetDots} dots. The border has ${TD404_BORDER_LEFT_MM} mm room to the left, ${TD404_BORDER_RIGHT_MM} mm right, ${TD404_BORDER_TOP_MM} mm up and ${TD404_BORDER_BOTTOM_MM} mm down before it is cut off.`;
+                    const clipNote = page
+                      ? td404DocumentOffsetClipWarning(page, jobDpi, hOffset, vOffset)
+                      : null;
+                    const liner = sideLinerShiftMm(sideLinerLeft, sideLinerRight);
+                    const base = `Border prints exactly where it sits on the canvas. Gap = liner between stickers. Side liner = strip beside the label on this roll; uneven sides shift the print by half the difference (${liner >= 0 ? '+' : ''}${liner.toFixed(2)} mm). H sent = correction ${hCorrection.toFixed(2)} + liner ${liner.toFixed(2)} = ${hOffset.toFixed(2)} mm. REFERENCE ${spec.xOffsetDots},${spec.yOffsetDots}.`;
+                    return clipNote ? `${base} ${clipNote}` : base;
                   })()}
                 </Text>
                 <StepperRow
-                  label="Horizontal Offset (saved for this printer)"
-                  value={`${hOffset.toFixed(2)} mm`}
-                  minusDisabled={hOffset <= -10}
-                  onMinus={() => setHOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
-                  onPlus={() => setHOffset((v) => Math.min(10, Math.round((v + 0.5) * 100) / 100))}
+                  label="Horizontal printer correction (saved)"
+                  value={`${hCorrection.toFixed(2)} mm`}
+                  minusDisabled={hCorrection <= -10}
+                  plusDisabled={hCorrection >= 10}
+                  onMinus={() => setHCorrection((v) => Math.max(-10, Math.round((v - 0.25) * 100) / 100))}
+                  onPlus={() => setHCorrection((v) => Math.min(10, Math.round((v + 0.25) * 100) / 100))}
                   bordered
                 />
                 <StepperRow
-                  label="Vertical Offset (saved for this printer)"
+                  label="Vertical printer correction (saved)"
                   value={`${vOffset.toFixed(2)} mm`}
                   minusDisabled={vOffset <= -10}
-                  onMinus={() => setVOffset((v) => Math.max(-10, Math.round((v - 0.5) * 100) / 100))}
-                  onPlus={() => setVOffset((v) => Math.min(20, Math.round((v + 0.5) * 100) / 100))}
+                  plusDisabled={vOffset >= 10}
+                  onMinus={() => setVOffset((v) => Math.max(-10, Math.round((v - 0.25) * 100) / 100))}
+                  onPlus={() => setVOffset((v) => Math.min(10, Math.round((v + 0.25) * 100) / 100))}
                 />
+                <Text style={{ color: '#111827', fontSize: 14, fontWeight: '600', paddingTop: 12 }}>
+                  Sent to printer: H {hOffset.toFixed(2)} mm, V {vOffset.toFixed(2)} mm
+                  {(() => {
+                    const mgr = getPrinterManager();
+                    if (!mgr.usesTd404CommandSet || !activeDoc) return '';
+                    const spec = createPrintSpec({
+                      widthMm: activeDoc.widthMm,
+                      heightMm: activeDoc.heightMm,
+                      dpi: jobDpi,
+                      profile: mgr.getActivePrinterProfile(),
+                      gapMm: gapLength,
+                      calibration: { horizontalOffsetMm: hOffset, verticalOffsetMm: vOffset },
+                    });
+                    return ` (REFERENCE ${spec.xOffsetDots},${spec.yOffsetDots})`;
+                  })()}
+                </Text>
+                <Text style={{ color: '#6B7280', fontSize: 12, paddingTop: 6 }}>
+                  H/V apply on the printer (TSPL REFERENCE), not in the preview. Print an alignment sheet to verify on paper.
+                </Text>
+                {getPrinterManager().usesTd404CommandSet ? (
+                  <Pressable
+                    disabled={printing || !activeDoc}
+                    onPress={() => {
+                      Alert.alert(
+                        'Print alignment sheet?',
+                        'Sends a real test label (2 mm border + rulers) with your current Gap, H, and V — not your design. Use the green Print button for labels.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Print sheet', onPress: () => void printAlignmentTestSheet() },
+                        ],
+                      );
+                    }}
+                    style={{
+                      marginTop: 10,
+                      paddingVertical: 12,
+                      paddingHorizontal: 14,
+                      borderRadius: 10,
+                      backgroundColor: printing ? '#E5E7EB' : '#F3F4F6',
+                      borderWidth: 1,
+                      borderColor: '#D1D5DB',
+                    }}
+                  >
+                    <Text style={{ color: '#111827', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
+                      Print alignment sheet (rulers)
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {__DEV__ ? (
+                  <View style={{ paddingTop: 12, gap: 8 }}>
+                    <Text style={{ color: '#6B7280', fontSize: 12 }}>
+                      Developer tools — not your label design.
+                    </Text>
+                    <Pressable
+                      disabled={printing || !activeDoc}
+                      onPress={() => {
+                        Alert.alert(
+                          'Print calibration pattern?',
+                          'Same as alignment sheet above.',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Print test sheet', onPress: () => void printAlignmentTestSheet() },
+                          ],
+                        );
+                      }}
+                      style={({ pressed }) => [
+                        styles.sizeBtn,
+                        { alignSelf: 'flex-start' },
+                        pressed && styles.pressed,
+                      ]}>
+                      <Text style={styles.sizeBtnText}>Print test sheet (rulers)</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
               </View>
             ) : null}
           </View>
@@ -1873,64 +2017,6 @@ export default function PrintScreen() {
           </Text>
         </Pressable>
         {/* Print button — prints the active label at its selected/previewed dimensions */}
-        {__DEV__ ? (
-          <Pressable
-            disabled={printing}
-            hitSlop={6}
-            style={({ pressed }) => [styles.sizeBtn, pressed && styles.pressed]}
-            onPress={() => {
-              void (async () => {
-                try {
-                  const doc = displayDocument ?? previewDocument;
-                  if (!doc) return;
-                  const png = await captureRef(shotRef, printCaptureShotOptions);
-                  if (TD404_HEADLESS_SKIA_PRINT) {
-                    const timed = rasterizeDocumentToBitmapTimed(doc, jobDpi, {
-                      threshold: 160,
-                      bakeTd404Feed: true,
-                    });
-                    const result = await printTd404MonoLabel({
-                      monoBytes: timed.result.mono1bppBuffer,
-                      widthDots: timed.result.widthDots,
-                      heightDots: timed.result.heightDots,
-                      bytesPerRow: timed.result.bytesPerRow,
-                      widthMm: doc.widthMm,
-                      heightMm: doc.heightMm,
-                      gapMm: gapLength,
-                      dpi: jobDpi,
-                      dryRun: true,
-                      gitSha: resolveGitSha(),
-                      buildTime: resolveBuildTime(),
-                    });
-                    const text = `path=headless ${result?.widthDots}x${result?.heightDots} jobBase64Chars=${result?.jobBase64?.length ?? 0}\n${result?.jobBase64 ?? ''}`;
-                    await FileSystem.writeAsStringAsync(`${FileSystem.documentDirectory}tspl-dry-run.txt`, text);
-                    console.info('[TSPL-DRY-RUN]', text.slice(0, 240));
-                    Alert.alert('TSPL dry-run', `Headless ${result?.widthDots}×${result?.heightDots}, ${result?.jobBase64?.length ?? 0} base64 chars. Not printed.`);
-                  } else {
-                    const result = await printTd404PngLabel({
-                      pngBase64: png,
-                      widthMm: doc.widthMm,
-                      heightMm: doc.heightMm,
-                      gapMm: gapLength,
-                      dpi: jobDpi,
-                      threshold: 160,
-                      dryRun: true,
-                      gitSha: resolveGitSha(),
-                      buildTime: resolveBuildTime(),
-                    });
-                    const text = `path=png ${result?.widthDots}x${result?.heightDots} jobBase64Chars=${result?.jobBase64?.length ?? 0}\n${result?.jobBase64 ?? ''}`;
-                    await FileSystem.writeAsStringAsync(`${FileSystem.documentDirectory}tspl-dry-run.txt`, text);
-                    console.info('[TSPL-DRY-RUN]', text.slice(0, 240));
-                    Alert.alert('TSPL dry-run', `PNG ${result?.widthDots ?? '?'}×${result?.heightDots ?? '?'}, ${result?.jobBase64?.length ?? 0} base64 chars. Not printed.`);
-                  }
-                } catch (err) {
-                  Alert.alert('TSPL dry-run failed', err instanceof Error ? err.message : String(err));
-                }
-              })();
-            }}>
-            <Text style={styles.sizeBtnText}>Dump</Text>
-          </Pressable>
-        ) : null}
         <Pressable
           disabled={printing}
           hitSlop={6}
@@ -2200,11 +2286,6 @@ const styles = StyleSheet.create({
   stepperRowBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#ECEEF1',
-  },
-  calibrationQualityNote: {
-    color: '#B45309',
-    fontSize: 12,
-    paddingVertical: 8,
   },
   stepperLabel: {
     ...Type.body,

@@ -1,5 +1,5 @@
 import { DEFAULT_TIME_STATE, TIME_DISPLAY_SAMPLE } from '@/components/editor/types';
-import { insetBorderBox } from '@/lib/border-geometry';
+import { insetBorderBox, isFullPanelGuideCircle } from '@/lib/border-geometry';
 import { elementSizeMm, mmToPt, ptToMm, textBlockHeightMm, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { isRatTailGeometry, ratTailBodyRectMm, scaleMediaGeometry } from '@/lib/media-geometry';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
@@ -391,14 +391,11 @@ export function clampElementToLabel(
 }
 
 export function normalizeDocumentElements(doc: LabelDocument): LabelElement[] {
-  const elements = doc.mediaShape === 'circle'
+  const roundDie = doc.mediaShape === 'circle' || doc.mediaShape === 'ellipse';
+  const elements = roundDie
     ? doc.elements.filter((el) => {
-        if (el.type === 'shape' && (el.figureShape === 'circle' || el.figureShape === 'oval')) {
-          const minDim = Math.min(doc.widthMm, doc.heightMm);
-          const isFullCanvas = el.width >= minDim - 1.5 && el.height >= minDim - 1.5;
-          if (isFullCanvas && el.fill && (el.fillColor === '#FFFFFF' || el.fillColor === '#ffffff')) {
-            return false;
-          }
+        if (isFullPanelGuideCircle(el, doc.widthMm, doc.heightMm)) {
+          return false;
         }
         return true;
       })
@@ -655,7 +652,8 @@ export function scaleDocumentToSize(
  * Keep every element's width/height (and all other fields) unchanged.
  * Only `left` / `top` move with the relative-origin formula:
  *   new_left = (old_left / old_label_width) × new_label_width
- * Does not clamp and does not re-pin borders.
+ * A locked label frame is re-pinned to 2 mm on the new stock so it does not
+ * sit in a corner. Two-up panels keep their stored boxes.
  */
 export function repositionDocumentToSize(
   doc: LabelDocument,
@@ -664,12 +662,24 @@ export function repositionDocumentToSize(
 ): LabelDocument {
   const sx = widthMm / Math.max(doc.widthMm, 0.01);
   const sy = heightMm / Math.max(doc.heightMm, 0.01);
+  const pinLocked = !doc.ups;
   const moveElements = (source: LabelElement[]): LabelElement[] =>
-    source.map((el) => ({
-      ...el,
-      left: el.left * sx,
-      top: el.top * sy,
-    }));
+    source.map((el) => {
+      if (pinLocked && el.type === 'border' && el.lockMovement) {
+        return {
+          ...el,
+          ...insetBorderBox(0, 0, widthMm, heightMm, widthMm, heightMm),
+          geometryVersion: 1 as const,
+          rotation: 0 as const,
+          lockMovement: true,
+        };
+      }
+      return {
+        ...el,
+        left: el.left * sx,
+        top: el.top * sy,
+      };
+    });
 
   const elements = moveElements(doc.elements);
   const nextDoc: LabelDocument = { ...doc, widthMm, heightMm, elements };
@@ -704,6 +714,18 @@ export function fitDocumentCenteredOnPage(
   const oy = (heightMm - contentH) / 2;
   const nextDoc = { ...doc, widthMm, heightMm };
   const elements = doc.elements.map((el) => {
+    if (el.type === 'border' && el.lockMovement) {
+      return clampElementToLabel(
+        {
+          ...el,
+          ...insetBorderBox(0, 0, widthMm, heightMm, widthMm, heightMm),
+          geometryVersion: 1 as const,
+          rotation: 0 as const,
+          lockMovement: true,
+        },
+        nextDoc,
+      );
+    }
     const scaled = scaleElementFields(el, scale, scale, scale, contentW, contentH);
     scaled.left = ox + scaled.left;
     scaled.top = oy + scaled.top;

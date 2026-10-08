@@ -17,7 +17,7 @@ import { resolveBuildTime, resolveGitSha } from '@/lib/build-identity';
 import type { LabelDocument } from '@/lib/label-document';
 import { printCaptureLayout, printCaptureOptionsForSize, waitForNextPaint } from '@/lib/printer/print-job';
 import { createPrintSpec } from '@/lib/printer/print-spec';
-import { usePrinterStore } from '@/stores/printer-store';
+import { jobPrintOffsets, usePrinterStore } from '@/stores/printer-store';
 import { printTd404MonoLabel, printTd404PngLabel } from 'td404-printer';
 import {
   LOCATION_DPI,
@@ -58,9 +58,9 @@ export default function LocationDotsScreen() {
   const sdkId = usePrinterStore((s) => s.sdkId);
   const printCalibration = usePrinterStore((s) => s.printCalibration);
   const calibrationKey = deviceId ?? sdkId ?? 'unknown';
-  const saved = printCalibration[calibrationKey];
-  const hOffsetMm = saved?.hOffsetMm ?? 0;
-  const vOffsetMm = saved?.vOffsetMm ?? 0;
+  const saved = jobPrintOffsets(printCalibration[calibrationKey]);
+  const hOffsetMm = saved.hOffsetMm;
+  const vOffsetMm = saved.vOffsetMm;
 
   const captures = useMemo<CaptureItem[]>(
     () => [

@@ -137,7 +137,7 @@ export function rasterizeEditorParityReference(doc: LabelDocument, dpi: number):
   heightDots: number;
   gray: Uint8Array;
 } {
-  const { packedW, packedH } = packedPageDots(doc.widthMm, doc.heightMm, dpi);
+  const { packedW, packedH, sizeDotsW, sizeDotsH } = packedPageDots(doc.widthMm, doc.heightMm, dpi);
   const dot = makeDotSurface(packedW, packedH);
   for (const el of sortLayers(doc.elements)) {
     if (el.needPrinting === false || el.visible === false) continue;
@@ -159,7 +159,13 @@ export function rasterizeEditorParityReference(doc: LabelDocument, dpi: number):
           el,
           dpi,
           1,
-          { bitmapWidthDots: packedW, bitmapHeightDots: packedH, mediaShape: doc.mediaShape },
+          {
+            bitmapWidthDots: packedW,
+            bitmapHeightDots: packedH,
+            labelWidthDots: sizeDotsW,
+            labelHeightDots: sizeDotsH,
+            mediaShape: doc.mediaShape,
+          },
         );
         break;
       default:

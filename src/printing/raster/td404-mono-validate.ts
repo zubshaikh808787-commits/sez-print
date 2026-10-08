@@ -1,16 +1,19 @@
-import { dotsPerMm } from '@/lib/printer/print-spec';
+import { createUniversalPrintLayout } from '@/lib/printer/print-spec';
+import { padMono1bppToBytesPerRow } from '@/printing/raster/bit-packer';
 
-/** Same packed-page math as printPngLabelNative / packedPageDots. */
+/** Same packed-page math as createUniversalPrintLayout / BITMAP pack-up. */
 export function td404PackedPageDots(
   widthMm: number,
   heightMm: number,
   dpi: number,
 ): { sizeDotsW: number; sizeDotsH: number; packedW: number; packedH: number } {
-  const dpm = dotsPerMm(dpi);
-  const sizeDotsW = Math.max(1, Math.round(widthMm * dpm));
-  const sizeDotsH = Math.max(1, Math.round(heightMm * dpm));
-  const packedW = Math.max(8, Math.floor(sizeDotsW / 8) * 8);
-  return { sizeDotsW, sizeDotsH, packedW, packedH: sizeDotsH };
+  const layout = createUniversalPrintLayout(widthMm, heightMm, dpi);
+  return {
+    sizeDotsW: layout.sizeDotsW,
+    sizeDotsH: layout.sizeDotsH,
+    packedW: layout.bitmapDotsW,
+    packedH: layout.bitmapDotsH,
+  };
 }
 
 export type Td404MonoBufferCheck = {
@@ -23,7 +26,32 @@ export type Td404MonoBufferCheck = {
   dpi: number;
 };
 
-/** Reject mismatched buffers; never pad or truncate. */
+/**
+ * TSPL BITMAP width is bytes×8. Sizes like 99 mm (1188 dots) are not a
+ * multiple of 8. Pad white on the right up to packedW so every millimetre
+ * size can print. Never shift the left edge.
+ */
+export function normalizeTd404MonoBuffer(args: Td404MonoBufferCheck): Td404MonoBufferCheck {
+  const { packedW, packedH } = td404PackedPageDots(args.widthMm, args.heightMm, args.dpi);
+  const destBpr = packedW / 8;
+  const srcBpr = Math.max(1, args.bytesPerRow | 0);
+  const height = args.heightDots | 0;
+  if (height !== packedH) {
+    throw new Error(
+      `TD-404 mono heightDots (${args.heightDots}) != packedH (${packedH}) for ${args.widthMm}x${args.heightMm}mm @ ${args.dpi} dpi`,
+    );
+  }
+  const monoBytes = padMono1bppToBytesPerRow(args.monoBytes, srcBpr, packedH, destBpr);
+  return {
+    ...args,
+    widthDots: packedW,
+    heightDots: packedH,
+    bytesPerRow: destBpr,
+    monoBytes,
+  };
+}
+
+/** Reject mismatched buffers after normalizeTd404MonoBuffer. */
 export function assertTd404MonoBuffer(args: Td404MonoBufferCheck): void {
   const { packedW, packedH } = td404PackedPageDots(args.widthMm, args.heightMm, args.dpi);
   if (args.bytesPerRow * 8 !== packedW) {

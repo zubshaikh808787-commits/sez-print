@@ -25,7 +25,7 @@ import { getPrinterManager } from '@/lib/printer/printer-manager';
 import {
   grayToBits,
   grayToPngBase64,
-  padBitsCentered,
+  padBitsRight,
   binarizeGrayForPrint,
   type BitRaster,
 } from '@/lib/printer/escpos';
@@ -185,7 +185,7 @@ export async function printPreparedGrayJob(
   });
   let bits = grayToBits(printGray, { threshold: 254, dither: false });
   if (bits.bytesPerRow * 8 !== geometry.bitmapDotsW || bits.height !== geometry.bitmapDotsH) {
-    bits = padBitsCentered(bits, geometry.bitmapDotsW, geometry.bitmapDotsH);
+    bits = padBitsRight(bits, geometry.bitmapDotsW, geometry.bitmapDotsH);
   }
 
   const job: RenderedPrintJob = {

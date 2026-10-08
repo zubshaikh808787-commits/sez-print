@@ -50,7 +50,7 @@ import {
   normalizeDocumentElements,
   scaleDocumentToSize,
 } from '@/lib/element-sizing';
-import { defaultBorderPlacement } from '@/lib/border-geometry';
+import { borderPlacementWarnings, defaultBorderPlacement } from '@/lib/border-geometry';
 import { labelOverlapRegionsMm, overlapBannerPositionsPx } from '@/lib/editor/safe-mode';
 import { clampToLabelBounds, fitFontSizeToLabel } from '@/lib/editor/label-bounds';
 import { GridSpacingPopover } from '@/components/editor/grid-spacing-popover';
@@ -199,6 +199,7 @@ import {
 import { borderStyleStrokeMm } from '@/constants/border-library';
 import { editorBridge, barcodeEncodeModeForScanType, isQrScanType } from '@/constants/editor-bridge';
 import { createIndustryTemplateDocument } from '@/constants/template-documents';
+import { structureTwoUpsCircleDocument } from '@/lib/multi-up-circle';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { androidRipple, cardShadow, Palette, Type } from '@/constants/ui';
 import {
@@ -221,6 +222,7 @@ import {
   parsePaperType,
   switchUpsPanel,
   syncUpsActivePanel,
+  upsEnsureBorderOnAllPanels,
   type ElementType,
   type LabelDocument,
   type LabelElement,
@@ -596,7 +598,7 @@ export default function EditScreen() {
           return canonicalizeJewelryDieCutDocument(normalized);
         }
         if (isRatTail143Document(normalized)) return refitRatTail143Document(normalized);
-        return normalized;
+        return structureTwoUpsCircleDocument(normalized);
       }
     }
 
@@ -1308,6 +1310,9 @@ export default function EditScreen() {
         let next: LabelDocument = { ...prev, elements: nextElements };
         if (next.ups) {
           next = syncUpsActivePanel(next);
+          if (next.elements.some((el) => el.type === 'border')) {
+            next = upsEnsureBorderOnAllPanels(next);
+          }
           if (next.ups?.batchEdit) {
             next = applyUpsBatchMirror(next);
           }
@@ -4474,6 +4479,11 @@ export default function EditScreen() {
           lineWidth={
             doc.elements.find((el) => el.type === 'border')?.lineWidth ?? 0.55
           }
+          warnings={(() => {
+            const border = doc.elements.find((el) => el.type === 'border');
+            if (!border || border.type !== 'border') return [];
+            return borderPlacementWarnings(border, doc.widthMm, doc.heightMm);
+          })()}
           onChangeWidth={(lineWidth) => {
             const border = docRef.current.elements.find((el) => el.type === 'border');
             if (border) patchElement(border.id, { lineWidth });
@@ -4670,12 +4680,14 @@ export default function EditScreen() {
 
 function BorderOptionsSheet({
   lineWidth,
+  warnings = [],
   onChangeWidth,
   onReplace,
   onRemove,
   onCancel,
 }: {
   lineWidth: number;
+  warnings?: string[];
   onChangeWidth: (next: number) => void;
   onReplace: () => void;
   onRemove: () => void;
@@ -4696,6 +4708,11 @@ function BorderOptionsSheet({
       <View style={styles.borderSheetBackdrop}>
         <View style={styles.borderSheetCard}>
           <Text style={styles.borderSheetTitle}>Border</Text>
+          {warnings.map((note) => (
+            <Text key={note} style={{ color: '#B45309', fontSize: 13, marginBottom: 8 }}>
+              {note}
+            </Text>
+          ))}
           <View style={styles.borderSheetActions}>
             <Pressable style={styles.borderReplaceBtn} onPress={onReplace}>
               <Text style={styles.borderReplaceText}>Replace</Text>

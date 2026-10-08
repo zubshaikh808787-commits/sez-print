@@ -25,6 +25,7 @@ export type LabelSettings = {
   mirrorSpacingMm: number;
   mirrorRowNumber: number;
   gapLengthMm: number;
+  tearOn: boolean;
   printDarkness: number | null;
   printSpeed: number | null;
   hOffsetMm: number;
@@ -58,6 +59,7 @@ export function defaultLabelSettings(): LabelSettings {
     mirrorSpacingMm: 0,
     mirrorRowNumber: 1,
     gapLengthMm: 3,
+    tearOn: true,
     printDarkness: null,
     printSpeed: null,
     hOffsetMm: 0,

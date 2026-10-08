@@ -266,6 +266,8 @@ export type Td404PngLabelOptions = {
   yDots?: number;
   copies?: number;
   media?: 'gap' | 'bline' | 'continuous';
+  /** TSPL SET TEAR. Default on. */
+  tearOn?: boolean;
   orientation?: number;
   dpi?: number;
   /** TSPL DIRECTION: 1 (default, matches JS pipeline / preview) or 0. */
@@ -303,6 +305,7 @@ export async function printTd404PngLabel(
     yDots: options.yDots ?? 0,
     copies: options.copies ?? 1,
     media: options.media ?? 'gap',
+    tearOn: options.tearOn !== false,
     orientation: options.orientation ?? 0,
     dpi: options.dpi ?? 304,
     direction: options.direction ?? 1,
@@ -328,6 +331,8 @@ export type Td404MonoLabelOptions = {
   yDots?: number;
   copies?: number;
   media?: 'gap' | 'bline' | 'continuous';
+  /** TSPL SET TEAR. Default on. */
+  tearOn?: boolean;
   dpi?: number;
   direction?: 0 | 1;
   dryRun?: boolean;
@@ -342,8 +347,44 @@ function packedPageDotsMm(widthMm: number, heightMm: number, dpi: number) {
   }
   const sizeDotsW = Math.max(1, Math.round(widthMm * dpm));
   const sizeDotsH = Math.max(1, Math.round(heightMm * dpm));
-  const packedW = Math.max(8, Math.floor(sizeDotsW / 8) * 8);
+  const packedW = Math.max(8, Math.ceil(sizeDotsW / 8) * 8);
   return { packedW, packedH: sizeDotsH };
+}
+
+function padMonoRows(
+  data: Uint8Array,
+  srcBytesPerRow: number,
+  height: number,
+  destBytesPerRow: number,
+): Uint8Array {
+  if (srcBytesPerRow === destBytesPerRow && data.length === destBytesPerRow * height) return data;
+  const out = new Uint8Array(destBytesPerRow * height);
+  const copy = Math.min(srcBytesPerRow, destBytesPerRow);
+  for (let y = 0; y < height; y++) {
+    const srcOff = y * srcBytesPerRow;
+    out.set(data.subarray(srcOff, srcOff + Math.min(copy, Math.max(0, data.length - srcOff))), y * destBytesPerRow);
+  }
+  return out;
+}
+
+function normalizeTd404MonoBufferLocal(
+  options: Td404MonoLabelOptions,
+  dpi: number,
+): Td404MonoLabelOptions {
+  const { packedW, packedH } = packedPageDotsMm(options.widthMm, options.heightMm, dpi);
+  if (options.heightDots !== packedH) {
+    throw new Error(
+      `TD-404 mono heightDots (${options.heightDots}) != packedH (${packedH}) for ${options.widthMm}x${options.heightMm}mm @ ${dpi} dpi`,
+    );
+  }
+  const destBpr = packedW / 8;
+  return {
+    ...options,
+    widthDots: packedW,
+    heightDots: packedH,
+    bytesPerRow: destBpr,
+    monoBytes: padMonoRows(options.monoBytes, options.bytesPerRow, packedH, destBpr),
+  };
 }
 
 function assertTd404MonoBufferLocal(options: Td404MonoLabelOptions, dpi: number): void {
@@ -375,16 +416,17 @@ export async function printTd404MonoLabel(
   options: Td404MonoLabelOptions,
 ): Promise<Td404MonoLabelResult | null> {
   const dpi = options.dpi ?? 304;
-  assertTd404MonoBufferLocal(options, dpi);
+  const mono = normalizeTd404MonoBufferLocal(options, dpi);
+  assertTd404MonoBufferLocal(mono, dpi);
   const mod = getNative();
   if (!mod || typeof mod.printMonoLabel !== 'function') return null;
-  if (!options.dryRun && !mod.isConnected()) {
+  if (!mono.dryRun && !mod.isConnected()) {
     throw new Error('No TD-404 printer connected.');
   }
-  return mod.printMonoLabel(options.monoBytes, {
-    widthDots: options.widthDots,
-    heightDots: options.heightDots,
-    bytesPerRow: options.bytesPerRow,
+  return mod.printMonoLabel(mono.monoBytes, {
+    widthDots: mono.widthDots,
+    heightDots: mono.heightDots,
+    bytesPerRow: mono.bytesPerRow,
     widthMm: options.widthMm,
     heightMm: options.heightMm,
     gapMm: options.gapMm ?? 3,
@@ -394,6 +436,7 @@ export async function printTd404MonoLabel(
     yDots: options.yDots ?? 0,
     copies: options.copies ?? 1,
     media: options.media ?? 'gap',
+    tearOn: options.tearOn !== false,
     dpi,
     direction: options.direction ?? 1,
     dryRun: options.dryRun === true,

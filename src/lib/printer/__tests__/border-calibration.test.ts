@@ -7,11 +7,9 @@ import {
   dotsPerMm,
   mmToDots,
   PRINTER_PROFILES,
-  TD404_BORDER_BOTTOM_MM,
-  TD404_BORDER_LEFT_MM,
-  TD404_BORDER_RIGHT_MM,
-  TD404_BORDER_TOP_MM,
+  tsplPackedWidthDots,
   TD404_MEDIA_ORIGIN_H_MM,
+  TD404_MEDIA_ORIGIN_V_MM,
 } from '@/lib/printer/print-spec';
 import {
   borderExceedsBitmap,
@@ -31,14 +29,15 @@ function margins(
   heightMm: number,
   element = fullBleedBorderElement(widthMm, heightMm),
   extraBottomInsetMm = 0,
-  bakeFeed = false,
   labelWidthMm?: number,
   labelHeightMm?: number,
+  mediaShape?: string,
+  clip = false,
 ) {
   const dpm = dotsPerMm(dpi);
-  const sizeW = Math.round(widthMm * dpm);
-  const sizeH = Math.round(heightMm * dpm);
-  const packedW = Math.max(8, Math.floor(sizeW / 8) * 8);
+  const sizeW = Math.round((labelWidthMm ?? widthMm) * dpm);
+  const sizeH = Math.round((labelHeightMm ?? heightMm) * dpm);
+  const packedW = tsplPackedWidthDots(sizeW);
   const surface = makeDotSurface(packedW, sizeH);
   drawPrintBorder(
     {
@@ -50,9 +49,11 @@ function margins(
     1,
     {
       extraBottomInsetMm,
-      bakeFeed,
-      bitmapWidthDots: bakeFeed ? packedW : undefined,
-      bitmapHeightDots: bakeFeed ? sizeH : undefined,
+      bitmapWidthDots: clip ? packedW : undefined,
+      bitmapHeightDots: clip ? sizeH : undefined,
+      labelWidthDots: sizeW,
+      labelHeightDots: sizeH,
+      mediaShape,
     },
   );
   let minX = packedW;
@@ -70,9 +71,13 @@ function margins(
   }
   return {
     L: minX,
-    R: packedW - 1 - maxX,
+    R: sizeW - 1 - maxX,
     T: minY,
     B: sizeH - 1 - maxY,
+    gray: surface.gray,
+    packedW,
+    sizeW,
+    sizeH,
   };
 }
 
@@ -143,7 +148,7 @@ const spec = createPrintSpec({
   calibration: { horizontalOffsetMm: 0, verticalOffsetMm: 0 },
 });
 assert.equal(spec.xOffsetDots, mmToDots(TD404_MEDIA_ORIGIN_H_MM, dpi));
-assert.equal(spec.yOffsetDots, 0);
+assert.equal(spec.yOffsetDots, mmToDots(TD404_MEDIA_ORIGIN_V_MM, dpi));
 assert.equal(spec.gapMm, 3);
 
 const plusOne = createPrintSpec({
@@ -181,10 +186,11 @@ for (const [w, h] of [
   [40, 30],
 ] as const) {
   const ink = margins(w, h);
-  for (const [side, dots] of Object.entries(ink)) {
+  for (const side of ['L', 'R', 'T', 'B'] as const) {
+    const dots = ink[side];
     assert.ok(
       Math.abs(dots - insetDots) <= 1,
-      `${w}x${h} ${side} ${dots} dots, expected ${insetDots}±1`,
+      `${w}x${h} ${side} ${dots} dots, expected ${insetDots}Â±1`,
     );
   }
 }
@@ -200,8 +206,9 @@ const stored = {
   },
 };
 const tagged = margins(50, 30, stored);
-for (const [side, dots] of Object.entries(tagged)) {
-  assert.ok(Math.abs(dots - insetDots) <= 1, `stored box ${side} ${dots} dots, expected ${insetDots}±1`);
+for (const side of ['L', 'R', 'T', 'B'] as const) {
+  const dots = tagged[side];
+  assert.ok(Math.abs(dots - insetDots) <= 1, `stored box ${side} ${dots} dots, expected ${insetDots}Â±1`);
 }
 
 const tearDots = mmToDots(1, dpi);
@@ -213,10 +220,17 @@ assert.ok(Math.abs(torn.B - (insetDots + tearDots)) <= 1, `tear bottom ${torn.B}
 const tornFull = margins(50, 30, fullBleedBorderElement(50, 30), 1);
 assert.ok(Math.abs(tornFull.T - insetDots) <= 1 && Math.abs(tornFull.B - (insetDots + tearDots)) <= 1, `full-bleed tear T${tornFull.T} B${tornFull.B}`);
 
-const leftDots = mmToDots(TD404_BORDER_LEFT_MM, dpi);
-const rightDots = mmToDots(TD404_BORDER_RIGHT_MM, dpi);
-const topDots = mmToDots(TD404_BORDER_TOP_MM, dpi);
-const bottomDots = mmToDots(TD404_BORDER_BOTTOM_MM, dpi);
+function taggedCanvasBox(widthMm: number, heightMm: number) {
+  return {
+    ...fullBleedBorderElement(widthMm, heightMm),
+    left: 2,
+    top: 2,
+    width: widthMm - 4,
+    height: heightMm - 4,
+    geometryVersion: 1 as const,
+  };
+}
+
 for (const [widthMm, heightMm] of [
   [50, 50],
   [40, 40],
@@ -228,26 +242,88 @@ for (const [widthMm, heightMm] of [
   [80, 20],
   [100, 150],
 ] as const) {
-  const baked = margins(
+  const wysiwyg = margins(
     widthMm,
     heightMm,
-    {
-      ...fullBleedBorderElement(widthMm, heightMm),
-      left: 2,
-      top: 2,
-      width: widthMm - 4,
-      height: heightMm - 4,
-      geometryVersion: 1,
-    },
+    taggedCanvasBox(widthMm, heightMm),
     0,
-    true,
     widthMm,
     heightMm,
+    undefined,
+    true,
   );
-  assert.ok(Math.abs(baked.L - leftDots) <= 1, `baked ${widthMm}x${heightMm} left ${baked.L}`);
-  assert.ok(Math.abs(baked.R - rightDots) <= 1, `baked ${widthMm}x${heightMm} right ${baked.R}`);
-  assert.ok(Math.abs(baked.T - topDots) <= 1, `baked ${widthMm}x${heightMm} top ${baked.T}`);
-  assert.ok(Math.abs(baked.B - bottomDots) <= 1, `baked ${widthMm}x${heightMm} bottom ${baked.B}`);
+  assert.ok(Math.abs(wysiwyg.L - insetDots) <= 1, `wysiwyg ${widthMm}x${heightMm} L ${wysiwyg.L}`);
+  assert.ok(
+    Math.abs(wysiwyg.R - insetDots) <= 1,
+    `wysiwyg ${widthMm}x${heightMm} R ${wysiwyg.R}`,
+  );
+  assert.ok(Math.abs(wysiwyg.T - insetDots) <= 1, `wysiwyg ${widthMm}x${heightMm} T ${wysiwyg.T}`);
+  assert.ok(Math.abs(wysiwyg.B - insetDots) <= 1, `wysiwyg ${widthMm}x${heightMm} B ${wysiwyg.B}`);
+}
+
+const oddWidthMm = 33;
+const oddHeightMm = 48;
+const oddWysiwyg = margins(
+  oddWidthMm,
+  oddHeightMm,
+  taggedCanvasBox(oddWidthMm, oddHeightMm),
+  0,
+  oddWidthMm,
+  oddHeightMm,
+  'rectangle',
+  true,
+);
+assert.ok(Math.abs(oddWysiwyg.L - insetDots) <= 1, `wysiwyg odd left ${oddWysiwyg.L}`);
+assert.ok(Math.abs(oddWysiwyg.T - insetDots) <= 1, `wysiwyg odd top ${oddWysiwyg.T}`);
+assert.ok(Math.abs(oddWysiwyg.B - insetDots) <= 1, `wysiwyg odd bottom ${oddWysiwyg.B}`);
+assert.ok(
+  Math.abs(oddWysiwyg.R - insetDots) <= 1,
+  `wysiwyg odd right ${oddWysiwyg.R}`,
+);
+
+for (const [widthMm, heightMm, shape] of [
+  [40, 40, 'circle'],
+  [50, 30, 'ellipse'],
+  [60, 40, 'circle'],
+] as const) {
+  const ring = margins(
+    widthMm,
+    heightMm,
+    taggedCanvasBox(widthMm, heightMm),
+    0,
+    widthMm,
+    heightMm,
+    shape,
+    true,
+  );
+  assert.ok(Math.abs(ring.L - insetDots) <= 1, `wysiwyg ${shape} ${widthMm}x${heightMm} left ${ring.L}`);
+  assert.ok(
+    Math.abs(ring.R - insetDots) <= 1,
+    `wysiwyg ${shape} ${widthMm}x${heightMm} right ${ring.R}`,
+  );
+  assert.ok(Math.abs(ring.T - insetDots) <= 1, `wysiwyg ${shape} ${widthMm}x${heightMm} top ${ring.T}`);
+  assert.ok(Math.abs(ring.B - insetDots) <= 1, `wysiwyg ${shape} ${widthMm}x${heightMm} bottom ${ring.B}`);
+  const corner = ring.gray[ring.T * ring.packedW + ring.L];
+  assert.notEqual(corner, 0, `wysiwyg ${shape} ${widthMm}x${heightMm} corner should be outside the ring`);
+  const midY = Math.round((ring.T + (ring.sizeH - 1 - ring.B)) / 2);
+  assert.equal(
+    ring.gray[midY * ring.packedW + ring.packedW / 2],
+    255,
+    `wysiwyg ${shape} centre stays clear`,
+  );
+}
+
+for (const widthMm of [30, 33, 50, 54, 100]) {
+  const ink = margins(widthMm, 30, taggedCanvasBox(widthMm, 30), 0, widthMm, 30, undefined, true);
+  for (const side of ['L', 'R', 'T', 'B'] as const) {
+    assert.ok(
+      Math.abs(ink[side] - insetDots) <= 1,
+      `SIZE-edge ${widthMm}x30 ${side} ${ink[side]} vs ${insetDots}`,
+    );
+  }
+  for (let x = ink.sizeW; x < ink.packedW; x++) {
+    assert.equal(ink.gray[0 * ink.packedW + x], 255, `pad col ${x} on ${widthMm}mm stays white`);
+  }
 }
 
 console.log('ok border-calibration');

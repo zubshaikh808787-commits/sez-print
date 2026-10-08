@@ -1,4 +1,4 @@
-import { dotsPerMm as dotsPerMmForDpi } from '@/lib/printer/print-spec';
+import { dotsPerMm as dotsPerMmForDpi, tsplPackedWidthDots } from '@/lib/printer/print-spec';
 import type { MediaProfile } from '@/printing/document/types';
 import type { RenderedPrintJob } from '@/printing/renderer/UniversalRenderer';
 import type {
@@ -11,9 +11,8 @@ import type {
 import { validatePrintRequest } from '@/printing/printer/validate';
 import { createPrintDocument } from '@/printing/document/types';
 
-function packWidthDown(dots: number): number {
-  const n = Math.max(1, Math.round(dots));
-  return Math.max(8, Math.floor(n / 8) * 8);
+function packWidthUp(dots: number): number {
+  return tsplPackedWidthDots(dots);
 }
 
 /**
@@ -86,7 +85,7 @@ export function createTd404Adapter(
       );
     },
     async encode(job: RenderedPrintJob, options: EncodeOptions = {}): Promise<Uint8Array> {
-      const packedW = packWidthDown(job.widthDots);
+      const packedW = packWidthUp(job.widthDots);
       if (job.bitmap.pixelFormat !== '1bpp') {
         throw new Error('TD-404 adapter expects a 1bpp bitmap from the universal renderer.');
       }

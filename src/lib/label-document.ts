@@ -17,6 +17,7 @@ import type { BorderStyleId } from '@/constants/border-library';
 import type { MediaGeometry } from '@/lib/media-geometry';
 import type { BulkLabelSet } from '@/lib/bulk-labels';
 import type { LabelSettings } from '@/lib/label-settings';
+import { defaultBorderPlacement, isFullPanelGuideCircle, migrateBorderElement } from '@/lib/border-geometry';
 import { computeTextElementHeightMm, measureTextWidthMm } from '@/lib/text-metrics';
 
 export type TemplateBackground =
@@ -121,6 +122,8 @@ type LayerMeta = {
   zIndex?: number;
   /** Editor-only. Print still uses `needPrinting`. */
   visible?: boolean;
+  /** Set when flattening N-up for print — which column this element belongs to. */
+  upsPanelIndex?: number;
 };
 
 export type LabelElement = (
@@ -186,6 +189,16 @@ export type LabelDocument = {
   bulk?: BulkLabelSet;
   /** Per-label print/layout options (mirror mode, offsets, gap, etc.). */
   settings?: LabelSettings;
+  /** After composeUpsDocument: one die per tiled column (for circular borders, etc.). */
+  upsPrintCell?: {
+    widthMm: number;
+    heightMm: number;
+    mediaShape?: MediaShape;
+    columnSpacingMm?: number;
+    columns?: number;
+  };
+  /** After composeUpsDocument: do not run tileDocumentTwoUp again in applyPrintSize. */
+  printComposedUps?: boolean;
 };
 
 let idCounter = 0;
@@ -323,10 +336,56 @@ export function applyUpsBatchMirror(doc: LabelDocument): LabelDocument {
   return { ...synced, ups: { ...synced.ups!, panels } };
 }
 
+/**
+ * Copy the active panel's border onto every ups column so print gets one frame
+ * per sticker, not a single border on the first panel only.
+ */
+export function upsEnsureBorderOnAllPanels(doc: LabelDocument): LabelDocument {
+  if (!doc.ups) return doc;
+  const synced = syncUpsActivePanel(doc);
+  const active = synced.ups!.panels[synced.ups!.activeIndex] ?? synced.elements;
+  const template = active.find((el) => el.type === 'border');
+  if (!template || template.type !== 'border') return synced;
+  const panelW = synced.widthMm;
+  const panelH = synced.heightMm;
+  const pinPanelBorder = (raw: LabelElement): LabelElement => {
+    if (raw.type !== 'border') return raw;
+    const pinned = migrateBorderElement(
+      {
+        ...raw,
+        ...defaultBorderPlacement(panelW, panelH),
+        borderStyle: raw.borderStyle,
+        lineWidth: raw.lineWidth,
+        needPrinting: raw.needPrinting,
+        visible: raw.visible,
+        drawingColorIndex: raw.drawingColorIndex,
+      },
+      panelW,
+      panelH,
+      true,
+    );
+    return pinned;
+  };
+  const panels = synced.ups!.panels.map((panel, i) => {
+    const without = panel.filter((el) => el.type !== 'border');
+    const raw =
+      i === synced.ups!.activeIndex
+        ? (panel.find((el) => el.type === 'border') ?? template)
+        : cloneElementsFreshIds([template])[0];
+    return [...without, pinPanelBorder(raw)];
+  });
+  const activePanel = panels[synced.ups!.activeIndex] ?? synced.elements;
+  return {
+    ...synced,
+    elements: JSON.parse(JSON.stringify(activePanel)) as LabelElement[],
+    ups: { ...synced.ups!, panels },
+  };
+}
+
 /** Flatten N-up panels into one print-ready document (horizontal tile). */
 export function composeUpsDocument(doc: LabelDocument): LabelDocument {
   if (!doc.ups || doc.ups.columns < 2) return doc;
-  const synced = syncUpsActivePanel(doc);
+  const synced = upsEnsureBorderOnAllPanels(syncUpsActivePanel(doc));
   const { columns, columnSpacingMm, panels } = synced.ups!;
   // Allow negative gutter (stick calibration); keep total width at least one cell.
   const gap = columnSpacingMm;
@@ -344,10 +403,17 @@ export function composeUpsDocument(doc: LabelDocument): LabelDocument {
     for (const raw of panels[i] ?? []) {
       // Clamp inside the single-panel bounds before tiling so print never spills.
       const el = clampPanelElement(raw, panelDoc);
+      if (
+        synced.mediaShape === 'circle' &&
+        isFullPanelGuideCircle(el, cellW, cellH)
+      ) {
+        continue;
+      }
       elements.push({
         ...JSON.parse(JSON.stringify(el)),
         id: generateId(),
         left: el.left + ox,
+        upsPanelIndex: i,
       } as LabelElement);
     }
   }
@@ -358,6 +424,15 @@ export function composeUpsDocument(doc: LabelDocument): LabelDocument {
     name: synced.name,
     widthMm: Math.round(totalW * 100) / 100,
     heightMm: cellH,
+    mediaShape: undefined,
+    upsPrintCell: {
+      widthMm: cellW,
+      heightMm: cellH,
+      mediaShape: synced.mediaShape,
+      columnSpacingMm: gap,
+      columns,
+    },
+    printComposedUps: true,
     elements,
     background:
       synced.background?.type === 'color'
@@ -376,14 +451,7 @@ function clampPanelElement(
   doc: { widthMm: number; heightMm: number },
 ): LabelElement {
   if (element.type === 'border') {
-    return {
-      ...element,
-      left: 0,
-      top: 0,
-      width: doc.widthMm,
-      height: doc.heightMm,
-      rotation: 0 as const,
-    };
+    return migrateBorderElement({ ...element, rotation: 0 }, doc.widthMm, doc.heightMm, true);
   }
   const maxW = doc.widthMm;
   const maxH = doc.heightMm;

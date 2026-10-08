@@ -335,7 +335,7 @@ export default function LabelSettingsScreen() {
           showDivider
         />
         <SettingsStepperRow
-          label="Gap Length"
+          label="Gap (liner between labels)"
           value={`${settings.gapLengthMm.toFixed(1)} mm`}
           minusDisabled={settings.gapLengthMm <= 0}
           onMinus={() =>
@@ -348,6 +348,11 @@ export default function LabelSettingsScreen() {
               gapLengthMm: Math.min(20, Math.round((settings.gapLengthMm + 0.5) * 10) / 10),
             })
           }
+        />
+        <SettingsToggleRow
+          label="Tear-off (SET TEAR)"
+          value={settings.tearOn !== false}
+          onValueChange={(tearOn) => patchSettings({ tearOn })}
         />
       </SettingsCard>
 

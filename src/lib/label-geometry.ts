@@ -157,8 +157,8 @@ export function printContentSize(widthMm: number, heightMm: number, dpi = PRINT_
 }
 
 /**
- * BITMAP canvas size: width packed DOWN to a multiple of 8 (TSPL bytes×8).
- * Packing up past SIZE-in-dots is clipped by firmware (right edge cutoff).
+ * BITMAP canvas size: width packed UP to a multiple of 8 (TSPL bytes×8).
+ * Extra columns are white. Firmware still clips past SIZE.
  */
 export function printRasterSize(widthMm: number, heightMm: number, dpi = PRINT_DPI) {
   const layout = createUniversalPrintLayout(widthMm, heightMm, dpi);
@@ -170,7 +170,7 @@ export function printRasterSize(widthMm: number, heightMm: number, dpi = PRINT_D
 
 /**
  * ViewShot captures `content` (SIZE-in-dots) so 1 px = 1 printer dot at the
- * same mm scale as the editor. `canvas` is the packed BITMAP size (crop, never scale).
+ * same mm scale as the editor. `canvas` is the packed-up BITMAP size (pad white, never scale).
  */
 export function printCaptureLayout(widthMm: number, heightMm: number, dpi = PRINT_DPI) {
   const layout = createUniversalPrintLayout(widthMm, heightMm, dpi);

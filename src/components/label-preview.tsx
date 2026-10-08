@@ -1,15 +1,14 @@
 import { Image } from 'expo-image';
-import { type ReactNode, useMemo, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { PixelRatio, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { CableFlagDieCutOverlay } from '@/components/cable-flag-outline';
-import { PrintGridLayer } from '@/components/print-grid-layer';
 import { StockSilhouetteOverlay } from '@/components/stock-silhouette';
 import { ElementContentView } from '@/components/editor/element-renderer';
 import { elementSizeMm, type LabelDocument } from '@/lib/label-document';
 import { fitLabelSize, mediaShapeClipStyle } from '@/lib/label-geometry';
-import { printGridKnockoutsMm, printGridSpacingMm } from '@/lib/print-grid';
-import { dotsPerMm, rectMmToDots, td404BorderOuterDots } from '@/lib/printer/print-spec';
+import { mediaShapeForElement } from '@/lib/printer/border-media-shape';
+import { dotsPerMm, rectMmToDots } from '@/lib/printer/print-spec';
 import { canvasFillFromDocument, sortLayers, templateUsesDieCutBackground } from '@/lib/template-schema';
 
 /** Workspace chrome around the artboard — not part of template content. */
@@ -148,32 +147,24 @@ type LabelPreviewProps = {
   showArtboardBorder?: boolean;
   /** Omit elements with needPrinting === false (print capture only). */
   hideNonPrinting?: boolean;
-  /** TD-404 capture only. Same border and feed cancel as the headless raster. */
-  bakeTd404Feed?: boolean;
-  /** H/V print offset in mm. Moves every element, border included, by the same amount. */
-  shiftMm?: ShiftMm;
+  /** Print capture: omit border layers so they can be stamped in printer dots. */
+  omitBorders?: boolean;
 };
-
-type ShiftMm = { x: number; y: number };
 
 function LabelElements({
   document,
   scale,
   hideNonPrinting = false,
+  omitBorders = false,
   printDpi,
-  bakeTd404Feed = false,
-  shiftMm,
 }: {
   document: LabelDocument;
   scale: number;
   hideNonPrinting?: boolean;
+  omitBorders?: boolean;
   printDpi?: number;
-  bakeTd404Feed?: boolean;
-  shiftMm?: ShiftMm;
 }) {
   const dpm = printDpi != null ? dotsPerMm(printDpi) : null;
-  const shiftDotsX = dpm != null ? Math.round((shiftMm?.x ?? 0) * dpm) : 0;
-  const shiftDotsY = dpm != null ? Math.round((shiftMm?.y ?? 0) * dpm) : 0;
   return (
     <>
       {sortLayers(document.elements)
@@ -182,6 +173,7 @@ function LabelElements({
         // here meant hidden layers still came out on paper.
         .filter((element) => element.visible !== false)
         .filter((element) => !hideNonPrinting || element.needPrinting !== false)
+        .filter((element) => !omitBorders || element.type !== 'border')
         .map((element) => {
         const size = elementSizeMm(element);
         let leftPx: number;
@@ -197,22 +189,9 @@ function LabelElements({
           // (DIP × density). The capture view is sized at dots/density so the
           // snapshot is 1 physical pixel per printer dot — no later scale.
           const density = PixelRatio.get() || 1;
-          const pageW = Math.round(document.widthMm * dpm);
-          const pageH = Math.round(document.heightMm * dpm);
-          const outer =
-            bakeTd404Feed && element.type === 'border'
-              ? td404BorderOuterDots(pageW, pageH, printDpi)
-              : null;
-          const box = outer
-            ? {
-                x0: outer.x0,
-                y0: outer.y0,
-                widthDots: outer.x1 - outer.x0,
-                heightDots: outer.y1 - outer.y0,
-              }
-            : rectMmToDots(element.left, element.top, size.width, size.height, printDpi);
-          leftPx = (box.x0 + shiftDotsX) / density;
-          topPx = (box.y0 + shiftDotsY) / density;
+          const box = rectMmToDots(element.left, element.top, size.width, size.height, printDpi);
+          leftPx = box.x0 / density;
+          topPx = box.y0 / density;
           widthPx = Math.max(1 / density, box.widthDots / density);
           heightPx = Math.max(1 / density, box.heightDots / density);
           widthDots = box.widthDots;
@@ -221,8 +200,8 @@ function LabelElements({
         } else {
           widthPx = Math.max(1, size.width * scale);
           heightPx = Math.max(1, size.height * scale);
-          leftPx = (element.left + (shiftMm?.x ?? 0)) * scale;
-          topPx = (element.top + (shiftMm?.y ?? 0)) * scale;
+          leftPx = element.left * scale;
+          topPx = element.top * scale;
         }
         return (
           <View
@@ -256,7 +235,7 @@ function LabelElements({
               scale={contentScale}
               forPrint={printDpi != null}
               printDpi={printDpi}
-              mediaShape={document.mediaShape}
+              mediaShape={mediaShapeForElement(document, element)}
               strokeFromOuterEdge={strokeFromOuterEdge}
             />
           </View>
@@ -283,22 +262,17 @@ function LabelCanvas({
   style,
   showBorder = true,
   hideNonPrinting = false,
+  omitBorders = false,
   printDpi,
-  bakeTd404Feed = false,
-  shiftMm,
 }: {
   document: LabelDocument;
   fitted: { widthPx: number; heightPx: number; scale: number };
   style?: StyleProp<ViewStyle>;
   showBorder?: boolean;
   hideNonPrinting?: boolean;
+  omitBorders?: boolean;
   printDpi?: number;
-  bakeTd404Feed?: boolean;
-  shiftMm?: ShiftMm;
 }) {
-  const gridSpacingMm = printGridSpacingMm(document);
-  const elements = document.elements;
-  const gridKnockouts = useMemo(() => printGridKnockoutsMm({ elements }), [elements]);
   return (
     <ArtboardFrame
       document={document}
@@ -326,25 +300,12 @@ function LabelCanvas({
               />
             </>
           )}
-          {gridSpacingMm != null ? (
-            <PrintGridLayer
-              widthMm={document.widthMm}
-              heightMm={document.heightMm}
-              spacingMm={gridSpacingMm}
-              knockoutsMm={gridKnockouts}
-              widthPx={fitted.widthPx || 1}
-              heightPx={fitted.heightPx || 1}
-              printDpi={printDpi}
-              shiftMm={printDpi != null ? shiftMm : undefined}
-            />
-          ) : null}
           <LabelElements
             document={document}
             scale={fitted.scale}
             hideNonPrinting={hideNonPrinting}
+            omitBorders={omitBorders}
             printDpi={printDpi}
-            bakeTd404Feed={bakeTd404Feed}
-            shiftMm={shiftMm}
           />
         </>
       ) : null}
@@ -432,8 +393,7 @@ export function LabelPreview({
   style,
   showArtboardBorder = true,
   hideNonPrinting = false,
-  bakeTd404Feed = false,
-  shiftMm,
+  omitBorders = false,
 }: LabelPreviewProps) {
   const [stageWidth, setStageWidth] = useState(0);
 
@@ -471,9 +431,8 @@ export function LabelPreview({
           fitted={{ widthPx: w, heightPx: h, scale }}
           showBorder={showArtboardBorder}
           hideNonPrinting={hideNonPrinting}
+          omitBorders={omitBorders}
           printDpi={printDpi}
-          bakeTd404Feed={bakeTd404Feed}
-          shiftMm={shiftMm}
         />
       </View>
     );
@@ -494,7 +453,7 @@ export function LabelPreview({
         style={style}
         showBorder={showArtboardBorder}
         hideNonPrinting={hideNonPrinting}
-        shiftMm={shiftMm}
+        omitBorders={omitBorders}
       />
     );
   }
@@ -516,6 +475,7 @@ export function LabelPreview({
         fitted={fitted}
         showBorder={showArtboardBorder}
         hideNonPrinting={hideNonPrinting}
+        omitBorders={omitBorders}
       />
     </View>
   );

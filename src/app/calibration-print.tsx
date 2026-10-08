@@ -34,7 +34,7 @@ import { defaultBorderPlacement } from '@/lib/border-geometry';
 import { createLabelDocument } from '@/lib/label-document';
 import { solveBorderAxis } from '@/lib/printer/border-calibration';
 import { rasterizeDocumentToBitmap } from '@/printing/raster/skia-rasterizer';
-import { usePrinterStore } from '@/stores/printer-store';
+import { jobPrintOffsets, usePrinterStore } from '@/stores/printer-store';
 import { generateCalibrationTspl, PRINTER_DPI, DOTS_PER_MM } from '@/printing/calibration';
 
 const GRID_STEP_MM = 5;
@@ -338,8 +338,8 @@ export default function CalibrationPrintScreen() {
           },
         ],
       });
-      const saved = usePrinterStore.getState().printCalibration[calibrationKey];
-      const bitmap = rasterizeDocumentToBitmap(doc, dpi, { threshold: 160, bakeTd404Feed: true });
+      const saved = jobPrintOffsets(usePrinterStore.getState().printCalibration[calibrationKey]);
+      const bitmap = rasterizeDocumentToBitmap(doc, dpi, { threshold: 160 });
       await manager.printMonoLabelFast({
         monoBytes: bitmap.mono1bppBuffer,
         widthDots: bitmap.widthDots,
@@ -349,8 +349,8 @@ export default function CalibrationPrintScreen() {
         heightMm: 30,
         gapMm: 3,
         dpi,
-        hOffsetMm: saved?.hOffsetMm ?? 0,
-        vOffsetMm: saved?.vOffsetMm ?? 0,
+        hOffsetMm: saved.hOffsetMm,
+        vOffsetMm: saved.vOffsetMm,
       });
       const specNow = createPrintSpec({
         widthMm: 50,
@@ -359,8 +359,8 @@ export default function CalibrationPrintScreen() {
         profile,
         gapMm: 3,
         calibration: {
-          horizontalOffsetMm: saved?.hOffsetMm ?? 0,
-          verticalOffsetMm: saved?.vOffsetMm ?? 0,
+          horizontalOffsetMm: saved.hOffsetMm,
+          verticalOffsetMm: saved.vOffsetMm,
         },
       });
       const summary = [
@@ -411,7 +411,7 @@ export default function CalibrationPrintScreen() {
     setPrintCalibration(calibrationKey, { hOffsetMm, vOffsetMm, density: 10, speed: 3 });
     const summary = [
       `Saved REFERENCE fine-tune h ${hOffsetMm.toFixed(3)} mm, v ${vOffsetMm.toFixed(3)} mm.`,
-      'Positive vertical moves the print down. The 1 mm horizontal media origin stays on top of h. The border bake is separate.',
+      'Positive vertical moves the print down. Leave H/V at 0 unless this roll’s sensor is off. Liner between stickers is Gap, not REFERENCE.',
       note,
       'Reprint the border check and measure three labels. Stop if the top jumps by more than 0.5 mm.',
     ].join('\n');
@@ -488,7 +488,7 @@ export default function CalibrationPrintScreen() {
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>2 mm border check</Text>
           <Text style={styles.helpText}>
-            Prints a 50×30 border with the TD-404 correction baked into that border only. Set the Print screen offsets to 0 first, then measure from each die-cut edge to the outside of the stroke. Saving stores a REFERENCE fine-tune on top of the 1 mm media origin.
+            Prints a 50×30 border centered on SIZE (2 mm from each die-cut edge). Set Print H/V to 0 and Gap to this roll’s liner (1 mm or 3 mm). Saving stores a REFERENCE fine-tune only if this roll’s sensor is off.
           </Text>
           <Pressable
             disabled={printing}

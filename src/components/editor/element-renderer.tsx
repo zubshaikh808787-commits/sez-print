@@ -17,7 +17,7 @@ import { ClipartIcon } from '@/components/clipart-icon';
 import { SignaturePreview } from '@/components/editor/signature-drawing-board';
 import { MonoImagePreview } from '@/components/editor/mono-image-preview';
 import { BorderPreview } from '@/components/border-preview';
-import { borderShapeForMedia } from '@/printing/raster/border-shapes';
+import { borderStyleUsesCircleRing } from '@/constants/border-library';
 import { formatDataSourceColumn } from '@/lib/editor/data-source-display';
 import {
   looksLikeImageUri,
@@ -1133,7 +1133,10 @@ export function ElementContentView({
       );
     }
     case 'border': {
-      const shape = borderShapeForMedia(mediaShape);
+      const circular =
+        mediaShape === 'circle' ||
+        mediaShape === 'ellipse' ||
+        borderStyleUsesCircleRing(element.borderStyle);
       const tagged = strokeFromOuterEdge === true || element.geometryVersion === 1;
       if (forPrint && printDpi != null) {
         return (
@@ -1141,8 +1144,8 @@ export function ElementContentView({
             <BorderPreview
               styleId={element.borderStyle}
               scale={scale}
-              lineWidthMm={element.lineWidth || undefined}
-              shape={shape}
+              lineWidthMm={element.lineWidth || 0.55}
+              circular={circular}
               widthPx={widthPx}
               heightPx={heightPx}
               widthDots={widthDots}
@@ -1160,8 +1163,8 @@ export function ElementContentView({
             <BorderPreview
               styleId={element.borderStyle}
               scale={scale}
-              lineWidthMm={element.lineWidth || undefined}
-              shape={shape}
+              lineWidthMm={element.lineWidth || 0.55}
+              circular={circular}
               widthPx={widthPx}
               heightPx={heightPx}
               strokeFromOuterEdge
@@ -1177,8 +1180,8 @@ export function ElementContentView({
           <BorderPreview
             styleId={element.borderStyle}
             scale={scale}
-            lineWidthMm={element.lineWidth || undefined}
-            shape={shape}
+            lineWidthMm={element.lineWidth || 0.55}
+            circular={circular}
             widthPx={innerW}
             heightPx={innerH}
           />

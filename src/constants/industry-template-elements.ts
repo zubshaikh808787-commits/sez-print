@@ -154,6 +154,25 @@ function circle(widthMm: number, heightMm: number): LabelElement {
   return circleAt((widthMm - d) / 2, (heightMm - d) / 2, d, { lockMovement: true });
 }
 
+/** Placeholder text for a round 2-ups panel (die outline comes from mediaShape + border, not a shape). */
+export function buildCircleUpsPanelSeed(
+  panelWidthMm: number,
+  panelHeightMm: number,
+  caption = 'Label',
+): LabelElement[] {
+  const w = panelWidthMm;
+  const h = panelHeightMm;
+  const { smallPt } = templateFontSizes(w, h);
+  return [
+    text(
+      { left: 0.8, top: h * 0.38, width: Math.max(4, w - 1.6) },
+      caption,
+      Math.max(5.5, smallPt * 0.9),
+      { align: 'center', bold: true },
+    ),
+  ];
+}
+
 function table(frame: Frame, rows: number, columns: number): LabelElement {
   const state = createTableState(rows, columns);
   return {
@@ -270,12 +289,10 @@ function multiCircleCols(w: number, h: number, count: number, labels?: string[])
   const gap = Math.max(0.6, Math.min(1.2, w * 0.015));
   const pad = 0.7;
   const colW = (w - pad * 2 - gap * (count - 1)) / count;
-  const d = Math.min(colW, h - pad * 2);
   const { smallPt } = templateFontSizes(colW, h);
   const els: LabelElement[] = [];
   for (let i = 0; i < count; i += 1) {
     const colLeft = pad + i * (colW + gap);
-    els.push(circleAt(colLeft + (colW - d) / 2, (h - d) / 2, d, { lockMovement: true }));
     const caption = labels?.[i] ?? `Label ${i + 1}`;
     els.push(
       text(

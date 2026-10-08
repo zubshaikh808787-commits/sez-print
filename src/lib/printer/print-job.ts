@@ -19,13 +19,14 @@ import {
   grayToPngBase64,
   cropGrayToSize,
   layoutImportedArtwork,
-  padBitsCentered,
+  padBitsRight,
   pngBase64ToGray,
   prepareEditorGrayForPrint,
   rotateGray,
   type BitRaster,
   type GrayRaster,
 } from '@/lib/printer/escpos';
+import { applySignedReferenceToMono } from '@/lib/printer/mono-shift';
 import { encodeTscBitmapJob, inspectTsplJob } from '@/lib/printer/tsc';
 import { getPrinterManager } from '@/lib/printer/printer-manager';
 import { logPrintTrace } from '@/printing';
@@ -212,7 +213,7 @@ export function finalizeGrayForPrint(
   let bits = grayToBits(fitted, { threshold: options.threshold, dither: options.dither });
 
   if (bits.bytesPerRow * 8 !== geometry.bitmapDotsW || bits.height !== geometry.bitmapDotsH) {
-    bits = padBitsCentered(bits, geometry.bitmapDotsW, geometry.bitmapDotsH);
+    bits = padBitsRight(bits, geometry.bitmapDotsW, geometry.bitmapDotsH);
   }
 
   if (bits.bytesPerRow * 8 !== geometry.bitmapDotsW || bits.height !== geometry.bitmapDotsH) {
@@ -378,17 +379,27 @@ export function encodeConnectedPrinterJob(
   console.info(formatPrintSpecDiagnostics(spec));
 
   if (manager.usesTd404CommandSet) {
-    const job = encodeTscBitmapJob(bits, {
-      widthMm: spec.widthMm,
-      heightMm: spec.heightMm,
-      gapMm: spec.gapMm,
-      copies: 1,
-      density: options.density,
-      speed: options.speed ?? 6,
-      media: spec.mediaType,
-      x: spec.xOffsetDots,
-      y: spec.yOffsetDots,
-    });
+    const ref = applySignedReferenceToMono(
+      bits.data,
+      bits.bytesPerRow,
+      bits.height,
+      spec.xOffsetDots,
+      spec.yOffsetDots,
+    );
+    const job = encodeTscBitmapJob(
+      ref.monoBytes === bits.data ? bits : { ...bits, data: ref.monoBytes },
+      {
+        widthMm: spec.widthMm,
+        heightMm: spec.heightMm,
+        gapMm: spec.gapMm,
+        copies: 1,
+        density: options.density,
+        speed: options.speed ?? 6,
+        media: spec.mediaType,
+        x: ref.xDots,
+        y: ref.yDots,
+      },
+    );
     const tspl = inspectTsplJob(job);
     logPrintTrace('TSPL_COMMAND', {
       size: tspl.sizeCommand,
@@ -452,9 +463,11 @@ export type NativePngPrintOptions = {
   vOffsetMm?: number;
   hOffsetMm?: number;
   media?: 'gap' | 'bline' | 'continuous';
+  tearOn?: boolean;
   orientation?: number;
   dpi?: number;
   threshold?: number;
+  direction?: 0 | 1;
 };
 
 /**

@@ -50,6 +50,7 @@ import {
   rasterizePngForPrint,
   tryNativeSdkPngPrint,
 } from '@/lib/printer/print-job';
+import { tsplDirectionForLabel } from '@/constants/shipping-template-elements';
 import { getPrinterManager, PrintTimingLogger } from '@/lib/printer/printer-manager';
 import { usePrinterStore } from '@/stores/printer-store';
 
@@ -261,6 +262,7 @@ export function LabelEditor({
         // the separately-tracked `dpi` UI state — sending `dpi` here could tell
         // the native module a different resolution than what was captured.
         dpi: activeDpi,
+        direction: tsplDirectionForLabel(null, geometry.labelWidthMm, geometry.labelHeightMm),
       });
       timer.end('sdkFastPrint');
 

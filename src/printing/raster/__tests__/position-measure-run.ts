@@ -43,7 +43,7 @@ filled box, barcode, and left text start on rectMmToDots (5.00 mm and 12.00 mm) 
 QR dark ink matches the integer meet contract: box 60..180, dark 67..172 (5.58 mm, 8.75 mm wide). That is QR-only versus the element box, 7 dots, because 120 dots does not divide the module count.
 The screenshot SVG scales that same matrix to the full 10x10 mm view, so a 10 mm printed QR is the live path and its view origin is 5.00 mm.
 No constant shift, no proportional drift, no text-only error. 25 mm and 57 mm crop 4 dots on the right; the border outer edge still matches the inset contract.
-BITMAP x,y stay 0,0. TD-404 REFERENCE x includes +1 mm die-cut origin plus stored hOffsetMm.
+BITMAP x,y stay 0,0. TD-404 REFERENCE is stored h/v only. Locked border is centered on SIZE.
 `);
 if (failed) process.exitCode = 1;
 else console.log('headless matches canvas on every size');

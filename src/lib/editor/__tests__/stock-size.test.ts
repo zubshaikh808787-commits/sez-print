@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { repositionDocumentToSize, scaleDocumentToSize } from '@/lib/element-sizing';
+import { fitDocumentCenteredOnPage, repositionDocumentToSize, scaleDocumentToSize } from '@/lib/element-sizing';
 import type { LabelDocument, LabelElement } from '@/lib/label-document';
 import { applyDocumentStockSize } from '@/lib/stock-size';
 
@@ -64,10 +64,10 @@ test('keep-as-is moves origins by the relative formula and leaves size fields', 
   assert.equal(text.width, 20);
   assert.equal(text.height, 8);
   assert.equal((text as { fontSize?: number }).fontSize, 10);
-  assert.equal(border.left, 0);
-  assert.equal(border.top, 0);
-  assert.equal(border.width, 50);
-  assert.equal(border.height, 30);
+  assert.equal(border.left, 2);
+  assert.equal(border.top, 2);
+  assert.equal(border.width, 96);
+  assert.equal(border.height, 56);
 });
 
 test('scale path still pins a full-bleed border to the new stock', () => {
@@ -96,6 +96,19 @@ test('keep-as-is repositions inactive ups panels', () => {
   assert.equal(next.ups?.panels[1][0].left, 16);
   assert.equal(next.ups?.panels[1][0].top, 8);
   assert.equal(next.ups?.panels[1][0].width, 10);
+});
+
+test('contain-fit pins a locked border to the print page, not the scaled design', () => {
+  const source = doc(50, 30, [textEl('t1', 10, 6, 20, 8), borderEl(50, 30)]);
+  const next = fitDocumentCenteredOnPage(source, 100, 60);
+  const text = next.elements.find((el) => el.id === 't1')!;
+  const border = next.elements.find((el) => el.id === 'border')!;
+  assert.equal(border.left, 2);
+  assert.equal(border.top, 2);
+  assert.equal(border.width, 96);
+  assert.equal(border.height, 56);
+  assert.ok(text.left > 10);
+  assert.ok(text.top > 6);
 });
 
 test('applyDocumentStockSize keep matches repositionDocumentToSize', () => {

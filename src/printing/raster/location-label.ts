@@ -825,7 +825,7 @@ export function reviewHeader(
     calibration: { horizontalOffsetMm: hOffsetMm, verticalOffsetMm: vOffsetMm },
   });
   const centeringDots = computePrintheadCenteringOffset(spec.widthDots, spec.profile);
-  const crop = spec.widthDots - spec.rasterWidthDots;
+  const pad = spec.rasterWidthDots - spec.widthDots;
   const gap = `${gapMm.toFixed(2)}`;
   const header = [
     `SIZE ${widthMm.toFixed(2)} mm,${heightMm.toFixed(2)} mm`,
@@ -838,14 +838,14 @@ export function reviewHeader(
     `xDots=${spec.xOffsetDots} yDots=${spec.yOffsetDots}`,
     `stored hOffsetMm=${hOffsetMm} vOffsetMm=${vOffsetMm}`,
     `alignment centering=${centeringDots}`,
-    `sizeDots=${spec.widthDots} packedDots=${spec.rasterWidthDots} crop=${crop}`,
+    `sizeDots=${spec.widthDots} packedDots=${spec.rasterWidthDots} pad=${pad}`,
   ];
   const negativeMono =
     spec.xOffsetDots < 0 || spec.yOffsetDots < 0
       ? 'negative origin is REFERENCE, not BITMAP. Payload columns stay intact.'
       : 'offsets are non-negative; REFERENCE x,y equal xDots,yDots and BITMAP stays 0,0.';
   const positiveShift =
-    'H/V offset moves REFERENCE. Ink inside the bitmap does not move; the paper origin shifts by that many dots.';
+    'H/V offset moves REFERENCE. Ink inside the bitmap does not move. Liner between stickers is GAP.';
   return { spec, centeringDots, crop, header, negativeMono, positiveShift };
 }
 

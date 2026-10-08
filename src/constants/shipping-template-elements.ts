@@ -391,6 +391,53 @@ function shipFreight(w: number, h: number): LabelElement[] {
   ];
 }
 
+/** Die-cut 4×6 shipping roll (99 mm × 149.5 mm). */
+export const SHIPPING_LABEL_991495_W_MM = 99;
+export const SHIPPING_LABEL_991495_H_MM = 149.5;
+const SHIPPING_SIZE_TOL_MM = 0.75;
+
+export function is991495ShippingLabelSize(widthMm: number, heightMm: number): boolean {
+  const w = Math.min(widthMm, heightMm);
+  const h = Math.max(widthMm, heightMm);
+  return (
+    Math.abs(w - SHIPPING_LABEL_991495_W_MM) <= SHIPPING_SIZE_TOL_MM &&
+    Math.abs(h - SHIPPING_LABEL_991495_H_MM) <= SHIPPING_SIZE_TOL_MM
+  );
+}
+
+export function isShippingLabelDocument(doc: {
+  templatePreviewType?: string;
+  templateCategory?: string;
+}): boolean {
+  const preview = doc.templatePreviewType ?? '';
+  const cat = (doc.templateCategory ?? '').toLowerCase();
+  return preview.startsWith('ship-') || cat.includes('shipping');
+}
+
+/**
+ * TSPL DIRECTION for TD-404 BITMAP jobs (no bitmap mirror/flip).
+ * 99×149.5 mm die-cut uses DIRECTION 1 so exit matches the on-screen preview;
+ * DIRECTION 0 inverts this roll. All other sizes stay 1.
+ */
+export function tsplDirectionForLabel(
+  doc: {
+    widthMm?: number;
+    heightMm?: number;
+  } | null | undefined,
+  widthMm?: number,
+  heightMm?: number,
+): 0 | 1 {
+  const pairs: [number, number][] = [];
+  if (widthMm != null && heightMm != null) pairs.push([widthMm, heightMm]);
+  if (doc?.widthMm != null && doc?.heightMm != null) {
+    pairs.push([doc.widthMm, doc.heightMm]);
+  }
+  for (const [w, h] of pairs) {
+    if (is991495ShippingLabelSize(w, h)) return 1;
+  }
+  return 1;
+}
+
 export function buildShippingTemplateElements(
   previewType: string,
   w: number,

@@ -22,6 +22,10 @@ import {
   isRatTailGeometry,
 } from '@/lib/media-geometry';
 import {
+  isTwoUpsCirclePreviewType,
+  structureTwoUpsCircleDocument,
+} from '@/lib/multi-up-circle';
+import {
   colorBackground,
   emptyBackground,
   freezeTemplateLayers,
@@ -431,6 +435,11 @@ export function createIndustryTemplateDocument(params: {
     document.templateCategory = params.category;
     // Centres ink in each 14 mm column (fixes left-shifted catalog prints).
     return canonicalizeJewelryDieCutDocument(document);
+  }
+  document.templatePreviewType = params.previewType;
+  document.templateCategory = params.category;
+  if (isTwoUpsCirclePreviewType(params.previewType)) {
+    return structureTwoUpsCircleDocument(document);
   }
   return document;
 }

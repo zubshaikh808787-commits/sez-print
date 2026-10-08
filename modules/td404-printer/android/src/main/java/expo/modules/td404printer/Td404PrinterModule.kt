@@ -558,9 +558,7 @@ class Td404PrinterModule : Module() {
     val media = (options["media"] as? String) ?: "gap"
     val orientation = (options["orientation"] as? Number)?.toInt() ?: 0
     val dpi = (options["dpi"] as? Number)?.toDouble() ?: 304.0
-    // DIRECTION 1 matches the JS TSPL pipeline default. DIRECTION 0 mirrors the
-    // bitmap along the feed axis, causing apparent zoom/offset vs the on-screen preview.
-    val direction = (options["direction"] as? Number)?.toInt() ?: 1
+    val direction = resolveTsplDirection(options, widthMm, heightMm)
 
     val t0 = System.currentTimeMillis()
     val raw = android.util.Base64.decode(pngBase64, android.util.Base64.DEFAULT)
@@ -585,13 +583,13 @@ class Td404PrinterModule : Module() {
     val dpm = td404DotsPerMm(dpi)
     val sizeDotsW = Math.max(1, Math.round(widthMm * dpm).toInt())
     val sizeDotsH = Math.max(1, Math.round(heightMm * dpm).toInt())
-    // TSPL BITMAP is bytes×8. Never pack UP past SIZE-in-dots.
-    val packedW = Math.max(8, (sizeDotsW / 8) * 8)
+    // TSPL BITMAP is bytes×8. Pack UP; extra columns are white (never crop the left).
+    val packedW = Math.max(8, ((sizeDotsW + 7) / 8) * 8)
     val packedH = sizeDotsH
     bitmap = fitTd404Bitmap(bitmap, packedW, packedH)
     val fitMode = when {
       pngW == packedW && pngH == packedH -> "identity"
-      pngW > packedW && pngW - packedW in 1..7 && pngH == packedH -> "crop"
+      pngW < packedW && packedW - pngW in 1..7 && pngH == packedH -> "pad"
       pngW % packedW == 0 && pngH % packedH == 0 -> "average"
       else -> "other"
     }
@@ -678,6 +676,7 @@ class Td404PrinterModule : Module() {
       "continuous" -> "GAP 0.00 mm,0 mm\r\n"
       else -> "GAP ${formatGap(gapMm)} mm,0 mm\r\n"
     }
+    val tearOn = (options["tearOn"] as? Boolean) ?: true
 
     val header = "\r\n" +
       sizeCmd +
@@ -685,7 +684,7 @@ class Td404PrinterModule : Module() {
       "SPEED $speed\r\n" +
       "DENSITY $density\r\n" +
       "DIRECTION $direction\r\n" +
-      "SET TEAR ON\r\n" +
+      "SET TEAR ${if (tearOn) "ON" else "OFF"}\r\n" +
       tsplOriginAndBitmap(xDots, yDots, bytesPerRow, contentH)
     // TSPL PRINT m,n — one socket write for all copies (avoids re-sending bitmap per copy).
     val printCmd = if (copies <= 1) "PRINT 1\r\n" else "PRINT 1,$copies\r\n"
@@ -767,6 +766,29 @@ class Td404PrinterModule : Module() {
     return result
   }
 
+  /** Pad logical 1bpp rows (0=white) on the right to TSPL bytesPerRow. */
+  private fun padMonoLogicalRows(
+    data: ByteArray,
+    srcBytesPerRow: Int,
+    height: Int,
+    destBytesPerRow: Int,
+  ): ByteArray {
+    if (srcBytesPerRow == destBytesPerRow && data.size == destBytesPerRow * height) return data
+    val out = ByteArray(destBytesPerRow * height)
+    val copy = minOf(srcBytesPerRow, destBytesPerRow)
+    for (y in 0 until height) {
+      val srcOff = y * srcBytesPerRow
+      System.arraycopy(
+        data,
+        srcOff,
+        out,
+        y * destBytesPerRow,
+        minOf(copy, maxOf(0, data.size - srcOff)),
+      )
+    }
+    return out
+  }
+
   /**
    * Packed 1-bit (logical black=1) → TSPL BITMAP wire (black=0). Header matches printPngLabelNative.
    */
@@ -781,7 +803,7 @@ class Td404PrinterModule : Module() {
     val copies = ((options["copies"] as? Number)?.toInt() ?: 1).coerceAtLeast(1)
     val media = (options["media"] as? String) ?: "gap"
     val dpi = (options["dpi"] as? Number)?.toDouble() ?: 304.0
-    val direction = (options["direction"] as? Number)?.toInt() ?: 1
+    val direction = resolveTsplDirection(options, widthMm, heightMm)
     val widthDots = (options["widthDots"] as? Number)?.toInt()
       ?: throw IllegalArgumentException("widthDots is required")
     val heightDots = (options["heightDots"] as? Number)?.toInt()
@@ -792,36 +814,49 @@ class Td404PrinterModule : Module() {
     val dpm = td404DotsPerMm(dpi)
     val sizeDotsW = Math.max(1, Math.round(widthMm * dpm).toInt())
     val sizeDotsH = Math.max(1, Math.round(heightMm * dpm).toInt())
-    val packedW = Math.max(8, (sizeDotsW / 8) * 8)
+    val packedW = Math.max(8, ((sizeDotsW + 7) / 8) * 8)
     val packedH = sizeDotsH
+    val destBytesPerRow = packedW / 8
 
-    if (bytesPerRow * 8 != packedW) {
-      throw IllegalArgumentException(
-        "TD-404 mono buffer bytesPerRow*8 (${bytesPerRow * 8}) != packedW ($packedW) for ${widthMm}x${heightMm}mm @ ${dpi.toInt()} dpi",
-      )
-    }
-    if (widthDots != packedW) {
-      throw IllegalArgumentException(
-        "TD-404 mono widthDots ($widthDots) != packedW ($packedW)",
-      )
-    }
     if (heightDots != packedH) {
       throw IllegalArgumentException(
         "TD-404 mono heightDots ($heightDots) != packedH ($packedH)",
       )
     }
-    val expectedLen = bytesPerRow * heightDots
-    if (monoBytes.size != expectedLen) {
+
+    var logicalMono = monoBytes
+    var rowBytes = bytesPerRow
+    if (rowBytes * 8 != packedW) {
+      if (rowBytes * 8 > packedW) {
+        throw IllegalArgumentException(
+          "TD-404 mono buffer bytesPerRow*8 (${rowBytes * 8}) > packedW ($packedW) for ${widthMm}x${heightMm}mm @ ${dpi.toInt()} dpi",
+        )
+      }
+      android.util.Log.i(
+        "Td404Printer",
+        "MONO_PAD bytesPerRow*8=${rowBytes * 8} -> packedW=$packedW (${widthMm}x${heightMm}mm)",
+      )
+      logicalMono = padMonoLogicalRows(monoBytes, rowBytes, heightDots, destBytesPerRow)
+      rowBytes = destBytesPerRow
+    } else if (widthDots != packedW) {
+      android.util.Log.w(
+        "Td404Printer",
+        "MONO widthDots ($widthDots) != packedW ($packedW); using packedW for BITMAP",
+      )
+    }
+
+    val expectedLen = rowBytes * heightDots
+    if (logicalMono.size != expectedLen) {
       throw IllegalArgumentException(
-        "TD-404 mono buffer length ${monoBytes.size} != bytesPerRow*heightDots ($expectedLen)",
+        "TD-404 mono buffer length ${logicalMono.size} != bytesPerRow*heightDots ($expectedLen)",
       )
     }
 
     val wireBmp = ByteArray(expectedLen)
     for (i in 0 until expectedLen) {
-      wireBmp[i] = (monoBytes[i].toInt() xor 0xFF).toByte()
+      wireBmp[i] = (logicalMono[i].toInt() xor 0xFF).toByte()
     }
-    val ink = wireInkMargins(wireBmp, bytesPerRow, packedW, heightDots)
+    val ink = wireInkMargins(wireBmp, rowBytes, packedW, heightDots)
     android.util.Log.i(
       "Td404Printer",
       "PRINT-INK MONO native_rev=$nativeRev packed=${packedW}x${heightDots} REFERENCE=${xDots},${yDots} BITMAP=0,0 $ink",
@@ -833,14 +868,15 @@ class Td404PrinterModule : Module() {
       "continuous" -> "GAP 0.00 mm,0 mm\r\n"
       else -> "GAP ${formatGap(gapMm)} mm,0 mm\r\n"
     }
+    val tearOn = (options["tearOn"] as? Boolean) ?: true
     val header = "\r\n" +
       sizeCmd +
       gapCmd +
       "SPEED $speed\r\n" +
       "DENSITY $density\r\n" +
       "DIRECTION $direction\r\n" +
-      "SET TEAR ON\r\n" +
-      tsplOriginAndBitmap(xDots, yDots, bytesPerRow, heightDots)
+      "SET TEAR ${if (tearOn) "ON" else "OFF"}\r\n" +
+      tsplOriginAndBitmap(xDots, yDots, rowBytes, heightDots)
     val printCmd = if (copies <= 1) "PRINT 1\r\n" else "PRINT 1,$copies\r\n"
     val footer = "\r\n$printCmd"
 
@@ -859,7 +895,7 @@ class Td404PrinterModule : Module() {
     if (dryRun) {
       android.util.Log.i(
         "Td404Printer",
-        "PRINT-TRACE DRY-RUN MONO packed=${packedW}x${packedH} BITMAP=${bytesPerRow}x${heightDots} job=${job.size}B (no socket write)",
+        "PRINT-TRACE DRY-RUN MONO packed=${packedW}x${packedH} BITMAP=${rowBytes}x${heightDots} job=${job.size}B (no socket write)",
       )
     } else {
       val tWrite0 = System.currentTimeMillis()
@@ -869,7 +905,7 @@ class Td404PrinterModule : Module() {
         "Td404Printer",
         "PRINT-TRACE MONO packed=${packedW}x${packedH} sizeDots=${sizeDotsW}x${sizeDotsH} " +
           "dpm=$dpm dpi=$dpi SIZE=${formatMm(widthMm)}x${formatMm(heightMm)}mm " +
-          "BITMAP=${bytesPerRow}x${heightDots} DIRECTION=$direction job=${job.size}B copies=$copies " +
+          "BITMAP=${rowBytes}x${heightDots} DIRECTION=$direction job=${job.size}B copies=$copies " +
           "write=${writeMs}ms bytesSent=$totalSent",
       )
     }
@@ -947,6 +983,13 @@ class Td404PrinterModule : Module() {
   }
 
   /** 304 → 12 dots/mm, 203 → 8. Matches print-spec dotsPerMm. Other dpi values are rejected. */
+  private fun resolveTsplDirection(options: Map<String, Any?>, widthMm: Double, heightMm: Double): Int {
+    return when (val raw = options["direction"]) {
+      is Number -> raw.toInt().coerceIn(0, 1)
+      else -> 1
+    }
+  }
+
   private fun td404DotsPerMm(dpi: Double): Double {
     if (dpi == 304.0) return 12.0
     if (dpi == 203.0) return 8.0
@@ -961,19 +1004,21 @@ class Td404PrinterModule : Module() {
     val srcW = bitmap.width
     val srcH = bitmap.height
     if (srcW == packedW && srcH == packedH) return bitmap
-    // SIZE-in-dots capture can be up to 7 columns wider than packed BITMAP width.
-    // Crop from the top-left (same as JS prepareEditorGrayForPrint) — never scale.
-    val cropW = srcW - packedW
-    if (srcH == packedH && cropW in 1..7) {
-      val cropped = Bitmap.createBitmap(bitmap, 0, 0, packedW, packedH)
-      if (cropped !== bitmap) {
+    // SIZE-in-dots capture can be 1–7 columns narrower than packed BITMAP (pack-up).
+    // Pad white on the right — never crop the left.
+    val padW = packedW - srcW
+    if (srcH == packedH && padW in 1..7) {
+      val padded = Bitmap.createBitmap(packedW, packedH, Bitmap.Config.ARGB_8888)
+      padded.eraseColor(0xFFFFFFFF.toInt())
+      android.graphics.Canvas(padded).drawBitmap(bitmap, 0f, 0f, null)
+      if (padded !== bitmap) {
         bitmap.recycle()
       }
       android.util.Log.i(
         "Td404Printer",
-        "PRINT-TRACE BITMAP_CROP src=${srcW}x${srcH} packed=${packedW}x${packedH} cropRight=$cropW",
+        "PRINT-TRACE BITMAP_PAD src=${srcW}x${srcH} packed=${packedW}x${packedH} padRight=$padW",
       )
-      return cropped
+      return padded
     }
     if (packedW <= 0 || packedH <= 0 || srcW % packedW != 0 || srcH % packedH != 0) {
       throw IllegalArgumentException(

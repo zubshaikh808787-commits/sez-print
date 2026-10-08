@@ -216,6 +216,7 @@ function makeSkiaRasterSurface(widthDots: number, heightDots: number, skiaMod: S
     fillEllipse(cx, cy, rx, ry, gray) {
       fillPaint.setColor(grayToColor(skiaMod, gray));
       fillPaint.setStyle(PaintStyle.Fill);
+      fillPaint.setAntiAlias(false);
       const rxf = Math.max(1, rx);
       const ryf = Math.max(1, ry);
       canvas.drawOval(

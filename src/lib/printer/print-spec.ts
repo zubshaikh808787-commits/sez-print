@@ -103,47 +103,21 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
 export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-304'];
 
 /**
- * TD-404 firmware origin is the liner / side edge, not the die-cut.
- * The sticker starts ~1 mm inboard. Canvas 0 mm is the die-cut, so REFERENCE
- * x is shifted +1 mm (on top of user H offset). BITMAP stays 0,0.
+ * No built-in millimetre nudge. Liner between stickers is 1 mm on some rolls
+ * and 3 mm on others — that is TSPL GAP (user setting), not REFERENCE.
+ * At H=0,V=0 REFERENCE is 0,0. The locked border is centered on this label’s
+ * SIZE (equal 2 mm from each die-cut edge). User H/V still add if a roll
+ * needs a sensor nudge.
  */
-export const TD404_MEDIA_ORIGIN_H_MM = 1;
+export const TD404_MEDIA_ORIGIN_H_MM = 0;
+export const TD404_MEDIA_ORIGIN_V_MM = 0;
 
 export function mediaOriginXMm(profile: PrinterProfile): number {
   return profile.id.startsWith('td404') ? TD404_MEDIA_ORIGIN_H_MM : 0;
 }
 
-/**
- * Outer edge of a TD-404 border, in printer dots, measured from the packed bitmap.
- *
- * Ruler on the last print, with the previous insets: top 2 mm, left 2 mm,
- * right 0.5 mm, bottom 3 mm. Top and left already match, so those insets stay.
- * Right gains 1.5 mm (the stroke moves left). Bottom loses 1 mm (the stroke
- * moves down). At 304 DPI that is top 12, left 18, right 36, bottom 24.
- * The stroke stays inside the bitmap. REFERENCE is not moved.
- */
-export const TD404_BORDER_TOP_MM = 1;
-export const TD404_BORDER_LEFT_MM = 1.5;
-export const TD404_BORDER_RIGHT_MM = 3;
-export const TD404_BORDER_BOTTOM_MM = 2;
-
-export function td404BorderOuterDots(
-  widthDots: number,
-  heightDots: number,
-  dpi: number,
-): { x0: number; y0: number; x1: number; y1: number } {
-  const left = mmToDots(TD404_BORDER_LEFT_MM, dpi);
-  const right = mmToDots(TD404_BORDER_RIGHT_MM, dpi);
-  const top = mmToDots(TD404_BORDER_TOP_MM, dpi);
-  const bottom = mmToDots(TD404_BORDER_BOTTOM_MM, dpi);
-  const x0 = left;
-  const y0 = top;
-  return {
-    x0,
-    y0,
-    x1: Math.max(x0 + 1, widthDots - right),
-    y1: Math.max(y0 + 1, heightDots - bottom),
-  };
+export function mediaOriginYMm(profile: PrinterProfile): number {
+  return profile.id.startsWith('td404') ? TD404_MEDIA_ORIGIN_V_MM : 0;
 }
 
 /** Keep millimetres to 0.01. Never integer-round a typed size. */
@@ -207,12 +181,38 @@ export function rectMmToDots(
 }
 
 /**
- * TSPL BITMAP width is bytes×8. Firmware clips any columns past SIZE-in-dots,
- * which reads as a left shift plus right-edge cutoff. Always pack DOWN.
+ * TSPL BITMAP width is bytes×8. Pack UP with white columns on the right so the
+ * last 0–7 content dots are never cropped. Firmware still clips past SIZE;
+ * extra pad bits are white. Never shift or crop the left.
  */
 export function tsplPackedWidthDots(contentDots: number): number {
   const dots = Math.max(1, Math.round(contentDots));
-  return Math.max(8, Math.floor(dots / 8) * 8);
+  return Math.max(8, Math.ceil(dots / 8) * 8);
+}
+
+/**
+ * True when REFERENCE + an outer-edge millimetre lands on or past SIZE.
+ * Built-in media origin is included (same as createPrintSpec). Used to warn
+ * on user H/V; Job B did not keep extra width on the sticker, so SIZE is not
+ * widened.
+ */
+export function td404OffsetClipsOuterEdge(
+  widthMm: number,
+  heightMm: number,
+  dpi: number,
+  hOffsetMm: number,
+  vOffsetMm: number,
+  rightOuterMm: number,
+  bottomOuterMm: number,
+): { clipsRight: boolean; clipsBottom: boolean } {
+  const sizeW = mmToDots(widthMm, dpi);
+  const sizeH = mmToDots(heightMm, dpi);
+  const xRef = mmToDots(hOffsetMm + TD404_MEDIA_ORIGIN_H_MM, dpi);
+  const yRef = mmToDots(vOffsetMm + TD404_MEDIA_ORIGIN_V_MM, dpi);
+  return {
+    clipsRight: xRef + mmToDots(rightOuterMm, dpi) >= sizeW,
+    clipsBottom: yRef + mmToDots(bottomOuterMm, dpi) >= sizeH,
+  };
 }
 
 /**
@@ -221,12 +221,8 @@ export function tsplPackedWidthDots(contentDots: number): number {
  * Capture at SIZE-in-dots (1 px = 1 printer dot, same mm scale as the editor).
  * This is shared by all four printer integrations, so it must NOT bake in a
  * TSPL-only constraint: Josh's LPAPI, Dev's ESC/POS mode, and Tez's PrintSDK
- * do not have TSPL's BITMAP-width-is-bytes×8 rule, and narrowing their
- * capture to match it made their own native fit/scale step (containFitToPage,
- * createScaledBitmap, scaleToLabelDots) resample a bitmap that no longer
- * matched the target mm exactly — a measured source of blur and a horizontal
- * offset on hardware. BITMAP width is packed DOWN only at TSPL encode time
- * (`bitmapDotsW`); leftover 0–7 columns are cropped there, never scaled.
+ * do not have TSPL's BITMAP-width-is-bytes×8 rule. BITMAP width is packed UP
+ * at TSPL encode time (`bitmapDotsW`) with white columns on the right.
  */
 export type UniversalPrintLayout = {
   widthMm: number;
@@ -238,7 +234,7 @@ export type UniversalPrintLayout = {
   /** ViewShot / editor capture — identical to SIZE so preview mm maps 1:1. */
   captureDotsW: number;
   captureDotsH: number;
-  /** TSPL BITMAP width (multiple of 8, never wider than SIZE). */
+  /** TSPL BITMAP width (multiple of 8, packed UP from SIZE; extra dots are white). */
   bitmapDotsW: number;
   bitmapDotsH: number;
   bytesPerRow: number;
@@ -348,8 +344,7 @@ export type CreatePrintSpecOptions = {
  * hardware sensor calibration (GAP / BLINE / REFERENCE 0,0) to establish
  * the label's origin at the top-left of the media.
  * Injecting an artificial printhead offset shifts the image off the physical label.
- * Hardware centering is 0. TD-404 adds TD404_MEDIA_ORIGIN_H_MM on REFERENCE x.
- * REFERENCE y is the user vertical offset only. The border inset is in dots.
+ * Hardware centering is 0. TD-404 REFERENCE is user H/V only. Bitmap is not shifted.
  */
 export function computePrintheadCenteringOffset(
   _labelWidthDots: number,
@@ -377,9 +372,8 @@ export function createPrintSpec(options: CreatePrintSpecOptions): PrintSpec {
   const rasterWidthDots = layout.bitmapDotsW;
   const bytesPerRow = layout.bytesPerRow;
 
-  // SIZE origin is firmware top-left (liner). Pack-down leftover is cropped on the right.
-  // TD-404 die-cut is ~1 mm inboard of the side edge — REFERENCE x includes that.
-  // Never bake the shift into the bitmap.
+  // SIZE origin is firmware top-left of the die-cut. Pack-up leftover is white
+  // on the right. Never bake H/V into the bitmap — they live on REFERENCE.
   const forceLeft = options.calibration?.forceLeftAligned === true;
   const centeringProfile = forceLeft ? { ...profile, alignment: 'left' as PrinterAlignment } : profile;
   const centeringOffsetDots = computePrintheadCenteringOffset(widthDots, centeringProfile);
@@ -388,7 +382,10 @@ export function createPrintSpec(options: CreatePrintSpecOptions): PrintSpec {
     (options.calibration?.horizontalOffsetMm ?? 0) + mediaOriginXMm(profile),
     dpi,
   );
-  const calibYOffsetDots = mmToDots(options.calibration?.verticalOffsetMm ?? 0, dpi);
+  const calibYOffsetDots = mmToDots(
+    (options.calibration?.verticalOffsetMm ?? 0) + mediaOriginYMm(profile),
+    dpi,
+  );
 
   const xOffsetDots = centeringOffsetDots + calibXOffsetDots;
   const yOffsetDots = calibYOffsetDots;
@@ -466,7 +463,7 @@ export function formatPrintSpecDiagnostics(spec: PrintSpec): string {
     `Physical Size   : ${spec.widthMm.toFixed(2)} × ${spec.heightMm.toFixed(2)} mm`,
     `Printer DPI     : ${spec.dpi} DPI`,
     `Dots Dimension  : ${spec.widthDots} × ${spec.heightDots} dots (SIZE)`,
-    `Raster Canvas   : ${spec.rasterWidthDots} × ${spec.heightDots} dots BITMAP (${spec.bytesPerRow} bytes/row, pack-down crop ${Math.max(0, spec.widthDots - spec.rasterWidthDots)} dots)`,
+    `Raster Canvas   : ${spec.rasterWidthDots} × ${spec.heightDots} dots BITMAP (${spec.bytesPerRow} bytes/row, pack-up pad ${Math.max(0, spec.rasterWidthDots - spec.widthDots)} dots)`,
     `Orientation     : ${spec.orientation}°`,
     `Printer Profile : ${spec.profile.name} (${spec.profile.printheadWidthMm} mm / ${spec.profile.printheadWidthDots} dots)`,
     `Alignment Mode  : ${spec.profile.alignment} (xOffset: ${spec.xOffsetDots} dots, yOffset: ${spec.yOffsetDots} dots)`,

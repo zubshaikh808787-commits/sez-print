@@ -20,14 +20,15 @@ import {
   type LabelElement,
 } from '@/lib/label-document';
 import { dotsPerMm, mmToDots, rectMmToDots } from '@/lib/printer/print-spec';
+import { isFullPanelGuideCircle } from '@/lib/border-geometry';
 import { sortLayers } from '@/lib/template-schema';
-import { printGridKnockoutsMm, printGridRectsDots, printGridSpacingMm } from '@/lib/print-grid';
 import { computeWrappedLines, layoutPrintText } from '@/lib/text-metrics';
 import { formatBarcodeHri } from '@/lib/barcode/hri';
 import { stretchThenRoundBars } from './barcode-stretch';
-import { packGrayToMono1bpp } from './bit-packer';
+import { packGrayToMono1bpp, padMono1bppToBytesPerRow } from './bit-packer';
+import { normalizeTd404MonoBuffer, td404PackedPageDots } from './td404-mono-validate';
+import { borderMediaShapeForElement } from '@/lib/printer/border-media-shape';
 import { drawPrintBorder } from './print-border';
-import { applyInkDarkness, rectsToPx, scanCodeRectsMm } from './ink-darkness';
 import { drawQrMeet } from './qr-meet';
 import {
   makeOffscreenSurface,
@@ -46,18 +47,6 @@ export type RasterizeOptions = {
   backend?: RasterSurfaceBackend;
   /** Ground-truth only. Default 1. Packs/draws at N× then caller downscales. */
   dotScale?: number;
-  /** TD-404 production print. Place the border and cancel the −1 mm feed on other layers. */
-  bakeTd404Feed?: boolean;
-  /**
-   * User H/V offset in printer dots, applied to the finished page so every layer
-   * (border included) moves by the same amount. Ink pushed past an edge is cropped.
-   */
-  shiftDots?: { x: number; y: number };
-  /**
-   * Manual darkness minus the bridge default (TD-404: -10..+5). 0 or absent leaves the
-   * bitmap untouched. Barcodes and QR codes are excluded.
-   */
-  darknessSteps?: number;
 }
 
 export type RasterBitmap = {
@@ -115,11 +104,7 @@ export function packedPageDots(widthMm: number, heightMm: number, dpi: number): 
   packedW: number;
   packedH: number;
 } {
-  const dpm = dotsPerMm(dpi);
-  const sizeDotsW = Math.max(1, Math.round(widthMm * dpm));
-  const sizeDotsH = Math.max(1, Math.round(heightMm * dpm));
-  const packedW = Math.max(8, Math.floor(sizeDotsW / 8) * 8);
-  return { sizeDotsW, sizeDotsH, packedW, packedH: sizeDotsH };
+  return td404PackedPageDots(widthMm, heightMm, dpi);
 }
 
 export function wrapPrintText(element: {
@@ -157,7 +142,6 @@ export type RasterizeTiming = {
 
 let encodeAccumMs = 0;
 let activeDotScale = 1;
-let activeBakeFeed = false;
 
 function dots(mm: number, dpi: number): number {
   return mmToDots(mm, dpi) * activeDotScale;
@@ -195,17 +179,24 @@ function drawDocumentToSurface(
   surface: RasterSurface,
   bitmapWidthDots: number,
   bitmapHeightDots: number,
+  labelWidthDots: number,
+  labelHeightDots: number,
 ): void {
   const dpm = dpmScaled(dpi);
-  const gridSpacing = printGridSpacingMm(doc);
-  if (gridSpacing != null) {
-    const s = activeDotScale;
-    const knockouts = printGridKnockoutsMm(doc);
-    for (const r of printGridRectsDots(doc.widthMm, doc.heightMm, gridSpacing, dpi, knockouts)) {
-      surface.fillRect(r.left * s, r.top * s, r.width * s, r.height * s, 0);
+  const cellW = doc.upsPrintCell?.widthMm ?? doc.widthMm;
+  const cellH = doc.upsPrintCell?.heightMm ?? doc.heightMm;
+  const roundDie =
+    doc.mediaShape === 'circle' ||
+    doc.mediaShape === 'ellipse' ||
+    doc.upsPrintCell?.mediaShape === 'circle';
+  const layers = sortLayers(doc.elements).filter((el) => {
+    if (!roundDie) return true;
+    if (el.upsPanelIndex != null && doc.upsPrintCell) {
+      return !isFullPanelGuideCircle(el, cellW, cellH);
     }
-  }
-  for (const el of sortLayers(doc.elements)) {
+    return !isFullPanelGuideCircle(el, doc.widthMm, doc.heightMm);
+  });
+  for (const el of layers) {
     if (el.needPrinting === false || el.visible === false) continue;
     if (UNSUPPORTED.has(el.type)) {
       throw new Error(`Unsupported print element type: ${el.type}`);
@@ -226,8 +217,11 @@ function drawDocumentToSurface(
           drawPrintBorder(surface, el, dpi, activeDotScale, {
             bitmapWidthDots,
             bitmapHeightDots,
-            bakeFeed: activeBakeFeed,
-            mediaShape: doc.mediaShape,
+            labelWidthDots,
+            labelHeightDots,
+            mediaShape: borderMediaShapeForElement(doc, el),
+            upsPrintCell: doc.upsPrintCell,
+            upsPanelIndex: el.upsPanelIndex,
           });
           break;
         case 'line':
@@ -265,10 +259,9 @@ export function rasterizeDocumentToBitmapTimed(
   dpi: number,
   options: RasterizeOptions = {},
 ): RasterizeTiming {
-  const { packedW, packedH } = packedPageDots(doc.widthMm, doc.heightMm, dpi);
+  const { packedW, packedH, sizeDotsW, sizeDotsH } = packedPageDots(doc.widthMm, doc.heightMm, dpi);
   const threshold = options.threshold ?? 160;
   activeDotScale = Math.max(1, Math.round(options.dotScale ?? 1));
-  activeBakeFeed = options.bakeTd404Feed === true;
   resetTextDrawLog();
   const surfW = packedW * activeDotScale;
   const surfH = packedH * activeDotScale;
@@ -279,30 +272,13 @@ export function rasterizeDocumentToBitmapTimed(
   const allocMs = performance.now() - tAlloc0;
 
   const tDraw0 = performance.now();
-  drawDocumentToSurface(doc, dpi, surface, packedW, packedH);
+  drawDocumentToSurface(doc, dpi, surface, packedW, packedH, sizeDotsW, sizeDotsH);
   const drawWallMs = performance.now() - tDraw0;
   const encodeMs = encodeAccumMs;
   const drawMs = Math.max(0, drawWallMs - encodeMs);
 
   const tRead0 = performance.now();
-  const steps = Math.round(options.darknessSteps ?? 0);
-  const drawn = surface.readGray();
-  const gray = shiftGray(
-    steps === 0
-      ? drawn
-      : applyInkDarkness(
-          drawn,
-          surfW,
-          surfH,
-          threshold,
-          steps,
-          rectsToPx(scanCodeRectsMm(doc), dpmScaled(dpi), activeDotScale),
-        ),
-    surfW,
-    surfH,
-    Math.round(options.shiftDots?.x ?? 0) * activeDotScale,
-    Math.round(options.shiftDots?.y ?? 0) * activeDotScale,
-  );
+  const gray = surface.readGray();
   const readbackMs = performance.now() - tRead0;
 
   const tPack0 = performance.now();
@@ -313,22 +289,47 @@ export function rasterizeDocumentToBitmapTimed(
     threshold,
     options.target?.mono1bppBuffer,
   );
+  const destW = packedW * activeDotScale;
+  const destH = packedH * activeDotScale;
+  const destBpr = destW / 8;
+  const mono1bppBuffer = padMono1bppToBytesPerRow(
+    packed.mono1bppBuffer,
+    packed.bytesPerRow,
+    destH,
+    destBpr,
+  );
   const packMs = performance.now() - tPack0;
 
-  const result: RasterBitmap = options.target
+  let result: RasterBitmap = options.target
     ? (() => {
-        options.target!.widthDots = surfW;
-        options.target!.heightDots = surfH;
-        options.target!.bytesPerRow = packed.bytesPerRow;
-        options.target!.mono1bppBuffer = packed.mono1bppBuffer;
+        options.target!.widthDots = destW;
+        options.target!.heightDots = destH;
+        options.target!.bytesPerRow = destBpr;
+        options.target!.mono1bppBuffer = mono1bppBuffer;
         return options.target!;
       })()
     : {
-        widthDots: packedW * activeDotScale,
-        heightDots: packedH * activeDotScale,
-        bytesPerRow: packed.bytesPerRow,
-        mono1bppBuffer: packed.mono1bppBuffer,
+        widthDots: destW,
+        heightDots: destH,
+        bytesPerRow: destBpr,
+        mono1bppBuffer,
       };
+
+  const finalized = normalizeTd404MonoBuffer({
+    monoBytes: result.mono1bppBuffer,
+    widthDots: result.widthDots,
+    heightDots: result.heightDots,
+    bytesPerRow: result.bytesPerRow,
+    widthMm: doc.widthMm,
+    heightMm: doc.heightMm,
+    dpi,
+  });
+  result = {
+    widthDots: finalized.widthDots,
+    heightDots: finalized.heightDots,
+    bytesPerRow: finalized.bytesPerRow,
+    mono1bppBuffer: finalized.monoBytes,
+  };
 
   return {
     allocMs,
@@ -342,22 +343,6 @@ export function rasterizeDocumentToBitmapTimed(
     result,
     gray,
   };
-}
-
-/** Move the whole page by (dx, dy) dots. Uncovered area is white. */
-export function shiftGray(gray: Uint8Array, width: number, height: number, dx: number, dy: number): Uint8Array {
-  if (dx === 0 && dy === 0) return gray;
-  const out = new Uint8Array(width * height);
-  out.fill(255);
-  const x0 = Math.max(0, dx);
-  const x1 = Math.min(width, width + dx);
-  if (x1 <= x0) return out;
-  for (let y = 0; y < height; y++) {
-    const sy = y - dy;
-    if (sy < 0 || sy >= height) continue;
-    out.set(gray.subarray(sy * width + x0 - dx, sy * width + x1 - dx), y * width + x0);
-  }
-  return out;
 }
 
 function inkValue(antiColor?: boolean): number {

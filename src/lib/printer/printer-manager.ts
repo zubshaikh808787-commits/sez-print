@@ -13,6 +13,7 @@ import {
   PRINTER_PROFILES,
   type PrinterProfile,
 } from '@/lib/printer/print-spec';
+import { applySignedReferenceToMono } from '@/lib/printer/mono-shift';
 import {
   BLUETOOTH_OFF_MESSAGE,
   bluetoothOffScanResult,
@@ -29,7 +30,7 @@ import {
   getAmbiguousModelCandidates,
 } from '@/lib/printer/printer-heuristics';
 import { encodeTscTextSample } from '@/lib/printer/tsc';
-import { assertTd404MonoBuffer } from '@/printing/raster/td404-mono-validate';
+import { assertTd404MonoBuffer, normalizeTd404MonoBuffer } from '@/printing/raster/td404-mono-validate';
 import { usePrinterStore, normalizePrinterMac } from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { type SeznikPrinterModelId, SEZNIK_PRINTER_MODELS } from '@/constants/printer-models';
@@ -265,6 +266,8 @@ class PrinterManager {
     writeMs?: number;
     bytesSent?: number;
     jobBytes?: number;
+    reference?: string;
+    requestedReference?: string;
   } | null = null;
   /** Last error message for diagnostics. */
   private lastErrorMessage: string | null = null;
@@ -2827,6 +2830,8 @@ class PrinterManager {
     writeMs?: number;
     bytesSent?: number;
     jobBytes?: number;
+    reference?: string;
+    requestedReference?: string;
   } | null {
     return this.lastTd404MonoLabelTiming;
   }
@@ -3039,10 +3044,12 @@ class PrinterManager {
     vOffsetMm?: number;
     hOffsetMm?: number;
     media?: 'gap' | 'bline' | 'continuous';
+    tearOn?: boolean;
     orientation?: number;
     dpi?: number;
     threshold?: number;
     dither?: boolean;
+    direction?: 0 | 1;
   }): Promise<boolean> {
     if (this.activeTransport === 'labelx-spp' || this.isLabelX) {
       return this.printLabelXPngLabelFast(options);
@@ -3097,9 +3104,10 @@ class PrinterManager {
           yDots: spec.yOffsetDots,
           copies: Math.max(1, Math.round(options.copies ?? 1)),
           media: options.media ?? 'gap',
+          tearOn: options.tearOn !== false,
           orientation: options.orientation ?? 0,
           dpi: spec.dpi,
-          direction: 1,
+          direction: options.direction ?? 1,
           threshold: options.threshold ?? 160,
           dither: options.dither ?? false,
         });
@@ -3131,13 +3139,8 @@ class PrinterManager {
         console.info(
           '[printer] SDK fast print done in',
           Date.now() - t0,
-          'ms | media=',
-          options.media ?? 'gap',
-          'gapMm=',
-          spec.gapMm,
-          '|',
+          'ms |',
           result,
-          `| sent DENSITY ${options.density ?? 10} SPEED ${options.speed ?? 3} threshold=${options.threshold ?? 160}`,
         );
       } finally {
         const currentStore = usePrinterStore.getState();
@@ -3187,7 +3190,9 @@ class PrinterManager {
     vOffsetMm?: number;
     hOffsetMm?: number;
     media?: 'gap' | 'bline' | 'continuous';
+    tearOn?: boolean;
     dpi?: number;
+    direction?: 0 | 1;
   }): Promise<boolean> {
     if (this.activeTransport !== 'td404-spp' || !this.usesTd404CommandSet) {
       return false;
@@ -3218,7 +3223,7 @@ class PrinterManager {
             verticalOffsetMm: options.vOffsetMm ?? 0,
           },
         });
-        assertTd404MonoBuffer({
+        const mono = normalizeTd404MonoBuffer({
           monoBytes: options.monoBytes,
           widthDots: options.widthDots,
           heightDots: options.heightDots,
@@ -3227,23 +3232,32 @@ class PrinterManager {
           heightMm: spec.heightMm,
           dpi: spec.dpi,
         });
+        assertTd404MonoBuffer(mono);
+        const ref = applySignedReferenceToMono(
+          mono.monoBytes,
+          mono.bytesPerRow,
+          mono.heightDots,
+          spec.xOffsetDots,
+          spec.yOffsetDots,
+        );
         const t0 = Date.now();
         const result = await td404.printTd404MonoLabel({
-          monoBytes: options.monoBytes,
-          widthDots: options.widthDots,
-          heightDots: options.heightDots,
-          bytesPerRow: options.bytesPerRow,
+          monoBytes: ref.monoBytes,
+          widthDots: mono.widthDots,
+          heightDots: mono.heightDots,
+          bytesPerRow: mono.bytesPerRow,
           widthMm: spec.widthMm,
           heightMm: spec.heightMm,
           gapMm: spec.gapMm,
           density: options.density ?? 10,
           speed: options.speed ?? 3,
-          xDots: spec.xOffsetDots,
-          yDots: spec.yOffsetDots,
+          xDots: ref.xDots,
+          yDots: ref.yDots,
           copies: Math.max(1, Math.round(options.copies ?? 1)),
           media: options.media ?? 'gap',
+          tearOn: options.tearOn !== false,
           dpi: spec.dpi,
-          direction: 1,
+          direction: options.direction ?? 1,
         });
         if (!result) {
           this.lastTd404MonoLabelTiming = null;
@@ -3251,23 +3265,26 @@ class PrinterManager {
           (err as Error & { code?: string }).code = 'NATIVE_MONO_UNAVAILABLE';
           throw err;
         }
+        const referenceSent = `${ref.xDots},${ref.yDots}`;
+        const referenceRequested = `${ref.requestedX},${ref.requestedY}`;
         this.lastTd404MonoLabelTiming = {
           writeMs: result.writeMs,
           bytesSent: result.bytesSent,
           jobBytes: result.jobBytes,
+          reference: result.reference ?? referenceSent,
+          requestedReference: referenceRequested,
         };
         console.info(
           '[printer] TD-404 mono print done in',
           Date.now() - t0,
-          'ms | media=',
-          options.media ?? 'gap',
-          'gapMm=',
-          spec.gapMm,
-          '| writeMs=',
+          'ms | writeMs=',
           result.writeMs,
           'bytesSent=',
           result.bytesSent,
-          `| sent DENSITY ${options.density ?? 10} SPEED ${options.speed ?? 3}`,
+          '| REFERENCE sent=',
+          referenceSent,
+          'requested=',
+          referenceRequested,
         );
       } finally {
         const currentStore = usePrinterStore.getState();
