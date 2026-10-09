@@ -1,6 +1,8 @@
 import type { LabelDocument } from '@/lib/label-document';
 import { applySignedReferenceToMono } from '@/lib/printer/mono-shift';
 import { dotsPerMm, mmToDots } from '@/lib/printer/print-spec';
+import { borderPrintEngine } from '@/printing/raster/border-baseline';
+import { labelCenterMm } from '@/printing/raster/border-center';
 import {
   diagnoseCanonicalGray,
   formatBorderPrintDiagnostics,
@@ -103,6 +105,8 @@ export function collectBorderPrintDiagnostics(
     vOffsetMm: media.vOffsetMm,
     referenceDots: media.referenceDots,
     printerName: media.printerName,
+    engine: borderPrintEngine(),
+    labelCenterMm: labelCenterMm(doc.widthMm, doc.heightMm),
     td404BorderCorrection: false,
     source: 'canonical',
     layer,

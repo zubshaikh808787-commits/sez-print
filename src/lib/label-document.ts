@@ -353,7 +353,10 @@ export function upsEnsureBorderOnAllPanels(doc: LabelDocument): LabelDocument {
     const pinned = migrateBorderElement(
       {
         ...raw,
-        ...defaultBorderPlacement(panelW, panelH),
+        ...defaultBorderPlacement(panelW, panelH, {
+          mediaShape: synced.mediaShape,
+          borderStyle: raw.borderStyle,
+        }),
         borderStyle: raw.borderStyle,
         lineWidth: raw.lineWidth,
         needPrinting: raw.needPrinting,
@@ -363,6 +366,7 @@ export function upsEnsureBorderOnAllPanels(doc: LabelDocument): LabelDocument {
       panelW,
       panelH,
       true,
+      synced.mediaShape,
     );
     return pinned;
   };
@@ -402,7 +406,7 @@ export function composeUpsDocument(doc: LabelDocument): LabelDocument {
     const panelDoc = { widthMm: cellW, heightMm: cellH };
     for (const raw of panels[i] ?? []) {
       // Clamp inside the single-panel bounds before tiling so print never spills.
-      const el = clampPanelElement(raw, panelDoc);
+      const el = clampPanelElement(raw, panelDoc, synced.mediaShape);
       if (
         synced.mediaShape === 'circle' &&
         isFullPanelGuideCircle(el, cellW, cellH)
@@ -449,9 +453,16 @@ export function composeUpsDocument(doc: LabelDocument): LabelDocument {
 function clampPanelElement(
   element: LabelElement,
   doc: { widthMm: number; heightMm: number },
+  mediaShape?: LabelDocument['mediaShape'],
 ): LabelElement {
   if (element.type === 'border') {
-    return migrateBorderElement({ ...element, rotation: 0 }, doc.widthMm, doc.heightMm, true);
+    return migrateBorderElement(
+      { ...element, rotation: 0 },
+      doc.widthMm,
+      doc.heightMm,
+      true,
+      mediaShape,
+    );
   }
   const maxW = doc.widthMm;
   const maxH = doc.heightMm;

@@ -137,7 +137,7 @@ export function buildBorderCalibrationDocument(
     elements.push(
       text(
         'cal-meta',
-        `${w}x${h} ${meta.dpi}dpi GAP ${meta.gapMm} H${meta.hOffsetMm} V${meta.vOffsetMm}`,
+        `SIZE ${w}x${h}mm ${meta.dpi}dpi GAP ${meta.gapMm} H${meta.hOffsetMm} V${meta.vOffsetMm}`,
         4.6,
         h - 3.4 - metaMm * 1.4,
         Math.max(4, w - 9.2),

@@ -1,7 +1,7 @@
 /**
- * Production TD-404 border raster (baseline ~90% die-edge accuracy).
+ * Production TD-404 border raster dispatcher.
  * Restore point: git tag `border-accuracy-90`, branch `border/stable-baseline`.
- * New border plans should add parallel code paths; keep this entry point stable.
+ * Flip USE_CENTERED_BORDER_ENGINE to restore drawPrintBorderBaseline.
  */
 import type { BorderStyleId } from '@/constants/border-library';
 import { borderStyleUsesCircleRing } from '@/constants/border-library';
@@ -10,6 +10,9 @@ import { BORDER_EDGE_WARN_MM } from '@/lib/border-geometry';
 import type { LabelDocument, LabelElement } from '@/lib/label-document';
 import { fillRect } from '@/printing/raster/dot-surface';
 import { mmToDots, rectMmToDots } from '@/lib/printer/print-spec';
+import { USE_CENTERED_BORDER_ENGINE } from '@/printing/raster/border-baseline';
+import { centeredBorderPrintRectMm } from '@/printing/raster/border-center';
+import { drawCenteredPrintBorder } from '@/printing/raster/centered-print-border';
 import {
   borderFrameInsetsForElement,
   borderStrokeDots,
@@ -48,11 +51,10 @@ export type DrawPrintBorderOpts = {
 };
 
 /**
- * Inward frame whose outer edge is the border element's own rectangle (the
- * canvas geometry), converted once with rectMmToDots and clipped to SIZE.
- * No printer, GAP, or H/V input: those live in TSPL SIZE/GAP/REFERENCE.
+ * ~90% baseline drawer: uses stored left/top and untagged 2 mm draw inset.
+ * Kept for rollback (USE_CENTERED_BORDER_ENGINE = false) and parity tests.
  */
-export function drawPrintBorder(
+export function drawPrintBorderBaseline(
   target: FrameFillTarget,
   el: Extract<LabelElement, { type: 'border' }>,
   dpi: number,
@@ -124,6 +126,24 @@ export function drawPrintBorder(
   drawInwardFrameInBox(target, w, h, dpi, el.lineWidth, style, x0, y0, insets);
 }
 
+/**
+ * Production entry: centered engine by default; baseline when the flag is off.
+ * Call sites (headless Skia, ViewShot stamp) stay on this name.
+ */
+export function drawPrintBorder(
+  target: FrameFillTarget,
+  el: Extract<LabelElement, { type: 'border' }>,
+  dpi: number,
+  scale = 1,
+  opts?: DrawPrintBorderOpts,
+): void {
+  if (USE_CENTERED_BORDER_ENGINE) {
+    drawCenteredPrintBorder(target, el, dpi, scale, opts);
+    return;
+  }
+  drawPrintBorderBaseline(target, el, dpi, scale, opts);
+}
+
 /** Stamp integer 1-bit borders onto an existing SIZE or packed-up gray buffer. */
 export function stampPrintBordersOnGray(
   gray: Uint8Array,
@@ -157,7 +177,7 @@ export function stampPrintBordersOnGray(
 }
 
 export function td404DocumentOffsetClipWarning(
-  doc: Pick<LabelDocument, 'widthMm' | 'heightMm' | 'elements'>,
+  doc: Pick<LabelDocument, 'widthMm' | 'heightMm' | 'elements' | 'upsPrintCell' | 'mediaShape'>,
   dpi: number,
   hOffsetMm: number,
   vOffsetMm: number,
@@ -167,7 +187,15 @@ export function td404DocumentOffsetClipWarning(
   for (const el of doc.elements) {
     if (el.type !== 'border') continue;
     if (el.needPrinting === false || el.visible === false) continue;
-    const margins = borderEdgeMarginsMm(el, doc.widthMm, doc.heightMm, hOffsetMm, vOffsetMm);
+    const margins = borderEdgeMarginsMm(
+      el,
+      doc.widthMm,
+      doc.heightMm,
+      hOffsetMm,
+      vOffsetMm,
+      doc.upsPrintCell,
+      doc.mediaShape,
+    );
     for (const [side, mm] of Object.entries(margins)) {
       if (mmToDots(mm, dpi) <= 0) clipped.add(side);
       else if (mm < BORDER_EDGE_WARN_MM) near.set(side, Math.min(mm, near.get(side) ?? Infinity));
@@ -191,15 +219,35 @@ export function td404DocumentOffsetClipWarning(
 
 /**
  * Outer ink distance of a border from each SIZE edge after the global H/V
- * shift. Untagged borders draw 2 mm inside their box, so that inset counts.
+ * shift. Centered engine uses the print rect (canvas W×H on the label).
+ * Baseline still counts the untagged 2 mm draw inset.
  */
 export function borderEdgeMarginsMm(
-  el: Pick<Extract<LabelElement, { type: 'border' }>, 'left' | 'top' | 'width' | 'height' | 'geometryVersion'>,
+  el: Pick<
+    Extract<LabelElement, { type: 'border' }>,
+    'left' | 'top' | 'width' | 'height' | 'geometryVersion' | 'upsPanelIndex' | 'borderStyle'
+  >,
   labelWidthMm: number,
   labelHeightMm: number,
   hOffsetMm = 0,
   vOffsetMm = 0,
+  upsPrintCell?: LabelDocument['upsPrintCell'],
+  mediaShape?: LabelDocument['mediaShape'],
 ): { left: number; right: number; top: number; bottom: number } {
+  if (USE_CENTERED_BORDER_ENGINE) {
+    const print = centeredBorderPrintRectMm(el, {
+      widthMm: labelWidthMm,
+      heightMm: labelHeightMm,
+      upsPrintCell,
+      mediaShape,
+    });
+    return {
+      left: print.left + hOffsetMm,
+      right: labelWidthMm - (print.left + print.width) - hOffsetMm,
+      top: print.top + vOffsetMm,
+      bottom: labelHeightMm - (print.top + print.height) - vOffsetMm,
+    };
+  }
   const inset = untaggedBorderNeedsDrawInset(el, labelWidthMm, labelHeightMm)
     ? PRINT_BORDER_INSET_MM
     : 0;

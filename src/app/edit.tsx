@@ -1810,7 +1810,11 @@ export default function EditScreen() {
           break;
         }
         case 'border': {
-          const placement = defaultBorderPlacement(maxW, maxH);
+          const placement = defaultBorderPlacement(maxW, maxH, {
+            mediaShape: docRef.current.mediaShape,
+            borderStyle:
+              typeof overrides.borderStyle === 'string' ? overrides.borderStyle : 'solid-medium',
+          });
           element = {
             id: base.id,
             type: 'border',
@@ -3194,8 +3198,12 @@ export default function EditScreen() {
         editorBridge.borderResult = null;
         const existingBorder = docRef.current.elements.find((el) => el.type === 'border');
         const lineWidth = borderStyleStrokeMm(borderStyle);
+        const placement = defaultBorderPlacement(docRef.current.widthMm, docRef.current.heightMm, {
+          mediaShape: docRef.current.mediaShape,
+          borderStyle,
+        });
         if (existingBorder) {
-          patchElement(existingBorder.id, { borderStyle, lineWidth });
+          patchElement(existingBorder.id, { borderStyle, lineWidth, ...placement });
         } else {
           addElement('border', { borderStyle, lineWidth });
         }

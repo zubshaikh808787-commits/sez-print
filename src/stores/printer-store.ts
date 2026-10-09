@@ -24,8 +24,13 @@ export type PrintHistoryEntry = {
   source: 'label' | 'photo' | 'pdf' | 'scan' | 'excel' | 'img-to-label';
 };
 
-/** Bumped when media origin became 0,0 so leftover millimetre-chase H/V is dropped. */
-export const PRINT_ORIGIN_VERSION = 1;
+/**
+ * Bumped when leftover millimetre-chase H/V must be dropped.
+ * v2: centered-border engine. Saved H=−1 / V=+1 from the old pipeline
+ * un-centers a bitmap that is already 2 mm on every side (negative H shifts
+ * ink left; +V REFERENCE moves ink down). Gap and side liner stay.
+ */
+export const PRINT_ORIGIN_VERSION = 2;
 
 export type PrintCalibrationEntry = {
   /** Printer correction only. The roll's side-liner shift is added at print time. */
@@ -47,7 +52,49 @@ export type ResolvedPrintOffsets = {
   gapMm: number | null;
 };
 
-/** Load saved roll/printer offsets. Legacy entries without originVersion still keep H/V when set. */
+function clampPrintOffsetMm(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(-10, Math.min(10, value as number));
+}
+
+/** Drop leftover H/V from an older origin generation. Keep gap and liner. */
+export function migratePrintCalibrationEntry(saved: PrintCalibrationEntry): PrintCalibrationEntry {
+  const gapMm = saved.gapMm != null && Number.isFinite(saved.gapMm) ? saved.gapMm : undefined;
+  const sideLinerLeftMm = saved.sideLinerLeftMm ?? 0;
+  const sideLinerRightMm = saved.sideLinerRightMm ?? 0;
+  if (saved.originVersion === PRINT_ORIGIN_VERSION) {
+    return {
+      ...saved,
+      hOffsetMm: clampPrintOffsetMm(saved.hOffsetMm),
+      vOffsetMm: clampPrintOffsetMm(saved.vOffsetMm),
+      sideLinerLeftMm,
+      sideLinerRightMm,
+      originVersion: PRINT_ORIGIN_VERSION,
+    };
+  }
+  return {
+    ...saved,
+    hOffsetMm: 0,
+    vOffsetMm: 0,
+    sideLinerLeftMm,
+    sideLinerRightMm,
+    gapMm,
+    originVersion: PRINT_ORIGIN_VERSION,
+  };
+}
+
+export function migratePrintCalibrationMap(
+  map: Record<string, PrintCalibrationEntry> | undefined,
+): Record<string, PrintCalibrationEntry> {
+  if (!map) return {};
+  const out: Record<string, PrintCalibrationEntry> = {};
+  for (const [key, entry] of Object.entries(map)) {
+    out[key] = migratePrintCalibrationEntry(entry);
+  }
+  return out;
+}
+
+/** Load saved roll/printer offsets. Stale originVersion H/V is always 0. */
 export function resolvedPrintOffsets(saved?: PrintCalibrationEntry | null): ResolvedPrintOffsets {
   const sideLinerLeftMm = saved?.sideLinerLeftMm ?? 0;
   const sideLinerRightMm = saved?.sideLinerRightMm ?? 0;
@@ -56,11 +103,13 @@ export function resolvedPrintOffsets(saved?: PrintCalibrationEntry | null): Reso
     return { hOffsetMm: 0, vOffsetMm: 0, sideLinerLeftMm, sideLinerRightMm, gapMm };
   }
   const modern = saved.originVersion === PRINT_ORIGIN_VERSION;
-  const hOffsetMm =
-    modern || Number.isFinite(saved.hOffsetMm) ? Math.max(-10, Math.min(10, saved.hOffsetMm ?? 0)) : 0;
-  const vOffsetMm =
-    modern || Number.isFinite(saved.vOffsetMm) ? Math.max(-10, Math.min(10, saved.vOffsetMm ?? 0)) : 0;
-  return { hOffsetMm, vOffsetMm, sideLinerLeftMm, sideLinerRightMm, gapMm };
+  return {
+    hOffsetMm: modern ? clampPrintOffsetMm(saved.hOffsetMm) : 0,
+    vOffsetMm: modern ? clampPrintOffsetMm(saved.vOffsetMm) : 0,
+    sideLinerLeftMm,
+    sideLinerRightMm,
+    gapMm,
+  };
 }
 
 /** H/V to send with a job: printer correction plus the roll's side-liner shift. */
@@ -224,7 +273,14 @@ export const usePrinterStore = create<PrinterStoreState>()(
         history: state.history,
         printCalibration: state.printCalibration,
       }),
-      merge: (persisted, current) => ({ ...current, ...(persisted as object) }),
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<PrinterStoreState>;
+        return {
+          ...current,
+          ...p,
+          printCalibration: migratePrintCalibrationMap(p.printCalibration),
+        };
+      },
     },
   ),
 );

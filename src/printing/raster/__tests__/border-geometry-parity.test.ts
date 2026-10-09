@@ -70,7 +70,10 @@ function checkBorders(label: string, d: LabelDocument) {
     const only = { ...d, elements: [el] };
     const t = raster(only);
     const m = measureBorderInDots(t.gray, t.result.widthDots, sizeW, sizeH);
-    const e = expectedBorderDots(el, DPI, d.widthMm, d.heightMm);
+    const e = expectedBorderDots(el, DPI, d.widthMm, d.heightMm, {
+      upsPrintCell: d.upsPrintCell,
+      mediaShape: d.mediaShape,
+    });
     const stroke = expectedStrokeDots(el, DPI);
     checks += 1;
     const box = m.box;
@@ -85,7 +88,8 @@ function checkBorders(label: string, d: LabelDocument) {
           [m.strokeDots.left, m.strokeDots.right, m.strokeDots.top, m.strokeDots.bottom].every(
             (s) => Math.abs(s - stroke) <= 1,
           );
-    const ok = maxDelta <= 1 && strokeOk && !m.touchesEdge;
+    const expectedTouches = e.x0 <= 0 || e.y0 <= 0 || e.x1 >= sizeW || e.y1 >= sizeH;
+    const ok = maxDelta <= 1 && strokeOk && (!m.touchesEdge || expectedTouches);
     console.log(
       `${ok ? 'ok  ' : 'FAIL'} ${label.padEnd(34)} expected ${e.x0},${e.y0}-${e.x1},${e.y1} ` +
         `measured ${box ? `${box.x0},${box.y0}-${box.x1},${box.y1}` : 'none'} delta ${delta.join(',')} ` +
@@ -116,15 +120,19 @@ for (const [w, h] of SIZES) {
     doc(w, h, [border({ left: 2, top: 2, width: w - 4, height: h - 4, geometryVersion: undefined })]),
   );
   checkBorders(`${tag} ellipse media`, doc(w, h, [border(defaultBorderPlacement(w, h))], 'ellipse'));
-  checkBorders(`${tag} circle media`, doc(w, h, [border(defaultBorderPlacement(w, h))], 'circle'));
+  checkBorders(
+    `${tag} circle media`,
+    doc(w, h, [border(defaultBorderPlacement(w, h, { mediaShape: 'circle' }))], 'circle'),
+  );
 }
-checkBorders(
-  '100x30 two-up panels',
-  doc(100, 30, [
-    border({ left: 2, top: 2, width: 46, height: 26 }),
-    border({ left: 52, top: 2, width: 46, height: 26 }),
-  ]),
-);
+{
+  const twoUp = doc(100, 30, [
+    border({ left: 99, top: 99, width: 46, height: 26, upsPanelIndex: 0 }),
+    border({ left: 0, top: 0, width: 46, height: 26, upsPanelIndex: 1 }),
+  ]);
+  twoUp.upsPrintCell = { widthMm: 50, heightMm: 30, columns: 2, columnSpacingMm: 0 };
+  checkBorders('100x30 two-up panels', twoUp);
+}
 
 function text(left: number, top: number): LabelElement {
   return {

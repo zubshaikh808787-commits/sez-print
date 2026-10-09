@@ -95,7 +95,12 @@ import { effectiveHOffsetMm, SIDE_LINER_MAX_MM, sideLinerShiftMm } from '@/lib/p
 import { ensurePrintTypefaces } from '@/printing/raster/print-typeface';
 import { useDataStore, type ExcelSheet } from '@/stores/data-store';
 import { useLabelStore } from '@/stores/label-store';
-import { resolvedPrintOffsets, usePrinterStore, type PrintHistoryEntry } from '@/stores/printer-store';
+import {
+  PRINT_ORIGIN_VERSION,
+  resolvedPrintOffsets,
+  usePrinterStore,
+  type PrintHistoryEntry,
+} from '@/stores/printer-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { resolveLabelSettings } from '@/lib/label-settings';
 import { loadAndRenderPdf, printPdfToThermal, type RenderedPdfPage } from '@/lib/pdf-printer';
@@ -468,23 +473,30 @@ export default function PrintScreen() {
     () => resolvedPrintOffsets(savedCalibration).sideLinerRightMm,
   );
   const hOffset = effectiveHOffsetMm(hCorrection, sideLinerLeft, sideLinerRight);
+  const offsetsSyncedRef = useRef(false);
+  const skipOffsetPersistRef = useRef(true);
 
   // Re-sync when the connected printer changes (or persisted calibration
   // finishes loading from AsyncStorage after this screen already mounted).
+  // Skip the following persist effect so a stale H/V in React state cannot
+  // stamp leftover millimetre-chase back onto a migrated originVersion.
   useEffect(() => {
     const resync = () => {
       const saved = usePrinterStore.getState().printCalibration[calibrationKey];
       const next = resolvedPrintOffsets(saved);
+      skipOffsetPersistRef.current = true;
       setHCorrection(next.hOffsetMm);
       setVOffset(next.vOffsetMm);
       setSideLinerLeft(next.sideLinerLeftMm);
       setSideLinerRight(next.sideLinerRightMm);
       if (next.gapMm != null && !specialMediaJob) setGapLength(next.gapMm);
+      offsetsSyncedRef.current = true;
     };
+    offsetsSyncedRef.current = false;
     resync();
     return usePrinterStore.persist.onFinishHydration(resync);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calibrationKey]);
+  }, [calibrationKey, savedCalibration?.originVersion]);
 
   const stepRollGap = (deltaMm: number) => {
     const next = Math.min(20, Math.max(0, Math.round((gapLength + deltaMm) * 100) / 100));
@@ -498,6 +510,11 @@ export default function PrintScreen() {
   // reopening Print — the controls used to always reset to 0mm, making a
   // real, fixed mechanical offset look like an unresolved random shift.
   useEffect(() => {
+    if (skipOffsetPersistRef.current) {
+      skipOffsetPersistRef.current = false;
+      return;
+    }
+    if (!offsetsSyncedRef.current) return;
     if (calibrationKey === 'unknown' || !usePrinterStore.persist.hasHydrated()) return;
     setPrintCalibration(calibrationKey, {
       hOffsetMm: hCorrection,
@@ -505,6 +522,7 @@ export default function PrintScreen() {
       sideLinerLeftMm: sideLinerLeft,
       sideLinerRightMm: sideLinerRight,
       gapMm: specialMediaJob ? undefined : gapLength,
+      originVersion: PRINT_ORIGIN_VERSION,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hCorrection, vOffset, sideLinerLeft, sideLinerRight, gapLength, calibrationKey, specialMediaJob]);
@@ -729,15 +747,40 @@ export default function PrintScreen() {
   const jobName =
     previewDocument?.name ?? params.docName ?? (isPdfJob ? 'PDF Document' : 'Label');
 
-  /** Roll media at job time — UI state is authoritative (not a stale closure). */
-  const rollMediaNow = () => ({
-    gapMm: gapLength,
-    hCorrectionMm: hCorrection,
-    vOffsetMm: vOffset,
-    sideLinerLeftMm: sideLinerLeft,
-    sideLinerRightMm: sideLinerRight,
-    hOffsetMm: effectiveHOffsetMm(hCorrection, sideLinerLeft, sideLinerRight),
-  });
+  /**
+   * Roll media at job time. Stale originVersion H/V (leftover millimetre chase)
+   * is never sent — that un-centers a bitmap that is already equal on all sides.
+   */
+  const rollMediaNow = () => {
+    const saved = usePrinterStore.getState().printCalibration[calibrationKey];
+    const staleOrigin = !!saved && saved.originVersion !== PRINT_ORIGIN_VERSION;
+    const h = staleOrigin ? 0 : hCorrection;
+    const v = staleOrigin ? 0 : vOffset;
+    if (staleOrigin && calibrationKey !== 'unknown') {
+      console.info(
+        `[print] dropped stale millimetre-chase H=${hCorrection}mm V=${vOffset}mm origin=${saved?.originVersion}; sending 0,0`,
+      );
+      skipOffsetPersistRef.current = true;
+      setPrintCalibration(calibrationKey, {
+        hOffsetMm: 0,
+        vOffsetMm: 0,
+        sideLinerLeftMm: sideLinerLeft,
+        sideLinerRightMm: sideLinerRight,
+        gapMm: specialMediaJob ? undefined : gapLength,
+        originVersion: PRINT_ORIGIN_VERSION,
+      });
+      setHCorrection(0);
+      setVOffset(0);
+    }
+    return {
+      gapMm: gapLength,
+      hCorrectionMm: h,
+      vOffsetMm: v,
+      sideLinerLeftMm: sideLinerLeft,
+      sideLinerRightMm: sideLinerRight,
+      hOffsetMm: effectiveHOffsetMm(h, sideLinerLeft, sideLinerRight),
+    };
+  };
 
   const printAlignmentTestSheet = useCallback(async () => {
     const page = displayDocument ?? previewDocument;
@@ -1947,7 +1990,7 @@ export default function PrintScreen() {
                   })()}
                 </Text>
                 <Text style={{ color: '#6B7280', fontSize: 12, paddingTop: 6 }}>
-                  H/V apply on the printer (TSPL REFERENCE), not in the preview. Print an alignment sheet to verify on paper.
+                  H/V apply on the printer (TSPL REFERENCE), not in the preview. Leave both at 0 mm for equal borders — leftover millimetre chase from the old border pipeline is discarded. Only change H/V if this printer’s head is mechanically off. Print an alignment sheet to verify on paper.
                 </Text>
                 {getPrinterManager().usesTd404CommandSet ? (
                   <Pressable

@@ -1,6 +1,8 @@
 import type { LabelDocument, LabelElement } from '@/lib/label-document';
 import { upsPanelCellRectMm } from '@/lib/printer/border-media-shape';
 import { dotsPerMm, mmToDots, rectMmToDots, tsplPackedWidthDots } from '@/lib/printer/print-spec';
+import { USE_CENTERED_BORDER_ENGINE, type BorderPrintEngine } from '@/printing/raster/border-baseline';
+import { centeredBorderPrintRectMm, labelCenterMm, rectCenterMm } from '@/printing/raster/border-center';
 import {
   borderFrameInsetsForElement,
   borderStrokeDots,
@@ -30,21 +32,44 @@ export function borderElementsOf(doc: Pick<LabelDocument, 'elements'>): BorderEl
   );
 }
 
+export type ExpectedBorderOpts = {
+  upsPrintCell?: LabelDocument['upsPrintCell'];
+  mediaShape?: LabelDocument['mediaShape'];
+  /** Force baseline (stored left/top + untagged inset) even when the engine is on. */
+  engine?: BorderPrintEngine;
+};
+
 /**
- * Canvas geometry of one border in printer dots: the element rectangle through
- * rectMmToDots, then the same draw-time inset the canvas applies to untagged
- * borders, clipped to SIZE. No printer constants.
+ * Outer ink box in printer dots. Centered engine: canvas W×H on the label/cell,
+ * no extra inset. Baseline: stored left/top plus untagged draw inset.
  */
 export function expectedBorderDots(
   el: BorderElement,
   dpi: number,
   labelWidthMm: number,
   labelHeightMm: number,
+  opts?: ExpectedBorderOpts,
 ): DotBox {
-  const rect = rectMmToDots(el.left, el.top, el.width, el.height, dpi);
-  const inset = borderFrameInsetsForElement(el, dpi, 0, labelWidthMm, labelHeightMm);
   const sizeW = mmToDots(labelWidthMm, dpi);
   const sizeH = mmToDots(labelHeightMm, dpi);
+  const engine = opts?.engine ?? (USE_CENTERED_BORDER_ENGINE ? 'centered' : 'baseline');
+  if (engine === 'centered') {
+    const mm = centeredBorderPrintRectMm(el, {
+      widthMm: labelWidthMm,
+      heightMm: labelHeightMm,
+      upsPrintCell: opts?.upsPrintCell,
+      mediaShape: opts?.mediaShape,
+    });
+    const rect = rectMmToDots(mm.left, mm.top, mm.width, mm.height, dpi);
+    return {
+      x0: Math.max(0, rect.x0),
+      y0: Math.max(0, rect.y0),
+      x1: Math.min(sizeW, rect.x1),
+      y1: Math.min(sizeH, rect.y1),
+    };
+  }
+  const rect = rectMmToDots(el.left, el.top, el.width, el.height, dpi);
+  const inset = borderFrameInsetsForElement(el, dpi, 0, labelWidthMm, labelHeightMm);
   return {
     x0: Math.max(0, rect.x0 + inset.left),
     y0: Math.max(0, rect.y0 + inset.top),
@@ -154,6 +179,8 @@ export type BorderPrintDiagnostics = {
   vOffsetMm: number;
   referenceDots: { x: number; y: number };
   printerName: string;
+  engine: BorderPrintEngine;
+  labelCenterMm: { x: number; y: number };
   /** Always false: the border is drawn from its document rectangle only. */
   td404BorderCorrection: false;
   /** Raster bitmap before signed-REFERENCE firmware workaround. */
@@ -162,6 +189,9 @@ export type BorderPrintDiagnostics = {
   layer: 'match' | 'raster_mismatch';
   borders: Array<{
     id: string;
+    canvasRectMm: { left: number; top: number; width: number; height: number };
+    printRectMm: { left: number; top: number; width: number; height: number };
+    borderCenterMm: { x: number; y: number };
     expected: DotBox;
     measured: DotBox | null;
     deltaDots: { x0: number; y0: number; x1: number; y1: number } | null;
@@ -187,7 +217,7 @@ function clipForBorder(
 }
 
 function diagnoseOneBorder(
-  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm' | 'upsPrintCell'>,
+  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm' | 'upsPrintCell' | 'mediaShape'>,
   el: BorderElement,
   dpi: number,
   gray: Uint8Array,
@@ -196,7 +226,13 @@ function diagnoseOneBorder(
   const sizeW = mmToDots(doc.widthMm, dpi);
   const sizeH = mmToDots(doc.heightMm, dpi);
   const dpm = dotsPerMm(dpi);
-  const expected = expectedBorderDots(el, dpi, doc.widthMm, doc.heightMm);
+  const expected = expectedBorderDots(el, dpi, doc.widthMm, doc.heightMm, {
+    upsPrintCell: doc.upsPrintCell,
+    mediaShape: doc.mediaShape,
+  });
+  const printRectMm = USE_CENTERED_BORDER_ENGINE
+    ? centeredBorderPrintRectMm(el, doc)
+    : { left: el.left, top: el.top, width: el.width, height: el.height };
   const marginsExpectedMm = expectedMarginsMm(expected, dpi, doc.widthMm, doc.heightMm);
   const pad = Math.max(mmToDots(0.85, dpi), expectedStrokeDots(el, dpi) + 2);
   let clip: DotBox = {
@@ -241,6 +277,9 @@ function diagnoseOneBorder(
     : null;
   return {
     id: el.id,
+    canvasRectMm: { left: el.left, top: el.top, width: el.width, height: el.height },
+    printRectMm,
+    borderCenterMm: rectCenterMm(printRectMm),
     expected,
     measured: m.box,
     deltaDots,
@@ -266,7 +305,7 @@ function diagnoseOneBorder(
  * `rasterizeBorders` (so text/QR ink never enters the box).
  */
 export function diagnoseBorders(
-  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm' | 'upsPrintCell'>,
+  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm' | 'upsPrintCell' | 'mediaShape'>,
   dpi: number,
   rasterizeBorders: (border: BorderElement) => { gray: Uint8Array; strideDots: number },
 ): BorderPrintDiagnostics['borders'] {
@@ -278,7 +317,7 @@ export function diagnoseBorders(
 
 /** Measure outer ink on the actual print gray (the buffer about to be packed/sent). */
 export function diagnoseCanonicalGray(
-  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm' | 'upsPrintCell'>,
+  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm' | 'upsPrintCell' | 'mediaShape'>,
   dpi: number,
   gray: Uint8Array,
   strideDots: number,
@@ -292,7 +331,8 @@ export function packedWidthForMm(widthMm: number, dpi: number): number {
 
 export function formatBorderPrintDiagnostics(d: BorderPrintDiagnostics): string {
   const lines = [
-    `[BORDER-DIAG] label=${d.widthMm}x${d.heightMm}mm dpi=${d.dpi} dpm=${d.dotsPerMm} ` +
+    `[BORDER-DIAG] engine=${d.engine} label=${d.widthMm}x${d.heightMm}mm ` +
+      `labelCenter=${d.labelCenterMm.x},${d.labelCenterMm.y} dpi=${d.dpi} dpm=${d.dotsPerMm} ` +
       `SIZE=${d.sizeDotsW}x${d.sizeDotsH} BITMAP=${d.bitmapBytesPerRow}B(${d.bitmapWidthDots})x${d.bitmapHeightDots} ` +
       `GAP=${d.gapMm}mm H=${d.hOffsetMm}mm V=${d.vOffsetMm}mm REFERENCE=${d.referenceDots.x},${d.referenceDots.y} ` +
       `printer=${d.printerName} source=${d.source} layer=${d.layer} ` +
@@ -304,8 +344,13 @@ export function formatBorderPrintDiagnostics(d: BorderPrintDiagnostics): string 
     const exp = b.expectedMarginsMm;
     const act = b.marginsMm;
     const err = b.errorMm;
+    const canvas = b.canvasRectMm;
+    const print = b.printRectMm;
     lines.push(
-      `[BORDER-DIAG] ${b.id} expected=${e.x0},${e.y0}-${e.x1},${e.y1} ` +
+      `[BORDER-DIAG] ${b.id} canvas=${canvas.left},${canvas.top} ${canvas.width}x${canvas.height} ` +
+        `print=${print.left},${print.top} ${print.width}x${print.height} ` +
+        `borderCenter=${b.borderCenterMm.x},${b.borderCenterMm.y} ` +
+        `expected=${e.x0},${e.y0}-${e.x1},${e.y1} ` +
         `measured=${m ? `${m.x0},${m.y0}-${m.x1},${m.y1}` : 'none'} ` +
         `delta=${b.deltaDots ? `${b.deltaDots.x0},${b.deltaDots.y0},${b.deltaDots.x1},${b.deltaDots.y1}` : 'n/a'} ` +
         `stroke=${b.expectedStrokeDots} measured=${b.measuredStrokeDots ? `${b.measuredStrokeDots.left}/${b.measuredStrokeDots.right}/${b.measuredStrokeDots.top}/${b.measuredStrokeDots.bottom}` : 'n/a'} ` +
@@ -316,6 +361,23 @@ export function formatBorderPrintDiagnostics(d: BorderPrintDiagnostics): string 
         `BITMAP mm ${act ? `L${act.left.toFixed(2)} R${act.right.toFixed(2)} T${act.top.toFixed(2)} B${act.bottom.toFixed(2)}` : 'n/a'} ` +
         `ERROR mm ${err ? `L${err.left.toFixed(3)} R${err.right.toFixed(3)} T${err.top.toFixed(3)} B${err.bottom.toFixed(3)}` : 'n/a'}`,
     );
+  }
+  if (d.hOffsetMm !== 0 || d.vOffsetMm !== 0) {
+    const h = d.hOffsetMm;
+    const v = d.vOffsetMm;
+    lines.push(
+      `[BORDER-DIAG] CASE C paper shift H=${h}mm V=${v}mm ` +
+        `(+H/+V move ink right/down on a centered bitmap; physical L≈bitmapL+H R≈bitmapR-H T≈bitmapT+V B≈bitmapB-V). ` +
+        `Leave H/V at 0 unless this printer’s head is mechanically off.`,
+    );
+    for (const b of d.borders) {
+      const act = b.marginsMm;
+      if (!act) continue;
+      lines.push(
+        `[BORDER-DIAG] ${b.id} PAPER mm L${(act.left + h).toFixed(2)} R${(act.right - h).toFixed(2)} ` +
+          `T${(act.top + v).toFixed(2)} B${(act.bottom - v).toFixed(2)}`,
+      );
+    }
   }
   return lines.join('\n');
 }

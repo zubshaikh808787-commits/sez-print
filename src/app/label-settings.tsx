@@ -120,7 +120,15 @@ export default function LabelSettingsScreen() {
         const nextElements = existing
           ? doc.elements.map((el) =>
               el.id === existing.id && el.type === 'border'
-                ? { ...el, borderStyle, lineWidth: borderStyleStrokeMm(borderStyle) }
+                ? {
+                    ...el,
+                    borderStyle,
+                    lineWidth: borderStyleStrokeMm(borderStyle),
+                    ...defaultBorderPlacement(doc.widthMm, doc.heightMm, {
+                      mediaShape: doc.mediaShape,
+                      borderStyle,
+                    }),
+                  }
                 : el,
             )
           : [
@@ -130,7 +138,10 @@ export default function LabelSettingsScreen() {
                 type: 'border' as const,
                 borderStyle,
                 lineWidth: borderStyleStrokeMm(borderStyle),
-                ...defaultBorderPlacement(doc.widthMm, doc.heightMm),
+                ...defaultBorderPlacement(doc.widthMm, doc.heightMm, {
+                  mediaShape: doc.mediaShape,
+                  borderStyle,
+                }),
                 needPrinting: true,
                 drawingColorIndex: settingsNow.defaultDrawingColorIndex,
               },

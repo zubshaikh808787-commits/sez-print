@@ -24,9 +24,8 @@ export type BorderCalibrationPrintOptions = {
 };
 
 /**
- * Border isolation print: 2 mm border element (product path), rulers, and TL mark.
- * centre lines, corner marks, 1 mm rulers, and a "TL" mark. Sent through the
- * same headless raster + printMonoLabel path as a normal label.
+ * Diagnostic print only. Do not derive new millimetre offsets from the paper.
+ * One 2 mm border (product path), centre H/V, 1/2/3/5 mm L-marks, SIZE/DPI/GAP/H/V text.
  */
 export async function printBorderCalibrationTest(
   opts: BorderCalibrationPrintOptions,

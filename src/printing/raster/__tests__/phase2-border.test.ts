@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DEFAULT_BARCODE_STATE, DEFAULT_ELEMENT_STATE, DEFAULT_QRCODE_STATE } from '@/components/editor/types';
 import { createLabelDocument, generateId, mmToPt, type LabelDocument } from '@/lib/label-document';
 import { mmToDots, rectMmToDots, td404OffsetClipsOuterEdge, tsplPackedWidthDots } from '@/lib/printer/print-spec';
+import { centeredBorderRectMm } from '@/printing/raster/border-center';
 import { packGrayToMono1bpp, unpackMono1bppToGray } from '@/printing/raster/bit-packer';
 import { borderStrokeDots } from '@/printing/raster/border-frame';
 import { measureBorderInDots } from '@/printing/raster/border-measure';
@@ -128,7 +129,11 @@ assert.match(td404DocumentOffsetClipWarning(warnDoc, dpi, 2, 0) ?? '', /right bo
 const fullBleedUntagged = taggedBorderDoc(50, 30);
 const fb = fullBleedUntagged.elements[0] as Extract<LabelDocument['elements'][number], { type: 'border' }>;
 Object.assign(fb, { left: 0, top: 0, width: 50, height: 30, geometryVersion: undefined });
-assert.equal(td404DocumentOffsetClipWarning(fullBleedUntagged, dpi, 0, 0), null, 'untagged draws 2 mm inside');
+assert.match(
+  td404DocumentOffsetClipWarning(fullBleedUntagged, dpi, 0, 0) ?? '',
+  /border edge/,
+  'full-bleed canvas W×H prints to the die edge (no extra inset)',
+);
 const tight = taggedBorderDoc(50, 30);
 Object.assign(tight.elements[0], { left: 1, top: 1, width: 48, height: 28 });
 assert.match(td404DocumentOffsetClipWarning(tight, dpi, 0, 0) ?? '', /left 1\.00 mm/);
@@ -175,8 +180,14 @@ for (let y = 0; y < staleSizeH; y++) {
     if (y > maxY) maxY = y;
   }
 }
-// A border is never re-pinned to SIZE: on a larger page it stays at its own rectangle.
-const staleRect = rectMmToDots(2, 2, 46, 26, dpi);
+// Print recenters canvas W×H on the current label; stored left/top is ignored.
+const staleMm = centeredBorderRectMm({
+  frameWidthMm: 80,
+  frameHeightMm: 40,
+  borderWidthMm: 46,
+  borderHeightMm: 26,
+});
+const staleRect = rectMmToDots(staleMm.left, staleMm.top, staleMm.width, staleMm.height, dpi);
 assert.ok(Math.abs(minX - staleRect.x0) <= 1, `stale L ${minX} expected ${staleRect.x0}`);
 assert.ok(Math.abs(maxX + 1 - staleRect.x1) <= 1, `stale R ${maxX + 1} expected ${staleRect.x1}`);
 assert.ok(Math.abs(minY - staleRect.y0) <= 1, `stale T ${minY} expected ${staleRect.y0}`);

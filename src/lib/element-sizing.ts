@@ -1,5 +1,5 @@
 import { DEFAULT_TIME_STATE, TIME_DISPLAY_SAMPLE } from '@/components/editor/types';
-import { insetBorderBox, isFullPanelGuideCircle } from '@/lib/border-geometry';
+import { defaultBorderPlacement, isFullPanelGuideCircle } from '@/lib/border-geometry';
 import { elementSizeMm, mmToPt, ptToMm, textBlockHeightMm, type LabelDocument, type LabelElement } from '@/lib/label-document';
 import { isRatTailGeometry, ratTailBodyRectMm, scaleMediaGeometry } from '@/lib/media-geometry';
 import { clampToLabelBounds } from '@/lib/editor/label-bounds';
@@ -585,8 +585,12 @@ function scaleBorderElement(
   width: number,
   height: number,
   fontScale: number,
+  mediaShape?: LabelDocument['mediaShape'],
 ): LabelElement {
-  const pinned = insetBorderBox(0, 0, width, height, width, height);
+  const pinned = defaultBorderPlacement(width, height, {
+    mediaShape,
+    borderStyle: el.borderStyle,
+  });
   return {
     ...el,
     ...pinned,
@@ -623,7 +627,7 @@ export function scaleDocumentToSize(
     source.map((el) => {
       if (el.type === 'border') {
         return clampElementToLabel(
-          scaleBorderElement(el, 0, 0, widthMm, heightMm, fontScale),
+          scaleBorderElement(el, 0, 0, widthMm, heightMm, fontScale, nextDoc.mediaShape),
           nextDoc,
         );
       }
@@ -668,10 +672,10 @@ export function repositionDocumentToSize(
       if (pinLocked && el.type === 'border' && el.lockMovement) {
         return {
           ...el,
-          ...insetBorderBox(0, 0, widthMm, heightMm, widthMm, heightMm),
-          geometryVersion: 1 as const,
-          rotation: 0 as const,
-          lockMovement: true,
+          ...defaultBorderPlacement(widthMm, heightMm, {
+            mediaShape: doc.mediaShape,
+            borderStyle: el.borderStyle,
+          }),
         };
       }
       return {
@@ -718,10 +722,10 @@ export function fitDocumentCenteredOnPage(
       return clampElementToLabel(
         {
           ...el,
-          ...insetBorderBox(0, 0, widthMm, heightMm, widthMm, heightMm),
-          geometryVersion: 1 as const,
-          rotation: 0 as const,
-          lockMovement: true,
+          ...defaultBorderPlacement(widthMm, heightMm, {
+            mediaShape: doc.mediaShape,
+            borderStyle: el.borderStyle,
+          }),
         },
         nextDoc,
       );
@@ -751,7 +755,7 @@ export function fitDocumentToFillPage(
   const elements = doc.elements.map((el) => {
     if (el.type === 'border') {
       return clampElementToLabel(
-        scaleBorderElement(el, 0, 0, widthMm, heightMm, fontScale),
+        scaleBorderElement(el, 0, 0, widthMm, heightMm, fontScale, nextDoc.mediaShape),
         nextDoc,
       );
     }

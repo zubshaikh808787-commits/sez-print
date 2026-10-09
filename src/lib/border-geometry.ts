@@ -1,3 +1,4 @@
+import { borderStyleUsesCircleRing, type BorderStyleId } from '@/constants/border-library';
 import type { LabelDocument, LabelElement } from '@/lib/label-document';
 import { PRINT_BORDER_INSET_MM, untaggedBorderNeedsDrawInset } from '@/printing/raster/border-frame';
 
@@ -45,6 +46,58 @@ export function borderPlacementWarnings(
  * border left at the old size after keep-resize) keeps the shifted size
  * instead of being rewritten to the new label.
  */
+export type BorderPlacementOpts = {
+  mediaShape?: string | null;
+  borderStyle?: string | null;
+};
+
+/** Circle die or circle-* style: box is a square on the inscribed die, not the bounding rect. */
+export function usesCircularBorderBox(opts?: BorderPlacementOpts): boolean {
+  if (opts?.mediaShape === 'circle') return true;
+  const style = opts?.borderStyle;
+  return typeof style === 'string' && borderStyleUsesCircleRing(style as BorderStyleId);
+}
+
+/** Leftover (frame − box) split equally on both sides. */
+export function equalCenteredBoxMm(
+  frameWidthMm: number,
+  frameHeightMm: number,
+  boxWidthMm: number,
+  boxHeightMm: number,
+  originXMm = 0,
+  originYMm = 0,
+): { left: number; top: number; width: number; height: number } {
+  const width = Math.max(MIN_BORDER_MM, boxWidthMm);
+  const height = Math.max(MIN_BORDER_MM, boxHeightMm);
+  return {
+    left: originXMm + (frameWidthMm - width) / 2,
+    top: originYMm + (frameHeightMm - height) / 2,
+    width,
+    height,
+  };
+}
+
+/**
+ * Square frame for a circular die / circle style. Diameter follows the
+ * existing border size when given, otherwise the die minus the design inset.
+ */
+export function circularCenteredBorderBoxMm(
+  frameWidthMm: number,
+  frameHeightMm: number,
+  borderWidthMm?: number,
+  borderHeightMm?: number,
+  originXMm = 0,
+  originYMm = 0,
+): { left: number; top: number; width: number; height: number } {
+  const die = Math.min(frameWidthMm, frameHeightMm);
+  const requested =
+    borderWidthMm != null && borderHeightMm != null
+      ? Math.min(borderWidthMm, borderHeightMm)
+      : die - PRINT_BORDER_INSET_MM * 2;
+  const size = Math.max(MIN_BORDER_MM, Math.min(die, requested));
+  return equalCenteredBoxMm(frameWidthMm, frameHeightMm, size, size, originXMm, originYMm);
+}
+
 export function insetBorderBox(
   left: number,
   top: number,
@@ -70,8 +123,12 @@ export function insetBorderBox(
   return { left: x.origin, top: y.origin, width: x.size, height: y.size };
 }
 
-/** New locked border: the 2 mm margin is already inside the rectangle. */
-export function defaultBorderPlacement(widthMm: number, heightMm: number): {
+/** New locked border: equal leftover on each side; circle dies get a square. */
+export function defaultBorderPlacement(
+  widthMm: number,
+  heightMm: number,
+  opts?: BorderPlacementOpts,
+): {
   left: number;
   top: number;
   width: number;
@@ -80,8 +137,11 @@ export function defaultBorderPlacement(widthMm: number, heightMm: number): {
   lockMovement: true;
   rotation: 0;
 } {
+  const rect = usesCircularBorderBox(opts)
+    ? circularCenteredBorderBoxMm(widthMm, heightMm)
+    : insetBorderBox(0, 0, widthMm, heightMm, widthMm, heightMm);
   return {
-    ...insetBorderBox(0, 0, widthMm, heightMm, widthMm, heightMm),
+    ...rect,
     geometryVersion: 1,
     lockMovement: true,
     rotation: 0,
@@ -93,9 +153,12 @@ export function migrateBorderElement<T extends LabelElement & { type: 'border' }
   limitW: number,
   limitH: number,
   pinLocked = true,
+  mediaShape?: string | null,
 ): T {
+  const opts: BorderPlacementOpts = { mediaShape, borderStyle: el.borderStyle };
   if (pinLocked && el.lockMovement) {
-    const rect = insetBorderBox(0, 0, limitW, limitH, limitW, limitH);
+    const placed = defaultBorderPlacement(limitW, limitH, opts);
+    const rect = { left: placed.left, top: placed.top, width: placed.width, height: placed.height };
     const same =
       el.geometryVersion === 1 &&
       Math.abs(el.left - rect.left) < 0.05 &&
@@ -111,11 +174,30 @@ export function migrateBorderElement<T extends LabelElement & { type: 'border' }
       lockMovement: true,
     };
   }
-  if (el.geometryVersion === 1) return el;
+  if (el.geometryVersion === 1) {
+    if (usesCircularBorderBox(opts) && Math.abs(el.width - el.height) > 0.05) {
+      return {
+        ...el,
+        ...circularCenteredBorderBoxMm(limitW, limitH, el.width, el.height),
+        rotation: 0,
+      };
+    }
+    return el;
+  }
   if (!untaggedBorderNeedsDrawInset(el, limitW, limitH)) {
+    if (usesCircularBorderBox(opts)) {
+      return {
+        ...el,
+        ...circularCenteredBorderBoxMm(limitW, limitH, el.width, el.height),
+        geometryVersion: 1,
+        rotation: 0,
+      };
+    }
     return { ...el, geometryVersion: 1, rotation: 0 };
   }
-  const rect = insetBorderBox(el.left, el.top, el.width, el.height, limitW, limitH);
+  const rect = usesCircularBorderBox(opts)
+    ? circularCenteredBorderBoxMm(limitW, limitH, el.width, el.height)
+    : insetBorderBox(el.left, el.top, el.width, el.height, limitW, limitH);
   return {
     ...el,
     ...rect,
@@ -130,11 +212,12 @@ export function migrateElementsForLabel(
   limitW: number,
   limitH: number,
   pinLocked = true,
+  mediaShape?: string | null,
 ): LabelElement[] {
   let changed = false;
   const next = elements.map((el) => {
     if (el.type !== 'border') return el;
-    const migrated = migrateBorderElement(el, limitW, limitH, pinLocked);
+    const migrated = migrateBorderElement(el, limitW, limitH, pinLocked, mediaShape);
     if (migrated !== el) changed = true;
     return migrated;
   });
@@ -144,9 +227,17 @@ export function migrateElementsForLabel(
 /** Migrate every border on the document and on each multi-up panel (panel size). */
 export function migrateDocumentBorders(doc: LabelDocument): LabelDocument {
   const pinLocked = !doc.ups;
-  const elements = migrateElementsForLabel(doc.elements, doc.widthMm, doc.heightMm, pinLocked);
+  const elements = migrateElementsForLabel(
+    doc.elements,
+    doc.widthMm,
+    doc.heightMm,
+    pinLocked,
+    doc.mediaShape,
+  );
   const panels = doc.ups
-    ? doc.ups.panels.map((panel) => migrateElementsForLabel(panel, doc.widthMm, doc.heightMm, true))
+    ? doc.ups.panels.map((panel) =>
+        migrateElementsForLabel(panel, doc.widthMm, doc.heightMm, true, doc.mediaShape),
+      )
     : undefined;
   const panelsChanged = Boolean(
     panels && doc.ups && panels.some((panel, i) => panel !== doc.ups!.panels[i]),

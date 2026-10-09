@@ -104,7 +104,11 @@ for (const [h, v] of [
     spec.xOffsetDots,
     spec.yOffsetDots,
   );
-  assert.equal(sha(wire.monoBytes), canonical, `H=${h} V=${v} must not change canonical bits`);
+  if (spec.xOffsetDots >= 0 && spec.yOffsetDots >= 0) {
+    assert.equal(sha(wire.monoBytes), canonical, `H=${h} V=${v} must not change canonical bits`);
+  } else {
+    assert.notEqual(sha(wire.monoBytes), canonical, `H=${h} V=${v} media-origin whole-bitmap shift`);
+  }
 }
 
 const neg = createPrintSpec({

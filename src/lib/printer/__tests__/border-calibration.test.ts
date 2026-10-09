@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { makeDotSurface, fillRect, strokeRect } from '@/printing/raster/dot-surface';
-import { drawPrintBorder } from '@/printing/raster/print-border';
+import { drawPrintBorder, drawPrintBorderBaseline } from '@/printing/raster/print-border';
 import { PRINT_BORDER_INSET_MM } from '@/printing/raster/border-frame';
 import {
   createPrintSpec,
@@ -53,6 +53,8 @@ function margins(
       bitmapHeightDots: clip ? sizeH : undefined,
       labelWidthDots: sizeW,
       labelHeightDots: sizeH,
+      labelWidthMm: labelWidthMm ?? widthMm,
+      labelHeightMm: labelHeightMm ?? heightMm,
       mediaShape,
     },
   );
@@ -150,6 +152,8 @@ const spec = createPrintSpec({
 assert.equal(spec.xOffsetDots, mmToDots(TD404_MEDIA_ORIGIN_H_MM, dpi));
 assert.equal(spec.yOffsetDots, mmToDots(TD404_MEDIA_ORIGIN_V_MM, dpi));
 assert.equal(spec.gapMm, 3);
+assert.equal(TD404_MEDIA_ORIGIN_V_MM, -0.5, 'TD-404 feed origin lifts a centered bitmap ~0.5mm');
+assert.ok(spec.yOffsetDots < 0, 'negative V is a whole-bitmap shift, not a border inset');
 
 const plusOne = createPrintSpec({
   widthMm: 50,
@@ -179,20 +183,62 @@ const kept = migrateCalibrationEntry({
 assert.equal(kept.entry.hOffsetMm, 0.2);
 assert.equal(kept.note, '');
 
+function taggedCanvasBox(widthMm: number, heightMm: number) {
+  return {
+    ...fullBleedBorderElement(widthMm, heightMm),
+    left: 2,
+    top: 2,
+    width: widthMm - 4,
+    height: heightMm - 4,
+    geometryVersion: 1 as const,
+  };
+}
+
 for (const [w, h] of [
   [50, 30],
   [50, 25],
   [50, 40],
   [40, 30],
 ] as const) {
-  const ink = margins(w, h);
+  const ink = margins(w, h, taggedCanvasBox(w, h));
   for (const side of ['L', 'R', 'T', 'B'] as const) {
     const dots = ink[side];
     assert.ok(
       Math.abs(dots - insetDots) <= 1,
-      `${w}x${h} ${side} ${dots} dots, expected ${insetDots}Â±1`,
+      `${w}x${h} ${side} ${dots} dots, expected ${insetDots}±1`,
     );
   }
+}
+
+{
+  const w = 50;
+  const h = 30;
+  const sizeW = mmToDots(w, dpi);
+  const sizeH = mmToDots(h, dpi);
+  const packedW = tsplPackedWidthDots(sizeW);
+  const surface = makeDotSurface(packedW, sizeH);
+  drawPrintBorderBaseline(
+    {
+      fillRect: (x, y, bw, bh, g) => fillRect(surface, x, y, bw, bh, g),
+      strokeRect: (x, y, bw, bh, s, g) => strokeRect(surface, x, y, bw, bh, s, g),
+    },
+    fullBleedBorderElement(w, h),
+    dpi,
+    1,
+    {
+      labelWidthDots: sizeW,
+      labelHeightDots: sizeH,
+      labelWidthMm: w,
+      labelHeightMm: h,
+    },
+  );
+  let minX = packedW;
+  for (let y = 0; y < sizeH; y++) {
+    for (let x = 0; x < packedW; x++) {
+      if (surface.gray[y * packedW + x] === 0 && x < minX) minX = x;
+    }
+  }
+  assert.ok(Math.abs(minX - insetDots) <= 1, `baseline untagged full-bleed still insets ${insetDots} (got ${minX})`);
 }
 
 const stored = {
@@ -218,18 +264,8 @@ assert.ok(Math.abs(torn.R - insetDots) <= 1, `tear right ${torn.R}`);
 assert.ok(Math.abs(torn.T - insetDots) <= 1, `tear top ${torn.T}`);
 assert.ok(Math.abs(torn.B - (insetDots + tearDots)) <= 1, `tear bottom ${torn.B}, expected ${insetDots + tearDots}`);
 const tornFull = margins(50, 30, fullBleedBorderElement(50, 30), 1);
-assert.ok(Math.abs(tornFull.T - insetDots) <= 1 && Math.abs(tornFull.B - (insetDots + tearDots)) <= 1, `full-bleed tear T${tornFull.T} B${tornFull.B}`);
-
-function taggedCanvasBox(widthMm: number, heightMm: number) {
-  return {
-    ...fullBleedBorderElement(widthMm, heightMm),
-    left: 2,
-    top: 2,
-    width: widthMm - 4,
-    height: heightMm - 4,
-    geometryVersion: 1 as const,
-  };
-}
+assert.ok(tornFull.T <= 1, `full-bleed canvas prints at the die edge T${tornFull.T}`);
+assert.ok(Math.abs(tornFull.B - tearDots) <= 1, `full-bleed extra bottom B${tornFull.B}`);
 
 for (const [widthMm, heightMm] of [
   [50, 50],
@@ -296,13 +332,19 @@ for (const [widthMm, heightMm, shape] of [
     shape,
     true,
   );
-  assert.ok(Math.abs(ring.L - insetDots) <= 1, `wysiwyg ${shape} ${widthMm}x${heightMm} left ${ring.L}`);
-  assert.ok(
-    Math.abs(ring.R - insetDots) <= 1,
-    `wysiwyg ${shape} ${widthMm}x${heightMm} right ${ring.R}`,
-  );
-  assert.ok(Math.abs(ring.T - insetDots) <= 1, `wysiwyg ${shape} ${widthMm}x${heightMm} top ${ring.T}`);
-  assert.ok(Math.abs(ring.B - insetDots) <= 1, `wysiwyg ${shape} ${widthMm}x${heightMm} bottom ${ring.B}`);
+  assert.ok(Math.abs(ring.L - ring.R) <= 1, `wysiwyg ${shape} ${widthMm}x${heightMm} L ${ring.L} vs R ${ring.R}`);
+  assert.ok(Math.abs(ring.T - ring.B) <= 1, `wysiwyg ${shape} ${widthMm}x${heightMm} T ${ring.T} vs B ${ring.B}`);
+  if (shape === 'ellipse') {
+    assert.ok(Math.abs(ring.L - insetDots) <= 1, `wysiwyg ellipse left ${ring.L}`);
+    assert.ok(Math.abs(ring.T - insetDots) <= 1, `wysiwyg ellipse top ${ring.T}`);
+  } else {
+    const dieDots = mmToDots(Math.min(widthMm, heightMm), dpi);
+    const sizeDots = dieDots - insetDots * 2;
+    const expectL = Math.round((mmToDots(widthMm, dpi) - sizeDots) / 2);
+    const expectT = Math.round((mmToDots(heightMm, dpi) - sizeDots) / 2);
+    assert.ok(Math.abs(ring.L - expectL) <= 1, `wysiwyg circle ${widthMm}x${heightMm} left ${ring.L} vs ${expectL}`);
+    assert.ok(Math.abs(ring.T - expectT) <= 1, `wysiwyg circle ${widthMm}x${heightMm} top ${ring.T} vs ${expectT}`);
+  }
   const corner = ring.gray[ring.T * ring.packedW + ring.L];
   assert.notEqual(corner, 0, `wysiwyg ${shape} ${widthMm}x${heightMm} corner should be outside the ring`);
   const midY = Math.round((ring.T + (ring.sizeH - 1 - ring.B)) / 2);

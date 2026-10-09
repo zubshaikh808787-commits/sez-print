@@ -103,14 +103,16 @@ export const PRINTER_PROFILES: Record<string, PrinterProfile> = {
 export const DEFAULT_PRINTER_PROFILE = PRINTER_PROFILES['td404-304'];
 
 /**
- * No built-in millimetre nudge. Liner between stickers is 1 mm on some rolls
- * and 3 mm on others — that is TSPL GAP (user setting), not REFERENCE.
- * At H=0,V=0 REFERENCE is 0,0. The locked border is centered on this label’s
- * SIZE (equal 2 mm from each die-cut edge). User H/V still add if a roll
- * needs a sensor nudge.
+ * Printer-model feed origin, not a border inset and not user H/V.
+ * Liner between stickers is TSPL GAP. The locked border is centered on SIZE
+ * (equal 2 mm from each die-cut edge) in the canonical bitmap.
+ * TD-404 gap-sensor / print-head sits slightly below die top: at user H=V=0
+ * paper still shows extra top / tight bottom. Negative V is a whole-bitmap
+ * shift because firmware REFERENCE Y cannot be negative. User H/V still add
+ * if a particular roll’s sensor is off.
  */
 export const TD404_MEDIA_ORIGIN_H_MM = 0;
-export const TD404_MEDIA_ORIGIN_V_MM = 0;
+export const TD404_MEDIA_ORIGIN_V_MM = -0.5;
 
 export function mediaOriginXMm(profile: PrinterProfile): number {
   return profile.id.startsWith('td404') ? TD404_MEDIA_ORIGIN_H_MM : 0;
