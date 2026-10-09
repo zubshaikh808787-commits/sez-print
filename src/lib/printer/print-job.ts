@@ -222,7 +222,7 @@ export function finalizeGrayForPrint(
       bitH: bits.height,
       canvasW: geometry.bitmapDotsW,
       canvasH: geometry.bitmapDotsH,
-      note: 'Not letterboxing. BITMAP uses cropped packed width.',
+      note: 'Not letterboxing. BITMAP uses packed-up width (ceil to 8 dots).',
     });
   }
 

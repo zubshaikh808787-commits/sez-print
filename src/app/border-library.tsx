@@ -21,7 +21,7 @@ export default function BorderLibraryScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const params = useLocalSearchParams<{ from?: string }>();
-  const fromEdit = params.from === 'edit';
+  const fromEdit = params.from === 'edit' || params.from === 'label-settings';
   const [selectedId, setSelectedId] = useState(BORDER_LIBRARY[0].id);
   const [category, setCategory] = useState<(typeof BORDER_CATEGORIES)[number]>('All');
 

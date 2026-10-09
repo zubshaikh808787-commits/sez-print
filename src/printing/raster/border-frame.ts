@@ -1,4 +1,4 @@
-import type { BorderStyleId } from '@/constants/border-library';
+import { borderStyleStrokeMm, type BorderStyleId } from '@/constants/border-library';
 import { dotsPerMm, mmToDots } from '@/lib/printer/print-spec';
 
 /** Inward frame inset from the label edge — matches headless `drawPrintBorder`. */
@@ -10,22 +10,7 @@ export function borderInsetDots(dpi: number): number {
 }
 
 export function borderStrokeFallbackMm(styleId: BorderStyleId): number {
-  switch (styleId) {
-    case 'solid-thin':
-    case 'circle-thin':
-      return 0.35;
-    case 'solid-thick':
-    case 'circle-thick':
-      return 0.9;
-    case 'circle-medium':
-      return 0.55;
-    case 'dashed':
-    case 'dotted':
-    case 'label-frame':
-      return 0.5;
-    default:
-      return 0.55;
-  }
+  return borderStyleStrokeMm(styleId);
 }
 
 export function borderStrokeDots(
@@ -124,16 +109,50 @@ function cornerBracketBands(
 export type FrameInsets = { left: number; right: number; top: number; bottom: number };
 
 /**
+ * True when an untagged border box is already inset from the label edge
+ * (typical persisted 2 mm frame missing geometryVersion). A second draw-time
+ * inset would double the margin. Full-bleed untagged (0,0,w,h) still needs
+ * one design inset.
+ */
+export function untaggedBorderNeedsDrawInset(
+  el: { geometryVersion?: 1; left?: number; top?: number; width?: number; height?: number },
+  labelWidthMm?: number,
+  labelHeightMm?: number,
+): boolean {
+  if (el.geometryVersion === 1) return false;
+  if (labelWidthMm == null || labelHeightMm == null || !(labelWidthMm > 0) || !(labelHeightMm > 0)) {
+    return true;
+  }
+  const left = el.left ?? 0;
+  const top = el.top ?? 0;
+  const width = el.width ?? labelWidthMm;
+  const height = el.height ?? labelHeightMm;
+  const right = labelWidthMm - (left + width);
+  const bottom = labelHeightMm - (top + height);
+  const eps = 0.05;
+  const alreadyInset =
+    left >= PRINT_BORDER_INSET_MM - eps &&
+    top >= PRINT_BORDER_INSET_MM - eps &&
+    right >= PRINT_BORDER_INSET_MM - eps &&
+    bottom >= PRINT_BORDER_INSET_MM - eps;
+  return !alreadyInset;
+}
+
+/**
  * Insets for one border element. geometryVersion 1 already stores the 2 mm
- * margin in the rectangle, so the stroke inset is 0. Untagged borders inset
- * 2 mm at draw time. extraBottomInsetMm is off in production (0).
+ * margin in the rectangle, so the stroke inset is 0. Untagged full-bleed
+ * borders inset 2 mm at draw time. extraBottomInsetMm is off in production (0).
  */
 export function borderFrameInsetsForElement(
-  el: { geometryVersion?: 1 },
+  el: { geometryVersion?: 1; left?: number; top?: number; width?: number; height?: number },
   dpi: number,
   extraBottomInsetMm = 0,
+  labelWidthMm?: number,
+  labelHeightMm?: number,
 ): FrameInsets {
-  const base = el.geometryVersion === 1 ? 0 : borderInsetDots(dpi);
+  const base = untaggedBorderNeedsDrawInset(el, labelWidthMm, labelHeightMm)
+    ? borderInsetDots(dpi)
+    : 0;
   const extra = Math.max(0, mmToDots(extraBottomInsetMm, dpi));
   return { left: base, right: base, top: base, bottom: base + extra };
 }

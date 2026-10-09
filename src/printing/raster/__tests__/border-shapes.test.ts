@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { BORDER_LIBRARY, borderStyleStrokeMm, resolveBorderStyle } from '@/constants/border-library';
-import { mmToDots } from '@/lib/printer/print-spec';
+import { mmToDots, tsplPackedWidthDots } from '@/lib/printer/print-spec';
 import { fillRect, makeDotSurface, strokeRect, type DotSurface } from '@/printing/raster/dot-surface';
 import { drawPrintBorder } from '@/printing/raster/print-border';
 import { styledBorderBands, type BorderShape } from '@/printing/raster/border-shapes';
@@ -9,7 +9,7 @@ import { fullBleedBorderElement } from '@/lib/printer/border-calibration';
 const dpi = 304;
 
 function paint(widthMm: number, heightMm: number, style: string, mediaShape?: string, bakeFeed = true): DotSurface {
-  const w = Math.floor(mmToDots(widthMm, dpi) / 8) * 8;
+  const w = tsplPackedWidthDots(mmToDots(widthMm, dpi));
   const h = mmToDots(heightMm, dpi);
   const surface = makeDotSurface(w, h);
   drawPrintBorder(
@@ -29,7 +29,15 @@ function paint(widthMm: number, heightMm: number, style: string, mediaShape?: st
     },
     dpi,
     1,
-    { bitmapWidthDots: w, bitmapHeightDots: h, bakeFeed, mediaShape },
+    {
+      bitmapWidthDots: w,
+      bitmapHeightDots: h,
+      labelWidthDots: mmToDots(widthMm, dpi),
+      labelHeightDots: h,
+      labelWidthMm: widthMm,
+      labelHeightMm: heightMm,
+      mediaShape,
+    },
   );
   return surface;
 }

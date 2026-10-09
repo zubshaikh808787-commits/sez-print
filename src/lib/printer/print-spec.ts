@@ -309,7 +309,7 @@ export type PrintSpec = {
   widthDots: number;
   /** Exact label height in printer dots. */
   heightDots: number;
-  /** Raster canvas width in dots (packed down to a multiple of 8). */
+  /** Raster canvas width in dots (packed UP to a multiple of 8). */
   rasterWidthDots: number;
   /** Bytes per row for 1-bit packed raster. */
   bytesPerRow: number;

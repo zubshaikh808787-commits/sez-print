@@ -86,7 +86,10 @@ import {
 } from '@/printing/raster/skia-rasterizer';
 import { td404DocumentOffsetClipWarning } from '@/printing/raster/print-border';
 import { rasterizeViewShotPngWithStampedBorders } from '@/printing/raster/stamp-viewshot-borders';
-import { logBorderPrintDiagnostics } from '@/printing/raster/border-diagnostics';
+import {
+  exportCanonicalBitmapIfDev,
+  logBorderPrintDiagnostics,
+} from '@/printing/raster/border-diagnostics';
 import { printBorderCalibrationTest } from '@/lib/printer/border-calibration-print';
 import { effectiveHOffsetMm, SIDE_LINER_MAX_MM, sideLinerShiftMm } from '@/lib/printer/side-liner';
 import { ensurePrintTypefaces } from '@/printing/raster/print-typeface';
@@ -1170,15 +1173,17 @@ export default function PrintScreen() {
               const docPrepMs = Date.now() - tPrep0;
               const timed = rasterizeDocumentToBitmapTimed(pageDoc, jobDpi, { threshold });
               const bitmap = timed.result;
-              if (__DEV__) {
-                logBorderPrintDiagnostics(pageDoc, jobDpi, bitmap, {
-                  gapMm: jobGap,
-                  hOffsetMm: jobH,
-                  vOffsetMm: jobV,
-                  referenceDots: { x: printSpec.xOffsetDots, y: printSpec.yOffsetDots },
-                  printerName: deviceName ?? 'unknown',
-                });
-              }
+              logBorderPrintDiagnostics(pageDoc, jobDpi, bitmap, {
+                gapMm: jobGap,
+                hOffsetMm: jobH,
+                vOffsetMm: jobV,
+                referenceDots: { x: printSpec.xOffsetDots, y: printSpec.yOffsetDots },
+                printerName: deviceName ?? 'unknown',
+              }, timed.gray);
+              void exportCanonicalBitmapIfDev(
+                bitmap,
+                `${pageDoc.widthMm}x${pageDoc.heightMm}`,
+              );
               const tNative0 = Date.now();
               usedNative = await manager.printMonoLabelFast({
                 monoBytes: bitmap.mono1bppBuffer,
@@ -1241,15 +1246,17 @@ export default function PrintScreen() {
                 jobDpi,
                 threshold,
               );
-              if (__DEV__) {
-                logBorderPrintDiagnostics(pageDoc, jobDpi, stamped, {
-                  gapMm: jobGap,
-                  hOffsetMm: jobH,
-                  vOffsetMm: jobV,
-                  referenceDots: { x: printSpec.xOffsetDots, y: printSpec.yOffsetDots },
-                  printerName: deviceName ?? 'unknown',
-                });
-              }
+              logBorderPrintDiagnostics(pageDoc, jobDpi, stamped, {
+                gapMm: jobGap,
+                hOffsetMm: jobH,
+                vOffsetMm: jobV,
+                referenceDots: { x: printSpec.xOffsetDots, y: printSpec.yOffsetDots },
+                printerName: deviceName ?? 'unknown',
+              });
+              void exportCanonicalBitmapIfDev(
+                stamped,
+                `${pageDoc.widthMm}x${pageDoc.heightMm}-viewshot`,
+              );
               usedNative = await manager.printMonoLabelFast({
                 monoBytes: stamped.mono1bppBuffer,
                 widthDots: stamped.widthDots,
@@ -1347,6 +1354,17 @@ export default function PrintScreen() {
                   pageDoc,
                   jobDpi,
                   threshold,
+                );
+                logBorderPrintDiagnostics(pageDoc, jobDpi, stamped, {
+                  gapMm: jobGap,
+                  hOffsetMm: jobH,
+                  vOffsetMm: jobV,
+                  referenceDots: { x: printSpec.xOffsetDots, y: printSpec.yOffsetDots },
+                  printerName: deviceName ?? 'unknown',
+                });
+                void exportCanonicalBitmapIfDev(
+                  stamped,
+                  `${pageDoc.widthMm}x${pageDoc.heightMm}-viewshot-fallback`,
                 );
                 usedNative = await manager.printMonoLabelFast({
                   monoBytes: stamped.mono1bppBuffer,
@@ -1591,7 +1609,7 @@ export default function PrintScreen() {
             )}
           </View>
 
-          {/* Dedicated 1:1 Hardware Dot Print Artboard (captured at SIZE dots, then cropped to BITMAP) */}
+          {/* Dedicated 1:1 Hardware Dot Print Artboard (captured at SIZE dots, packed UP to BITMAP) */}
           {(displayDocument ?? previewDocument) ? (
             <View
               collapsable={false}

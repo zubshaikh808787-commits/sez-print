@@ -111,6 +111,10 @@ for (const [w, h] of SIZES) {
     `${tag} untagged full-bleed`,
     doc(w, h, [border({ left: 0, top: 0, width: w, height: h, geometryVersion: undefined })]),
   );
+  checkBorders(
+    `${tag} untagged already-inset`,
+    doc(w, h, [border({ left: 2, top: 2, width: w - 4, height: h - 4, geometryVersion: undefined })]),
+  );
   checkBorders(`${tag} ellipse media`, doc(w, h, [border(defaultBorderPlacement(w, h))], 'ellipse'));
   checkBorders(`${tag} circle media`, doc(w, h, [border(defaultBorderPlacement(w, h))], 'circle'));
 }

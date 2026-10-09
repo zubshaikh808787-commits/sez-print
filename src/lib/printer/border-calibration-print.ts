@@ -1,7 +1,10 @@
 import { getPrinterManager } from '@/lib/printer/printer-manager';
 import { createPrintSpec } from '@/lib/printer/print-spec';
 import { buildBorderCalibrationDocument } from '@/printing/raster/border-calibration-label';
-import { logBorderPrintDiagnostics } from '@/printing/raster/border-diagnostics';
+import {
+  exportCanonicalBitmapIfDev,
+  logBorderPrintDiagnostics,
+} from '@/printing/raster/border-diagnostics';
 import type { BorderPrintDiagnostics } from '@/printing/raster/border-measure';
 import { ensurePrintTypefaces } from '@/printing/raster/print-typeface';
 import { rasterizeDocumentToBitmapTimed } from '@/printing/raster/skia-rasterizer';
@@ -50,13 +53,20 @@ export async function printBorderCalibrationTest(
     gapMm: opts.gapMm,
     calibration: { horizontalOffsetMm: opts.hOffsetMm, verticalOffsetMm: opts.vOffsetMm },
   });
-  const diagnostics = logBorderPrintDiagnostics(doc, opts.dpi, bitmap, {
-    gapMm: opts.gapMm,
-    hOffsetMm: opts.hOffsetMm,
-    vOffsetMm: opts.vOffsetMm,
-    referenceDots: { x: spec.xOffsetDots, y: spec.yOffsetDots },
-    printerName: opts.printerName ?? 'unknown',
-  });
+  const diagnostics = logBorderPrintDiagnostics(
+    doc,
+    opts.dpi,
+    bitmap,
+    {
+      gapMm: opts.gapMm,
+      hOffsetMm: opts.hOffsetMm,
+      vOffsetMm: opts.vOffsetMm,
+      referenceDots: { x: spec.xOffsetDots, y: spec.yOffsetDots },
+      printerName: opts.printerName ?? 'unknown',
+    },
+    timed.gray,
+  );
+  void exportCanonicalBitmapIfDev(bitmap, `cal-${doc.widthMm}x${doc.heightMm}`);
   const sent = await manager.printMonoLabelFast({
     monoBytes: bitmap.mono1bppBuffer,
     widthDots: bitmap.widthDots,

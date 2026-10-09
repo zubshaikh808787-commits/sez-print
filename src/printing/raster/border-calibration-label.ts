@@ -53,7 +53,7 @@ function text(id: string, value: string, left: number, top: number, width: numbe
 /** Tick every 1 mm along all four edges; every 5 mm is twice as long. */
 function rulers(w: number, h: number): LabelElement[] {
   const out: LabelElement[] = [];
-  const len = (i: number) => (i % 5 === 0 ? 1.6 : 0.8);
+  const len = (i: number) => (i % 5 === 0 ? 0.9 : 0.5);
   const half = TICK_MM / 2;
   for (let i = 1; i < w; i++) {
     out.push(line(`tick-t-${i}`, i - half, 0, TICK_MM, len(i)));
@@ -62,6 +62,25 @@ function rulers(w: number, h: number): LabelElement[] {
   for (let i = 1; i < h; i++) {
     out.push(line(`tick-l-${i}`, 0, i - half, len(i), TICK_MM));
     out.push(line(`tick-r-${i}`, w - len(i), i - half, len(i), TICK_MM));
+  }
+  return out;
+}
+
+/** Inward L marks at 1/2/3/5 mm — measurement rulers, not extra full frames. */
+function insetRulers(w: number, h: number): LabelElement[] {
+  const out: LabelElement[] = [];
+  const half = TICK_MM / 2;
+  for (const mm of [1, 2, 3, 5]) {
+    if (mm * 2 >= w || mm * 2 >= h) continue;
+    const arm = Math.min(3, Math.max(1.4, Math.min(w, h) * 0.1));
+    out.push(line(`ref-tl-h-${mm}`, mm, mm - half, arm, TICK_MM));
+    out.push(line(`ref-tl-v-${mm}`, mm - half, mm, TICK_MM, arm));
+    out.push(line(`ref-tr-h-${mm}`, w - mm - arm, mm - half, arm, TICK_MM));
+    out.push(line(`ref-tr-v-${mm}`, w - mm - half, mm, TICK_MM, arm));
+    out.push(line(`ref-bl-h-${mm}`, mm, h - mm - half, arm, TICK_MM));
+    out.push(line(`ref-bl-v-${mm}`, mm - half, h - mm - arm, TICK_MM, arm));
+    out.push(line(`ref-br-h-${mm}`, w - mm - arm, h - mm - half, arm, TICK_MM));
+    out.push(line(`ref-br-v-${mm}`, w - mm - half, h - mm - arm, TICK_MM, arm));
   }
   return out;
 }
@@ -98,6 +117,7 @@ export function buildBorderCalibrationDocument(
     line('cal-center-h', 2, h / 2 - half, Math.max(0.5, w - 4), REF_STROKE_MM),
     line('cal-center-v', w / 2 - half, 2, REF_STROKE_MM, Math.max(0.5, h - 4)),
     ...rulers(w, h),
+    ...insetRulers(w, h),
   ];
   if (w >= 10 && h >= 10) {
     const c = 0.8;

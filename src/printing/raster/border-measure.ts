@@ -1,4 +1,5 @@
 import type { LabelDocument, LabelElement } from '@/lib/label-document';
+import { upsPanelCellRectMm } from '@/lib/printer/border-media-shape';
 import { dotsPerMm, mmToDots, rectMmToDots, tsplPackedWidthDots } from '@/lib/printer/print-spec';
 import {
   borderFrameInsetsForElement,
@@ -41,7 +42,7 @@ export function expectedBorderDots(
   labelHeightMm: number,
 ): DotBox {
   const rect = rectMmToDots(el.left, el.top, el.width, el.height, dpi);
-  const inset = borderFrameInsetsForElement(el, dpi);
+  const inset = borderFrameInsetsForElement(el, dpi, 0, labelWidthMm, labelHeightMm);
   const sizeW = mmToDots(labelWidthMm, dpi);
   const sizeH = mmToDots(labelHeightMm, dpi);
   return {
@@ -49,6 +50,23 @@ export function expectedBorderDots(
     y0: Math.max(0, rect.y0 + inset.top),
     x1: Math.min(sizeW, rect.x1 - inset.right),
     y1: Math.min(sizeH, rect.y1 - inset.bottom),
+  };
+}
+
+export function expectedMarginsMm(
+  expected: DotBox,
+  dpi: number,
+  labelWidthMm: number,
+  labelHeightMm: number,
+): { left: number; right: number; top: number; bottom: number } {
+  const dpm = dotsPerMm(dpi);
+  const sizeW = mmToDots(labelWidthMm, dpi);
+  const sizeH = mmToDots(labelHeightMm, dpi);
+  return {
+    left: expected.x0 / dpm,
+    top: expected.y0 / dpm,
+    right: (sizeW - expected.x1) / dpm,
+    bottom: (sizeH - expected.y1) / dpm,
   };
 }
 
@@ -68,15 +86,20 @@ export function measureBorderInDots(
   sizeW: number,
   sizeH: number,
   threshold = 160,
+  clip?: DotBox,
 ): BorderInkMeasure {
   const ink = (x: number, y: number) => gray[y * strideDots + x] < threshold;
+  const xMin = clip ? Math.max(0, clip.x0) : 0;
+  const yMin = clip ? Math.max(0, clip.y0) : 0;
+  const xMax = clip ? Math.min(strideDots, clip.x1) : strideDots;
+  const yMax = clip ? Math.min(sizeH, clip.y1) : sizeH;
   let minX = sizeW;
   let maxX = -1;
   let minY = sizeH;
   let maxY = -1;
   let touchesEdge = false;
-  for (let y = 0; y < sizeH; y++) {
-    for (let x = 0; x < strideDots; x++) {
+  for (let y = yMin; y < yMax; y++) {
+    for (let x = xMin; x < xMax; x++) {
       if (!ink(x, y)) continue;
       if (x >= sizeW) {
         touchesEdge = true;
@@ -133,12 +156,18 @@ export type BorderPrintDiagnostics = {
   printerName: string;
   /** Always false: the border is drawn from its document rectangle only. */
   td404BorderCorrection: false;
+  /** Raster bitmap before signed-REFERENCE firmware workaround. */
+  source: 'canonical' | 'isolated';
+  /** match = canvas==bitmap (CASE C if paper is wrong). raster_mismatch = CASE B. */
+  layer: 'match' | 'raster_mismatch';
   borders: Array<{
     id: string;
     expected: DotBox;
     measured: DotBox | null;
     deltaDots: { x0: number; y0: number; x1: number; y1: number } | null;
+    expectedMarginsMm: { left: number; right: number; top: number; bottom: number };
     marginsMm: { left: number; right: number; top: number; bottom: number } | null;
+    errorMm: { left: number; right: number; top: number; bottom: number } | null;
     expectedStrokeDots: number;
     measuredStrokeDots: BorderInkMeasure['strokeDots'];
     clipped: boolean;
@@ -146,57 +175,115 @@ export type BorderPrintDiagnostics = {
   }>;
 };
 
+function clipForBorder(
+  doc: Pick<LabelDocument, 'widthMm' | 'heightMm' | 'upsPrintCell'>,
+  el: BorderElement,
+  dpi: number,
+): DotBox | undefined {
+  if (!doc.upsPrintCell || el.upsPanelIndex == null) return undefined;
+  const cell = upsPanelCellRectMm(doc.upsPrintCell, el.upsPanelIndex);
+  const rect = rectMmToDots(cell.left, cell.top, cell.width, cell.height, dpi);
+  return { x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1 };
+}
+
+function diagnoseOneBorder(
+  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm' | 'upsPrintCell'>,
+  el: BorderElement,
+  dpi: number,
+  gray: Uint8Array,
+  strideDots: number,
+): BorderPrintDiagnostics['borders'][number] {
+  const sizeW = mmToDots(doc.widthMm, dpi);
+  const sizeH = mmToDots(doc.heightMm, dpi);
+  const dpm = dotsPerMm(dpi);
+  const expected = expectedBorderDots(el, dpi, doc.widthMm, doc.heightMm);
+  const marginsExpectedMm = expectedMarginsMm(expected, dpi, doc.widthMm, doc.heightMm);
+  const pad = Math.max(mmToDots(0.85, dpi), expectedStrokeDots(el, dpi) + 2);
+  let clip: DotBox = {
+    x0: Math.max(0, expected.x0 - pad),
+    y0: Math.max(0, expected.y0 - pad),
+    x1: Math.min(sizeW, expected.x1 + pad),
+    y1: Math.min(sizeH, expected.y1 + pad),
+  };
+  const cell = clipForBorder(doc, el, dpi);
+  if (cell) {
+    clip = {
+      x0: Math.max(clip.x0, cell.x0),
+      y0: Math.max(clip.y0, cell.y0),
+      x1: Math.min(clip.x1, cell.x1),
+      y1: Math.min(clip.y1, cell.y1),
+    };
+  }
+  const m = measureBorderInDots(gray, strideDots, sizeW, sizeH, 160, clip);
+  const deltaDots = m.box
+    ? {
+        x0: m.box.x0 - expected.x0,
+        y0: m.box.y0 - expected.y0,
+        x1: m.box.x1 - expected.x1,
+        y1: m.box.y1 - expected.y1,
+      }
+    : null;
+  const withinOneDot = deltaDots
+    ? Math.max(
+        Math.abs(deltaDots.x0),
+        Math.abs(deltaDots.y0),
+        Math.abs(deltaDots.x1),
+        Math.abs(deltaDots.y1),
+      ) <= 1
+    : false;
+  const marginsMm = m.marginsDots
+    ? {
+        left: m.marginsDots.left / dpm,
+        right: m.marginsDots.right / dpm,
+        top: m.marginsDots.top / dpm,
+        bottom: m.marginsDots.bottom / dpm,
+      }
+    : null;
+  return {
+    id: el.id,
+    expected,
+    measured: m.box,
+    deltaDots,
+    expectedMarginsMm: marginsExpectedMm,
+    marginsMm,
+    errorMm: marginsMm
+      ? {
+          left: marginsMm.left - marginsExpectedMm.left,
+          right: marginsMm.right - marginsExpectedMm.right,
+          top: marginsMm.top - marginsExpectedMm.top,
+          bottom: marginsMm.bottom - marginsExpectedMm.bottom,
+        }
+      : null,
+    expectedStrokeDots: expectedStrokeDots(el, dpi),
+    measuredStrokeDots: m.strokeDots,
+    clipped: m.touchesEdge,
+    withinOneDot,
+  };
+}
+
 /**
  * Measure each printable border in a border-only gray raster produced by
  * `rasterizeBorders` (so text/QR ink never enters the box).
  */
 export function diagnoseBorders(
-  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm'>,
+  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm' | 'upsPrintCell'>,
   dpi: number,
   rasterizeBorders: (border: BorderElement) => { gray: Uint8Array; strideDots: number },
 ): BorderPrintDiagnostics['borders'] {
-  const sizeW = mmToDots(doc.widthMm, dpi);
-  const sizeH = mmToDots(doc.heightMm, dpi);
-  const dpm = dotsPerMm(dpi);
   return borderElementsOf(doc).map((el) => {
-    const expected = expectedBorderDots(el, dpi, doc.widthMm, doc.heightMm);
     const { gray, strideDots } = rasterizeBorders(el);
-    const m = measureBorderInDots(gray, strideDots, sizeW, sizeH);
-    const deltaDots = m.box
-      ? {
-          x0: m.box.x0 - expected.x0,
-          y0: m.box.y0 - expected.y0,
-          x1: m.box.x1 - expected.x1,
-          y1: m.box.y1 - expected.y1,
-        }
-      : null;
-    const withinOneDot = deltaDots
-      ? Math.max(
-          Math.abs(deltaDots.x0),
-          Math.abs(deltaDots.y0),
-          Math.abs(deltaDots.x1),
-          Math.abs(deltaDots.y1),
-        ) <= 1
-      : false;
-    return {
-      id: el.id,
-      expected,
-      measured: m.box,
-      deltaDots,
-      marginsMm: m.marginsDots
-        ? {
-            left: m.marginsDots.left / dpm,
-            right: m.marginsDots.right / dpm,
-            top: m.marginsDots.top / dpm,
-            bottom: m.marginsDots.bottom / dpm,
-          }
-        : null,
-      expectedStrokeDots: expectedStrokeDots(el, dpi),
-      measuredStrokeDots: m.strokeDots,
-      clipped: m.touchesEdge,
-      withinOneDot,
-    };
+    return diagnoseOneBorder(doc, el, dpi, gray, strideDots);
   });
+}
+
+/** Measure outer ink on the actual print gray (the buffer about to be packed/sent). */
+export function diagnoseCanonicalGray(
+  doc: Pick<LabelDocument, 'elements' | 'widthMm' | 'heightMm' | 'upsPrintCell'>,
+  dpi: number,
+  gray: Uint8Array,
+  strideDots: number,
+): BorderPrintDiagnostics['borders'] {
+  return borderElementsOf(doc).map((el) => diagnoseOneBorder(doc, el, dpi, gray, strideDots));
 }
 
 export function packedWidthForMm(widthMm: number, dpi: number): number {
@@ -208,18 +295,26 @@ export function formatBorderPrintDiagnostics(d: BorderPrintDiagnostics): string 
     `[BORDER-DIAG] label=${d.widthMm}x${d.heightMm}mm dpi=${d.dpi} dpm=${d.dotsPerMm} ` +
       `SIZE=${d.sizeDotsW}x${d.sizeDotsH} BITMAP=${d.bitmapBytesPerRow}B(${d.bitmapWidthDots})x${d.bitmapHeightDots} ` +
       `GAP=${d.gapMm}mm H=${d.hOffsetMm}mm V=${d.vOffsetMm}mm REFERENCE=${d.referenceDots.x},${d.referenceDots.y} ` +
-      `printer=${d.printerName} td404BorderOuterDots=NOT USED bakeTd404Feed=false`,
+      `printer=${d.printerName} source=${d.source} layer=${d.layer} ` +
+      `td404BorderOuterDots=NOT USED bakeTd404Feed=false`,
   ];
   for (const b of d.borders) {
     const e = b.expected;
     const m = b.measured;
+    const exp = b.expectedMarginsMm;
+    const act = b.marginsMm;
+    const err = b.errorMm;
     lines.push(
       `[BORDER-DIAG] ${b.id} expected=${e.x0},${e.y0}-${e.x1},${e.y1} ` +
         `measured=${m ? `${m.x0},${m.y0}-${m.x1},${m.y1}` : 'none'} ` +
         `delta=${b.deltaDots ? `${b.deltaDots.x0},${b.deltaDots.y0},${b.deltaDots.x1},${b.deltaDots.y1}` : 'n/a'} ` +
-        `marginsMm=${b.marginsMm ? `L${b.marginsMm.left.toFixed(2)} R${b.marginsMm.right.toFixed(2)} T${b.marginsMm.top.toFixed(2)} B${b.marginsMm.bottom.toFixed(2)}` : 'n/a'} ` +
         `stroke=${b.expectedStrokeDots} measured=${b.measuredStrokeDots ? `${b.measuredStrokeDots.left}/${b.measuredStrokeDots.right}/${b.measuredStrokeDots.top}/${b.measuredStrokeDots.bottom}` : 'n/a'} ` +
         `clipped=${b.clipped} match=${b.withinOneDot ? 'yes' : 'NO'}`,
+    );
+    lines.push(
+      `[BORDER-DIAG] ${b.id} EXPECTED mm L${exp.left.toFixed(2)} R${exp.right.toFixed(2)} T${exp.top.toFixed(2)} B${exp.bottom.toFixed(2)} ` +
+        `BITMAP mm ${act ? `L${act.left.toFixed(2)} R${act.right.toFixed(2)} T${act.top.toFixed(2)} B${act.bottom.toFixed(2)}` : 'n/a'} ` +
+        `ERROR mm ${err ? `L${err.left.toFixed(3)} R${err.right.toFixed(3)} T${err.top.toFixed(3)} B${err.bottom.toFixed(3)}` : 'n/a'}`,
     );
   }
   return lines.join('\n');

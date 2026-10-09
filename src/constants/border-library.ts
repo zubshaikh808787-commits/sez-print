@@ -90,6 +90,40 @@ export const BORDER_CATEGORIES = [
   'Safety',
 ] as const;
 
+const BORDER_STYLE_IDS = new Set<string>(BORDER_LIBRARY.map((item) => item.id));
+
+/** Old ids that used to print as a different live style. */
+const RETIRED_BORDER_STYLES: Record<string, BorderStyleId> = {
+  'label-frame': 'double',
+  ornate: 'solid-medium',
+};
+
+export function resolveBorderStyle(styleId?: string | null): BorderStyleId {
+  if (!styleId) return 'solid-medium';
+  const retired = RETIRED_BORDER_STYLES[styleId];
+  if (retired) return retired;
+  if (BORDER_STYLE_IDS.has(styleId)) return styleId as BorderStyleId;
+  return 'solid-medium';
+}
+
+/** Default ink thickness when the user picks this style. Matches printer fallback. */
+export function borderStyleStrokeMm(styleId?: string | null): number {
+  switch (styleId) {
+    case 'solid-thin':
+    case 'circle-thin':
+      return 0.35;
+    case 'solid-thick':
+    case 'circle-thick':
+      return 0.9;
+    case 'dashed':
+    case 'dotted':
+    case 'label-frame':
+      return 0.5;
+    default:
+      return 0.55;
+  }
+}
+
 /** Ring borders (for round labels or circular frames on any stock). */
 export function borderStyleUsesCircleRing(styleId: BorderStyleId): boolean {
   return styleId === 'circle-thin' || styleId === 'circle-medium' || styleId === 'circle-thick';

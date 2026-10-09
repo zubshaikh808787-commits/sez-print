@@ -222,6 +222,8 @@ function drawDocumentToSurface(
             mediaShape: borderMediaShapeForElement(doc, el),
             upsPrintCell: doc.upsPrintCell,
             upsPanelIndex: el.upsPanelIndex,
+            labelWidthMm: doc.widthMm,
+            labelHeightMm: doc.heightMm,
           });
           break;
         case 'line':

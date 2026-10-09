@@ -1,5 +1,5 @@
 import type { LabelDocument, LabelElement } from '@/lib/label-document';
-import { PRINT_BORDER_INSET_MM } from '@/printing/raster/border-frame';
+import { PRINT_BORDER_INSET_MM, untaggedBorderNeedsDrawInset } from '@/printing/raster/border-frame';
 
 const MIN_BORDER_MM = 1;
 
@@ -112,6 +112,9 @@ export function migrateBorderElement<T extends LabelElement & { type: 'border' }
     };
   }
   if (el.geometryVersion === 1) return el;
+  if (!untaggedBorderNeedsDrawInset(el, limitW, limitH)) {
+    return { ...el, geometryVersion: 1, rotation: 0 };
+  }
   const rect = insetBorderBox(el.left, el.top, el.width, el.height, limitW, limitH);
   return {
     ...el,

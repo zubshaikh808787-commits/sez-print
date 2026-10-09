@@ -1,3 +1,8 @@
+/**
+ * Production TD-404 border raster (baseline ~90% die-edge accuracy).
+ * Restore point: git tag `border-accuracy-90`, branch `border/stable-baseline`.
+ * New border plans should add parallel code paths; keep this entry point stable.
+ */
 import type { BorderStyleId } from '@/constants/border-library';
 import { borderStyleUsesCircleRing } from '@/constants/border-library';
 import { borderMediaShapeForElement, upsPanelCellRectMm } from '@/lib/printer/border-media-shape';
@@ -12,6 +17,7 @@ import {
   drawInwardEllipseRing,
   drawInwardFrameInBox,
   PRINT_BORDER_INSET_MM,
+  untaggedBorderNeedsDrawInset,
   type FrameFillTarget,
 } from '@/printing/raster/border-frame';
 
@@ -36,6 +42,9 @@ export type DrawPrintBorderOpts = {
   /** Composed N-up: clip each border to its sticker cell so rings stay centered on the die. */
   upsPrintCell?: LabelDocument['upsPrintCell'];
   upsPanelIndex?: number;
+  /** Label SIZE in millimetres — needed so untagged already-inset boxes are not inset twice. */
+  labelWidthMm?: number;
+  labelHeightMm?: number;
 };
 
 /**
@@ -82,7 +91,13 @@ export function drawPrintBorder(
   const w = Math.max(1, x1 - x0);
   const h = Math.max(1, y1 - y0);
   const style = (el.borderStyle ?? 'solid-medium') as BorderStyleId;
-  const unit = borderFrameInsetsForElement(el, dpi, opts?.extraBottomInsetMm ?? 0);
+  const unit = borderFrameInsetsForElement(
+    el,
+    dpi,
+    opts?.extraBottomInsetMm ?? 0,
+    opts?.labelWidthMm,
+    opts?.labelHeightMm,
+  );
   const insets = {
     left: unit.left * s,
     right: unit.right * s,
@@ -135,6 +150,8 @@ export function stampPrintBordersOnGray(
       mediaShape: borderMediaShapeForElement(doc, el),
       upsPrintCell: doc.upsPrintCell,
       upsPanelIndex: el.upsPanelIndex,
+      labelWidthMm: doc.widthMm,
+      labelHeightMm: doc.heightMm,
     });
   }
 }
@@ -183,7 +200,9 @@ export function borderEdgeMarginsMm(
   hOffsetMm = 0,
   vOffsetMm = 0,
 ): { left: number; right: number; top: number; bottom: number } {
-  const inset = el.geometryVersion === 1 ? 0 : PRINT_BORDER_INSET_MM;
+  const inset = untaggedBorderNeedsDrawInset(el, labelWidthMm, labelHeightMm)
+    ? PRINT_BORDER_INSET_MM
+    : 0;
   return {
     left: el.left + inset + hOffsetMm,
     right: labelWidthMm - (el.left + el.width) + inset - hOffsetMm,

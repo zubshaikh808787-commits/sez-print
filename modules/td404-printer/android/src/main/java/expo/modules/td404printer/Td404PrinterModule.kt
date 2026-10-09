@@ -548,7 +548,7 @@ class Td404PrinterModule : Module() {
       ?: throw IllegalArgumentException("pngBase64 is required")
     val widthMm = (options["widthMm"] as? Number)?.toDouble() ?: 50.0
     val heightMm = (options["heightMm"] as? Number)?.toDouble() ?: 30.0
-    val gapMm = (options["gapMm"] as? Number)?.toDouble() ?: 2.0
+    val gapMm = (options["gapMm"] as? Number)?.toDouble() ?: 3.0
     val density = (options["density"] as? Number)?.toInt() ?: 10
     val speed = (options["speed"] as? Number)?.toInt() ?: 3
     val threshold = (options["threshold"] as? Number)?.toInt() ?: 160
@@ -795,7 +795,7 @@ class Td404PrinterModule : Module() {
   private fun printMonoLabelNative(monoBytes: ByteArray, options: Map<String, Any?>): Map<String, Any?> {
     val widthMm = (options["widthMm"] as? Number)?.toDouble() ?: 50.0
     val heightMm = (options["heightMm"] as? Number)?.toDouble() ?: 30.0
-    val gapMm = (options["gapMm"] as? Number)?.toDouble() ?: 2.0
+    val gapMm = (options["gapMm"] as? Number)?.toDouble() ?: 3.0
     val density = (options["density"] as? Number)?.toInt() ?: 10
     val speed = (options["speed"] as? Number)?.toInt() ?: 3
     val xDots = (options["xDots"] as? Number)?.toInt() ?: 0
